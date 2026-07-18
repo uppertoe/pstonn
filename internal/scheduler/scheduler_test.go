@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -45,6 +47,7 @@ type fakeNotifier struct {
 	mu         sync.Mutex // guards the slices: notifications fire from goroutines
 	sent       []sentMail
 	applied    []appliedNote
+	outcomes   []notify.ApplyOutcome // full outcomes, for asserting message content
 	adminNotes []string
 	relinks    []string
 }
@@ -58,9 +61,10 @@ func (f *fakeNotifier) SendRenewalReminder(to string, deadline time.Time, url st
 	return nil
 }
 
-func (f *fakeNotifier) NotifyApply(_ context.Context, owner, label, reg, source string, ok bool, detail string) (int, error) {
+func (f *fakeNotifier) NotifyApply(_ context.Context, o notify.ApplyOutcome) (int, error) {
 	f.mu.Lock()
-	f.applied = append(f.applied, appliedNote{owner, reg, ok})
+	f.applied = append(f.applied, appliedNote{o.Owner, o.Reg, o.OK})
+	f.outcomes = append(f.outcomes, o)
 	f.mu.Unlock()
 	if f.deliverSet {
 		return f.deliver, nil
@@ -103,6 +107,11 @@ func (f *fakeNotifier) relinkSnap() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.relinks...)
+}
+func (f *fakeNotifier) outcomeSnap() []notify.ApplyOutcome {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]notify.ApplyOutcome(nil), f.outcomes...)
 }
 
 // seedSchedule gives an owner something for the scheduler to act on, so their
@@ -224,28 +233,35 @@ func TestKeepWarmUnlinksOnExpiry(t *testing.T) {
 	}
 }
 
-// TestRecordApplyDedup: a repeated identical outcome (e.g. a failure recurring
-// every tick) is logged and notified once, but a genuinely new outcome fires.
-func TestRecordApplyDedup(t *testing.T) {
+func rejectedErr() error {
+	return &parking.CouncilError{Kind: parking.FailRejected, Op: "change the vehicle on your permit", Err: errors.New("no")}
+}
+func transientErr() error {
+	return &parking.CouncilError{Kind: parking.FailTransient, Op: "change the vehicle on your permit", Err: errors.New("timeout")}
+}
+
+// TestFailureNotifyDedupAndSuccess: a repeated identical REJECTION (alarms at
+// once) is logged and notified once; a later success fires a new notification.
+func TestFailureNotifyDedupAndSuccess(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	pid, _ := st.UpsertPermit(ctx, "u@example.com", "14576", "14", "1st Visitor Permit")
-	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "1st Visitor Permit"}
+	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "1st Visitor Permit", ActiveRegistration: "OLD111"}
 	fn := &fakeNotifier{on: true}
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
-	// The notification dedup key is written after async delivery; production ticks
-	// are a minute apart, so allow each delivery to land before the next outcome
-	// (a sleep between calls emulates that cadence).
-	s.recordApply(ctx, p, "AVS619", "override", "error", "boom")
+	// Ticks are a minute apart in production; sleep so async delivery lands first.
+	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
-	s.recordApply(ctx, p, "AVS619", "override", "error", "boom") // identical → suppressed
+	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil) // identical → suppressed
 	time.Sleep(60 * time.Millisecond)
-	s.recordApply(ctx, p, "AVS619", "override", "success", "") // new outcome → fires
+	// Success (as the reconcile success branch would do).
+	s.clearFailStreak(p.ID)
+	s.logApply(ctx, p.ID, "AVS619", "override", "success", "")
+	s.notifyUser(ctx, p, notify.ApplyOutcome{Owner: p.Owner, PermitLabel: permitLabel(p), Reg: "AVS619", OK: true}, "success|AVS619")
 	time.Sleep(60 * time.Millisecond)
 
-	logs, _ := st.ListApplyLogFor(ctx, "u@example.com", 10)
-	if len(logs) != 2 {
+	if logs, _ := st.ListApplyLogFor(ctx, "u@example.com", 10); len(logs) != 2 {
 		t.Fatalf("apply_log rows = %d, want 2 (dup suppressed)", len(logs))
 	}
 	applied := fn.appliedSnap()
@@ -255,12 +271,76 @@ func TestRecordApplyDedup(t *testing.T) {
 	if applied[0].ok || !applied[1].ok {
 		t.Fatalf("expected [fail, success], got %+v", applied)
 	}
+	// Message suitability: the failure names the consequence (still shows OLD111)
+	// and is marked non-transient (a rejection needs the user to act).
+	fail := fn.outcomeSnap()[0]
+	if fail.CurrentReg != "OLD111" || fail.Transient || fail.Reason == "" || fail.Action == "" {
+		t.Fatalf("rejection message not suitable: %+v", fail)
+	}
 }
 
-// TestRecordApplyEscalatesWhenUserNotReached: when the user's channels all fail,
-// the outcome is NOT marked delivered (so it retries), and the operator is
-// alerted once. This is the anti-fine guarantee.
-func TestRecordApplyEscalatesWhenUserNotReached(t *testing.T) {
+// TestTransientFailureGracePeriod: a transient blip does NOT alarm the user until
+// it has persisted (failNotifyThreshold ticks), though it is logged immediately.
+func TestTransientFailureGracePeriod(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	pid, _ := st.UpsertPermit(ctx, "u@example.com", "14576", "14", "Permit")
+	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "Permit", ActiveRegistration: "OLD111"}
+	fn := &fakeNotifier{on: true}
+	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+
+	for i := 0; i < failNotifyThreshold-1; i++ {
+		s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+		time.Sleep(30 * time.Millisecond)
+	}
+	if n := len(fn.appliedSnap()); n != 0 {
+		t.Fatalf("transient blip alarmed the user too early: %d notifications", n)
+	}
+	if logs, _ := st.ListApplyLogFor(ctx, "u@example.com", 10); len(logs) == 0 {
+		t.Fatal("transient failure should still be recorded in the activity log")
+	}
+	// The threshold-th consecutive failure now alarms.
+	s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+	time.Sleep(60 * time.Millisecond)
+	out := fn.outcomeSnap()
+	if len(out) != 1 || out[0].OK || !out[0].Transient {
+		t.Fatalf("expected one transient failure notification, got %+v", out)
+	}
+	// A success resets the streak so the next blip gets a fresh grace period.
+	s.clearFailStreak(p.ID)
+	s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+	time.Sleep(30 * time.Millisecond)
+	if n := len(fn.appliedSnap()); n != 1 {
+		t.Fatalf("streak not reset after success; got %d notifications", n)
+	}
+}
+
+// TestSystemicDetection: many users failing in one pass alerts the operator.
+func TestSystemicDetection(t *testing.T) {
+	st := newStore(t)
+	fn := &fakeNotifier{on: true, admin: true}
+	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	stats := &passStats{
+		failOwners:       map[string]bool{"a@x": true, "b@x": true, "c@x": true},
+		unexpectedOwners: map[string]bool{},
+	}
+	s.detectSystemic(context.Background(), stats, 5)
+	time.Sleep(60 * time.Millisecond)
+	found := false
+	for _, subj := range fn.adminSnap() {
+		if strings.Contains(subj, "failing for multiple users") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a systemic admin alert, got %v", fn.adminSnap())
+	}
+}
+
+// TestFailureEscalatesWhenUserNotReached: when the user's channels all fail, the
+// outcome is NOT marked delivered (so it retries), and the operator is alerted
+// once. This is the anti-fine guarantee.
+func TestFailureEscalatesWhenUserNotReached(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	pid, _ := st.UpsertPermit(ctx, "u@example.com", "14576", "14", "Permit")
@@ -268,13 +348,14 @@ func TestRecordApplyEscalatesWhenUserNotReached(t *testing.T) {
 	fn := &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 0} // user not reached
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
-	s.recordApply(ctx, p, "AVS619", "override", "error", "boom")
+	// A rejection alarms on the first tick.
+	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.adminSnap()); n != 1 {
 		t.Fatalf("admin escalations = %d, want 1 (user not reached)", n)
 	}
 	// Not marked delivered → an identical repeat is RE-attempted, not suppressed.
-	s.recordApply(ctx, p, "AVS619", "override", "error", "boom")
+	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 2 {
 		t.Fatalf("undelivered failure must be retried; NotifyApply calls = %d, want 2", n)

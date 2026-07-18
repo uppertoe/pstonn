@@ -53,6 +53,50 @@ var (
 	ErrCouncilBusy = errors.New("parking: council temporarily unavailable (rate-limited or blocked); backing off")
 )
 
+// FailureKind classifies WHY a council operation failed, so callers can word the
+// user's notification correctly and decide whether to retry quietly or ask the
+// user to act.
+type FailureKind int
+
+const (
+	// FailTransient: a network error or a 5xx from the council. A retry is likely
+	// to succeed, so the user should not be alarmed on the first occurrence.
+	FailTransient FailureKind = iota
+	// FailRejected: the council refused the request (a 4xx, or the permit can't be
+	// edited). This will not fix itself; the user needs to check or act.
+	FailRejected
+	// FailUnexpected: the council returned something we couldn't parse. Possibly a
+	// one-off glitch, possibly an API change (worth an operator alert in bulk).
+	FailUnexpected
+)
+
+// CouncilError wraps a failed council operation with its kind and a plain-English
+// description of the operation ("read the current vehicle on your permit"), used
+// to build human notifications. Unwraps to the underlying cause.
+type CouncilError struct {
+	Kind FailureKind
+	Op   string
+	Err  error
+}
+
+func (e *CouncilError) Error() string { return fmt.Sprintf("parking: %s: %v", e.Op, e.Err) }
+func (e *CouncilError) Unwrap() error { return e.Err }
+
+func councilErr(kind FailureKind, op string, err error) error {
+	return &CouncilError{Kind: kind, Op: op, Err: err}
+}
+
+// FailureOf extracts the classification from an error. For anything that is not a
+// CouncilError it defaults to FailTransient (retry, don't alarm) since an
+// unclassified error is more likely a transient glitch than a permanent refusal.
+func FailureOf(err error) (kind FailureKind, op string) {
+	var ce *CouncilError
+	if errors.As(err, &ce) {
+		return ce.Kind, ce.Op
+	}
+	return FailTransient, ""
+}
+
 // Client talks to the council IdentityServer and permit API on behalf of app
 // users. It is safe for concurrent use.
 type Client struct {
@@ -232,7 +276,11 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 // It short-circuits while the owner is in a soft-block cooldown, and classifies
 // Akamai push-back (429/403/503) as ErrCouncilBusy with an exponential backoff so
 // the scheduler stops re-hitting a portal that is already refusing us.
-func (c *Client) apiRequest(ctx context.Context, owner, method, path string, query url.Values, body io.Reader) (*http.Response, error) {
+// op is a plain-English description of what the request is doing, used to build
+// human notifications when it fails. On any non-2xx (other than the busy codes)
+// or a transport error, apiRequest returns a classified CouncilError and no
+// response; a 2xx returns the response for the caller to decode.
+func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string, query url.Values, body io.Reader) (*http.Response, error) {
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return nil, fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
@@ -253,7 +301,8 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path string, que
 	c.xhrHeaders(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		// Transport error (DNS, dial, timeout, reset): transient by nature.
+		return nil, councilErr(FailTransient, op, err)
 	}
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests, http.StatusForbidden, http.StatusServiceUnavailable:
@@ -265,8 +314,16 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path string, que
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		c.clearPenalty(owner)
+		return resp, nil
 	}
-	return resp, nil
+	// Other non-2xx: 5xx is a server-side blip (transient); 4xx is a refusal.
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	resp.Body.Close()
+	kind := FailRejected
+	if resp.StatusCode >= 500 {
+		kind = FailTransient
+	}
+	return nil, councilErr(kind, op, fmt.Errorf("council returned %d", resp.StatusCode))
 }
 
 // managedVehicleResp is the response of GET /ssp-svc/api/permits/managedVehicle.
@@ -323,18 +380,16 @@ type manageVehicleV struct {
 
 // managedVehicle fetches the vehicle(s) currently on the permit.
 func (c *Client) managedVehicle(ctx context.Context, owner string, p model.Permit) (*managedVehicleResp, error) {
-	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/permits/managedVehicle",
+	const op = "read the current vehicle on your permit"
+	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/permits/managedVehicle", op,
 		url.Values{"permitID": {p.CouncilPermitID}}, nil)
 	if err != nil {
-		return nil, err
+		return nil, err // already classified (or a busy/auth sentinel)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("parking: managedVehicle returned status %d", resp.StatusCode)
-	}
 	var mv managedVehicleResp
 	if err := json.NewDecoder(resp.Body).Decode(&mv); err != nil {
-		return nil, fmt.Errorf("parking: decode managedVehicle: %w", err)
+		return nil, councilErr(FailUnexpected, op, err)
 	}
 	return &mv, nil
 }
@@ -378,15 +433,16 @@ func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model
 // the portal, which sends no request when nothing changes. Success is any 2xx
 // with an empty body.
 func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
+	const op = "change the vehicle on your permit"
 	mv, err := c.managedVehicle(ctx, owner, p)
 	if err != nil {
 		return err
 	}
 	if len(mv.PermitVehicles) == 0 {
-		return fmt.Errorf("parking: permit %s has no vehicle to reallocate", p.CouncilPermitID)
+		return councilErr(FailRejected, op, errors.New("the permit has no vehicle to change"))
 	}
 	if !mv.CanEditOrDeleteVehicle {
-		return fmt.Errorf("parking: permit %s does not permit editing its vehicle", p.CouncilPermitID)
+		return councilErr(FailRejected, op, errors.New("the council does not allow changing this permit's vehicle"))
 	}
 	cur := mv.PermitVehicles[0]
 	if strings.EqualFold(cur.RegistrationNumber, registration) {
@@ -394,7 +450,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	}
 	permitID, err := strconv.ParseInt(p.CouncilPermitID, 10, 64)
 	if err != nil {
-		return fmt.Errorf("parking: invalid council permit id %q: %w", p.CouncilPermitID, err)
+		return councilErr(FailRejected, op, fmt.Errorf("invalid council permit id %q", p.CouncilPermitID))
 	}
 	detailID := cur.PKPermitVehicleDetailID.String()
 	state := cur.FKVehicleStateID
@@ -418,15 +474,12 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if err != nil {
 		return err
 	}
-	resp, err := c.apiRequest(ctx, owner, http.MethodPost, "/api/permits/manageVehicle", nil, bytes.NewReader(buf))
+	resp, err := c.apiRequest(ctx, owner, http.MethodPost, "/api/permits/manageVehicle", op, nil, bytes.NewReader(buf))
 	if err != nil {
-		return err
+		return err // classified (non-2xx / transport) or a busy/auth sentinel
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("parking: manageVehicle returned status %d", resp.StatusCode)
-	}
 	return nil
 }
 
@@ -465,18 +518,16 @@ type gridRow struct {
 
 // ListPermits returns the permits on the app user's linked council account.
 func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, error) {
-	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/Index/grid",
+	const op = "list your permits"
+	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/Index/grid", op,
 		url.Values{"pageNumber": {"0"}, "pageSize": {"0"}}, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("parking: Index/grid returned status %d", resp.StatusCode)
-	}
 	var g gridResp
 	if err := json.NewDecoder(resp.Body).Decode(&g); err != nil {
-		return nil, fmt.Errorf("parking: decode Index/grid: %w", err)
+		return nil, councilErr(FailUnexpected, op, err)
 	}
 	out := make([]PermitInfo, 0, len(g.PermitGrid))
 	for _, r := range g.PermitGrid {

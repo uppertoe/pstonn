@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -40,7 +41,7 @@ type Notifier interface {
 	SendRenewalReminder(to string, deadline time.Time, confirmURL string) error
 	// NotifyApply returns how many channels accepted the message (0 = the user was
 	// NOT reached; -1 = intentionally suppressed, e.g. failures-only success).
-	NotifyApply(ctx context.Context, owner, permitLabel, reg, source string, ok bool, detail string) (int, error)
+	NotifyApply(ctx context.Context, o notify.ApplyOutcome) (int, error)
 	// NotifyRelinkRequired tells the user to reconnect their council account;
 	// returns the number of channels that accepted it (0 = not reached).
 	NotifyRelinkRequired(ctx context.Context, owner string) int
@@ -85,7 +86,16 @@ type Scheduler struct {
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
 	lastAlert map[string]time.Time
+
+	// failMu guards failStreak, the count of consecutive failed reconcile ticks
+	// per permit, so a transient blip doesn't alarm the user on the first miss.
+	failMu     sync.Mutex
+	failStreak map[int64]int
 }
+
+// failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
+// must persist before the user is alarmed (rejections alarm on the first tick).
+const failNotifyThreshold = 3
 
 const systemAlertThrottle = 30 * time.Minute
 
@@ -117,6 +127,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		jitterFrac:    jf,
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
+		failStreak:    make(map[int64]int),
 	}
 }
 
@@ -355,62 +366,153 @@ func (s *Scheduler) alertRelink(owner string) {
 	}()
 }
 
-// recordApply records an apply outcome to the activity log and notifies the
-// owner. Crucially, the notification dedup keys on the outcome we last
-// SUCCESSFULLY delivered (stored in permit_notify), NOT on the activity-log row.
-// So an undelivered notification is retried on the next tick instead of being
-// silently suppressed, and if the user cannot be reached the operator is alerted
-// once. This is what keeps a delivery failure from turning into a missed change
-// (and a fine) that nobody hears about.
-func (s *Scheduler) recordApply(ctx context.Context, p model.Permit, reg, source, status, detail string) {
-	key := status + "|" + reg + "|" + detail
-
-	// Activity log: append only when the outcome changed from the last row.
-	if last, err := s.store.LastApply(ctx, p.ID); err != nil ||
-		!(last.Status == status && last.Registration == reg && last.Detail == detail) {
-		_ = s.store.RecordApply(ctx, p.ID, reg, source, status, detail)
+// permitLabel is the human name for a permit in notifications.
+func permitLabel(p model.Permit) string {
+	if p.Label != "" {
+		return p.Label
 	}
+	return "permit " + p.CouncilPermitID
+}
 
+// logApply appends an apply outcome to the activity log, deduping on the last row
+// so a repeating outcome isn't logged every tick.
+func (s *Scheduler) logApply(ctx context.Context, permitID int64, reg, source, status, detail string) {
+	if last, err := s.store.LastApply(ctx, permitID); err != nil ||
+		!(last.Status == status && last.Registration == reg && last.Detail == detail) {
+		_ = s.store.RecordApply(ctx, permitID, reg, source, status, detail)
+	}
+}
+
+// notifyUser delivers an apply outcome to the user with guaranteed-retry
+// semantics: it dedups on the outcome we last SUCCESSFULLY delivered
+// (permit_notify), NOT the activity-log row, so an undelivered notification is
+// retried on the next tick rather than silently suppressed, and if the user
+// cannot be reached the operator is alerted once. key identifies the outcome.
+func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.ApplyOutcome, key string) {
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
 	notifiedKey, adminKey, _ := s.store.PermitNotify(ctx, p.ID)
 	if notifiedKey == key {
-		return // the user has already been successfully told about this exact outcome
+		return // already successfully told about this exact outcome
 	}
-
-	label := p.Label
-	if label == "" {
-		label = "permit " + p.CouncilPermitID
-	}
-	owner, ok := p.Owner, status == "success"
 	go func() {
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		delivered, err := s.notifier.NotifyApply(nctx, owner, label, reg, source, ok, detail)
+		delivered, err := s.notifier.NotifyApply(nctx, o)
 		if delivered != 0 { // >0 delivered, or -1 intentionally suppressed
 			_ = s.store.SetPermitNotifiedKey(nctx, p.ID, key)
 			return
 		}
-		// The user was NOT reached. Do not mark delivered (retry next tick), and
-		// escalate to the operator once per distinct outcome.
 		if err != nil {
-			log.Printf("scheduler: notify %s failed (will retry): %v", owner, err)
+			log.Printf("scheduler: notify %s failed (will retry): %v", o.Owner, err)
 		}
 		if adminKey != key {
 			outcome := "was updated"
-			if !ok {
+			if !o.OK {
 				outcome = "did NOT change (fine risk)"
 			}
-			body := fmt.Sprintf("Could not deliver a permit notification to %s.\n\nPermit: %s\nPlate: %s\nOutcome: %s / %s\nTheir permit %s and they may be unaware.\nError: %v",
-				owner, label, reg, status, detail, outcome, err)
-			if ae := s.notifier.NotifyAdmin(nctx, "User could not be notified: "+owner, body); ae == nil {
+			body := fmt.Sprintf("Could not deliver a permit notification to %s.\n\nPermit: %s\nPlate: %s\nTheir permit %s and they may be unaware.\nError: %v",
+				o.Owner, o.PermitLabel, o.Reg, outcome, err)
+			if ae := s.notifier.NotifyAdmin(nctx, "User could not be notified: "+o.Owner, body); ae == nil {
 				_ = s.store.SetPermitAdminKey(nctx, p.ID, key)
 			} else {
-				log.Printf("scheduler: admin escalation for %s failed: %v", owner, ae)
+				log.Printf("scheduler: admin escalation for %s failed: %v", o.Owner, ae)
 			}
 		}
 	}()
+}
+
+// handleApplyFailure records a failed apply and notifies the user, but only after
+// a transient problem has PERSISTED (so a one-tick blip that self-heals doesn't
+// alarm anyone); a council refusal, which won't fix itself, alarms on the first
+// tick. The message explains the cause, the consequence (what plate is still on
+// the permit), and what to do. It also feeds the systemic-failure detector.
+func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, source string, err error, stats *passStats) {
+	kind, op := parking.FailureOf(err)
+	reason, action := describeFailure(kind, op)
+
+	// Activity log records the failure from the first tick (visible in-app).
+	s.logApply(ctx, p.ID, want, source, "error", reason)
+
+	if stats != nil {
+		stats.failOwners[p.Owner] = true
+		if kind == parking.FailUnexpected {
+			stats.unexpectedOwners[p.Owner] = true
+		}
+	}
+
+	// Transient/unexpected problems get a grace period; a refusal alarms at once.
+	n := s.bumpFailStreak(p.ID)
+	threshold := failNotifyThreshold
+	if kind == parking.FailRejected {
+		threshold = 1
+	}
+	if n < threshold {
+		return
+	}
+
+	s.notifyUser(ctx, p, notify.ApplyOutcome{
+		Owner:       p.Owner,
+		PermitLabel: permitLabel(p),
+		Reg:         want,
+		OK:          false,
+		CurrentReg:  p.ActiveRegistration,
+		Reason:      reason,
+		Action:      action,
+		Transient:   kind != parking.FailRejected,
+	}, "error|"+want+"|"+reason)
+}
+
+// describeFailure turns a failure classification into a plain-English reason and
+// a next step for the user.
+func describeFailure(kind parking.FailureKind, op string) (reason, action string) {
+	if op == "" {
+		op = "update your permit"
+	}
+	switch kind {
+	case parking.FailRejected:
+		return fmt.Sprintf("The council would not let p.stonn %s.", op),
+			"Please check the permit on the council website, or change the vehicle there yourself. You may also need to re-link p.stonn from the app."
+	case parking.FailUnexpected:
+		return fmt.Sprintf("p.stonn got an unexpected response from the council while trying to %s.", op),
+			"p.stonn will keep trying. If your permit shows the wrong vehicle, change it on the council website in the meantime."
+	default: // FailTransient
+		return fmt.Sprintf("p.stonn is having trouble reaching the council to %s.", op),
+			"p.stonn will keep trying automatically. If it keeps happening, check your permit on the council website."
+	}
+}
+
+// bumpFailStreak increments and returns the consecutive-failure count for a
+// permit; clearFailStreak resets it after a success.
+func (s *Scheduler) bumpFailStreak(permitID int64) int {
+	s.failMu.Lock()
+	defer s.failMu.Unlock()
+	s.failStreak[permitID]++
+	return s.failStreak[permitID]
+}
+
+func (s *Scheduler) clearFailStreak(permitID int64) {
+	s.failMu.Lock()
+	delete(s.failStreak, permitID)
+	s.failMu.Unlock()
+}
+
+// detectSystemic alerts the operator when many users' plate changes fail in one
+// pass (a council outage or API change), so a fleet-wide break is seen directly
+// rather than only as scattered per-user notices.
+func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalPermits int) {
+	if stats == nil {
+		return
+	}
+	failN, unexpectedN := len(stats.failOwners), len(stats.unexpectedOwners)
+	systemic := unexpectedN >= 2 || failN >= 3 || (totalPermits >= 2 && failN == totalPermits)
+	if !systemic {
+		return
+	}
+	s.systemAlert(ctx, "multi-user-fail",
+		"Plate changes are failing for multiple users",
+		fmt.Sprintf("This reconcile pass, %d user(s) had a plate change fail (%d with an unexpected/unparseable council response). This may be a council outage or an API change; check the logs.", failN, unexpectedN))
 }
 
 // maybeRemind emails the one-click renewal-confirm link once per cycle when a
@@ -507,17 +609,19 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		regByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Registration
 	}
 	now := time.Now().In(s.loc)
+	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}}
 	// Space out the council writes: when many permits change at the same wall-clock
 	// boundary (a midnight/9am roster rollover), applying them back-to-back is a
 	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
 	// after each permit that actually hit the council.
 	for _, p := range permits {
-		if s.reconcilePermit(ctx, p, regByOwnerID, now) && s.rateDelay > 0 {
+		if s.reconcilePermit(ctx, p, regByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
 			}
 		}
 	}
+	s.detectSystemic(ctx, stats, len(permits))
 }
 
 type ownerVehicle struct {
@@ -525,9 +629,17 @@ type ownerVehicle struct {
 	id    int64
 }
 
+// passStats accumulates failures across one reconcile pass so a fleet-wide
+// problem (a council outage or API change) can be reported to the operator
+// directly, instead of only surfacing as per-user notifications.
+type passStats struct {
+	failOwners       map[string]bool
+	unexpectedOwners map[string]bool
+}
+
 // reconcilePermit applies any needed plate change for one permit. It returns
 // true when it actually contacted the council (so the caller can space bursts).
-func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID map[ownerVehicle]string, now time.Time) (hitCouncil bool) {
+func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID map[ownerVehicle]string, now time.Time, stats *passStats) (hitCouncil bool) {
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -551,7 +663,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 	switch {
 	case err == nil:
 		_ = s.store.SetPermitActive(ctx, p.ID, want)
-		s.recordApply(ctx, p, want, string(res.Source), "success", "")
+		s.clearFailStreak(p.ID)
+		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
+		s.notifyUser(ctx, p, notify.ApplyOutcome{
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Source: string(res.Source), OK: true,
+		}, "success|"+want)
 		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true
 	case errors.Is(err, parking.ErrNotLinked):
@@ -579,7 +695,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		}
 		return true
 	default:
-		s.recordApply(ctx, p, want, string(res.Source), "error", err.Error())
+		s.handleApplyFailure(ctx, p, want, string(res.Source), err, stats)
 		log.Printf("scheduler: permit %s apply error: %v", p.CouncilPermitID, err)
 		return true
 	}

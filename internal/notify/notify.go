@@ -126,27 +126,68 @@ func (s *Service) SendRenewalReminder(to string, deadline time.Time, confirmURL 
 	return s.mail.SendRenewalReminder(to, deadline, confirmURL)
 }
 
-// NotifyApply tells the permit owner that a plate change was applied (ok=true)
-// or failed, honouring their channel choices and "failures only" setting. It
-// returns how many channels ACCEPTED the message: the caller uses 0 to mean
-// "the user was NOT reached" so it can escalate to the operator and retry, rather
-// than silently marking the outcome as delivered.
-func (s *Service) NotifyApply(ctx context.Context, owner, permitLabel, reg, source string, ok bool, detail string) (delivered int, err error) {
-	pref, err := s.store.GetNotifyPref(ctx, owner)
+// ApplyOutcome is what NotifyApply describes to the user: a successful change,
+// or a failure with a plain-English reason, the consequence (what plate is still
+// on the permit), and what to do. Transient softens the wording (we keep trying).
+type ApplyOutcome struct {
+	Owner       string
+	PermitLabel string
+	Reg         string // the vehicle we tried to set
+	Source      string // "roster" / "override" (success context)
+	OK          bool
+	CurrentReg  string // what is still on the permit on failure ("" if unknown)
+	Reason      string // one plain sentence: why it failed
+	Action      string // one plain sentence: what the user should do
+	Transient   bool   // failure expected to self-heal → soften wording
+}
+
+// NotifyApply tells the permit owner about an apply outcome, honouring their
+// channel choices and "failures only" setting. It returns how many channels
+// ACCEPTED the message: the caller uses 0 to mean "the user was NOT reached" so
+// it can escalate to the operator and retry, rather than silently marking the
+// outcome as delivered. -1 means intentionally not sent (failures-only success).
+func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered int, err error) {
+	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
 	if err != nil {
 		return 0, err
 	}
-	// "Failures only": suppress success notices, but never suppress failures.
-	if ok && pref.FailuresOnly {
-		return -1, nil // -1: intentionally not sent (not a delivery failure)
+	if o.OK && pref.FailuresOnly {
+		return -1, nil
 	}
+
 	var subject, body string
-	if ok {
-		subject = fmt.Sprintf("Permit updated: %s is now %s", permitLabel, reg)
-		body = fmt.Sprintf("Your %s has been set to %s (%s).", permitLabel, reg, source)
+	if o.OK {
+		subject = fmt.Sprintf("Permit updated: %s is now %s", o.PermitLabel, o.Reg)
+		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, o.Reg, o.Source)
 	} else {
-		subject = fmt.Sprintf("Permit change FAILED: %s", permitLabel)
-		body = fmt.Sprintf("Could not set %s to %s.\n\n%s\n\nOpen the app to check your council connection.", permitLabel, reg, detail)
+		if o.Transient {
+			subject = fmt.Sprintf("Still updating your %s", o.PermitLabel)
+		} else {
+			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
+		}
+		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, o.Reg)}
+		if o.CurrentReg != "" {
+			lines = append(lines, fmt.Sprintf("Right now the permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
+		} else {
+			lines = append(lines, "The vehicle on the permit has not been changed.")
+		}
+		if o.Reason != "" {
+			lines = append(lines, "", o.Reason)
+		}
+		if o.Action != "" {
+			lines = append(lines, o.Action)
+		}
+		body = strings.Join(lines, "\n")
+	}
+
+	priority, tags := "default", "white_check_mark"
+	if !o.OK {
+		tags = "warning"
+		if o.Transient {
+			priority = "default"
+		} else {
+			priority = "high"
+		}
 	}
 
 	var errs []string
@@ -155,17 +196,13 @@ func (s *Service) NotifyApply(ctx context.Context, owner, permitLabel, reg, sour
 		if s.appURL != "" {
 			emailBody += "\n\n" + s.appURL
 		}
-		if e := s.mail.Send(owner, subject, emailBody); e != nil {
+		if e := s.mail.Send(o.Owner, subject, emailBody); e != nil {
 			errs = append(errs, "email: "+e.Error())
 		} else {
 			delivered++
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
-		priority, tags := "default", "white_check_mark"
-		if !ok {
-			priority, tags = "high", "warning"
-		}
 		if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, priority, tags); e != nil {
 			errs = append(errs, "ntfy: "+e.Error())
 		} else {
@@ -173,7 +210,7 @@ func (s *Service) NotifyApply(ctx context.Context, owner, permitLabel, reg, sour
 		}
 	}
 	if len(errs) > 0 {
-		return delivered, fmt.Errorf("notify %s: %s", owner, strings.Join(errs, "; "))
+		return delivered, fmt.Errorf("notify %s: %s", o.Owner, strings.Join(errs, "; "))
 	}
 	return delivered, nil
 }
