@@ -366,6 +366,8 @@
     <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
     <li>p.stonn does not store your council password. It does store your email, your schedule, and the encrypted session.</li>
     <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
+    <li>Use a password that is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
+    <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
     <li>Consider whether you are comfortable with a third party holding access to your council account before using this. Do not rely on it for anything you can't afford to have go wrong.</li>
   </ul>
 
@@ -453,6 +455,7 @@
       <button type="submit">{{template "ic-link"}} Link account</button>
     </form>
     <p class="empty-note" style="margin-top:12px">Your council account must use <strong>{{.User.Email}}</strong>, the email you signed in with.</p>
+    <p class="empty-note" style="margin-top:6px">Tip: use a password unique to your council account. You can disconnect any time in Settings, and changing your council password also revokes access. <a href="/about">How it works &amp; security</a></p>
   </section>
 </main>
 
