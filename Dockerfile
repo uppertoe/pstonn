@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- build stage ---
-FROM golang:1.25.11-alpine@sha256:523c3effe300580ed375e43f43b1c9b091b68e935a7c3a92bfcc4e7ed55b18c2 AS build
+FROM golang:1.25.12-alpine@sha256:56961d79ea8129efddcc0b8643fd8a5416b4e6228cfd477e3fd61deb2672c587 AS build
 WORKDIR /src
 
 # Cache modules first.
@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pstonn .
 RUN mkdir -p /data && chown 65532:65532 /data
 
 # --- runtime stage ---
-# distroless/static: no shell, includes CA certs for the council/Authelia TLS
+# distroless/static: no shell, includes CA certs for the council and SMTP TLS
 # calls, runs as nonroot. The binary self-probes via `-healthcheck`, no curl.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
 COPY --from=build /out/pstonn /app
