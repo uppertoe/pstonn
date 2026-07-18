@@ -1,0 +1,42 @@
+# pstonn -- visitor permit scheduler.
+#
+# Auth model: the app relies on the platform forward-auth layer (vps-scaffold-auth)
+# for login. Users sign in with a one-time emailed code (any email domain), and
+# the app receives their VERIFIED email via the Remote-* headers. Leave
+# APP_OIDC_ISSUER unset so the app trusts those headers; set AUTH_LOGOUT_URL to
+# vps-scaffold-auth's sign-out URL.
+#
+# The landing page ("/"), the about and contact pages, the vendored assets, the
+# healthcheck, and the email confirm link are PUBLIC (not behind forward-auth).
+# Everything else (the app) is protected. Once signed in, protected requests
+# carry the Remote-* headers.
+p.{$DOMAIN} {
+    # Public, no login: landing/about/contact pages, static assets, healthcheck,
+    # and the token-only renewal-confirm link from reminder emails. Strip the
+    # shared session cookie even here: it is scoped to .{$DOMAIN}, so the browser
+    # sends it to every path, and the public backend must never receive the
+    # estate-wide bearer.
+    @public path / /about /contact /healthz /council/confirm
+    handle @public {
+        route {
+            import strip_client_identity
+            reverse_proxy pstonn:8080 {
+                import strip_auth_cookie
+            }
+        }
+    }
+    handle /static/* {
+        route {
+            import strip_client_identity
+            reverse_proxy pstonn:8080 {
+                import strip_auth_cookie
+            }
+        }
+    }
+    # Everything else requires a signed-in user (forward-auth via vps-scaffold-auth).
+    # Needs apps/auth enabled in the server repo (it defines `protected` +
+    # `strip_auth_cookie`); otherwise these routes 502.
+    handle {
+        import protected pstonn:8080
+    }
+}

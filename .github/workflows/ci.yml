@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly rebuild so base-image security fixes are picked up even when no
+    # code changes; the digest pin on the server repo follows.
+    - cron: "50 17 * * 0" # Sun 17:50 UTC (Mon 03:50 AEST)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.12"
+          cache-dependency-path: go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: CGO_ENABLED=0 go build ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l internal/ main.go)"
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  publish:
+    # Build and push the image on pushes to main and on version tags.
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/pstonn
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=ref,event=tag
+
+      # Build once and LOAD into the runner's docker: the image must boot and
+      # serve /healthz before anything is pushed (unit tests can pass while
+      # the packaged image is broken).
+      - name: Build image (load for smoke test)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          load: true
+          tags: pstonn:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (image boots and serves /healthz)
+        run: |
+          set -e
+          docker run -d --name pstonn-smoke -p 8899:8080 \
+            -e DATA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
+            -e DOMAIN=example.com \
+            pstonn:ci
+          code=000
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8899/healthz || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          echo "GET /healthz -> $code (after ${i}s)"
+          docker logs pstonn-smoke || true
+          docker rm -f pstonn-smoke >/dev/null 2>&1 || true
+          if [ "$code" != "200" ]; then
+            echo "::error::boot smoke failed: image does not serve /healthz"
+            exit 1
+          fi
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

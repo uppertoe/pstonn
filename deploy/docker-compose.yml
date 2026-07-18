@@ -1,0 +1,41 @@
+# Drop-in service fragment for a vps-scaffold server repo.
+# Copy this directory to the server repo as apps/pstonn/, then add
+#   - apps/pstonn/docker-compose.yml
+# to the root docker-compose.yml `include:` list and re-render Caddy routes:
+#   bash scaffold/docker/render-caddy-routes.sh && git add .generated
+#
+# The service name MUST stay "pstonn" (it matches the app folder and the Caddy
+# upstream). Caddy is the only container that publishes host ports; this app is
+# reached over the generated proxy network, so it declares no `ports:`.
+services:
+  pstonn:
+    image: ghcr.io/uppertoe/pstonn:latest # pin by @sha256 in the server repo (CI image-pins job enforces this)
+    env_file:
+      - path: ./.env
+        required: false # keeps `docker compose config` valid in CI without a real .env
+    environment:
+      - DOMAIN=${DOMAIN} # from the root .env; derives the public base URL (https://p.<DOMAIN>)
+      - AUTH_LOGOUT_URL=https://auth.${DOMAIN}/logout # vps-scaffold-auth sign-out
+    volumes:
+      - pstonn_data:/data
+    # --- CIS Docker Benchmark §5 hardening (CI-enforced) ---
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "/app", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pstonn_data:

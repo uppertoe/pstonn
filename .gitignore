@@ -1,0 +1,14 @@
+# Secrets — never commit real env files
+deploy/**/.env
+.env
+
+# Local build artifacts / data
+/pstonn
+/tmp/
+*.db
+*.db-wal
+*.db-shm
+data/
+
+# Local-only Claude settings
+.claude/settings.local.json

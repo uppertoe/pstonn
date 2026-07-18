@@ -1,0 +1,9 @@
+.git
+.github
+deploy
+docs
+*.md
+*.db
+*.db-wal
+*.db-shm
+data
