@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /guests", s.withUser(s.guestsPage))
 	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
 	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))
+	mux.HandleFunc("POST /guests/qr", s.withConsent(s.showVisitorQR))
 	mux.HandleFunc("POST /guests/{id}", s.withConsent(s.updateGuestGrant))
 	mux.HandleFunc("POST /guests/toggle", s.withConsent(s.toggleGuests))
 	mux.HandleFunc("POST /guests/{id}/delete", s.withConsent(s.deleteGuestGrant))
@@ -491,6 +492,7 @@ type dashboardData struct {
 	PermitOpts    []permitOpt      // create-grant permit choices
 	NewGuestLinks []guestLinkView  // links shown once, right after a grant is created
 	Edit          *editGrantView   // non-nil puts the pass form in edit mode
+	QR            *qrShowView      // non-nil shows the on-screen visitor QR
 	Guest         guestActView     // public activation menu (State "guest")
 }
 

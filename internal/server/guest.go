@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"html/template"
 	"net/http"
 	"strings"
 	"time"
@@ -15,7 +16,20 @@ import (
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
+	"rsc.io/qr"
 )
+
+// qrTTL is how long a visitor QR stays valid after the resident shows it.
+const qrTTL = 3 * time.Hour
+
+// qrDataURI renders text as a QR code PNG in a data: URI (CSP allows img data:).
+func qrDataURI(text string) (string, error) {
+	c, err := qr.Encode(text, qr.M)
+	if err != nil {
+		return "", err
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(c.PNG()), nil
+}
 
 // ---- guest-pass view types ----
 
@@ -27,6 +41,15 @@ type guestActView struct {
 	CurrentReg     string        // what is on the permit right now ("" if unknown)
 	Cars           []vehicleView // the cars this link may activate
 	AllowOvernight bool          // whether the overnight checkbox is offered
+	AllowPlate     bool          // whether the visitor may type an arbitrary plate
+}
+
+// qrShowView drives the page the resident shows on-screen for a visitor to scan.
+type qrShowView struct {
+	PermitLabel string
+	ImageURI    template.URL // the QR as a data: URI (trusted: server-generated)
+	URL         string       // the activation URL (also printed under the QR)
+	ExpiresAt   string       // human-readable expiry
 }
 
 // guestGrantView + guestRecipientView drive the account holder's management page.
@@ -138,6 +161,7 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 		Guest: guestActView{
 			Token: gc.rawToken, OwnerEmail: permit.Owner, PermitLabel: permitLabel(permit),
 			CurrentReg: current, Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
+			AllowPlate: gc.Grant.AllowPlate,
 		},
 	})
 }
@@ -160,52 +184,70 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w)
 		return
 	}
-	// The chosen car must be one this link is allowed to activate.
-	vid := atoi64(r.FormValue("vehicle_id"))
-	var chosen *model.Vehicle
-	for i := range gc.Vehicles {
-		if gc.Vehicles[i].ID == vid {
-			chosen = &gc.Vehicles[i]
-			break
-		}
-	}
-	if chosen == nil {
-		s.renderGuestResult(w, permit.Owner, false, "Please choose one of the cars on your link.")
-		return
-	}
-
 	now := time.Now().In(s.cfg.DisplayLocation)
 	overnight := gc.Grant.AllowOvernight && r.FormValue("overnight") != ""
 	end := dayEndLocal(now, 0)
 	if overnight {
 		end = dayEndLocal(now, 1)
 	}
-	// The activation is a fresh override: created now, so it wins the resolution
-	// tie-break and holds through its window (see model.Resolve).
-	if _, err := s.store.CreateOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient); err != nil {
-		s.renderGuestResult(w, permit.Owner, false, "Something went wrong saving your choice. Please try again.")
-		return
+
+	// The target is either an arbitrary plate (when the grant allows it, e.g. a
+	// visitor QR) or one of the grant's saved cars. Each becomes a fresh override,
+	// created now, so it wins the resolution tie-break for its window.
+	var reg, name, createdBy string
+	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
+		if len(plate) < 2 || len(plate) > 10 {
+			s.renderGuestResult(w, permit.Owner, false, "Enter a valid number plate (2 to 10 characters).")
+			return
+		}
+		reg = plate
+		createdBy = gc.Recipient
+		if createdBy == "" {
+			createdBy = "visitor (QR)"
+		}
+		if _, err := s.store.CreatePlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy); err != nil {
+			s.renderGuestResult(w, permit.Owner, false, "Something went wrong saving your plate. Please try again.")
+			return
+		}
+	} else {
+		vid := atoi64(r.FormValue("vehicle_id"))
+		var chosen *model.Vehicle
+		for i := range gc.Vehicles {
+			if gc.Vehicles[i].ID == vid {
+				chosen = &gc.Vehicles[i]
+				break
+			}
+		}
+		if chosen == nil {
+			s.renderGuestResult(w, permit.Owner, false, "Please choose one of the cars on your link.")
+			return
+		}
+		reg, name, createdBy = chosen.Registration, chosen.Label, gc.Recipient
+		if _, err := s.store.CreateOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient); err != nil {
+			s.renderGuestResult(w, permit.Owner, false, "Something went wrong saving your choice. Please try again.")
+			return
+		}
 	}
 	_ = s.store.TouchGuestTokenUsed(r.Context(), gc.TokenID)
 
 	until := untilPhrase(now, overnight)
-	// Best-effort synchronous apply so the recipient gets a real result; the
+	// Best-effort synchronous apply so the visitor gets a real result; the
 	// scheduler (kicked below) owns retries and eventual consistency regardless.
 	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, chosen.Registration)
+	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, reg)
 	s.sched.Kick()
 	if err == nil {
-		_ = s.store.SetPermitActive(r.Context(), permit.ID, chosen.Registration)
-		_ = s.store.RecordApply(r.Context(), permit.ID, chosen.Registration, "guest", "success", "activated by "+gc.Recipient)
-		s.notifyGuestApply(permit, chosen.Registration, chosen.Label, gc.Recipient)
-		s.renderGuestResult(w, permit.Owner, true, chosen.Registration+" is now on the permit until "+until+".")
+		_ = s.store.SetPermitActive(r.Context(), permit.ID, reg)
+		_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "success", "activated by "+createdBy)
+		s.notifyGuestApply(permit, reg, name, createdBy)
+		s.renderGuestResult(w, permit.Owner, true, reg+" is now on the permit until "+until+".")
 		return
 	}
-	_ = s.store.RecordApply(r.Context(), permit.ID, chosen.Registration, "guest", "error", err.Error())
+	_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "error", err.Error())
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The override is saved; the scheduler will apply it shortly.
-		s.renderGuestResult(w, permit.Owner, true, "Saved "+chosen.Registration+". It should be on the permit within a minute (until "+until+").")
+		s.renderGuestResult(w, permit.Owner, true, "Saved "+reg+". It should be on the permit within a minute (until "+until+").")
 		return
 	}
 	s.renderGuestResult(w, permit.Owner, false, "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
@@ -505,6 +547,45 @@ func (s *Server) emailLinks(owner, permitLabel string, links []guestLinkView) in
 		}
 	}
 	return sent
+}
+
+// showVisitorQR mints a short-lived, plate-entry grant for a permit and renders a
+// QR the resident shows on-screen. A visitor scans it, types their plate, and it
+// goes on the permit until the end of the day. The grant self-expires (qrTTL).
+func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	permitID := atoi64(r.FormValue("permit_id"))
+	raw, hash := newGuestToken()
+	if _, err := s.store.CreateQRGrant(r.Context(), owner, permitID, hash, qrTTL); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	url := s.guestLink(raw)
+	img, err := qrDataURI(url)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	permit, _ := s.store.GetPermit(r.Context(), permitID)
+	base, ok := s.appShell(w, r, "guests")
+	if !ok {
+		return
+	}
+	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	base.QR = &qrShowView{
+		PermitLabel: permitLabel(permit),
+		ImageURI:    template.URL(img),
+		URL:         url,
+		ExpiresAt:   time.Now().In(s.cfg.DisplayLocation).Add(qrTTL).Format("3:04pm"),
+	}
+	s.render(w, base)
 }
 
 func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {

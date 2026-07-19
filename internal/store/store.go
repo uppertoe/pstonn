@@ -200,6 +200,8 @@ CREATE TABLE IF NOT EXISTS guest_grant (
     permit_id       INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
     label           TEXT NOT NULL DEFAULT '',
     allow_overnight INTEGER NOT NULL DEFAULT 0,
+    allow_plate     INTEGER NOT NULL DEFAULT 0,  -- visitor may type an arbitrary plate
+    on_screen       INTEGER NOT NULL DEFAULT 0,  -- ephemeral QR grant (hidden from the pass list)
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL
 );
@@ -221,6 +223,7 @@ CREATE TABLE IF NOT EXISTS guest_token (
     token_hash      TEXT NOT NULL UNIQUE,
     revoked_at      TEXT NOT NULL DEFAULT '',
     last_used_at    TEXT NOT NULL DEFAULT '',
+    expires_at      TEXT NOT NULL DEFAULT '',   -- RFC3339 UTC; '' = never (persistent email link)
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_guest_token_grant ON guest_token(grant_id);
@@ -242,6 +245,9 @@ CREATE TABLE IF NOT EXISTS account_flags (
 		`ALTER TABLE council_session ADD COLUMN reminder_sent_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN confirm_token TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_token ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
@@ -1185,6 +1191,7 @@ type GuestGrant struct {
 	PermitID       int64
 	Label          string
 	AllowOvernight bool
+	AllowPlate     bool // visitor may type an arbitrary plate (tradie / on-screen QR)
 	Enabled        bool
 	CreatedAt      time.Time
 }
@@ -1346,6 +1353,52 @@ func (s *Store) AddGuestTokens(ctx context.Context, owner string, grantID int64,
 	return added, nil
 }
 
+// CreateQRGrant creates an ephemeral "on-screen QR" grant for a permit: it allows
+// a visitor to type an arbitrary plate, has no saved cars or email recipients,
+// and its single token expires after ttl. It is hidden from the pass list. Expired
+// on-screen grants for the owner are pruned first so they do not accumulate.
+// Returns the token hash to store (caller keeps the raw token for the QR URL).
+func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64, tokenHash string, ttl time.Duration) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+	// Prune the owner's already-expired on-screen grants (cascades their tokens).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND on_screen = 1
+		 AND id IN (SELECT grant_id FROM guest_token WHERE expires_at != '' AND expires_at <= ?)`,
+		owner, nowUTC()); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, enabled, created_at)
+		 VALUES (?, ?, 'Visitor QR', 0, 1, 1, 1, ?)`,
+		owner, permitID, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	expires := time.Now().UTC().Add(ttl).Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, expires_at, created_at) VALUES (?, '', ?, ?, ?)`,
+		grantID, tokenHash, expires, nowUTC()); err != nil {
+		return 0, err
+	}
+	return grantID, tx.Commit()
+}
+
 // GuestContextByTokenHash resolves a presented token hash to the grant, recipient
 // and allowed vehicles — only if the token is live, its grant enabled, and the
 // owner's guest passes are not globally paused. Any failed gate returns
@@ -1353,15 +1406,16 @@ func (s *Store) AddGuestTokens(ctx context.Context, owner string, grantID int64,
 func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
 	var gc GuestContext
 	var created string
-	var overnight, enabled int
+	var overnight, plate, enabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.enabled, g.created_at
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.enabled, g.created_at
 FROM guest_token t
 JOIN guest_grant g ON g.id = t.grant_id
 WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
+  AND (t.expires_at = '' OR t.expires_at > ?)
   AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
-		tokenHash).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
-		&gc.Grant.Label, &overnight, &enabled, &created)
+		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
+		&gc.Grant.Label, &overnight, &plate, &enabled, &created)
 	if err == sql.ErrNoRows {
 		return GuestContext{}, ErrNotFound
 	}
@@ -1369,6 +1423,7 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 		return GuestContext{}, err
 	}
 	gc.Grant.AllowOvernight = overnight == 1
+	gc.Grant.AllowPlate = plate == 1
 	gc.Grant.Enabled = enabled == 1
 	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 		return GuestContext{}, err
@@ -1383,7 +1438,7 @@ WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
 // ListGuestGrants returns the owner's grants with their cars and recipient tokens.
 func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrantDetail, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? ORDER BY id DESC`, owner)
+		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 ORDER BY id DESC`, owner)
 	if err != nil {
 		return nil, err
 	}

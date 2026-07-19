@@ -8,6 +8,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.11.0
 	golang.org/x/oauth2 v0.24.0
 	modernc.org/sqlite v1.34.1
+	rsc.io/qr v0.2.0
 )
 
 require (

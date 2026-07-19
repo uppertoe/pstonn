@@ -664,7 +664,8 @@ func (s *Scheduler) displacedGuest(ctx context.Context, p model.Permit, override
 		if reg == "" {
 			reg = regByOwnerID[ownerVehicle{p.Owner, o.VehicleID}]
 		}
-		if reg == prev && o.CreatedBy != "" {
+		// Only a real email is contactable (a QR visitor's created_by is not one).
+		if reg == prev && strings.Contains(o.CreatedBy, "@") {
 			by = o.CreatedBy
 			break
 		}

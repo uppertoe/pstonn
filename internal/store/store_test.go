@@ -724,3 +724,41 @@ func TestPlateOverride(t *testing.T) {
 		t.Error("saved-vehicle override should have a vehicle id and empty registration")
 	}
 }
+
+func TestQRGrant(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner, bob = "u@example.com", "bob@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// A foreign permit is rejected.
+	if _, err := s.CreateQRGrant(ctx, owner, bp, "x", time.Hour); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
+	}
+
+	// A valid QR grant resolves with plate entry allowed and no cars.
+	if _, err := s.CreateQRGrant(ctx, owner, p, "qrhash", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	gc, err := s.GuestContextByTokenHash(ctx, "qrhash")
+	if err != nil {
+		t.Fatalf("resolve QR token: %v", err)
+	}
+	if !gc.Grant.AllowPlate || len(gc.Vehicles) != 0 || gc.Grant.Owner != owner {
+		t.Fatalf("QR context: %+v", gc)
+	}
+
+	// It is hidden from the management list.
+	if ds, _ := s.ListGuestGrants(ctx, owner); len(ds) != 0 {
+		t.Fatalf("QR grant should be hidden from the pass list, got %d", len(ds))
+	}
+
+	// An expired token is treated as not-found.
+	if _, err := s.CreateQRGrant(ctx, owner, p, "expiredhash", -time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "expiredhash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired QR token = %v, want ErrNotFound", err)
+	}
+}

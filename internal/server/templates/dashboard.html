@@ -621,6 +621,7 @@
     <h1>{{.Guest.PermitLabel}}</h1>
     <p class="gnow">On the permit now: {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="muted">unknown</span>{{end}}</p>
     <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:18px">
+      {{if .Guest.Cars}}
       <p class="sub">Tap your car to put it on the permit</p>
       <div class="gcars">
         {{range .Guest.Cars}}
@@ -632,11 +633,20 @@
         </button>
         {{end}}
       </div>
+      {{end}}
+      {{if .Guest.AllowPlate}}
+      <label class="fld"><span>Your number plate</span>
+        <input type="text" name="plate" placeholder="e.g. ABC123" maxlength="10" autocapitalize="characters" required style="text-transform:uppercase;font-size:17px;letter-spacing:1px;text-align:center">
+      </label>
+      {{end}}
       {{if .Guest.AllowOvernight}}
       <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps the car on until the end of tomorrow instead of the end of today.</span></span></label>
       {{end}}
+      {{if .Guest.AllowPlate}}
+      <button type="submit" style="justify-content:center;margin-top:4px">{{template "ic-check"}} Put my car on the permit</button>
+      {{end}}
     </form>
-    <p class="empty-note" style="margin-top:16px">Tap your car. It stays on the permit until the end of the day. The account holder is told when it changes.</p>
+    <p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes.</p>
   </section>
 </main>
 
@@ -934,6 +944,20 @@
   {{if not .IsPrimary}}
   <section class="card"><p class="empty-note">Only the account owner can manage guest passes.</p></section>
 
+  {{else if .QR}}
+  {{/* ---- ON-SCREEN VISITOR QR ---- */}}
+  <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
+    <div class="editbar" style="text-align:left">
+      <span class="eyebrow">{{template "ic-key"}} Visitor QR</span>
+      <a href="/guests"><button type="button" class="ghost sm">&larr; Done</button></a>
+    </div>
+    <h2 style="justify-content:center">{{.QR.PermitLabel}}</h2>
+    <p class="subtitle" style="text-align:center;max-width:340px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
+    <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="240" height="240" style="width:240px;height:240px;image-rendering:pixelated;border:8px solid #fff;border-radius:12px;background:#fff">
+    <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.ExpiresAt}}</strong>. Generate a fresh one each time.</p>
+    <p class="empty-note" style="word-break:break-all">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
+  </section>
+
   {{else if .Edit}}
   {{/* ---- EDIT MODE: one focused pass, including who has a link ---- */}}
   <section class="card editing" id="passform" style="--hue:var(--sec-vehicles)">
@@ -1002,6 +1026,19 @@
       </form>
     </div>
   </section>
+
+  {{if .PermitOpts}}
+  <section class="card" style="--hue:var(--sec-schedule)">
+    <h2><span class="ic">{{template "ic-key"}}</span> Visitor at the door?</h2>
+    <p class="subtitle">Show a one-time QR code a visitor (a tradie, a friend's car) can scan to put <em>their own plate</em> on the permit for the day. No saved car needed; it expires in a few hours.</p>
+    <form method="post" action="/guests/qr" class="row" style="gap:10px;flex-wrap:wrap">
+      {{if gt (len .PermitOpts) 1}}
+      <select name="permit_id" style="flex:1;min-width:180px">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+      {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+      <button type="submit">{{template "ic-key"}} Show a visitor QR</button>
+    </form>
+  </section>
+  {{end}}
 
   {{if .Guests}}
   <div class="grants">
