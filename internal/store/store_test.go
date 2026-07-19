@@ -204,6 +204,22 @@ func TestAccountMembers(t *testing.T) {
 	}
 }
 
+// TestHasOwnData guards the "can't invite an existing user" rule: a fresh email
+// has no data, but one with a vehicle (or permit, or council session) does.
+func TestHasOwnData(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if has, err := s.HasOwnData(ctx, "fresh@example.com"); err != nil || has {
+		t.Fatalf("fresh email should have no data: has=%v err=%v", has, err)
+	}
+	if _, err := s.CreateVehicle(ctx, "active@example.com", "AAA111", "car"); err != nil {
+		t.Fatal(err)
+	}
+	if has, err := s.HasOwnData(ctx, "active@example.com"); err != nil || !has {
+		t.Fatalf("email with a vehicle should have data: has=%v err=%v", has, err)
+	}
+}
+
 // TestSaveCouncilSessionStampsLinkedAt confirms an interactive save sets the
 // re-authorise clock, and that ListCouncilSessions surfaces it.
 func TestSaveCouncilSessionStampsLinkedAt(t *testing.T) {

@@ -1115,6 +1115,13 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusConflict, "That person already shares their own account with others, so they cannot join yours.")
 		return
 	}
+	// Block someone who already runs their own account: joining would hide their
+	// own permits and connection. They would need a different email, or to remove
+	// their own data first.
+	if has, _ := s.store.HasOwnData(ctx, email); has {
+		s.message(w, http.StatusConflict, "That person already uses p.stonn with their own account. Ask them to use a different email, or to remove their own account first.")
+		return
+	}
 	n, err := s.store.CountMembers(ctx, owner)
 	if err != nil {
 		s.serverError(w, err)
@@ -1129,6 +1136,12 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusConflict, "That email already has access to an account.")
 		return
 	}
+	// Courtesy heads-up (best-effort; not a login code) so they know to sign in.
+	go func(to, from string) {
+		if e := s.notify.SendInvite(to, from); e != nil {
+			log.Printf("invite email to %s: %v", to, e)
+		}
+	}(email, owner)
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 

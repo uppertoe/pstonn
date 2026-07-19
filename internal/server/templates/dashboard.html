@@ -746,7 +746,7 @@
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit">{{template "ic-plus"}} Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">They get access when they sign in with that email. They can manage the schedule and vehicles, but cannot disconnect the council account, delete the account, or change who has access.</p>
+    <p class="empty-note" style="margin-top:10px">They get access when they sign in with that email.{{if .Notify.EmailAvailable}} We send them a heads-up so they know to.{{end}} They can manage the schedule and vehicles, but cannot disconnect the council account, delete the account, or change who has access. Someone who already has their own p.stonn account cannot be added.</p>
     {{else}}
     <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
     {{end}}

@@ -268,6 +268,30 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 	return nil
 }
 
+// SendInvite emails a courtesy heads-up to someone who has just been granted
+// shared access, so they know to sign in. It is NOT an access grant or a code:
+// access still only takes effect when they sign in with this email and get the
+// normal one-time login code. Email only (they may have no push set up yet), and
+// a no-op when SMTP is unconfigured.
+func (s *Service) SendInvite(to, ownerEmail string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := "You have been given access to a p.stonn account"
+	lines := []string{
+		ownerEmail + " has given you shared access to their p.stonn account, which schedules a City of Stonnington visitor parking permit.",
+		"",
+		"Sign in with this email address to help manage the schedule. You will get a one-time code to confirm it is you.",
+	}
+	if s.appURL != "" {
+		lines = append(lines, "", s.appURL)
+	}
+	lines = append(lines,
+		"",
+		"If you were not expecting this, you can ignore this email. You can also remove your access from Settings after signing in.")
+	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+}
+
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.ntfyBase+"/"+topic, strings.NewReader(body))
 	if err != nil {

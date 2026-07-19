@@ -754,6 +754,20 @@ func (s *Store) IsPrimary(ctx context.Context, owner string) (bool, error) {
 	return n > 0, err
 }
 
+// HasOwnData reports whether email already runs their own p.stonn account, i.e.
+// has a linked council session, a managed permit, or a saved vehicle. Adding
+// such a person as a secondary would hide their own setup, so the caller blocks
+// it. A brand-new user who has only signed in (no data yet) returns false.
+func (s *Store) HasOwnData(ctx context.Context, email string) (bool, error) {
+	var has int
+	err := s.db.QueryRowContext(ctx, `SELECT
+        EXISTS(SELECT 1 FROM council_session WHERE owner = ?)
+     OR EXISTS(SELECT 1 FROM permit WHERE owner = ?)
+     OR EXISTS(SELECT 1 FROM vehicle WHERE owner = ?)`,
+		email, email, email).Scan(&has)
+	return has == 1, err
+}
+
 // ---- Apply log ----
 
 // Consent is one recorded acceptance of the terms.
