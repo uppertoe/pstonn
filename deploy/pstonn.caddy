@@ -11,33 +11,61 @@
 # Everything else (the app) is protected. Once signed in, protected requests
 # carry the Remote-* headers.
 p.{$DOMAIN} {
-    # Public, no login: landing/about/why/contact pages, static assets, healthcheck,
-    # the token-only renewal-confirm link from reminder emails, and the token-only
-    # guest-pass activation links (/g/*). Strip the
-    # shared session cookie even here: it is scoped to .{$DOMAIN}, so the browser
-    # sends it to every path, and the public backend must never receive the
-    # estate-wide bearer.
-    @public path / /about /why /contact /healthz /council/confirm /g/*
-    handle @public {
-        route {
-            import strip_client_identity
-            reverse_proxy pstonn:8080 {
-                import strip_auth_cookie
-            }
-        }
-    }
-    handle /static/* {
-        route {
-            import strip_client_identity
-            reverse_proxy pstonn:8080 {
-                import strip_auth_cookie
-            }
-        }
-    }
-    # Everything else requires a signed-in user (forward-auth via vps-scaffold-auth).
-    # Needs apps/auth enabled in the server repo (it defines `protected` +
-    # `strip_auth_cookie`); otherwise these routes 502.
-    handle {
-        import protected pstonn:8080
-    }
+	# Public, no login: landing/about/why/contact pages, static assets, healthcheck,
+	# the token-only renewal-confirm link from reminder emails, and the token-only
+	# guest-pass activation links (/g/*). Strip the
+	# shared session cookie even here: it is scoped to .{$DOMAIN}, so the browser
+	# sends it to every path, and the public backend must never receive the
+	# estate-wide bearer.
+	# The landing page. It stays public, but a signed-in visitor is sent straight
+	# to the app instead of the marketing page. Only the auth layer knows whether
+	# the visitor has a session, so it decides here (the public backend is never
+	# told who is signed in): forward_auth checks the session against auth:8080, a
+	# 2xx (signed in) redirects to the app, and anyone else is served the public
+	# landing with identity and the shared cookie stripped. This mirrors the
+	# forward_auth in the (protected) snippet; keep the uri/copy_headers in step.
+	handle / {
+		route {
+			import strip_client_identity
+			forward_auth auth:8080 {
+				uri /verify
+				copy_headers Remote-User Remote-Email Remote-Groups
+				header_up X-Auth-Policy "any"
+
+				@signedin status 2xx
+				handle_response @signedin {
+					redir /schedule 302
+				}
+				handle_response {
+					reverse_proxy pstonn:8080 {
+						import strip_auth_cookie
+					}
+				}
+			}
+		}
+	}
+
+	@public path /about /why /contact /healthz /council/confirm /g/*
+	handle @public {
+		route {
+			import strip_client_identity
+			reverse_proxy pstonn:8080 {
+				import strip_auth_cookie
+			}
+		}
+	}
+	handle /static/* {
+		route {
+			import strip_client_identity
+			reverse_proxy pstonn:8080 {
+				import strip_auth_cookie
+			}
+		}
+	}
+	# Everything else requires a signed-in user (forward-auth via vps-scaffold-auth).
+	# Needs apps/auth enabled in the server repo (it defines `protected` +
+	# `strip_auth_cookie`); otherwise these routes 502.
+	handle {
+		import protected pstonn:8080
+	}
 }
