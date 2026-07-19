@@ -513,19 +513,19 @@ func (s *Store) PermitByCouncilID(ctx context.Context, councilPermitID string) (
 	return p, err
 }
 
-// UpsertPermit inserts a permit, or updates the label/type of one the SAME owner
+// UpsertPermit inserts a permit, or refreshes the type of one the SAME owner
 // already holds. It never reassigns ownership: the ON CONFLICT update is guarded
 // by owner, so one user can never take over another user's permit row by
 // re-submitting its council permit id. Callers must confirm the permit belongs
 // to the owner's council account first (see addPermit); this is the last line of
-// defence. Returns the row id.
+// defence. The label is only set on first insert — re-adding a permit keeps any
+// name the user has since chosen (see SetPermitLabel). Returns the row id.
 func (s *Store) UpsertPermit(ctx context.Context, owner, councilPermitID, permitTypeID, label string) (int64, error) {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO permit (owner, council_permit_id, permit_type_id, label, updated_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(council_permit_id) DO UPDATE SET
     permit_type_id = excluded.permit_type_id,
-    label          = excluded.label,
     updated_at     = excluded.updated_at
 WHERE permit.owner = excluded.owner`,
 		owner, councilPermitID, permitTypeID, label, nowUTC())
@@ -535,6 +535,21 @@ WHERE permit.owner = excluded.owner`,
 	var id int64
 	err = s.db.QueryRowContext(ctx, `SELECT id FROM permit WHERE council_permit_id = ?`, councilPermitID).Scan(&id)
 	return id, err
+}
+
+// SetPermitLabel renames a permit (owner-scoped) to a name the user chooses, shown
+// everywhere the permit appears. Returns ErrNotFound if it isn't the owner's.
+func (s *Store) SetPermitLabel(ctx context.Context, owner string, id int64, label string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET label = ?, updated_at = ? WHERE id = ? AND owner = ?`,
+		label, nowUTC(), id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) SetPermitActive(ctx context.Context, id int64, registration string) error {

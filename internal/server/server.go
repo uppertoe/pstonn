@@ -123,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /vehicles/{id}/email", s.withConsent(s.setVehicleEmail))
 	mux.HandleFunc("POST /permits", s.withConsent(s.addPermit))
 	mux.HandleFunc("POST /permits/{id}/delete", s.withConsent(s.deletePermit))
+	mux.HandleFunc("POST /permits/{id}/name", s.withConsent(s.renamePermit))
 	mux.HandleFunc("POST /permits/{id}/rules", s.withConsent(s.setRule))
 	mux.HandleFunc("POST /permits/{id}/override", s.withConsent(s.addOverride))
 	mux.HandleFunc("POST /permits/{id}/overrides/{oid}/delete", s.withConsent(s.deleteOverride))
@@ -1152,6 +1153,30 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Re-evaluate so the scheduler drops the now-removed permit promptly.
 	s.sched.Kick()
+	redirectHome(w, r)
+}
+
+// renamePermit gives a permit a friendly name the user chooses (e.g. "Nanny"),
+// shown everywhere it appears — schedule, guest passes, door QRs. It's purely a
+// display label; the council record is untouched.
+func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	label := strings.TrimSpace(r.FormValue("label"))
+	if label == "" {
+		s.message(w, http.StatusBadRequest, "Give the permit a name.")
+		return
+	}
+	if rs := []rune(label); len(rs) > 40 {
+		label = string(rs[:40])
+	}
+	if err := s.store.SetPermitLabel(r.Context(), owner, p.ID, label); err != nil {
+		s.serverError(w, err)
+		return
+	}
 	redirectHome(w, r)
 }
 

@@ -196,6 +196,11 @@
   /* status hero */
   .permit-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
   .permit-head h2 { margin:0; font-size:17px; letter-spacing:-.01em; }
+  .pname { display:inline-flex; align-items:center; gap:4px; min-width:0; }
+  .pname .ghost.icon.sm { opacity:.55; }
+  .pname:hover .ghost.icon.sm { opacity:1; }
+  .pname-edit { display:flex; align-items:center; gap:8px; flex:1; flex-wrap:wrap; min-width:0; }
+  .pname-edit input { flex:1; min-width:150px; font-size:16px; font-weight:600; letter-spacing:-.01em; padding:7px 11px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); }
   .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
 
   /* legend */
@@ -1396,9 +1401,19 @@
 
 {{/* =================== PERMIT BODY (swappable) =================== */}}
 {{define "permit-body"}}
-<div class="permit-head">
-  <h2>{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</h2>
-  <div class="nowbadge">
+<div class="permit-head" x-data="{rename:false}">
+  <div class="pname" x-show="!rename">
+    <h2>{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</h2>
+    <button type="button" class="ghost icon sm" title="Rename permit" aria-label="Rename permit"
+            @click="rename=true; $nextTick(() => $refs.pname.focus())">{{template "ic-edit"}}</button>
+  </div>
+  <form x-show="rename" x-cloak method="post" action="/permits/{{.Permit.ID}}/name" class="pname-edit" @submit="rename=false">
+    <input name="label" x-ref="pname" maxlength="40" required autocomplete="off" @keydown.escape="rename=false"
+           value="{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}">
+    <button type="submit" class="sm">{{template "ic-check"}} Save</button>
+    <button type="button" class="ghost sm" @click="rename=false">Cancel</button>
+  </form>
+  <div class="nowbadge" x-show="!rename">
     <span class="muted" style="font-size:12.5px">on permit now</span>
     {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
   </div>

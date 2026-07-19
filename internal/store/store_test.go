@@ -125,12 +125,23 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	if p.Label != "Alice permit" {
 		t.Fatalf("label overwritten to %q by non-owner upsert", p.Label)
 	}
-	// The real owner can still update their own permit.
-	if _, err := s.UpsertPermit(ctx, alice, "14576", "14", "Alice renamed"); err != nil {
+	// Re-adding the permit no longer clobbers the label, so a name the owner chose
+	// survives a re-add through the picker.
+	if _, err := s.UpsertPermit(ctx, alice, "14576", "14", "ignored on re-add"); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := s.PermitByCouncilID(ctx, "14576"); p.Label != "Alice renamed" {
-		t.Fatalf("owner update did not apply: %+v", p)
+	if p, _ := s.PermitByCouncilID(ctx, "14576"); p.Label != "Alice permit" {
+		t.Fatalf("re-add should keep the existing label, got %q", p.Label)
+	}
+	// Renaming goes through SetPermitLabel, and only the owner may do it.
+	if err := s.SetPermitLabel(ctx, bob, p.ID, "Bob rename"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-owner rename = %v, want ErrNotFound", err)
+	}
+	if err := s.SetPermitLabel(ctx, alice, p.ID, "Nanny"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.PermitByCouncilID(ctx, "14576"); got.Label != "Nanny" {
+		t.Fatalf("SetPermitLabel did not apply: %+v", got)
 	}
 }
 
