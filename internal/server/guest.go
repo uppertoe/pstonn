@@ -198,7 +198,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = s.store.SetPermitActive(r.Context(), permit.ID, chosen.Registration)
 		_ = s.store.RecordApply(r.Context(), permit.ID, chosen.Registration, "guest", "success", "activated by "+gc.Recipient)
-		s.notifyGuestApply(permit, chosen.Registration, chosen.Label)
+		s.notifyGuestApply(permit, chosen.Registration, chosen.Label, gc.Recipient)
 		s.renderGuestResult(w, permit.Owner, true, chosen.Registration+" is now on the permit until "+until+".")
 		return
 	}
@@ -236,9 +236,9 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
 }
 
-func (s *Server) notifyGuestApply(permit model.Permit, reg, name string) {
+func (s *Server) notifyGuestApply(permit model.Permit, reg, name, by string) {
 	outcome := notify.ApplyOutcome{
-		Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: reg, Name: name, Source: "guest", OK: true,
+		Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

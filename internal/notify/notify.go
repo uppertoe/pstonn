@@ -133,7 +133,8 @@ type ApplyOutcome struct {
 	PermitLabel string
 	Reg         string // the vehicle we tried to set
 	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
-	Source      string // "roster" / "override" (success context)
+	By          string // who made the change, when it was a guest activation ("" otherwise)
+	Source      string // "roster" / "override" / "guest" (success context)
 	OK          bool
 	CurrentReg  string // what is still on the permit on failure ("" if unknown)
 	Reason      string // one plain sentence: why it failed
@@ -165,6 +166,11 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if o.OK {
 		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, car)
 		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, car, o.Source)
+		if o.By != "" {
+			// A guest activated it via their link; tell the holder who, and that it
+			// overrides the schedule only until it ends (then the roster resumes).
+			body += fmt.Sprintf("\n\nActivated by %s using a guest link. This overrides your schedule until it ends, then your roster resumes.", o.By)
+		}
 	} else {
 		switch {
 		case o.CurrentReg != "" && o.Transient:
@@ -334,6 +340,23 @@ func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
 		url,
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
+	}
+	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+}
+
+// NotifyGuestDisplaced tells a guest (who has no account, so email only) that
+// the car they put on a permit via their link has since been taken off it, so
+// they can move it or re-activate before getting caught out. No-op without SMTP.
+func (s *Service) NotifyGuestDisplaced(ctx context.Context, to, permitLabel, oldReg, newReg string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := fmt.Sprintf("Heads up: %s is no longer on the %s", oldReg, permitLabel)
+	lines := []string{
+		fmt.Sprintf("The car you put on the visitor permit (%s) has just been taken off it.", oldReg),
+		fmt.Sprintf("The permit now shows %s instead.", newReg),
+		"",
+		"If your car is still parked there, please move it or open your link again to put it back on, so you stay covered.",
 	}
 	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
 }
