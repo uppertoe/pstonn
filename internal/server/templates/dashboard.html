@@ -75,8 +75,8 @@
   }
   * { box-sizing:border-box; }
   [x-cloak] { display:none !important; }
-  html { scroll-behavior:smooth; }
-  body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; }
+  html { scroll-behavior:smooth; overflow-x:hidden; }
+  body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; overflow-x:hidden; }
   a { color:var(--primary); text-decoration:none; }
   svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; display:block; }
   @keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
@@ -146,7 +146,6 @@
     .nav-item svg { width:22px; height:22px; }
     .nav-item.active::after { top:0; bottom:auto; left:22%; right:22%; border-radius:0 0 3px 3px; }
     main { margin-bottom:88px; }
-    .fab { bottom:84px; }
   }
 
   main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap:16px; }
@@ -185,7 +184,7 @@
   button.icon { padding:9px; }
 
   table { width:100%; border-collapse:collapse; }
-  th,td { text-align:left; padding:11px 6px; border-bottom:1px solid var(--line); font-size:14px; }
+  th,td { text-align:left; padding:11px 6px; border-bottom:1px solid var(--line); font-size:14px; overflow-wrap:anywhere; }
   th { color:var(--muted); font-weight:600; font-size:12px; }
   tr:last-child td { border-bottom:0; }
   .reg { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; font-weight:650; letter-spacing:.4px; background:var(--primary-soft); color:var(--primary-2); padding:3px 8px; border-radius:7px; display:inline-block; }
@@ -204,26 +203,29 @@
   .legend .veh { font-size:13px; }
 
   /* roster */
-  .roster { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; }
-  @media (max-width:640px){ .roster { grid-template-columns:repeat(4,1fr); } }
-  .rcell { position:relative; }
+  .roster { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
+  @media (max-width:640px){ .roster { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+  .rcell { position:relative; min-width:0; }
   .rcell > .day { font-size:11px; color:var(--muted); text-align:center; margin-bottom:6px; font-weight:600; }
   .chip { width:100%; border:1px solid var(--line); background:var(--surface); border-radius:var(--radius-sm); padding:10px 8px; min-height:46px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; font-size:12.5px; color:var(--ink); text-align:center; transition:border-color .15s, box-shadow .15s, transform .08s; }
   .chip.empty { color:var(--muted); border-style:dashed; }
   .chip:hover { border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent); }
   .chip:active { transform:scale(.98); }
-  .chip .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+  .chip .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; min-width:0; }
 
   /* calendar */
-  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
   .cday { position:relative; border:1px solid var(--line); border-radius:10px; padding:7px 4px 9px; text-align:center; cursor:pointer; background:var(--surface); transition:border-color .15s, transform .08s; }
   .cday:hover { border-color:var(--primary); }
   .cday:active { transform:scale(.98); }
   .cday.today { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
   .cday.past { opacity:.42; }
-  .cday .cd { font-size:10.5px; color:var(--muted); margin-bottom:7px; white-space:nowrap; font-weight:600; }
+  .cday .cd { font-size:10.5px; color:var(--muted); margin-bottom:4px; white-space:nowrap; font-weight:600; }
+  /* one-off marker: a fixed centred slot between the date and the bar, so it is
+     always the same height (dot present or not) and never widens the cell. */
+  .cday .omk { height:6px; display:flex; align-items:center; justify-content:center; margin-bottom:5px; }
+  .cday .oneoff { width:5px; height:5px; border-radius:50%; background:var(--accent); }
   .cday .bar { height:6px; border-radius:4px; background:var(--line); }
-  .cday .oneoff { position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--accent); }
 
   /* popover */
   .pop { position:absolute; z-index:30; top:100%; left:50%; transform:translateX(-50%); margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; animation:rise .16s ease both; }
@@ -264,7 +266,7 @@
 
   /* one-offs list */
   .oneoff-list { display:grid; gap:8px; margin:2px 0 4px; }
-  .oneoff-item { display:grid; grid-template-columns:1fr 232px 40px; align-items:center; gap:14px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; background:var(--surface-2); }
+  .oneoff-item { display:grid; grid-template-columns:1fr auto 40px; align-items:center; gap:14px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; background:var(--surface-2); }
   .oneoff-item .veh { min-width:0; }
   .oneoff-item .veh .lab, .oneoff-item .veh { overflow:hidden; }
   .oneoff-item .when { font-size:13px; color:var(--muted); text-align:left; white-space:nowrap; }
@@ -302,10 +304,19 @@
   .permit-foot button { background:none; box-shadow:none; color:var(--muted); font-weight:550; font-size:12.5px; padding:6px 9px; }
   .permit-foot button:hover { color:var(--danger); background:var(--danger-soft); filter:none; box-shadow:none; }
   .permit-foot button svg { width:14px; height:14px; }
-  /* Vehicle driver-email inline form */
-  .vemail { display:flex; gap:6px; margin-top:7px; max-width:340px; }
-  .vemail input { font-size:12.5px; padding:6px 9px; }
-  .vemail button { padding:6px 11px; font-size:12.5px; }
+  /* Vehicles list: one row per car (label + plate + delete), email form below */
+  .vlist { display:grid; gap:2px; }
+  .vrow { padding:13px 0; border-bottom:1px solid var(--line); }
+  .vrow:first-child { padding-top:2px; }
+  .vrow:last-child { border-bottom:0; padding-bottom:2px; }
+  .vmain { display:flex; align-items:center; gap:10px; }
+  .vmain .veh { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14.5px; font-weight:550; }
+  .vmain .plate { flex:0 0 auto; }
+  .vemail { display:flex; gap:6px; margin-top:8px; max-width:360px; }
+  .vemail input { font-size:13.5px; padding:7px 10px; flex:1; min-width:0; }
+  .vemail button { padding:7px 12px; font-size:13.5px; }
+  /* Keep the add-a-vehicle inputs the same size as the per-car email inputs */
+  .vaddform input { font-size:13.5px; }
   /* Number plate: a distinct badge tinted with each car's colour (--plate). */
   .plate { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:700; font-size:13px; letter-spacing:1px; text-transform:uppercase; padding:4px 9px; border-radius:6px; border:2px solid var(--plate,var(--line)); background:color-mix(in srgb, var(--plate,var(--ink)) 12%, var(--surface)); color:var(--ink); white-space:nowrap; display:inline-block; }
   /* Guest-pass management */
@@ -313,6 +324,27 @@
   .grants .card { margin:0; }
   @media (max-width:560px){ .grants { grid-template-columns:1fr; } }
   .card.editing { border-color:var(--sec-vehicles); box-shadow:0 0 0 1px var(--sec-vehicles) inset, var(--shadow); }
+  /* ---- small-screen refinements for the app pages ---- */
+  @media (max-width:560px){
+    main { padding:0 12px; }
+    .card { padding:16px 15px; }
+    /* Calendar keeps 7 weekday columns but tightens so they fit narrow screens */
+    .cal { gap:4px; }
+    .cday { padding:6px 2px 8px; }
+    .cday .cd { font-size:9.5px; letter-spacing:-.02em; }
+    .cday .bar { height:5px; }
+    /* Roster: shrink the chip a touch so a full plate fits a narrow column */
+    .chip { font-size:11.5px; gap:5px; padding:9px 4px; }
+    /* Vehicle driver-email field uses the full width */
+    .vemail { max-width:none; }
+    .vemail input { min-width:0; }
+    /* Activity log: stack each row into a readable block instead of a cramped table */
+    table.mtable, table.mtable tbody, table.mtable tr, table.mtable td { display:block; }
+    table.mtable tr { padding:9px 0; border-bottom:1px solid var(--line); }
+    table.mtable tr:last-child { border-bottom:0; }
+    table.mtable td { border:0; padding:1px 0; }
+    table.mtable td[style*="nowrap"] { font-size:12px; color:var(--muted); }
+  }
   .editbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px; }
   .editbar .eyebrow { font-size:12px; font-weight:650; letter-spacing:.04em; text-transform:uppercase; color:var(--sec-vehicles); }
   .glink { display:flex; flex-direction:column; gap:2px; padding:9px 0; border-top:1px solid var(--line); }
@@ -328,8 +360,11 @@
   .guestwrap { max-width:460px; margin:0 auto; padding:32px 18px 60px; }
   .guestcard { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:26px 24px; }
   .guestcard h1 { font-size:20px; letter-spacing:-.02em; margin:2px 0 4px; }
-  .gbrand { display:flex; align-items:center; gap:8px; font-weight:750; margin-bottom:16px; }
-  .gbrand .mark { width:26px; height:26px; }
+  .gbrand { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .gbrand .mark { width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:var(--on-primary); display:grid; place-items:center; box-shadow:var(--shadow); flex:0 0 auto; }
+  .gbrand .mark svg { width:18px; height:18px; stroke-width:1.9; }
+  .gbrand .word { font-family:'Space Grotesk',system-ui,sans-serif; font-weight:600; font-size:19px; letter-spacing:-.02em; line-height:1; }
+  .gbrand .word .dot { color:var(--primary); }
   .gmanaged { font-size:13px; color:var(--muted); margin:0; }
   .gnow { font-size:14px; color:var(--muted); margin:8px 0 0; }
   .gcars { display:grid; gap:10px; margin-top:4px; }
@@ -392,6 +427,9 @@
   .fab:hover { filter:brightness(1.06); transform:translateY(-2px); }
   .fab:active { transform:scale(.97); }
   @media (max-width:520px){ .fab .fab-label { display:none; } .fab { padding:0; width:52px; justify-content:center; } }
+  /* Below 640px the nav is a fixed bottom bar (z-index 30), so lift the FAB above
+     it. Declared after the base .fab so it wins at equal specificity. */
+  @media (max-width:640px){ .fab { bottom:calc(74px + env(safe-area-inset-bottom, 0px)); z-index:35; } }
   .modal form.stack { max-width:none; margin:0; }
   .modal .fld select, .modal .fld input { width:100%; }
 </style>
@@ -767,7 +805,7 @@
   <nav class="nav">
     <a href="/schedule" class="nav-item {{if eq .Page "schedule"}}active{{end}}" style="--hue:var(--sec-schedule)">{{template "ic-calendar"}}<span>Schedule</span></a>
     <a href="/vehicles" class="nav-item {{if eq .Page "vehicles"}}active{{end}}" style="--hue:var(--sec-vehicles)">{{template "ic-cars"}}<span>Vehicles</span></a>
-    <a href="/guests" class="nav-item {{if eq .Page "guests"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-key"}}<span>Guests</span></a>
+    <a href="/guests" class="nav-item {{if eq .Page "guests"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-users"}}<span>Guests</span></a>
     <a href="/activity" class="nav-item {{if eq .Page "activity"}}active{{end}}" style="--hue:var(--sec-activity)">{{template "ic-activity"}}<span>Activity</span></a>
     <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-gear"}}<span>Settings</span></a>
   </nav>
@@ -804,30 +842,26 @@
   <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic">{{template "ic-cars"}}</span> Vehicles</div>
   <p class="subtitle">The plates that may share your permit. Each gets a colour used across the schedule.</p>
   <section class="card" style="--hue:var(--sec-vehicles)">
-    <table>
-      <tbody>
+    <div class="vlist">
       {{range .Vehicles}}
-        <tr>
-          <td>
-            <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}</span>
-            <form method="post" action="/vehicles/{{.ID}}/email" class="vemail">
-              <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off">
-              <button type="submit" class="ghost sm">Save</button>
-            </form>
-          </td>
-          <td><span class="reg">{{.Registration}}</span></td>
-          <td style="text-align:right">
-            <form method="post" action="/vehicles/{{.ID}}/delete" onsubmit="return confirm('Remove this vehicle?')">
-              <button class="danger icon" type="submit" title="Remove">{{template "ic-trash"}}</button>
-            </form>
-          </td>
-        </tr>
+      <div class="vrow">
+        <div class="vmain">
+          <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}</span>
+          <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
+          <form method="post" action="/vehicles/{{.ID}}/delete" onsubmit="return confirm('Remove this vehicle?')">
+            <button class="danger icon" type="submit" title="Remove">{{template "ic-trash"}}</button>
+          </form>
+        </div>
+        <form method="post" action="/vehicles/{{.ID}}/email" class="vemail">
+          <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off">
+          <button type="submit" class="ghost sm">Save</button>
+        </form>
+      </div>
       {{else}}
-        <tr><td class="empty-note">No vehicles yet. Add the plates that may share a permit.</td></tr>
+      <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
       {{end}}
-      </tbody>
-    </table>
-    <form method="post" action="/vehicles" class="row" style="margin-top:14px">
+    </div>
+    <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px">
       <input class="grow" name="label" placeholder="Label (e.g. Mum's Corolla)" required>
       <input name="registration" placeholder="PLATE" required style="text-transform:uppercase;width:130px">
       <button type="submit">{{template "ic-plus"}} Add</button>
@@ -840,7 +874,7 @@
   <div class="sectitle" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Activity</div>
   <p class="subtitle">Every plate change the scheduler has applied on your behalf.</p>
   <section class="card" style="--hue:var(--sec-activity)">
-    <table>
+    <table class="mtable">
       <tbody>
       {{range .Log}}
         <tr>
@@ -939,7 +973,7 @@
 
   {{else if eq .Page "guests"}}
   {{/* ---------- GUEST PASSES ---------- */}}
-  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-key"}}</span> Guest passes</div>
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
   <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
   {{if not .IsPrimary}}
   <section class="card"><p class="empty-note">Only the account owner can manage guest passes.</p></section>
@@ -948,12 +982,14 @@
   {{/* ---- ON-SCREEN VISITOR QR ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
     <div class="editbar" style="text-align:left">
-      <span class="eyebrow">{{template "ic-key"}} Visitor QR</span>
+      <span class="eyebrow">{{template "ic-qr"}} Visitor QR</span>
       <a href="/guests"><button type="button" class="ghost sm">&larr; Done</button></a>
     </div>
     <h2 style="justify-content:center">{{.QR.PermitLabel}}</h2>
     <p class="subtitle" style="text-align:center;max-width:340px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
-    <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="240" height="240" style="width:240px;height:240px;image-rendering:pixelated;border:8px solid #fff;border-radius:12px;background:#fff">
+    <div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
+      <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
+    </div>
     <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.ExpiresAt}}</strong>. Generate a fresh one each time.</p>
     <p class="empty-note" style="word-break:break-all">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
   </section>
@@ -1029,13 +1065,13 @@
 
   {{if .PermitOpts}}
   <section class="card" style="--hue:var(--sec-schedule)">
-    <h2><span class="ic">{{template "ic-key"}}</span> Visitor at the door?</h2>
-    <p class="subtitle">Show a one-time QR code a visitor (a tradie, a friend's car) can scan to put <em>their own plate</em> on the permit for the day. No saved car needed; it expires in a few hours.</p>
+    <h2><span class="ic">{{template "ic-qr"}}</span> Visitor at the door?</h2>
+    <p class="subtitle">Show a one-time QR code a visitor (a tradie, a friend's car) can scan to put <em>their own plate</em> on the permit for the day. No saved car needed; the code expires 15 minutes after you show it.</p>
     <form method="post" action="/guests/qr" class="row" style="gap:10px;flex-wrap:wrap">
       {{if gt (len .PermitOpts) 1}}
       <select name="permit_id" style="flex:1;min-width:180px">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
       {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
-      <button type="submit">{{template "ic-key"}} Show a visitor QR</button>
+      <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
     </form>
   </section>
   {{end}}
@@ -1217,8 +1253,8 @@
   {{range .Cal}}
   <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}" @click="open=!open">
     <div class="cd">{{.DayLabel}}</div>
+    <div class="omk">{{if .HasOneoff}}<span class="oneoff" title="one-off booking"></span>{{end}}</div>
     <div class="bar" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
-    {{if .HasOneoff}}<span class="oneoff" title="one-off booking"></span>{{end}}
     <div class="pop" x-show="open" x-cloak @click.outside="open=false">
       <p class="tt">{{.DayLabel}}</p>
       {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
@@ -1329,6 +1365,8 @@
 {{define "ic-activity"}}<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg>{{end}}
 {{define "ic-gear"}}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>{{end}}
 {{define "ic-key"}}<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5"/><path d="M11.2 11.2L20 20M17 17l2-2M14 14l2-2"/></svg>{{end}}
+{{define "ic-users"}}<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg>{{end}}
+{{define "ic-qr"}}<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg>{{end}}
 {{define "ic-edit"}}<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>{{end}}
 {{define "ic-moon"}}<svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg>{{end}}
 {{define "ic-sun"}}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>{{end}}

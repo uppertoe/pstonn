@@ -47,3 +47,19 @@ func TestDayEndAndUntilPhrase(t *testing.T) {
 		t.Fatalf("untilPhrase(overnight) = %q, want it to mention tomorrow/Saturday", got)
 	}
 }
+
+func TestValidRego(t *testing.T) {
+	// validRego runs on already-normalised input (upper, no spaces).
+	good := []string{"ABC123", "1QW4RT", "AB", "GOAT", "ABC1234", "12345678"}
+	for _, r := range good {
+		if !validRego(r) {
+			t.Errorf("validRego(%q) = false, want true", r)
+		}
+	}
+	bad := []string{"", "A", "ABC-123", "AB 12", "TOOLONGGG", "abc123", "AB.12"}
+	for _, r := range bad {
+		if validRego(r) {
+			t.Errorf("validRego(%q) = true, want false", r)
+		}
+	}
+}

@@ -19,12 +19,15 @@ import (
 	"rsc.io/qr"
 )
 
-// qrTTL is how long a visitor QR stays valid after the resident shows it.
-const qrTTL = 3 * time.Hour
+// qrTTL is how long a visitor QR stays valid after the resident shows it. Kept
+// short: it's an in-person, show-it-now flow, so a tight window limits exposure.
+const qrTTL = 15 * time.Minute
 
 // qrDataURI renders text as a QR code PNG in a data: URI (CSP allows img data:).
+// Level Q (~25% error correction) is a robust choice for a code scanned off a
+// screen at an angle or with glare, without making it much denser for a short URL.
 func qrDataURI(text string) (string, error) {
-	c, err := qr.Encode(text, qr.M)
+	c, err := qr.Encode(text, qr.Q)
 	if err != nil {
 		return "", err
 	}
@@ -196,8 +199,8 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// created now, so it wins the resolution tie-break for its window.
 	var reg, name, createdBy string
 	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
-		if len(plate) < 2 || len(plate) > 10 {
-			s.renderGuestResult(w, permit.Owner, false, "Enter a valid number plate (2 to 10 characters).")
+		if !validRego(plate) {
+			s.renderGuestResult(w, permit.Owner, false, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 			return
 		}
 		reg = plate

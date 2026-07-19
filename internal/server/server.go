@@ -1024,11 +1024,15 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	reg := normalizeReg(r.FormValue("registration"))
 	label := strings.TrimSpace(r.FormValue("label"))
-	if reg == "" {
-		s.message(w, http.StatusBadRequest, "Registration is required.")
+	if !validRego(reg) {
+		s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 		return
 	}
 	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label); err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			s.message(w, http.StatusConflict, "You already have a vehicle with that plate.")
+			return
+		}
 		s.serverError(w, err)
 		return
 	}
@@ -1370,8 +1374,8 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	vehicleID := atoi64(r.FormValue("vehicle_id"))
 	switch {
 	case plate != "":
-		if len(plate) < 2 || len(plate) > 10 {
-			s.message(w, http.StatusBadRequest, "Enter a valid number plate (2 to 10 characters).")
+		if !validRego(plate) {
+			s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 			return
 		}
 		if _, err := s.store.CreatePlateOverride(r.Context(), p.ID, plate, startsAt, endsAt, user); err != nil {
@@ -1484,6 +1488,23 @@ func redirectHome(w http.ResponseWriter, r *http.Request) {
 
 func normalizeReg(s string) string {
 	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
+}
+
+// validRego reports whether s (already normalised: upper-case, no spaces) is a
+// plausible number plate: 2–8 alphanumeric characters. It is a sanity gate to
+// catch typos and junk, not a strict format check — Australian plates vary by
+// state and custom plates differ, so we stay lenient; the council makes the
+// authoritative check when the plate is actually set.
+func validRego(s string) bool {
+	if len(s) < 2 || len(s) > 8 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func pathInt(r *http.Request, name string) int64 { return atoi64(r.PathValue(name)) }

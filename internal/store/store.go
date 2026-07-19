@@ -19,6 +19,9 @@ import (
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("not found")
 
+// ErrDuplicate is returned when an insert violates a uniqueness constraint.
+var ErrDuplicate = errors.New("already exists")
+
 // Store wraps the database handle.
 type Store struct {
 	db *sql.DB
@@ -404,6 +407,9 @@ func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label st
 		`INSERT INTO vehicle (owner, registration, label, created_at) VALUES (?, ?, ?, ?)`,
 		owner, registration, label, nowUTC())
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			return 0, ErrDuplicate
+		}
 		return 0, err
 	}
 	return res.LastInsertId()
