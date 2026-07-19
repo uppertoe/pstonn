@@ -68,6 +68,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /council/link", s.withConsent(s.councilLink))
 	mux.HandleFunc("POST /council/unlink", s.withUser(s.councilUnlink)) // allow leaving without re-consent
 	mux.HandleFunc("POST /account/delete", s.withUser(s.accountDelete)) // allow leaving without re-consent
+	mux.HandleFunc("POST /account/members", s.withConsent(s.addMember))
+	mux.HandleFunc("POST /account/members/remove", s.withConsent(s.removeMember))
+	mux.HandleFunc("POST /account/leave", s.withUser(s.leaveAccount)) // secondary can always leave
 	mux.HandleFunc("POST /notifications", s.withConsent(s.saveNotify))
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
 	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))
@@ -277,6 +280,22 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 	return identity.User{}, false
 }
 
+// resolveAccount resolves which account the signed-in user acts within.
+//   - user is the raw signed-in email (used for per-user consent and for audit).
+//   - owner is the email that scopes all shared account data: the user's own
+//     when they run their own account, or the primary they are a secondary of.
+//   - isPrimary is false when the user is a secondary (a guest on someone's
+//     account), which gates the owner-only actions (council link/unlink, account
+//     delete, managing members).
+func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrimary bool) {
+	u, _ := identity.FromContext(ctx)
+	user = u.Email
+	if primary, ok, err := s.store.MemberAccount(ctx, user); err == nil && ok && primary != "" {
+		return user, primary, false
+	}
+	return user, user, true
+}
+
 func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.user(w, r); !ok {
@@ -338,26 +357,41 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 	redirectHome(w, r)
 }
 
-// declineTerms handles a user declining updated terms: it disconnects their
-// council account (so the app stops acting on their behalf without consent) and
-// notifies them that it happened.
+// declineTerms handles a user declining updated terms. A primary has their
+// council account disconnected (so the app stops acting without consent) and is
+// notified. A secondary simply leaves the shared account (they never held the
+// council connection), leaving the primary's account untouched.
 func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
+	user, _, isPrimary := s.resolveAccount(r.Context())
 	ctx := r.Context()
-	_, err := s.store.GetCouncilSession(ctx, u.Email)
+
+	if !isPrimary {
+		if err := s.store.RemoveMembership(ctx, user); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		log.Printf("secondary %s declined updated terms, left the shared account", user)
+		msg := "You declined the updated terms, so your shared access has been removed. The account owner's data is unaffected."
+		if s.logoutURL() != "" {
+			msg += ` <a href="` + s.logoutURL() + `">Sign out</a>.`
+		}
+		s.message(w, http.StatusOK, msg)
+		return
+	}
+
+	_, err := s.store.GetCouncilSession(ctx, user)
 	wasLinked := err == nil
-	if derr := s.store.DeleteCouncilSession(ctx, u.Email); derr != nil {
+	if derr := s.store.DeleteCouncilSession(ctx, user); derr != nil {
 		s.serverError(w, derr)
 		return
 	}
 	if wasLinked {
-		log.Printf("user %s declined updated terms, council account disconnected", u.Email)
-		owner := u.Email
+		log.Printf("user %s declined updated terms, council account disconnected", user)
 		go func() {
 			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if e := s.notify.NotifyDisconnected(nctx, owner); e != nil {
-				log.Printf("notify disconnect %s: %v", owner, e)
+			if e := s.notify.NotifyDisconnected(nctx, user); e != nil {
+				log.Printf("notify disconnect %s: %v", user, e)
 			}
 		}()
 	}
@@ -415,6 +449,11 @@ type dashboardData struct {
 	Flash       string // success (green)
 	Warn        string // problem / caution (amber)
 	Loc         *time.Location
+	// shared access
+	Owner      string       // effective account owner (email) that scopes the data
+	IsPrimary  bool         // whether the signed-in user owns this account
+	SharedWith string       // for a secondary: the primary account's email
+	Members    []memberView // for a primary: the secondaries with access
 	// dashboard state
 	Vehicles []vehicleView
 	Permits  []permitView
@@ -452,6 +491,11 @@ type vehicleView struct {
 	Label        string
 	Registration string
 	Color        string
+}
+
+type memberView struct {
+	Email string
+	Added string // human date the access was granted
 }
 
 type permitView struct {
@@ -538,24 +582,31 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		return dashboardData{}, false
 	}
 	ctx := r.Context()
-	base := dashboardData{User: u, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation, Page: page}
+	user, owner, isPrimary := s.resolveAccount(ctx)
+	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation, Page: page}
+	if !isPrimary {
+		base.SharedWith = owner
+	}
 	if r.URL.Query().Get("linked") == "1" {
 		base.Flash = "Council account linked."
 	}
-	// Terms gate: before anything else (and before we ever store their council
-	// login), the user must accept the current terms, and re-accept if changed.
-	if ok, updated := s.consentStatus(ctx, u.Email); !ok {
+	// Terms gate: before anything else (and before we ever store a council login),
+	// each user must accept the current terms individually, and re-accept if they
+	// change. Consent is per person (the raw signed-in email), not per account.
+	if ok, updated := s.consentStatus(ctx, user); !ok {
 		base.State = "terms"
 		base.Terms = termsView{Version: s.terms.Version, Intro: s.terms.Intro, Clauses: s.terms.Clauses, Updated: updated, OIDC: s.auth != nil}
 		s.render(w, base)
 		return dashboardData{}, false
 	}
-	if !s.council.Linked(ctx, u.Email) {
+	if !s.council.Linked(ctx, owner) {
+		// The council account belongs to the primary; a secondary can only wait
+		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
 		s.render(w, base)
 		return dashboardData{}, false
 	}
-	managed, err := s.store.ListPermitsFor(ctx, u.Email)
+	managed, err := s.store.ListPermitsFor(ctx, owner)
 	if err != nil {
 		s.serverError(w, err)
 		return dashboardData{}, false
@@ -576,7 +627,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	owner := base.User.Email
+	owner := base.Owner
 	now := time.Now().In(s.cfg.DisplayLocation)
 	vehicles, err := s.store.ListVehiclesFor(ctx, owner)
 	if err != nil {
@@ -609,7 +660,7 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	vehicles, err := s.store.ListVehiclesFor(r.Context(), base.User.Email)
+	vehicles, err := s.store.ListVehiclesFor(r.Context(), base.Owner)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -624,7 +675,7 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	logs, err := s.store.ListApplyLogFor(r.Context(), base.User.Email, 100)
+	logs, err := s.store.ListApplyLogFor(r.Context(), base.Owner, 100)
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -641,7 +692,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	owner := base.User.Email
+	owner := base.Owner
 	if cs, err := s.store.GetCouncilSession(ctx, owner); err == nil && !cs.LinkedAt.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
 		base.RelinkBy = cs.LinkedAt.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
 	}
@@ -653,8 +704,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	// Ensure the user always has an ntfy topic to subscribe to, even before enabling it.
+	// Ensure the account always has an ntfy topic to subscribe to, even before enabling it.
 	if pref.NtfyTopic == "" {
+		pref.Owner = owner
 		pref.NtfyTopic = notify.RandomTopic()
 		_ = s.store.SetNotifyPref(ctx, pref)
 	}
@@ -663,10 +715,19 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
 		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner,
 	}
-	if c, err := s.store.LatestConsent(ctx, owner); err == nil {
+	// Terms acceptance is per person; show the signed-in user's own consent.
+	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
 		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"))
 	}
 	base.Terms.Clauses = s.terms.Clauses
+	// Shared access: the owner sees who has access; a secondary sees whose account.
+	if base.IsPrimary {
+		if ms, err := s.store.ListMembers(ctx, owner); err == nil {
+			for _, m := range ms {
+				base.Members = append(base.Members, memberView{Email: m.Email, Added: m.AddedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006")})
+			}
+		}
+	}
 	s.render(w, base)
 }
 
@@ -692,18 +753,18 @@ func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, owner stri
 // saveNotify auto-saves the user's channel choices on every toggle, requiring at
 // least one channel to stay on (else it reverts and warns).
 func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	pref, err := s.store.GetNotifyPref(r.Context(), u.Email)
+	_, owner, _ := s.resolveAccount(r.Context())
+	pref, err := s.store.GetNotifyPref(r.Context(), owner)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	pref.Owner = u.Email
+	pref.Owner = owner
 	email := r.FormValue("email_enabled") != ""
 	ntfy := r.FormValue("ntfy_enabled") != ""
 	if (s.notify.EmailAvailable() || s.notify.NtfyAvailable()) && !email && !ntfy {
 		// Revert: render the still-saved pref (re-checks the box) with a warning.
-		s.renderNotify(w, r, u.Email, pref, "", "Keep at least one method on.")
+		s.renderNotify(w, r, owner, pref, "", "Keep at least one method on.")
 		return
 	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
@@ -711,30 +772,30 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.renderNotify(w, r, u.Email, pref, "Saved", "")
+	s.renderNotify(w, r, owner, pref, "Saved", "")
 }
 
-// regenTopic gives the user a fresh ntfy topic (live), enabling ntfy.
+// regenTopic gives the account a fresh ntfy topic (live), enabling ntfy.
 func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	pref, err := s.store.GetNotifyPref(r.Context(), u.Email)
+	_, owner, _ := s.resolveAccount(r.Context())
+	pref, err := s.store.GetNotifyPref(r.Context(), owner)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	pref.Owner, pref.NtfyTopic, pref.NtfyEnabled = u.Email, notify.RandomTopic(), true
+	pref.Owner, pref.NtfyTopic, pref.NtfyEnabled = owner, notify.RandomTopic(), true
 	if err := s.store.SetNotifyPref(r.Context(), pref); err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.renderNotify(w, r, u.Email, pref, "New topic. Re-subscribe in the ntfy app.", "")
+	s.renderNotify(w, r, owner, pref, "New topic. Re-subscribe in the ntfy app.", "")
 }
 
 // testNotify sends a test message on every enabled channel.
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	if err := s.notify.SendTest(r.Context(), u.Email); err != nil {
-		log.Printf("test notify %s: %v", u.Email, err)
+	_, owner, _ := s.resolveAccount(r.Context())
+	if err := s.notify.SendTest(r.Context(), owner); err != nil {
+		log.Printf("test notify %s: %v", owner, err)
 		s.message(w, http.StatusBadGateway, "Couldn't send the test notification: "+err.Error())
 		return
 	}
@@ -830,8 +891,12 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	base := dashboardData{User: u, OIDCEnabled: s.auth != nil, Loc: s.cfg.DisplayLocation}
-	if !s.council.Linked(r.Context(), u.Email) {
+	_, owner, isPrimary := s.resolveAccount(r.Context())
+	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, Loc: s.cfg.DisplayLocation}
+	if !isPrimary {
+		base.SharedWith = owner
+	}
+	if !s.council.Linked(r.Context(), owner) {
 		base.State = "onboarding"
 		s.render(w, base)
 		return
@@ -843,7 +908,7 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 // for them to nominate. A dead session cookie routes back to onboarding.
 func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashboardData) {
 	ctx := r.Context()
-	owner := base.User.Email
+	owner := base.Owner
 	permits, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		base.State = "onboarding"
@@ -884,14 +949,14 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 // ---- mutations ----
 
 func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
+	_, owner, _ := s.resolveAccount(r.Context())
 	reg := normalizeReg(r.FormValue("registration"))
 	label := strings.TrimSpace(r.FormValue("label"))
 	if reg == "" {
 		s.message(w, http.StatusBadRequest, "Registration is required.")
 		return
 	}
-	if _, err := s.store.CreateVehicle(r.Context(), u.Email, reg, label); err != nil {
+	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -899,8 +964,8 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	if err := s.store.DeleteVehicle(r.Context(), u.Email, pathInt(r, "id")); err != nil {
+	_, owner, _ := s.resolveAccount(r.Context())
+	if err := s.store.DeleteVehicle(r.Context(), owner, pathInt(r, "id")); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -908,7 +973,7 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
+	_, owner, _ := s.resolveAccount(r.Context())
 	ctx := r.Context()
 	cpid := strings.TrimSpace(r.FormValue("council_permit_id"))
 	if cpid == "" {
@@ -916,18 +981,18 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authorize the permit against the caller's OWN council account. The council
-	// username is pinned to their verified email, so ListPermits only returns
-	// permits they actually hold; a forged council_permit_id (not from the picker)
-	// is rejected here. We also take the permit type and current plate from the
-	// authoritative council record, never from the form.
-	permits, err := s.council.ListPermits(ctx, u.Email)
+	// Authorize the permit against the account's council record. The council
+	// username is pinned to the primary's verified email, so ListPermits only
+	// returns permits the account actually holds; a forged council_permit_id (not
+	// from the picker) is rejected here. We take the permit type and current plate
+	// from the authoritative council record, never from the form.
+	permits, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) || errors.Is(err, parking.ErrNotLinked) {
 			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
 			return
 		}
-		log.Printf("addPermit list council permits for %s: %v", u.Email, err)
+		log.Printf("addPermit list council permits for %s: %v", owner, err)
 		s.message(w, http.StatusBadGateway, "Couldn't reach the council to confirm the permit. Try again shortly.")
 		return
 	}
@@ -943,14 +1008,14 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Never take over a permit another app user already manages (e.g. a shared
-	// household permit both accounts can see).
-	if existing, err := s.store.PermitByCouncilID(ctx, cpid); err == nil && existing.Owner != u.Email {
+	// Never take over a permit another account already manages (e.g. a shared
+	// household permit both council accounts can see).
+	if existing, err := s.store.PermitByCouncilID(ctx, cpid); err == nil && existing.Owner != owner {
 		s.message(w, http.StatusConflict, "That permit is already being managed by another account.")
 		return
 	}
 
-	pid, err := s.store.UpsertPermit(ctx, u.Email, cpid, match.PermitTypeID,
+	pid, err := s.store.UpsertPermit(ctx, owner, cpid, match.PermitTypeID,
 		strings.TrimSpace(r.FormValue("label")))
 	if err != nil {
 		s.serverError(w, err)
@@ -968,44 +1033,129 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 // their council credentials, exchanges them for a session cookie, and discards
 // the password. The credentials are never stored.
 func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	// The council username is FIXED to the user's verified email (from the
+	user, _, isPrimary := s.resolveAccount(r.Context())
+	// Only the account owner links the council account; a secondary uses the
+	// primary's connection and cannot change it.
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can connect the council account.")
+		return
+	}
+	// The council username is FIXED to the owner's verified email (from the
 	// forward-auth layer), so a user can only ever link the Stonnington account
-	// that matches their own verified email, they supply just the password.
-	username := u.Email
+	// that matches their own verified email; they supply just the password.
 	password := r.FormValue("council_password")
 	if password == "" {
 		s.message(w, http.StatusBadRequest, "Enter your council password.")
 		return
 	}
-	if err := s.council.Link(r.Context(), u.Email, username, password); err != nil {
-		log.Printf("council link for %s: %v", u.Email, err)
+	if err := s.council.Link(r.Context(), user, user, password); err != nil {
+		log.Printf("council link for %s: %v", user, err)
 		s.message(w, http.StatusBadGateway, "Couldn't link your council account. Check that your password is correct and that your council account uses this email address.")
 		return
 	}
 	redirectHome(w, r)
 }
 
-// councilUnlink removes the user's stored council session but keeps their
-// permits, vehicles and schedule, so a later re-link resumes where they left off.
+// councilUnlink removes the account's stored council session but keeps its
+// permits, vehicles and schedule, so a later re-link resumes where it left off.
+// Owner-only: a secondary cannot disconnect the shared connection.
 func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	if err := s.store.DeleteCouncilSession(r.Context(), u.Email); err != nil {
+	user, _, isPrimary := s.resolveAccount(r.Context())
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can disconnect the council account.")
+		return
+	}
+	if err := s.store.DeleteCouncilSession(r.Context(), user); err != nil {
 		s.serverError(w, err)
 		return
 	}
 	redirectHome(w, r)
 }
 
-// accountDelete erases all of the user's data (session, permits, vehicles,
-// schedule, apply log). Guarded by a typed confirmation from the form.
+// accountDelete erases all of the owner's data (session, permits, vehicles,
+// schedule, apply log, and any shared access). Owner-only and guarded by a typed
+// confirmation. A secondary leaves via /account/leave instead.
 func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
+	user, _, isPrimary := s.resolveAccount(r.Context())
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "You have shared access to this account, so you cannot delete it. Use 'Leave this account' instead.")
+		return
+	}
 	if strings.TrimSpace(r.FormValue("confirm")) != "DELETE" {
 		s.message(w, http.StatusBadRequest, "Type DELETE to confirm removing all your data.")
 		return
 	}
-	if err := s.store.DeleteAllForOwner(r.Context(), u.Email); err != nil {
+	if err := s.store.DeleteAllForOwner(r.Context(), user); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	redirectHome(w, r)
+}
+
+// addMember (owner only) grants another verified email shared access to the
+// account, up to two people. Access takes effect when that person signs in with
+// the same email (via the one-time code), so there is no new secret to share.
+func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
+	user, owner, isPrimary := s.resolveAccount(r.Context())
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can share access.")
+		return
+	}
+	ctx := r.Context()
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if email == "" || !looksLikeEmail(email) {
+		s.message(w, http.StatusBadRequest, "Enter a valid email address.")
+		return
+	}
+	if email == user {
+		s.message(w, http.StatusBadRequest, "That is your own email.")
+		return
+	}
+	if isP, _ := s.store.IsPrimary(ctx, email); isP {
+		s.message(w, http.StatusConflict, "That person already shares their own account with others, so they cannot join yours.")
+		return
+	}
+	n, err := s.store.CountMembers(ctx, owner)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if n >= 2 {
+		s.message(w, http.StatusConflict, "You can share access with at most two people. Remove one first.")
+		return
+	}
+	if err := s.store.AddMember(ctx, owner, email); err != nil {
+		log.Printf("add member %s to %s: %v", email, owner, err)
+		s.message(w, http.StatusConflict, "That email already has access to an account.")
+		return
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// removeMember (owner only) revokes a secondary's shared access.
+func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
+	_, owner, isPrimary := s.resolveAccount(r.Context())
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can change shared access.")
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if err := s.store.RemoveMember(r.Context(), owner, email); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// leaveAccount lets a secondary give up their shared access, returning them to
+// their own (separate) account. A primary has nothing to leave.
+func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
+	user, _, isPrimary := s.resolveAccount(r.Context())
+	if isPrimary {
+		s.message(w, http.StatusBadRequest, "You own this account, so there is nothing to leave.")
+		return
+	}
+	if err := s.store.RemoveMembership(r.Context(), user); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -1035,8 +1185,8 @@ func (s *Server) councilConfirm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	p, ok := s.ownedPermit(w, r, u.Email)
+	_, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
 	}
@@ -1046,7 +1196,7 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	if vehicleID == 0 {
 		err = s.store.ClearRule(r.Context(), p.ID, weekday)
 	} else {
-		if !s.ownsVehicle(w, r, u.Email, vehicleID) {
+		if !s.ownsVehicle(w, r, owner, vehicleID) {
 			return
 		}
 		err = s.store.SetRule(r.Context(), p.ID, weekday, vehicleID)
@@ -1056,12 +1206,12 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sched.Kick()
-	s.respondPermit(w, r, u.Email, p)
+	s.respondPermit(w, r, owner, p)
 }
 
 func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	p, ok := s.ownedPermit(w, r, u.Email)
+	user, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
 	}
@@ -1070,7 +1220,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusBadRequest, "Choose a vehicle.")
 		return
 	}
-	if !s.ownsVehicle(w, r, u.Email, vehicleID) {
+	if !s.ownsVehicle(w, r, owner, vehicleID) {
 		return
 	}
 	startsAt := time.Now()
@@ -1095,26 +1245,28 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusBadRequest, "The end time must be after the start time.")
 		return
 	}
-	if _, err := s.store.CreateOverride(r.Context(), p.ID, vehicleID, startsAt, endsAt, u.Email); err != nil {
+	// CreatedBy records the actual person who made the booking (audit), even
+	// though the override belongs to the shared account's permit.
+	if _, err := s.store.CreateOverride(r.Context(), p.ID, vehicleID, startsAt, endsAt, user); err != nil {
 		s.serverError(w, err)
 		return
 	}
 	s.sched.Kick()
-	s.respondPermit(w, r, u.Email, p)
+	s.respondPermit(w, r, owner, p)
 }
 
 func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
-	u, _ := identity.FromContext(r.Context())
-	p, ok := s.ownedPermit(w, r, u.Email)
+	_, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
 	}
-	if err := s.store.DeleteOverride(r.Context(), u.Email, pathInt(r, "oid")); err != nil {
+	if err := s.store.DeleteOverride(r.Context(), owner, pathInt(r, "oid")); err != nil {
 		s.serverError(w, err)
 		return
 	}
 	s.sched.Kick()
-	s.respondPermit(w, r, u.Email, p)
+	s.respondPermit(w, r, owner, p)
 }
 
 // ownedPermit loads the permit named by the {id} path value and confirms it

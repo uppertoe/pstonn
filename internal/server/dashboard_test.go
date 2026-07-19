@@ -64,8 +64,9 @@ func TestTemplatesRender(t *testing.T) {
 		{"contact-sent", dashboardData{State: "contact", Contact: true, Flash: "Thanks. Your message has been sent.", Loc: loc}, "has been sent"},
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
-		{"onboarding", dashboardData{User: user, State: "onboarding", Loc: loc}, "Link your council account"},
-		{"relink", dashboardData{User: user, State: "onboarding", Relink: true, Loc: loc}, "Re-link your council account"},
+		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
+		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Re-link your council account"},
+		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
 		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Suggested: true},
 		}}, "VPP24714"},
@@ -79,7 +80,11 @@ func TestTemplatesRender(t *testing.T) {
 		{"activity", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: time.Now()}},
 		}, "Activity"},
-		{"settings", dashboardData{User: user, State: "app", Page: "settings", Loc: loc, RelinkBy: "15 Oct 2026"}, "Council connection"},
+		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, RelinkBy: "15 Oct 2026"}, "Council connection"},
+		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc}, "Add person"},
+		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}}, "nanny@example.com"},
+		{"settings-secondary", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Leave this account"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

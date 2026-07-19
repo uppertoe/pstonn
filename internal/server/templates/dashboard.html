@@ -30,6 +30,9 @@
   @font-face {
     font-family:'Space Grotesk'; font-style:normal; font-weight:600; font-display:swap;
     src:url('/static/spacegrotesk-wordmark.woff2') format('woff2');
+    /* Subset covers only the wordmark glyphs (p . s t o n); scope the font to them
+       so it is never partially applied to arbitrary headings. */
+    unicode-range:U+002E, U+006E, U+006F, U+0070, U+0073, U+0074;
   }
   :root {
     color-scheme: light dark;
@@ -290,7 +293,7 @@
   .appbar-r .cta-btn { text-decoration:none; }
   .landing { max-width:840px; }
   .lhero { text-align:center; padding:44px 10px 8px; }
-  .lhero h1 { font-family:'Space Grotesk',system-ui,sans-serif; font-size:clamp(28px,5vw,42px); line-height:1.08; letter-spacing:-.03em; margin:0 auto 18px; max-width:680px; }
+  .lhero h1 { font-size:clamp(28px,5vw,42px); line-height:1.08; letter-spacing:-.03em; margin:0 auto 18px; max-width:680px; font-weight:750; }
   .lhero p.lead { color:var(--muted); font-size:17px; max-width:600px; margin:0 auto 26px; line-height:1.55; }
   .cta { font-size:16px; padding:14px 24px; border-radius:14px; }
   .lnote { font-size:13px; color:var(--muted); margin-top:15px; }
@@ -304,7 +307,7 @@
   .brand-link { color:inherit; }
   /* about */
   .about { max-width:680px; }
-  .about-h1 { font-family:'Space Grotesk',system-ui,sans-serif; font-size:30px; letter-spacing:-.02em; margin:30px 0 6px; }
+  .about-h1 { font-size:30px; letter-spacing:-.02em; margin:30px 0 6px; font-weight:750; }
   .about-h2 { font-size:16px; letter-spacing:-.01em; margin:28px 0 8px; }
   .about p, .about li { color:var(--ink); font-size:15px; line-height:1.6; }
   .about ul { margin:0; padding-left:20px; display:grid; gap:9px; }
@@ -550,6 +553,7 @@
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
+    {{if .IsPrimary}}
     <h2>{{if .Relink}}Re-link your council account{{else}}Link your council account{{end}}</h2>
     <p>
       {{if .Relink}}Your council sign-in expired. Enter your details again to reconnect. We keep an encrypted session, never your password.
@@ -566,6 +570,11 @@
     </form>
     <p class="empty-note" style="margin-top:12px">Your council account must use <strong>{{.User.Email}}</strong>, the email you signed in with.</p>
     <p class="empty-note" style="margin-top:6px">Tip: use a password unique to your council account. You can disconnect any time in Settings, and changing your council password also revokes access. <a href="/about">How it works &amp; security</a></p>
+    {{else}}
+    <h2>Waiting for the account owner</h2>
+    <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>
+    <p class="empty-note" style="margin-top:12px">Not what you expected? You can leave this shared account in <a href="/settings">Settings</a>.</p>
+    {{end}}
   </section>
 </main>
 
@@ -694,6 +703,7 @@
   <p class="subtitle">Your council connection and account.</p>
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-link"}}</span> Council connection</h2>
+    {{if .IsPrimary}}
     {{if .RelinkBy}}
     <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. We'll email a one-click link to confirm you're still using it before <strong>{{.RelinkBy}}</strong>.</p>
     {{end}}
@@ -708,6 +718,46 @@
       </form>
     </div>
     <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything for good.</p>
+    {{else}}
+    <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
+    {{end}}
+  </section>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic">{{template "ic-user"}}</span> Shared access</h2>
+    {{if .IsPrimary}}
+    <p class="subtitle">Let up to two other people help manage this account. They sign in with their own email, so there is nothing to share but the access itself.</p>
+    {{if .Members}}
+    <ul style="list-style:none;padding:0;margin:14px 0 0;display:grid;gap:8px">
+      {{range .Members}}
+      <li class="row" style="justify-content:space-between">
+        <span>{{template "ic-user"}} <strong>{{.Email}}</strong> <span class="muted">added {{.Added}}</span></span>
+        <form method="post" action="/account/members/remove" onsubmit="return confirm('Remove {{.Email}}? They lose access to this account.')">
+          <input type="hidden" name="email" value="{{.Email}}">
+          <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="empty-note" style="margin-top:12px">No one else has access yet.</p>
+    {{end}}
+    {{if lt (len .Members) 2}}
+    <form method="post" action="/account/members" class="row" style="margin-top:14px;gap:8px">
+      <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
+      <button type="submit">{{template "ic-plus"}} Add person</button>
+    </form>
+    <p class="empty-note" style="margin-top:10px">They get access when they sign in with that email. They can manage the schedule and vehicles, but cannot disconnect the council account, delete the account, or change who has access.</p>
+    {{else}}
+    <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
+    {{end}}
+    {{else}}
+    <p class="subtitle">You have shared access to <strong>{{.SharedWith}}</strong>'s account.</p>
+    <p class="empty-note">You can manage the schedule and vehicles. Only the owner can connect or disconnect the council account, or delete the account.</p>
+    <form method="post" action="/account/leave" onsubmit="return confirm('Leave this shared account? You go back to your own account.')" style="margin-top:14px">
+      <button type="submit" class="ghost">{{template "ic-x"}} Leave this account</button>
+    </form>
+    <p class="empty-note" style="margin-top:10px">Leave if you need to set up your own council login. The owner's account is not affected.</p>
+    {{end}}
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-bell"}}</span> Notifications</h2>

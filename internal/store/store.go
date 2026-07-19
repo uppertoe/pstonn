@@ -172,6 +172,17 @@ CREATE TABLE IF NOT EXISTS notify_pref (
     failures_only INTEGER NOT NULL DEFAULT 0  -- 1 = only notify on failures, not every change
 );
 
+-- Shared access: a primary account owner may grant up to two other verified
+-- emails access to their account. member_email is the secondary's verified
+-- email; owner is the primary account it belongs to. member_email is the primary
+-- key, so a person can be a secondary on at most one account at a time.
+CREATE TABLE IF NOT EXISTS account_member (
+    member_email TEXT PRIMARY KEY,
+    owner        TEXT NOT NULL,
+    added_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_member_owner ON account_member(owner);
+
 CREATE TABLE IF NOT EXISTS oauth_state (
     state      TEXT PRIMARY KEY,
     verifier   TEXT NOT NULL,
@@ -654,7 +665,93 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM consent WHERE owner = ?`, owner); err != nil {
 		return err
 	}
+	// Remove this account's secondary members, and any membership this user held.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE owner = ? OR member_email = ?`, owner, owner); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// ---- Account members (shared access) ----
+
+// AccountMember is a secondary email with access to a primary's account.
+type AccountMember struct {
+	Email   string
+	AddedAt time.Time
+}
+
+// MemberAccount returns the primary account owner that memberEmail is a secondary
+// of, or ok=false when they are their own account.
+func (s *Store) MemberAccount(ctx context.Context, memberEmail string) (owner string, ok bool, err error) {
+	err = s.db.QueryRowContext(ctx,
+		`SELECT owner FROM account_member WHERE member_email = ?`, memberEmail).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return owner, true, nil
+}
+
+// ListMembers returns the secondaries with access to owner's account, oldest first.
+func (s *Store) ListMembers(ctx context.Context, owner string) ([]AccountMember, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT member_email, added_at FROM account_member WHERE owner = ? ORDER BY added_at`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AccountMember
+	for rows.Next() {
+		var m AccountMember
+		var at string
+		if err := rows.Scan(&m.Email, &at); err != nil {
+			return nil, err
+		}
+		m.AddedAt, _ = time.Parse(time.RFC3339, at)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// CountMembers returns how many secondaries owner's account already has.
+func (s *Store) CountMembers(ctx context.Context, owner string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM account_member WHERE owner = ?`, owner).Scan(&n)
+	return n, err
+}
+
+// AddMember grants memberEmail access to owner's account. It fails if memberEmail
+// already has access somewhere (member_email is unique); callers enforce the
+// per-account cap and the not-self / not-a-primary checks.
+func (s *Store) AddMember(ctx context.Context, owner, memberEmail string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO account_member (member_email, owner, added_at) VALUES (?, ?, ?)`,
+		memberEmail, owner, nowUTC())
+	return err
+}
+
+// RemoveMember revokes a secondary's access, scoped to the owner so one account
+// cannot remove another's member.
+func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner)
+	return err
+}
+
+// RemoveMembership lets a secondary leave whatever account they belong to.
+func (s *Store) RemoveMembership(ctx context.Context, memberEmail string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM account_member WHERE member_email = ?`, memberEmail)
+	return err
+}
+
+// IsPrimary reports whether owner is a primary of any shared account (has at
+// least one secondary). Used to stop a primary being added as someone's
+// secondary while people still depend on their account.
+func (s *Store) IsPrimary(ctx context.Context, owner string) (bool, error) {
+	n, err := s.CountMembers(ctx, owner)
+	return n > 0, err
 }
 
 // ---- Apply log ----

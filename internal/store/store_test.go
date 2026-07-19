@@ -133,6 +133,77 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	}
 }
 
+// TestAccountMembers covers shared access: resolution, the one-membership rule,
+// listing/counting, primary detection, and removal (by owner and by self).
+func TestAccountMembers(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const primary, nanny, gran = "mum@example.com", "nanny@example.com", "gran@example.com"
+
+	// No membership yet: everyone is their own account.
+	if _, ok, _ := s.MemberAccount(ctx, nanny); ok {
+		t.Fatal("nanny should not be a member of anyone yet")
+	}
+	if isP, _ := s.IsPrimary(ctx, primary); isP {
+		t.Fatal("primary should not be flagged before adding members")
+	}
+
+	// Add two secondaries.
+	if err := s.AddMember(ctx, primary, nanny); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMember(ctx, primary, gran); err != nil {
+		t.Fatal(err)
+	}
+	if owner, ok, _ := s.MemberAccount(ctx, nanny); !ok || owner != primary {
+		t.Fatalf("nanny should resolve to %s, got %q ok=%v", primary, owner, ok)
+	}
+	if n, _ := s.CountMembers(ctx, primary); n != 2 {
+		t.Fatalf("member count = %d, want 2", n)
+	}
+	if isP, _ := s.IsPrimary(ctx, primary); !isP {
+		t.Fatal("primary should be flagged once it has members")
+	}
+
+	// A person can belong to only one account (member_email is unique).
+	if err := s.AddMember(ctx, "other@example.com", nanny); err == nil {
+		t.Fatal("adding an existing member to another account should fail")
+	}
+
+	// Owner removes one; the removal is owner-scoped.
+	if err := s.RemoveMember(ctx, "someone-else@example.com", gran); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.CountMembers(ctx, primary); n != 2 {
+		t.Fatalf("wrong owner must not remove a member; count = %d, want 2", n)
+	}
+	if err := s.RemoveMember(ctx, primary, gran); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := s.CountMembers(ctx, primary); n != 1 {
+		t.Fatalf("member count after remove = %d, want 1", n)
+	}
+
+	// Secondary leaves of their own accord.
+	if err := s.RemoveMembership(ctx, nanny); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.MemberAccount(ctx, nanny); ok {
+		t.Fatal("nanny should be back to their own account after leaving")
+	}
+
+	// Deleting the primary account clears any remaining members.
+	if err := s.AddMember(ctx, primary, nanny); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteAllForOwner(ctx, primary); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.MemberAccount(ctx, nanny); ok {
+		t.Fatal("deleting the primary account should revoke shared access")
+	}
+}
+
 // TestSaveCouncilSessionStampsLinkedAt confirms an interactive save sets the
 // re-authorise clock, and that ListCouncilSessions surfaces it.
 func TestSaveCouncilSessionStampsLinkedAt(t *testing.T) {
