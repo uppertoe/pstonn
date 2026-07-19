@@ -48,8 +48,12 @@ func TestClientIPUsesRightmostXFF(t *testing.T) {
 }
 
 func TestLooksLikeEmail(t *testing.T) {
-	good := []string{"a@b.co", "user.name@example.com", "x+tag@sub.domain.io"}
-	bad := []string{"", "nope", "a@b", "@b.com", "a@", "two@@x.com", "a b@c.com", "trailing@dot."}
+	good := []string{"a@b.co", "user.name@example.com", "x+tag@sub.domain.io", "First.Last-99@mail.example.com"}
+	// Besides malformed addresses, reject the quote/paren/bracket/control chars that
+	// would let a stored address break out of an HTML attribute, JS string, or email
+	// header (see the vehicle "driver email" XSS and SMTP-header-injection hardening).
+	bad := []string{"", "nope", "a@b", "@b.com", "a@", "two@@x.com", "a b@c.com", "trailing@dot.",
+		"'+alert(1)+'@x.co", "a\"@x.co", "a<b@x.co", "a(b)@x.co", "a;b@x.co", "a\r\nb@x.co", "a`b@x.co"}
 	for _, s := range good {
 		if !looksLikeEmail(s) {
 			t.Errorf("looksLikeEmail(%q) = false, want true", s)

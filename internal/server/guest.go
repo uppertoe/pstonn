@@ -141,7 +141,12 @@ type guestLinkView struct {
 // ever persisted; the raw token lives in the emailed link.
 func newGuestToken() (raw, hash string) {
 	b := make([]byte, 32)
-	_, _ = crand.Read(b)
+	if _, err := crand.Read(b); err != nil {
+		// Fail closed: never mint a predictable (e.g. all-zero) token. A crypto/rand
+		// failure is catastrophic and effectively never happens; the panic is
+		// recovered by net/http into a 500, so no weak token is issued.
+		panic("guest token: crypto/rand failed: " + err.Error())
+	}
 	raw = base64.RawURLEncoding.EncodeToString(b)
 	return raw, hashGuestToken(raw)
 }
@@ -193,17 +198,24 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w)
 		return
 	}
-	// Best-effort current plate; never fail the page on a council hiccup.
-	current := permit.ActiveRegistration
-	if actual, err := s.council.CurrentVehicleCached(r.Context(), permit.Owner,
-		model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
-		current = actual
+	// A printed door QR is meant to be left out in public, so the page must not
+	// disclose the holder's email or the plate currently on the permit to anyone
+	// who scans it. For emailed links / on-screen QR (a known or present visitor)
+	// the current plate and "managed by" address are useful trust signals.
+	var ownerEmail, current string
+	if !gc.Grant.RequestOnly {
+		ownerEmail = permit.Owner
+		current = permit.ActiveRegistration // best-effort; never fail the page on a council hiccup
+		if actual, err := s.council.CurrentVehicleCached(r.Context(), permit.Owner,
+			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
+			current = actual
+		}
 	}
 	cars, _, _, _ := vehicleViews(gc.Vehicles)
 	s.render(w, dashboardData{
 		State: "guest", Loc: s.cfg.DisplayLocation,
 		Guest: guestActView{
-			Token: gc.rawToken, OwnerEmail: permit.Owner, PermitLabel: permitLabel(permit),
+			Token: gc.rawToken, OwnerEmail: ownerEmail, PermitLabel: permitLabel(permit),
 			CurrentReg: current, Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
 			AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
 		},
@@ -634,6 +646,7 @@ func (s *Server) emailLinks(owner, permitLabel string, links []guestLinkView) in
 // QR the resident shows on-screen. A visitor scans it, types their plate, and it
 // goes on the permit until the end of the day. The grant self-expires (qrTTL).
 func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
+	noStore(w) // the page embeds a live activation token; keep it out of caches
 	_, owner, _ := s.resolveAccount(r.Context())
 	permitID := atoi64(r.FormValue("permit_id"))
 	raw, hash := newGuestToken()
@@ -735,7 +748,9 @@ func parseEmails(s string) []string {
 
 func randNonce() string {
 	b := make([]byte, 16)
-	_, _ = crand.Read(b)
+	if _, err := crand.Read(b); err != nil {
+		panic("guest request nonce: crypto/rand failed: " + err.Error())
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -744,23 +759,25 @@ func randNonce() string {
 // polls until the holder decides. Nothing is put on the permit here — the
 // approval is the security boundary.
 func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCtx, permit model.Permit) {
+	// A printed door QR is public, so the visitor-facing pages here never show the
+	// holder's email (unlike the emailed/on-screen flows, where the recipient is known).
 	plate := normalizeReg(r.FormValue("plate"))
 	if !validRego(plate) {
 		s.render(w, dashboardData{State: "guest", Loc: s.cfg.DisplayLocation,
 			Warn: "Enter a valid number plate (letters and numbers, e.g. ABC123).",
-			Guest: guestActView{Token: gc.rawToken, OwnerEmail: permit.Owner,
+			Guest: guestActView{Token: gc.rawToken,
 				PermitLabel: permitLabel(permit), AllowPlate: true, RequestOnly: true}})
 		return
 	}
 	nonce := randNonce()
 	reqID, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, nonce)
 	if err != nil {
-		s.renderGuestResult(w, permit.Owner, false, "Something went wrong sending your request. Please try again.")
+		s.renderGuestResult(w, "", false, "Something went wrong sending your request. Please try again.")
 		return
 	}
 	s.notifyGuestRequest(permit, plate)
 	s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation,
-		Wait: &guestWaitView{OwnerEmail: permit.Owner, Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
+		Wait: &guestWaitView{Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
 }
 
 // guestRequestStatus is the visitor's poll endpoint: public and nonce-gated so a
@@ -829,6 +846,7 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 // viewDoorQR renders the durable, printable poster for an existing door QR. It never
 // rotates the token, so it can be reopened and reprinted as often as needed.
 func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
+	noStore(w) // the poster embeds the durable door-QR token; keep it out of caches
 	_, owner, _ := s.resolveAccount(r.Context())
 	g, err := s.store.PrintedGrantByID(r.Context(), owner, atoi64(r.PathValue("id")))
 	if err != nil {

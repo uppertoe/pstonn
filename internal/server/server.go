@@ -1037,7 +1037,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	reg := normalizeReg(r.FormValue("registration"))
-	label := strings.TrimSpace(r.FormValue("label"))
+	label := cleanLabel(r.FormValue("label"))
 	if !validRego(reg) {
 		s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 		return
@@ -1156,6 +1156,19 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 	redirectHome(w, r)
 }
 
+// cleanLabel trims a user-supplied name and strips control characters (including
+// CR/LF), so a label can't smuggle newlines into an email header (defence in depth
+// alongside the mailer's own sanitisation) or odd control bytes into the UI.
+func cleanLabel(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
+}
+
 // renamePermit gives a permit a friendly name the user chooses (e.g. "Nanny"),
 // shown everywhere it appears — schedule, guest passes, door QRs. It's purely a
 // display label; the council record is untouched.
@@ -1165,7 +1178,7 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	label := strings.TrimSpace(r.FormValue("label"))
+	label := cleanLabel(r.FormValue("label"))
 	if label == "" {
 		s.message(w, http.StatusBadRequest, "Give the permit a name.")
 		return

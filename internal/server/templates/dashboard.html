@@ -725,11 +725,11 @@
 <main class="guestwrap">
   <section class="guestcard">
     <div class="gbrand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    <p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>
+    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
     <h1>{{.Guest.PermitLabel}}</h1>
-    <p class="gnow">On the permit now: {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="muted">unknown</span>{{end}}</p>
+    {{if not .Guest.RequestOnly}}<p class="gnow">On the permit now: {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="muted">unknown</span>{{end}}</p>{{end}}
     {{if .Warn}}<div class="banner warn" style="margin-top:14px">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
-    {{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">Enter your plate to ask <strong>{{.Guest.OwnerEmail}}</strong> to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.</p>{{end}}
+    {{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">Enter your plate to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.</p>{{end}}
     <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px">
       {{if .Guest.Cars}}
       <p class="sub">Tap your car to put it on the permit</p>
@@ -765,7 +765,7 @@
 <main class="guestwrap">
   <section class="guestcard" style="text-align:center">
     <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    <p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>
+    {{if .Wait.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>{{end}}
     <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">{{.Wait.Plate}}</span> on the permit.</p>
     {{template "guest-req-status" .Wait}}
   </section>
@@ -1124,7 +1124,7 @@
         <div class="checks">
           {{range .Vehicles}}
           <label class="check">
-            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if index $.Edit.Selected .ID}} checked{{end}}{{if .Email}} @change="if($event.target.checked && recips.indexOf('{{.Email}}')<0){recips=(recips?recips+'\n':'')+'{{.Email}}'}"{{end}}>
+            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if index $.Edit.Selected .ID}} checked{{end}}{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
             <span class="dot" style="background:{{.Color}}"></span>
             <span>{{.Label}}</span>
             <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
@@ -1211,11 +1211,11 @@
         <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
       </form>
       <form method="post" action="/guests/printed" class="qropt">
-        <div class="qropt-txt"><strong>Print one for the door</strong><span class="empty-note">Leave it out. A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Leave it out (door, fridge, counter). A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
         {{if gt (len .PermitOpts) 1}}
         <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
-        <button type="submit" class="ghost">{{template "ic-qr"}} Print a door QR</button>
+        <button type="submit" class="ghost">{{template "ic-qr"}} Print a QR</button>
       </form>
     </div>
   </section>
@@ -1223,7 +1223,7 @@
 
   {{if .DoorGrants}}
   <section class="card" style="--hue:var(--sec-vehicles)">
-    <h2><span class="ic">{{template "ic-qr"}}</span> Your door QRs</h2>
+    <h2><span class="ic">{{template "ic-qr"}}</span> Your printed QRs</h2>
     <p class="subtitle">Durable codes to print, laminate, and leave up. Reopen any time to reprint the <em>same</em> one &mdash; the code keeps working. To change the code (say a sheet went missing), remove it and print a new one.</p>
     {{range .DoorGrants}}
     <div class="doorrow">
@@ -1282,7 +1282,7 @@
         <div class="checks">
           {{range .Vehicles}}
           <label class="check">
-            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if .Email}} @change="if($event.target.checked && recips.indexOf('{{.Email}}')<0){recips=(recips?recips+'\n':'')+'{{.Email}}'}"{{end}}>
+            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
             <span class="dot" style="background:{{.Color}}"></span>
             <span>{{.Label}}</span>
             <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
@@ -1331,7 +1331,7 @@
 {{/* =================== APP BAR (shared) =================== */}}
 {{define "appbar"}}
 <header class="appbar">
-  <div class="brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></div>
+  <a href="/schedule" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
   <div class="appbar-r">
     <button class="icon-btn" type="button" onclick="toggleTheme()" title="Toggle light / dark" aria-label="Toggle theme">
       <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>
