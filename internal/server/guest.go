@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +47,26 @@ type guestActView struct {
 	Cars           []vehicleView // the cars this link may activate
 	AllowOvernight bool          // whether the overnight checkbox is offered
 	AllowPlate     bool          // whether the visitor may type an arbitrary plate
+	RequestOnly    bool          // printed QR: entering a plate only requests approval
+}
+
+// guestWaitView drives the visitor's "waiting for approval" page (State
+// "guest-wait"), which polls the status endpoint.
+type guestWaitView struct {
+	OwnerEmail string
+	Plate      string
+	ReqID      int64
+	Nonce      string
+	Status     string // "pending" | "approved" | "denied"
+	Until      string // set when approved
+}
+
+// guestReqView is one pending request in the holder's approvals queue.
+type guestReqView struct {
+	ID          int64
+	Plate       string
+	PermitLabel string
+	Ago         string // "2 min ago"
 }
 
 // qrShowView drives the page the resident shows on-screen for a visitor to scan.
@@ -52,7 +74,8 @@ type qrShowView struct {
 	PermitLabel string
 	ImageURI    template.URL // the QR as a data: URI (trusted: server-generated)
 	URL         string       // the activation URL (also printed under the QR)
-	ExpiresAt   string       // human-readable expiry
+	ExpiresAt   string       // human-readable expiry ("" for a printed QR that doesn't expire)
+	Printed     bool         // a durable print-and-leave QR (request + approve), not the instant one
 }
 
 // guestGrantView + guestRecipientView drive the account holder's management page.
@@ -164,7 +187,7 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 		Guest: guestActView{
 			Token: gc.rawToken, OwnerEmail: permit.Owner, PermitLabel: permitLabel(permit),
 			CurrentReg: current, Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
-			AllowPlate: gc.Grant.AllowPlate,
+			AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
 		},
 	})
 }
@@ -187,6 +210,14 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w)
 		return
 	}
+
+	// A printed QR is inert: a scan only REQUESTS the permit. Nothing goes on the
+	// permit until the account holder approves it live.
+	if gc.Grant.RequestOnly {
+		s.guestRequest(w, r, gc, permit)
+		return
+	}
+
 	now := time.Now().In(s.cfg.DisplayLocation)
 	overnight := gc.Grant.AllowOvernight && r.FormValue("overnight") != ""
 	end := dayEndLocal(now, 0)
@@ -389,8 +420,29 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 			}
 		}
 	}
+	if reqs, rerr := s.store.ListPendingRequests(ctx, owner); rerr == nil {
+		now := time.Now()
+		for _, rq := range reqs {
+			base.PendingRequests = append(base.PendingRequests, guestReqView{
+				ID: rq.ID, Plate: rq.Plate, PermitLabel: labelByPermit[rq.PermitID], Ago: agoText(now, rq.RequestedAt),
+			})
+		}
+	}
 	base.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)
 	return err
+}
+
+// agoText is a coarse "how long ago" for the approvals queue.
+func agoText(now, t time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%d hr ago", int(d.Hours()))
+	}
 }
 
 // createGuestGrant creates a grant + a per-recipient token, emails each link, and
@@ -651,4 +703,136 @@ func parseEmails(s string) []string {
 		out = append(out, e)
 	}
 	return out
+}
+
+// ================= PRINTED QR: REQUEST + APPROVE =================
+
+func randNonce() string {
+	b := make([]byte, 16)
+	_, _ = crand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// guestRequest handles a printed-QR scan: it records a pending request for the
+// plate the visitor typed, notifies the account holder, and shows a page that
+// polls until the holder decides. Nothing is put on the permit here — the
+// approval is the security boundary.
+func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCtx, permit model.Permit) {
+	plate := normalizeReg(r.FormValue("plate"))
+	if !validRego(plate) {
+		s.render(w, dashboardData{State: "guest", Loc: s.cfg.DisplayLocation,
+			Warn: "Enter a valid number plate (letters and numbers, e.g. ABC123).",
+			Guest: guestActView{Token: gc.rawToken, OwnerEmail: permit.Owner,
+				PermitLabel: permitLabel(permit), AllowPlate: true, RequestOnly: true}})
+		return
+	}
+	nonce := randNonce()
+	reqID, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, nonce)
+	if err != nil {
+		s.renderGuestResult(w, permit.Owner, false, "Something went wrong sending your request. Please try again.")
+		return
+	}
+	s.notifyGuestRequest(permit, plate)
+	s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation,
+		Wait: &guestWaitView{OwnerEmail: permit.Owner, Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
+}
+
+// guestRequestStatus is the visitor's poll endpoint: public and nonce-gated so a
+// request id can't be enumerated. While pending it re-renders a polling fragment;
+// once decided it renders a static result.
+func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	nonce := r.URL.Query().Get("n")
+	req, err := s.store.GuestRequestForPoll(r.Context(), pathInt(r, "id"), nonce)
+	v := guestWaitView{Status: "denied"} // unknown/expired reads as not-approved
+	if err == nil {
+		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
+	}
+	if e := templates.ExecuteTemplate(w, "guest-req-status", v); e != nil {
+		log.Printf("render guest-req-status: %v", e)
+	}
+}
+
+func (s *Server) notifyGuestRequest(permit model.Permit, plate string) {
+	owner, label := permit.Owner, permitLabel(permit)
+	url := s.cfg.PublicBaseURL + "/guests"
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = s.notify.NotifyGuestRequest(ctx, owner, label, plate, url)
+	}()
+}
+
+// showPrintedQR mints a durable request-only grant and renders a QR to print and
+// leave out (e.g. at the door). A scan of it only requests the permit; the holder
+// approves live. It replaces any existing printed QR for the permit.
+func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	permitID := atoi64(r.FormValue("permit_id"))
+	raw, hash := newGuestToken()
+	if _, err := s.store.CreatePrintedGrant(r.Context(), owner, permitID, hash); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	url := s.guestLink(raw)
+	img, err := qrDataURI(url)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	permit, _ := s.store.GetPermit(r.Context(), permitID)
+	base, ok := s.appShell(w, r, "guests")
+	if !ok {
+		return
+	}
+	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	base.QR = &qrShowView{PermitLabel: permitLabel(permit), ImageURI: template.URL(img), URL: url, Printed: true}
+	s.render(w, base)
+}
+
+func (s *Server) approveGuestRequest(w http.ResponseWriter, r *http.Request) {
+	s.decideRequest(w, r, true)
+}
+func (s *Server) denyGuestRequest(w http.ResponseWriter, r *http.Request) {
+	s.decideRequest(w, r, false)
+}
+
+// decideRequest approves or denies a pending printed-QR request. On approval it
+// puts the plate on the permit (end of day) and applies it best-effort.
+func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve bool) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	now := time.Now().In(s.cfg.DisplayLocation)
+	until := untilPhrase(now, false)
+	req, err := s.store.DecideGuestRequest(r.Context(), owner, pathInt(r, "id"), approve, until)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Redirect(w, r, "/guests", http.StatusSeeOther)
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	if approve {
+		if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil && permit.Owner == owner {
+			end := dayEndLocal(now, 0)
+			if _, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)"); cerr == nil {
+				applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+				if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
+					_ = s.store.SetPermitActive(r.Context(), permit.ID, req.Plate)
+					_ = s.store.RecordApply(r.Context(), permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
+				}
+				cancel()
+				s.sched.Kick()
+			}
+		}
+	}
+	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }

@@ -90,6 +90,8 @@ func (s *Server) Handler() http.Handler {
 	// NO side effects (scanner/prefetch-safe); POST performs the activation.
 	mux.HandleFunc("GET /g/{token}", s.guestPage)
 	mux.HandleFunc("POST /g/{token}", s.guestActivate)
+	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
+	mux.HandleFunc("GET /g/req/{id}", s.guestRequestStatus)
 
 	mux.HandleFunc("GET /{$}", s.landing)            // public, not behind forward-auth
 	mux.HandleFunc("GET /about", s.about)            // public
@@ -105,6 +107,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
 	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))
 	mux.HandleFunc("POST /guests/qr", s.withConsent(s.showVisitorQR))
+	mux.HandleFunc("POST /guests/printed", s.withConsent(s.showPrintedQR))
+	mux.HandleFunc("POST /guests/requests/{id}/approve", s.withConsent(s.approveGuestRequest))
+	mux.HandleFunc("POST /guests/requests/{id}/deny", s.withConsent(s.denyGuestRequest))
 	mux.HandleFunc("POST /guests/{id}", s.withConsent(s.updateGuestGrant))
 	mux.HandleFunc("POST /guests/toggle", s.withConsent(s.toggleGuests))
 	mux.HandleFunc("POST /guests/{id}/delete", s.withConsent(s.deleteGuestGrant))
@@ -487,13 +492,15 @@ type dashboardData struct {
 	// picker state
 	Pick []pickView
 	// guest passes
-	Guests        []guestGrantView // management page: existing grants
-	GuestsEnabled bool             // kill-switch state (default on)
-	PermitOpts    []permitOpt      // create-grant permit choices
-	NewGuestLinks []guestLinkView  // links shown once, right after a grant is created
-	Edit          *editGrantView   // non-nil puts the pass form in edit mode
-	QR            *qrShowView      // non-nil shows the on-screen visitor QR
-	Guest         guestActView     // public activation menu (State "guest")
+	Guests          []guestGrantView // management page: existing grants
+	GuestsEnabled   bool             // kill-switch state (default on)
+	PermitOpts      []permitOpt      // create-grant permit choices
+	NewGuestLinks   []guestLinkView  // links shown once, right after a grant is created
+	Edit            *editGrantView   // non-nil puts the pass form in edit mode
+	QR              *qrShowView      // non-nil shows the on-screen visitor QR
+	PendingRequests []guestReqView   // printed-QR requests awaiting the holder's decision
+	Guest           guestActView     // public activation menu (State "guest")
+	Wait            *guestWaitView   // public "waiting for approval" page (State "guest-wait")
 }
 
 type termsView struct {

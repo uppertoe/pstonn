@@ -356,6 +356,15 @@
   .check .plate { margin-left:auto; }
   .grecip { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:13.5px; }
   .ro { padding:9px 12px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--muted); font-size:14px; }
+  .qropts { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .qropt { display:flex; flex-direction:column; gap:10px; padding:14px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); }
+  .qropt-txt { display:flex; flex-direction:column; gap:3px; }
+  .qropt select { width:100%; }
+  .qropt button { margin-top:auto; }
+  @media (max-width:640px){ .qropts { grid-template-columns:1fr; } }
+  .req { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--line); }
+  .req-main { display:flex; align-items:center; gap:12px; min-width:0; }
+  .req-meta { display:flex; flex-direction:column; gap:1px; min-width:0; }
   /* Public guest activation page */
   .guestwrap { max-width:460px; margin:0 auto; padding:32px 18px 60px; }
   .guestcard { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:26px 24px; }
@@ -378,6 +387,8 @@
   .gring.ok { background:var(--ok-soft); color:var(--ok); }
   .gring.warn { background:var(--warn-soft); color:var(--warn); }
   .gresult { font-size:16px; font-weight:600; line-height:1.5; margin:0 0 6px; }
+  .gspin { width:34px; height:34px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--primary); margin:20px auto 14px; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
   .link-quiet:hover { color:var(--primary); }
@@ -658,7 +669,9 @@
     <p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>
     <h1>{{.Guest.PermitLabel}}</h1>
     <p class="gnow">On the permit now: {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="muted">unknown</span>{{end}}</p>
-    <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:18px">
+    {{if .Warn}}<div class="banner warn" style="margin-top:14px">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
+    {{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">Enter your plate to ask <strong>{{.Guest.OwnerEmail}}</strong> to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.</p>{{end}}
+    <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px">
       {{if .Guest.Cars}}
       <p class="sub">Tap your car to put it on the permit</p>
       <div class="gcars">
@@ -681,10 +694,21 @@
       <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps the car on until the end of tomorrow instead of the end of today.</span></span></label>
       {{end}}
       {{if .Guest.AllowPlate}}
-      <button type="submit" style="justify-content:center;margin-top:4px">{{template "ic-check"}} Put my car on the permit</button>
+      <button type="submit" style="justify-content:center;margin-top:4px">{{if .Guest.RequestOnly}}{{template "ic-bell"}} Ask to use the permit{{else}}{{template "ic-check"}} Put my car on the permit{{end}}</button>
       {{end}}
     </form>
-    <p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes.</p>
+    {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes.</p>{{end}}
+  </section>
+</main>
+
+{{else if eq .State "guest-wait"}}
+{{/* ============ PRINTED-QR: WAITING FOR APPROVAL (polls) ============ */}}
+<main class="guestwrap">
+  <section class="guestcard" style="text-align:center">
+    <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    <p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>
+    <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">{{.Wait.Plate}}</span> on the permit.</p>
+    {{template "guest-req-status" .Wait}}
   </section>
 </main>
 
@@ -982,16 +1006,21 @@
   {{/* ---- ON-SCREEN VISITOR QR ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
     <div class="editbar" style="text-align:left">
-      <span class="eyebrow">{{template "ic-qr"}} Visitor QR</span>
+      <span class="eyebrow">{{template "ic-qr"}} {{if .QR.Printed}}Door QR{{else}}Visitor QR{{end}}</span>
       <a href="/guests"><button type="button" class="ghost sm">&larr; Done</button></a>
     </div>
     <h2 style="justify-content:center">{{.QR.PermitLabel}}</h2>
-    <p class="subtitle" style="text-align:center;max-width:340px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
+    <p class="subtitle" style="text-align:center;max-width:360px;margin:0 auto 14px">{{if .QR.Printed}}Print this and leave it out (at the door, on the counter). A visitor scans it and enters their plate, which asks you to approve, nothing goes on the permit until you say yes.{{else}}Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.{{end}}</p>
     <div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
-      <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
+      <img src="{{.QR.ImageURI}}" alt="Scan to ask to use the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
     </div>
+    {{if .QR.Printed}}
+    <p class="empty-note" style="margin-top:12px">This code does not expire. It is safe to leave out because a scan can only <strong>ask</strong>; you approve each request. Printing a new one replaces this.</p>
+    <button type="button" onclick="window.print()" class="ghost" style="margin-top:6px">{{template "ic-qr"}} Print</button>
+    {{else}}
     <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.ExpiresAt}}</strong>. Generate a fresh one each time.</p>
-    <p class="empty-note" style="word-break:break-all">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
+    {{end}}
+    <p class="empty-note" style="word-break:break-all;margin-top:10px">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
   </section>
 
   {{else if .Edit}}
@@ -1050,6 +1079,25 @@
   </section>
   {{end}}
 
+  {{if .PendingRequests}}
+  <section class="card" style="--hue:var(--danger)">
+    <h2><span class="ic">{{template "ic-bell"}}</span> Waiting for you</h2>
+    <p class="subtitle">Someone scanned a printed code and wants to use a permit. Approve to put their plate on until the end of today.</p>
+    {{range .PendingRequests}}
+    <div class="req">
+      <div class="req-main">
+        <span class="plate" style="--plate:var(--sec-vehicles)">{{.Plate}}</span>
+        <div class="req-meta"><strong>{{.PermitLabel}}</strong><span class="empty-note">asked {{.Ago}}</span></div>
+      </div>
+      <div class="row" style="gap:8px">
+        <form method="post" action="/guests/requests/{{.ID}}/approve"><button type="submit">{{template "ic-check"}} Allow</button></form>
+        <form method="post" action="/guests/requests/{{.ID}}/deny"><button type="submit" class="ghost">Deny</button></form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
   <section class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
@@ -1066,13 +1114,23 @@
   {{if .PermitOpts}}
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Visitor at the door?</h2>
-    <p class="subtitle">Show a one-time QR code a visitor (a tradie, a friend's car) can scan to put <em>their own plate</em> on the permit for the day. No saved car needed; the code expires 15 minutes after you show it.</p>
-    <form method="post" action="/guests/qr" class="row" style="gap:10px;flex-wrap:wrap">
-      {{if gt (len .PermitOpts) 1}}
-      <select name="permit_id" style="flex:1;min-width:180px">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
-      {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
-      <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
-    </form>
+    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
+    <div class="qropts">
+      <form method="post" action="/guests/qr" class="qropt">
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. Expires 15&nbsp;min after you show it.</span></div>
+        {{if gt (len .PermitOpts) 1}}
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
+      </form>
+      <form method="post" action="/guests/printed" class="qropt">
+        <div class="qropt-txt"><strong>Print one for the door</strong><span class="empty-note">Leave it out. A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
+        {{if gt (len .PermitOpts) 1}}
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        <button type="submit" class="ghost">{{template "ic-qr"}} Print a door QR</button>
+      </form>
+    </div>
   </section>
   {{end}}
 
@@ -1184,6 +1242,26 @@
 
 
 {{/* =================== NOTIFY BODY (swappable, auto-saves) =================== */}}
+{{/* Printed-QR request status (htmx-polled). Pending re-polls; a decision stops. */}}
+{{define "guest-req-status"}}
+{{if eq .Status "approved"}}
+<div id="reqstatus">
+  <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
+  <p class="gresult">Approved. <span class="plate">{{.Plate}}</span> is on the permit until {{.Until}}.</p>
+</div>
+{{else if eq .Status "denied"}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-x"}}</div>
+  <p class="gresult">Not approved. Ask the resident, or try again.</p>
+</div>
+{{else}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="gspin"></div>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
+</div>
+{{end}}
+{{end}}
+
 {{define "notify-body"}}
 <form hx-post="/notifications" hx-target="#notify-body" hx-swap="innerHTML" hx-trigger="change"
       class="stack notify-form" x-data="{ntfy: {{if .NtfyEnabled}}true{{else}}false{{end}}}">

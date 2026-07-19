@@ -361,6 +361,43 @@ func (s *Service) NotifyGuestDisplaced(ctx context.Context, to, permitLabel, old
 	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
 }
 
+// NotifyGuestRequest tells the account (all members) that someone scanned a
+// printed QR and is asking to put a plate on the permit, so they can approve or
+// decline it in the app. Goes to every enabled channel.
+func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string) error {
+	subject := fmt.Sprintf("Approve %s on your %s?", plate, permitLabel)
+	lines := []string{
+		fmt.Sprintf("Someone at your door scanned your printed QR and is asking to put %s on your %s.", plate, permitLabel),
+		"",
+		"Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.",
+	}
+	if url != "" {
+		lines = append(lines, "", url)
+	}
+	body := strings.Join(lines, "\n")
+
+	var errs []string
+	if s.mail.Enabled() {
+		recipients, _ := s.store.AccountEmails(ctx, owner)
+		for _, addr := range recipients {
+			if e := s.mail.Send(addr, subject, body); e != nil {
+				errs = append(errs, "email "+addr+": "+e.Error())
+			}
+		}
+	}
+	if s.ntfyBase != "" {
+		if pref, e := s.store.GetNotifyPref(ctx, owner); e == nil && pref.NtfyEnabled && pref.NtfyTopic != "" {
+			if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, "high", "bell"); e != nil {
+				errs = append(errs, "ntfy: "+e.Error())
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("notify request %s: %s", owner, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.ntfyBase+"/"+topic, strings.NewReader(body))
 	if err != nil {

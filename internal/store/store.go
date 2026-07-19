@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS guest_grant (
     allow_overnight INTEGER NOT NULL DEFAULT 0,
     allow_plate     INTEGER NOT NULL DEFAULT 0,  -- visitor may type an arbitrary plate
     on_screen       INTEGER NOT NULL DEFAULT 0,  -- ephemeral QR grant (hidden from the pass list)
+    request_only    INTEGER NOT NULL DEFAULT 0,  -- printed QR: scanning only REQUESTS; holder must approve
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL
 );
@@ -231,6 +232,22 @@ CREATE TABLE IF NOT EXISTS guest_token (
 );
 CREATE INDEX IF NOT EXISTS idx_guest_token_grant ON guest_token(grant_id);
 
+-- A visitor's request to use a printed-QR permit: created inert on scan, it does
+-- nothing until the account holder approves it live (the security boundary).
+CREATE TABLE IF NOT EXISTS guest_request (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    grant_id     INTEGER NOT NULL REFERENCES guest_grant(id) ON DELETE CASCADE,
+    owner        TEXT NOT NULL,             -- account owner (scopes approvals)
+    permit_id    INTEGER NOT NULL,
+    plate        TEXT NOT NULL,
+    nonce        TEXT NOT NULL DEFAULT '',  -- per-request secret so the visitor can poll status without enumeration
+    status       TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
+    requested_at TEXT NOT NULL,
+    decided_at   TEXT NOT NULL DEFAULT '',
+    until_at     TEXT NOT NULL DEFAULT ''   -- human when-it-ends, set on approval
+);
+CREATE INDEX IF NOT EXISTS idx_guest_request_owner ON guest_request(owner, status);
+
 -- Per-account flags. guests_enabled is the global kill-switch for guest passes.
 CREATE TABLE IF NOT EXISTS account_flags (
     owner          TEXT PRIMARY KEY,
@@ -250,6 +267,7 @@ CREATE TABLE IF NOT EXISTS account_flags (
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_grant ADD COLUMN request_only INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_token ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
@@ -1198,8 +1216,22 @@ type GuestGrant struct {
 	Label          string
 	AllowOvernight bool
 	AllowPlate     bool // visitor may type an arbitrary plate (tradie / on-screen QR)
+	RequestOnly    bool // printed QR: a scan only requests; the holder approves live
 	Enabled        bool
 	CreatedAt      time.Time
+}
+
+// GuestRequest is a visitor's pending/approved/denied request to use a
+// printed-QR permit.
+type GuestRequest struct {
+	ID          int64
+	GrantID     int64
+	Owner       string
+	PermitID    int64
+	Plate       string
+	Status      string // pending | approved | denied
+	RequestedAt time.Time
+	Until       string // human "until …" text, set on approval
 }
 
 // GuestToken is one recipient's link to a grant; the raw token is never stored,
@@ -1405,6 +1437,137 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64,
 	return grantID, tx.Commit()
 }
 
+// CreatePrintedGrant creates a durable "printed QR" grant for a permit: a scan
+// only lets a visitor REQUEST the permit (request_only), which the holder must
+// approve. It replaces any existing printed grant for the same permit so there is
+// one active code (a reprint invalidates the old one). Returns the grant id.
+func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID int64, tokenHash string) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`, owner, permitID); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, request_only, enabled, created_at)
+		 VALUES (?, ?, 'Printed QR', 0, 1, 0, 1, 1, ?)`, owner, permitID, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, '', ?, ?)`,
+		grantID, tokenHash, nowUTC()); err != nil {
+		return 0, err
+	}
+	return grantID, tx.Commit()
+}
+
+// CreateGuestRequest records a pending request from a printed-QR scan. nonce is a
+// per-request secret the visitor keeps, so they can poll its status without being
+// able to read other requests.
+func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+		grantID, owner, permitID, plate, nonce, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GuestRequestForPoll returns a request only if the nonce matches — the visitor's
+// status check, safe against request-id enumeration.
+func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string) (GuestRequest, error) {
+	var r GuestRequest
+	var requested string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until)
+	if err == sql.ErrNoRows {
+		return GuestRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	return r, nil
+}
+
+// GuestRequestByID returns a request (used by the visitor's polling status page).
+func (s *Store) GuestRequestByID(ctx context.Context, id int64) (GuestRequest, error) {
+	var r GuestRequest
+	var requested string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request WHERE id = ?`, id).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until)
+	if err == sql.ErrNoRows {
+		return GuestRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	return r, nil
+}
+
+// ListPendingRequests returns an owner's still-pending printed-QR requests, newest
+// first (the approvals queue).
+func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestRequest, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request
+		 WHERE owner = ? AND status = 'pending' ORDER BY id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestRequest
+	for rows.Next() {
+		var r GuestRequest
+		var requested string
+		if err := rows.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until); err != nil {
+			return nil, err
+		}
+		r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DecideGuestRequest approves or denies a pending request, scoped to owner. It
+// returns the request (so the caller can apply the plate on approval) or
+// ErrNotFound if it is not the owner's or no longer pending.
+func (s *Store) DecideGuestRequest(ctx context.Context, owner string, id int64, approve bool, until string) (GuestRequest, error) {
+	status := "denied"
+	if approve {
+		status = "approved"
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE guest_request SET status = ?, decided_at = ?, until_at = ?
+		 WHERE id = ? AND owner = ? AND status = 'pending'`,
+		status, nowUTC(), until, id, owner)
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return GuestRequest{}, ErrNotFound
+	}
+	return s.GuestRequestByID(ctx, id)
+}
+
 // GuestContextByTokenHash resolves a presented token hash to the grant, recipient
 // and allowed vehicles — only if the token is live, its grant enabled, and the
 // owner's guest passes are not globally paused. Any failed gate returns
@@ -1412,16 +1575,16 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64,
 func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
 	var gc GuestContext
 	var created string
-	var overnight, plate, enabled int
+	var overnight, plate, reqOnly, enabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.enabled, g.created_at
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.enabled, g.created_at
 FROM guest_token t
 JOIN guest_grant g ON g.id = t.grant_id
 WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
   AND (t.expires_at = '' OR t.expires_at > ?)
   AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
 		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
-		&gc.Grant.Label, &overnight, &plate, &enabled, &created)
+		&gc.Grant.Label, &overnight, &plate, &reqOnly, &enabled, &created)
 	if err == sql.ErrNoRows {
 		return GuestContext{}, ErrNotFound
 	}
@@ -1430,6 +1593,7 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 	}
 	gc.Grant.AllowOvernight = overnight == 1
 	gc.Grant.AllowPlate = plate == 1
+	gc.Grant.RequestOnly = reqOnly == 1
 	gc.Grant.Enabled = enabled == 1
 	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 		return GuestContext{}, err
@@ -1444,7 +1608,7 @@ WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
 // ListGuestGrants returns the owner's grants with their cars and recipient tokens.
 func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrantDetail, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 ORDER BY id DESC`, owner)
+		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 AND request_only = 0 ORDER BY id DESC`, owner)
 	if err != nil {
 		return nil, err
 	}

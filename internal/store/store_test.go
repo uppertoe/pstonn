@@ -762,3 +762,79 @@ func TestQRGrant(t *testing.T) {
 		t.Fatalf("expired QR token = %v, want ErrNotFound", err)
 	}
 }
+
+func TestPrintedRequestFlow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner, bob = "u@example.com", "bob@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// A foreign permit can't back a printed grant.
+	if _, err := s.CreatePrintedGrant(ctx, owner, bp, "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
+	}
+
+	// The printed grant is request-only, allows free plate entry, and stays hidden
+	// from the management list (like the on-screen QR).
+	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "printhash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gc, err := s.GuestContextByTokenHash(ctx, "printhash")
+	if err != nil {
+		t.Fatalf("resolve printed token: %v", err)
+	}
+	if !gc.Grant.AllowPlate || !gc.Grant.RequestOnly || gc.Grant.Owner != owner {
+		t.Fatalf("printed context: %+v", gc)
+	}
+	if ds, _ := s.ListGuestGrants(ctx, owner); len(ds) != 0 {
+		t.Fatalf("printed grant should be hidden from the pass list, got %d", len(ds))
+	}
+
+	// Showing a printed QR again replaces the prior grant for that permit (and, by
+	// cascade, any requests against it), so the old token stops resolving.
+	grantID, err = s.CreatePrintedGrant(ctx, owner, p, "printhash2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "printhash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("replaced printed token still resolves = %v, want ErrNotFound", err)
+	}
+
+	// A scan records a pending request the visitor can poll only with its nonce.
+	reqID, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "secretnonce")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestRequestForPoll(ctx, reqID, "wrongnonce"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("poll with wrong nonce = %v, want ErrNotFound", err)
+	}
+	if r, err := s.GuestRequestForPoll(ctx, reqID, "secretnonce"); err != nil || r.Status != "pending" {
+		t.Fatalf("poll with nonce = %+v, %v", r, err)
+	}
+
+	// It appears in the owner's approvals queue, but not another owner's.
+	if reqs, _ := s.ListPendingRequests(ctx, owner); len(reqs) != 1 || reqs[0].Plate != "TRADIE1" {
+		t.Fatalf("owner queue = %+v", reqs)
+	}
+	if reqs, _ := s.ListPendingRequests(ctx, bob); len(reqs) != 0 {
+		t.Fatalf("foreign owner should see no requests, got %d", len(reqs))
+	}
+
+	// Another owner can't decide it; the real owner can approve once.
+	if _, err := s.DecideGuestRequest(ctx, bob, reqID, true, "2026-07-21T00:00:00Z"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign decide = %v, want ErrNotFound", err)
+	}
+	dec, err := s.DecideGuestRequest(ctx, owner, reqID, true, "2026-07-21T00:00:00Z")
+	if err != nil || dec.Status != "approved" || dec.Until != "2026-07-21T00:00:00Z" {
+		t.Fatalf("approve = %+v, %v", dec, err)
+	}
+	// Deciding again is a no-op (no longer pending) and drops out of the queue.
+	if _, err := s.DecideGuestRequest(ctx, owner, reqID, true, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("re-decide = %v, want ErrNotFound", err)
+	}
+	if reqs, _ := s.ListPendingRequests(ctx, owner); len(reqs) != 0 {
+		t.Fatalf("decided request should leave the queue, got %d", len(reqs))
+	}
+}
