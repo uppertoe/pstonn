@@ -103,7 +103,7 @@ func TestTemplatesRender(t *testing.T) {
 	if err := templates.ExecuteTemplate(&buf, "permit-body", samplePermitView(loc)); err != nil {
 		t.Fatalf("render permit-body: %v", err)
 	}
-	for _, want := range []string{"Weekly roster", "Next 14 days", "One-off booking", "ABC123", "→"} {
+	for _, want := range []string{"Weekly roster", "This week and next", "One-off booking", "ABC123", "→"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("permit-body output missing %q", want)
 		}

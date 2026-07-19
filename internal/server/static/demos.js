@@ -150,8 +150,22 @@
   }
 
   var inits = { mini: initMini, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect };
-  document.querySelectorAll("[data-demo]").forEach(function (root) {
-    var fn = inits[root.getAttribute("data-demo")];
-    if (fn) fn(root);
-  });
+  function initDemos() {
+    document.querySelectorAll("[data-demo]").forEach(function (root) {
+      if (root.dataset.demoInit) return; // already running
+      var fn = inits[root.getAttribute("data-demo")];
+      if (fn) {
+        root.dataset.demoInit = "1";
+        fn(root);
+      }
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initDemos);
+  } else {
+    initDemos();
+  }
+  // htmx boosted navigation swaps the body without re-running head scripts, so
+  // re-scan for freshly-swapped demos after each load.
+  document.addEventListener("htmx:load", initDemos);
 })();

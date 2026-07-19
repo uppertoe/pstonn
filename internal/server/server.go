@@ -533,6 +533,7 @@ type calView struct {
 	Source    string // "roster" | "override" | ""
 	HasOneoff bool
 	IsToday   bool
+	Past      bool // earlier this week; shown dimmed for context
 }
 
 type overrideView struct {
@@ -853,14 +854,20 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 
 	loc := s.cfg.DisplayLocation
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	// Align the fortnight grid to weekday columns (Sunday first) so the same
+	// weekday sits in the same column as the roster above. The grid starts on the
+	// Sunday of the current week; days already gone this week show dimmed.
+	gridStart := today.AddDate(0, 0, -int(today.Weekday())) // Weekday(): Sunday==0
 	var cal []calView
 	for d := 0; d < 14; d++ {
-		day := today.AddDate(0, 0, d)
+		day := gridStart.AddDate(0, 0, d)
 		dayEnd := day.AddDate(0, 0, 1)
-		// Today reflects the plate right now (local time); future days are
+		isToday := day.Equal(today)
+		past := day.Before(today)
+		// Today reflects the plate right now (local time); other days are
 		// representative, resolved at midday.
 		resolveAt := day.Add(12 * time.Hour)
-		if d == 0 {
+		if isToday {
 			resolveAt = now
 		}
 		r := model.Resolve(resolveAt, rules, overrides)
@@ -878,7 +885,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		}
 		cal = append(cal, calView{
 			DayLabel: day.Format("Mon 2"), Reg: regByID[r.VehicleID], Color: colorByID[r.VehicleID],
-			Source: src, HasOneoff: hasOneoff, IsToday: d == 0,
+			Source: src, HasOneoff: hasOneoff, IsToday: isToday, Past: past,
 		})
 	}
 

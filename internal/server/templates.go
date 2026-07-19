@@ -1,8 +1,11 @@
 package server
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"html/template"
+	"io/fs"
 	"time"
 )
 
@@ -15,13 +18,41 @@ var templateFS embed.FS
 //go:embed static/*
 var staticFS embed.FS
 
-// weekdaysDisplay is the roster order shown in the UI (Monday first).
+// staticVersion fingerprints the embedded static files. It is appended to static
+// URLs as ?v=… so the aggressive immutable cache is busted exactly when a file's
+// content changes across a release (and never otherwise). Identical across
+// replicas because it is derived from content, not build time.
+var staticVersion = computeStaticVersion()
+
+func computeStaticVersion() string {
+	h := sha256.New()
+	_ = fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, e := staticFS.ReadFile(p)
+		if e != nil {
+			return e
+		}
+		h.Write([]byte(p))
+		h.Write(b)
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:10]
+}
+
+// asset builds a cache-busted URL for a vendored static file.
+func asset(path string) string { return "/static/" + path + "?v=" + staticVersion }
+
+// weekdaysDisplay is the roster order shown in the UI (Sunday first), matching
+// the fortnight calendar's weekday columns so the same day lines up in both.
 var weekdaysDisplay = []time.Weekday{
-	time.Monday, time.Tuesday, time.Wednesday, time.Thursday,
-	time.Friday, time.Saturday, time.Sunday,
+	time.Sunday, time.Monday, time.Tuesday, time.Wednesday,
+	time.Thursday, time.Friday, time.Saturday,
 }
 
 var templates = template.Must(template.New("").Funcs(template.FuncMap{
+	"asset":       asset,
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	"localTime": func(t time.Time, loc *time.Location) string {
 		if t.IsZero() {
