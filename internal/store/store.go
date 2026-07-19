@@ -694,6 +694,21 @@ func (s *Store) MemberAccount(ctx context.Context, memberEmail string) (owner st
 	return owner, true, nil
 }
 
+// AccountEmails returns every email that should be notified for an account: the
+// owner plus any secondaries. Always includes the owner, even if listing the
+// secondaries fails.
+func (s *Store) AccountEmails(ctx context.Context, owner string) ([]string, error) {
+	emails := []string{owner}
+	ms, err := s.ListMembers(ctx, owner)
+	if err != nil {
+		return emails, err
+	}
+	for _, m := range ms {
+		emails = append(emails, m.Email)
+	}
+	return emails, nil
+}
+
 // ListMembers returns the secondaries with access to owner's account, oldest first.
 func (s *Store) ListMembers(ctx context.Context, owner string) ([]AccountMember, error) {
 	rows, err := s.db.QueryContext(ctx,

@@ -488,6 +488,7 @@ type notifyView struct {
 	NtfyTopic      string
 	NtfyBase       string
 	UserEmail      string
+	Shared         bool   // account has secondaries, so email goes to everyone with access
 	Status         string // transient confirmation after auto-save
 	Error          string // transient error (e.g. tried to turn everything off)
 }
@@ -716,10 +717,14 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		pref.NtfyTopic = notify.RandomTopic()
 		_ = s.store.SetNotifyPref(ctx, pref)
 	}
+	shared := false
+	if n, err := s.store.CountMembers(ctx, owner); err == nil && n > 0 {
+		shared = true
+	}
 	base.Notify = notifyView{
 		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
-		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner,
+		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner, Shared: shared,
 	}
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
@@ -740,10 +745,14 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 // renderNotify renders the swappable notifications fragment (auto-save target),
 // or falls back to a redirect for a non-htmx request.
 func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, owner string, pref store.NotifyPref, status, errMsg string) {
+	shared := false
+	if n, err := s.store.CountMembers(r.Context(), owner); err == nil && n > 0 {
+		shared = true
+	}
 	nv := notifyView{
 		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
-		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner,
+		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner, Shared: shared,
 		Status: status, Error: errMsg,
 	}
 	if r.Header.Get("HX-Request") != "" {

@@ -196,13 +196,25 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		if s.appURL != "" {
 			emailBody += "\n\n" + s.appURL
 		}
-		if e := s.mail.Send(o.Owner, subject, emailBody); e != nil {
-			errs = append(errs, "email: "+e.Error())
-		} else {
+		// Email every member of the account (owner plus any secondaries), so a
+		// shared household all hear about a change. The account counts as reached
+		// (delivered) if at least one member's email is accepted; a single bad
+		// address does not force endless retries or an operator alert.
+		recipients, _ := s.store.AccountEmails(ctx, o.Owner)
+		sent := 0
+		for _, addr := range recipients {
+			if e := s.mail.Send(addr, subject, emailBody); e != nil {
+				errs = append(errs, "email "+addr+": "+e.Error())
+			} else {
+				sent++
+			}
+		}
+		if sent > 0 {
 			delivered++
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
+		// One account push topic that any member can subscribe their own device to.
 		if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, priority, tags); e != nil {
 			errs = append(errs, "ntfy: "+e.Error())
 		} else {
@@ -226,8 +238,11 @@ func (s *Service) SendTest(ctx context.Context, owner string) error {
 	const body = "This is a test. Your permit-change notifications are set up correctly."
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
-		if e := s.mail.Send(owner, subject, body); e != nil {
-			errs = append(errs, "email: "+e.Error())
+		recipients, _ := s.store.AccountEmails(ctx, owner)
+		for _, addr := range recipients {
+			if e := s.mail.Send(addr, subject, body); e != nil {
+				errs = append(errs, "email "+addr+": "+e.Error())
+			}
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {

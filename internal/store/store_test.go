@@ -205,6 +205,31 @@ func TestAccountMembers(t *testing.T) {
 	}
 }
 
+// TestAccountEmails confirms notifications fan out to the owner plus secondaries.
+func TestAccountEmails(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "mum@example.com"
+	if got, _ := s.AccountEmails(ctx, owner); len(got) != 1 || got[0] != owner {
+		t.Fatalf("solo account = %v, want just the owner", got)
+	}
+	_ = s.AddMember(ctx, owner, "nanny@example.com")
+	_ = s.AddMember(ctx, owner, "gran@example.com")
+	got, err := s.AccountEmails(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{owner: true, "nanny@example.com": true, "gran@example.com": true}
+	if len(got) != 3 {
+		t.Fatalf("got %v, want 3 recipients", got)
+	}
+	for _, e := range got {
+		if !want[e] {
+			t.Fatalf("unexpected recipient %q in %v", e, got)
+		}
+	}
+}
+
 // TestAddMemberCapped guards the atomic cap: adds succeed under the limit and
 // return ErrMemberLimit once full.
 func TestAddMemberCapped(t *testing.T) {
