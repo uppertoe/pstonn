@@ -58,6 +58,8 @@ func TestTemplatesRender(t *testing.T) {
 		{"landing", dashboardData{State: "landing", Loc: loc}, "Schedule your City of Stonnington"},
 		{"landing-signedin", dashboardData{State: "landing", SignedIn: true, Loc: loc}, "Open the app"},
 		{"about", dashboardData{State: "about", Loc: loc}, "security model"},
+		{"why", dashboardData{State: "why", Loc: loc}, "get a Stonnington ePermit"},
+		{"why-demos", dashboardData{State: "why", Loc: loc}, "data-demo=\"roster\""},
 		{"contact", dashboardData{State: "contact", Contact: true, Loc: loc}, "Send message"},
 		{"contact-sent", dashboardData{State: "contact", Contact: true, Flash: "Thanks. Your message has been sent.", Loc: loc}, "has been sent"},
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},

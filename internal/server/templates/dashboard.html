@@ -24,6 +24,8 @@
 </script>
 <script src="/static/htmx.min.js"></script>
 <script defer src="/static/alpine.min.js"></script>
+{{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="/static/demos.css">
+<script defer src="/static/demos.js"></script>{{end}}
 <style>
   @font-face {
     font-family:'Space Grotesk'; font-style:normal; font-weight:600; font-display:swap;
@@ -336,6 +338,19 @@
     <a href="/schedule"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
     <p class="lnote">Sign in with a one-time code sent to your email.</p>
   </section>
+  <div class="demos">
+    <div class="dm-mini" data-demo="mini">
+      <div class="dm-phone">
+        <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample</span></div>
+        <div class="dm-week" data-week></div>
+        <div class="dm-permit">
+          <div><div class="plab">Visitor permit</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+          <div class="dm-sync">{{template "ic-check"}}</div>
+        </div>
+      </div>
+      <p class="dm-foot"><a href="/why">See how it works &rarr;</a></p>
+    </div>
+  </div>
   <section class="lsteps">
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>Sign in to ePermits with your council password. p.stonn keeps an encrypted session and discards the password.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
@@ -381,6 +396,101 @@
   <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
 
   <p class="ldisclaimer" style="margin-top:32px"><a href="/">← Back</a></p>
+</main>
+
+{{else if eq .State "why"}}
+{{/* ================= PUBLIC: WHY / HOW IT WORKS ================= */}}
+{{template "publicheader" .}}
+<main class="landing about">
+  <h1 class="about-h1">Why this exists</h1>
+  <p>Stonnington changed how resident and visitor parking permits work. Since January, permits that used to be free now cost money, and the paper permits anyone could use are being phased out for a digital system. To keep a permit you enter your vehicle registrations into the council's online system, and parking officers check number plates against it.</p>
+  <p>For visitor parking, that means adding the registration of each car that visits, through the council portal, on the day it visits. For a household that relies on regular help (grandparents on pickup, a nanny, a carer), that becomes a recurring task tied to whoever is coming and when.</p>
+  <p>p.stonn handles that part for you. You set which car is on your visitor permit on a weekly schedule, add any one-off bookings, and it keeps the council permit up to date and tells you when it has changed.</p>
+
+  <h2 class="about-h2">How it works</h2>
+  <div class="demos">
+    <div class="dm-grid">
+
+      <figure class="dm" data-demo="connect">
+        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">your password is never stored</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Connect council account</h2></div>
+          <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
+          <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
+          <div class="dm-btn">{{template "ic-link"}} Link account</div>
+          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> We keep an encrypted session so the app can act for you. Your password is never stored.</div></div>
+        </div>
+      </figure>
+
+      <figure class="dm" data-demo="roster">
+        <figcaption class="dm-label"><span class="t">Set a weekly schedule</span><span class="s">a car for each day</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-week" data-week></div>
+          <div class="dm-picker">
+            <div class="ph">Which car?</div>
+            <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
+            <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
+            <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+          <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+      </figure>
+
+      <figure class="dm" data-demo="oneoff">
+        <figcaption class="dm-label"><span class="t">Book a one-off</span><span class="s">for a visit that breaks the routine</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
+          <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
+          <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
+          <div class="dm-btn">{{template "ic-plus"}} Book</div>
+          <div class="dm-uph">Upcoming</div>
+          <div class="dm-booking"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span> <span class="when">Sat 12 &ndash; Sun 13 Jul</span></div>
+          <div class="dm-cal"></div>
+        </div>
+      </figure>
+
+      <figure class="dm" data-demo="notify">
+        <figcaption class="dm-label"><span class="t">Know it happened</span><span class="s">every change, or if one fails</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-bell"}}</span> Notifications</h2></div>
+          <div class="dm-toggles">
+            <div class="dm-toggle">Email <span class="dm-swi"></span></div>
+            <div class="dm-toggle">Phone <span class="dm-swi"></span></div>
+          </div>
+          <div class="dm-push"><span class="badge" style="background:var(--ok)">{{template "ic-check"}}</span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg">Your visitor permit is now <b>ABC123</b> (Nan's car).</div></div></div>
+          <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>We will keep trying</b> and let you know.</div></div></div>
+        </div>
+      </figure>
+
+    </div>
+    <p class="dm-foot">A demonstration with made-up plates and names. Not a real permit.</p>
+  </div>
+
+  <h2 class="about-h2">Before you start: get a Stonnington ePermit</h2>
+  <p>p.stonn does not replace the council's system. It works on top of a permit you already hold, so you need a City of Stonnington ePermits account with at least one visitor permit first.</p>
+  <p>If you are not set up yet:</p>
+  <ul>
+    <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
+    <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
+    <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
+    <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
+  </ul>
+  <p>The council's own pages have the current fees, forms and details:</p>
+  <ul>
+    <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits" rel="noopener noreferrer">Parking permits</a></li>
+    <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
+    <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
+  </ul>
+  <p>Once your council account has a visitor permit, <a href="/schedule">sign in to p.stonn</a> and connect it.</p>
+
+  <p class="ldisclaimer" style="margin-top:32px"><a href="/">&larr; Back</a></p>
 </main>
 
 {{else if eq .State "contact"}}
@@ -632,6 +742,7 @@
 <header class="appbar">
   <a href="/" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <div class="appbar-r">
+    <a href="/why" class="link-quiet">How it works</a>
     <a href="/about" class="link-quiet">About</a>
     {{if .Contact}}<a href="/contact" class="link-quiet">Contact</a>{{end}}
     <button class="icon-btn" type="button" onclick="toggleTheme()" aria-label="Toggle light / dark"><span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span></button>

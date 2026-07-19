@@ -77,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /{$}", s.landing)            // public, not behind forward-auth
 	mux.HandleFunc("GET /about", s.about)            // public
+	mux.HandleFunc("GET /why", s.why)                // public
 	mux.HandleFunc("GET /contact", s.contactPage)    // public
 	mux.HandleFunc("POST /contact", s.submitContact) // public, rate-limited
 	mux.HandleFunc("GET /schedule", s.schedule)
@@ -173,6 +174,13 @@ func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 func (s *Server) about(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
 	s.render(w, dashboardData{State: "about", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+}
+
+// why is the PUBLIC "how it works" page: a plain explainer, the animated demos,
+// and how to get set up with a council ePermit.
+func (s *Server) why(w http.ResponseWriter, r *http.Request) {
+	_, signedIn := identity.FromContext(r.Context())
+	s.render(w, dashboardData{State: "why", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
 }
 
 // contactPage renders the PUBLIC contact form. When contact is not configured it

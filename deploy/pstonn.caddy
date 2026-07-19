@@ -11,12 +11,12 @@
 # Everything else (the app) is protected. Once signed in, protected requests
 # carry the Remote-* headers.
 p.{$DOMAIN} {
-    # Public, no login: landing/about/contact pages, static assets, healthcheck,
+    # Public, no login: landing/about/why/contact pages, static assets, healthcheck,
     # and the token-only renewal-confirm link from reminder emails. Strip the
     # shared session cookie even here: it is scoped to .{$DOMAIN}, so the browser
     # sends it to every path, and the public backend must never receive the
     # estate-wide bearer.
-    @public path / /about /contact /healthz /council/confirm
+    @public path / /about /why /contact /healthz /council/confirm
     handle @public {
         route {
             import strip_client_identity
