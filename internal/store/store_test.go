@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -201,6 +202,30 @@ func TestAccountMembers(t *testing.T) {
 	}
 	if _, ok, _ := s.MemberAccount(ctx, nanny); ok {
 		t.Fatal("deleting the primary account should revoke shared access")
+	}
+}
+
+// TestAddMemberCapped guards the atomic cap: adds succeed under the limit and
+// return ErrMemberLimit once full.
+func TestAddMemberCapped(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "mum@example.com"
+	if err := s.AddMemberCapped(ctx, owner, "a@example.com", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMemberCapped(ctx, owner, "b@example.com", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMemberCapped(ctx, owner, "c@example.com", 2); !errors.Is(err, ErrMemberLimit) {
+		t.Fatalf("third add should hit the limit, got %v", err)
+	}
+	if n, _ := s.CountMembers(ctx, owner); n != 2 {
+		t.Fatalf("member count = %d, want 2", n)
+	}
+	// A different account is unaffected by the first account's cap.
+	if err := s.AddMemberCapped(ctx, "other@example.com", "d@example.com", 2); err != nil {
+		t.Fatalf("another account should still be able to add: %v", err)
 	}
 }
 

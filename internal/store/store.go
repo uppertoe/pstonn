@@ -732,6 +732,28 @@ func (s *Store) AddMember(ctx context.Context, owner, memberEmail string) error 
 	return err
 }
 
+// ErrMemberLimit means the account already has the maximum number of secondaries.
+var ErrMemberLimit = errors.New("store: shared-access member limit reached")
+
+// AddMemberCapped adds a secondary only if the account is below max, atomically:
+// the count check and insert are one statement, so concurrent adds can't slip
+// past the cap. Returns ErrMemberLimit when full, or the underlying error (e.g. a
+// unique-constraint violation when the email is already a member somewhere).
+func (s *Store) AddMemberCapped(ctx context.Context, owner, memberEmail string, max int) error {
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO account_member (member_email, owner, added_at)
+SELECT ?, ?, ?
+WHERE (SELECT COUNT(1) FROM account_member WHERE owner = ?) < ?`,
+		memberEmail, owner, nowUTC(), owner, max)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrMemberLimit
+	}
+	return nil
+}
+
 // RemoveMember revokes a secondary's access, scoped to the owner so one account
 // cannot remove another's member.
 func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) error {

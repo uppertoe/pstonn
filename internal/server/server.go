@@ -40,6 +40,10 @@ type Server struct {
 	mail     *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
 	terms    Terms
 	contact  *rateLimiter // per-IP throttle on the public contact form
+	// invite-email throttles so a primary can't email-bomb an address or mass-send
+	// via SMTP: fanout caps per-owner sends, target dedups per recipient.
+	inviteFanout *rateLimiter
+	inviteTarget *rateLimiter
 }
 
 // New constructs a Server.
@@ -47,7 +51,9 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 	return &Server{
 		cfg: cfg, store: st, sessions: sessions, auth: auth, council: council,
 		sched: sched, notify: notifier, mail: mail, terms: loadTerms(cfg.TermsPath),
-		contact: newRateLimiter(3, 10*time.Minute), // 3 messages / 10 min per IP
+		contact:      newRateLimiter(3, 10*time.Minute), // 3 messages / 10 min per IP
+		inviteFanout: newRateLimiter(6, time.Hour),      // <=6 invite emails / hour per owner
+		inviteTarget: newRateLimiter(1, 24*time.Hour),   // <=1 invite email / day per recipient
 	}
 }
 
@@ -1122,26 +1128,30 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusConflict, "That person already uses p.stonn with their own account. Ask them to use a different email, or to remove their own account first.")
 		return
 	}
-	n, err := s.store.CountMembers(ctx, owner)
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	if n >= 2 {
-		s.message(w, http.StatusConflict, "You can share access with at most two people. Remove one first.")
-		return
-	}
-	if err := s.store.AddMember(ctx, owner, email); err != nil {
+	// Add atomically under the cap of two (the count check and insert are one
+	// statement, so concurrent adds cannot exceed it).
+	if err := s.store.AddMemberCapped(ctx, owner, email, 2); err != nil {
+		if errors.Is(err, store.ErrMemberLimit) {
+			s.message(w, http.StatusConflict, "You can share access with at most two people. Remove one first.")
+			return
+		}
 		log.Printf("add member %s to %s: %v", email, owner, err)
 		s.message(w, http.StatusConflict, "That email already has access to an account.")
 		return
 	}
 	// Courtesy heads-up (best-effort; not a login code) so they know to sign in.
-	go func(to, from string) {
-		if e := s.notify.SendInvite(to, from); e != nil {
-			log.Printf("invite email to %s: %v", to, e)
-		}
-	}(email, owner)
+	// Throttled so a primary can't email-bomb an address (target: 1/day) or
+	// mass-send via SMTP (fanout: a few/hour per owner). The member is still added
+	// regardless; only the email is rate-limited.
+	if s.inviteFanout.allow("o:"+owner) && s.inviteTarget.allow("t:"+email) {
+		go func(to, from string) {
+			if e := s.notify.SendInvite(to, from); e != nil {
+				log.Printf("invite email to %s: %v", to, e)
+			}
+		}(email, owner)
+	} else {
+		log.Printf("invite email to %s throttled", email)
+	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
