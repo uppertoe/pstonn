@@ -388,14 +388,23 @@
   .poster-body { padding:26px 30px 22px; }
   .poster-title { font-size:23px; font-weight:700; letter-spacing:-.01em; margin:0 0 4px; color:var(--pp-ink); text-wrap:balance; }
   .poster-lead { font-size:15px; font-weight:600; color:var(--pp-ink); margin:0 0 18px; }
-  .poster-qbox { display:inline-block; padding:14px; background:#fff; border:1px solid var(--pp-line); border-radius:14px; }
-  .poster-qbox img { width:240px; height:240px; max-width:100%; image-rendering:pixelated; display:block; }
+  .poster-qbox { display:block; width:268px; max-width:100%; margin:0 auto; box-sizing:border-box; padding:14px; background:#fff; border:1px solid var(--pp-line); border-radius:14px; }
+  .poster-qbox img { width:100%; height:auto; image-rendering:pixelated; display:block; }
   .poster-steps { text-align:left; max-width:300px; margin:20px auto 0; padding-left:20px; display:flex; flex-direction:column; gap:7px; font-size:13.5px; color:var(--pp-muted); }
   .poster-steps li { line-height:1.4; }
   .poster-steps li::marker { color:var(--pp-accent); font-weight:700; }
   .poster-note { font-size:12px; color:var(--pp-muted); margin:18px auto 0; max-width:320px; line-height:1.5; }
   .poster-foot { border-top:1px solid var(--pp-line); padding:12px 22px; font-size:11px; color:var(--pp-muted); }
   .posterhint { text-align:center; color:var(--muted); font-size:12.5px; margin:18px auto 0; max-width:420px; line-height:1.5; }
+  @media (max-width:520px){
+    .posterwrap { padding:14px 12px 40px; }
+    .posteractions { margin-bottom:12px; }
+    .poster-body { padding:22px 18px 18px; }
+    .poster-band { padding:12px 16px; }
+    .poster-title { font-size:20px; }
+    .poster-lead { font-size:14px; }
+    .poster-steps { max-width:none; }
+  }
   @media print {
     @page { margin:16mm; }
     html, body { background:#fff !important; }
@@ -875,8 +884,7 @@
     <a href="/guests" hx-boost="false"><button type="button" class="ghost sm">&larr; Guests</button></a>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" onclick="window.print()">{{template "ic-qr"}} Print</button>
-      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/replace" onsubmit="return confirm('Print a new code? The current printed copy will stop working.')"><button type="submit" class="ghost sm">Replace</button></form>
-      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" onsubmit="return confirm('Revoke this door QR? Any copy you printed stops working.')"><button type="submit" class="ghost sm">Revoke</button></form>
+      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" onsubmit="return confirm('Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards.')"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
     </div>
   </div>
 
@@ -1211,7 +1219,7 @@
   {{if .DoorGrants}}
   <section class="card" style="--hue:var(--sec-vehicles)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Your door QRs</h2>
-    <p class="subtitle">Durable codes to print, laminate, and leave up. Reopen any time to reprint the <em>same</em> one &mdash; the code keeps working.</p>
+    <p class="subtitle">Durable codes to print, laminate, and leave up. Reopen any time to reprint the <em>same</em> one &mdash; the code keeps working. To change the code (say a sheet went missing), remove it and print a new one.</p>
     {{range .DoorGrants}}
     <div class="doorrow">
       <div class="doorrow-main">
@@ -1220,8 +1228,7 @@
       </div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <a href="/guests/door/{{.GrantID}}/view" hx-boost="false"><button type="button">{{template "ic-qr"}} View &amp; print</button></a>
-        <form method="post" action="/guests/door/{{.GrantID}}/replace" onsubmit="return confirm('Print a new code for this permit? The current printed copy will stop working.')"><button type="submit" class="ghost sm">Replace</button></form>
-        <form method="post" action="/guests/door/{{.GrantID}}/revoke" onsubmit="return confirm('Revoke this door QR? Any copy you printed stops working.')"><button class="ghost icon" type="submit" title="Revoke">{{template "ic-trash"}}</button></form>
+        <form method="post" action="/guests/door/{{.GrantID}}/revoke" onsubmit="return confirm('Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards.')"><button class="ghost icon" type="submit" title="Remove">{{template "ic-trash"}}</button></form>
       </div>
     </div>
     {{end}}

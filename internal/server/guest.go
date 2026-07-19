@@ -865,27 +865,6 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 	s.render(w, base)
 }
 
-// replaceDoorQR rotates a door QR to a fresh code (the old one stops working), for
-// when a holder deliberately wants a new one — e.g. the old sheet was lost.
-func (s *Server) replaceDoorQR(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
-	g, err := s.store.PrintedGrantByID(r.Context(), owner, atoi64(r.PathValue("id")))
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			s.message(w, http.StatusNotFound, "That door QR is no longer available.")
-			return
-		}
-		s.serverError(w, err)
-		return
-	}
-	grantID, err := s.mintPrintedGrant(r.Context(), owner, g.PermitID)
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", grantID), http.StatusSeeOther)
-}
-
 // revokeDoorQR retires a door QR for good (its code stops working).
 func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())

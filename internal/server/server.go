@@ -111,7 +111,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /guests/qr", s.withConsent(s.showVisitorQR))
 	mux.HandleFunc("POST /guests/printed", s.withConsent(s.showPrintedQR))
 	mux.HandleFunc("GET /guests/door/{id}/view", s.withConsent(s.viewDoorQR))
-	mux.HandleFunc("POST /guests/door/{id}/replace", s.withConsent(s.replaceDoorQR))
 	mux.HandleFunc("POST /guests/door/{id}/revoke", s.withConsent(s.revokeDoorQR))
 	mux.HandleFunc("POST /guests/requests/{id}/approve", s.withConsent(s.approveGuestRequest))
 	mux.HandleFunc("POST /guests/requests/{id}/deny", s.withConsent(s.denyGuestRequest))
