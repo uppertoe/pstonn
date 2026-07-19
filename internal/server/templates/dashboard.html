@@ -22,14 +22,14 @@
     };
   })();
 </script>
-<script src="/static/htmx.min.js"></script>
-<script defer src="/static/alpine.min.js"></script>
-{{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="/static/demos.css">
-<script defer src="/static/demos.js"></script>{{end}}
+<script src="{{asset "htmx.min.js"}}"></script>
+<script defer src="{{asset "alpine.min.js"}}"></script>
+{{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
+<script defer src="{{asset "demos.js"}}"></script>{{end}}
 <style>
   @font-face {
     font-family:'Space Grotesk'; font-style:normal; font-weight:600; font-display:swap;
-    src:url('/static/spacegrotesk-wordmark.woff2') format('woff2');
+    src:url('{{asset "spacegrotesk-wordmark.woff2"}}') format('woff2');
     /* Subset covers only the wordmark glyphs (p . s t o n); scope the font to them
        so it is never partially applied to arbitrary headings. */
     unicode-range:U+002E, U+006E, U+006F, U+0070, U+0073, U+0074;
@@ -166,6 +166,12 @@
   textarea { resize:vertical; min-height:96px; width:100%; }
   input:focus,select:focus,textarea:focus { outline:0; border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 22%,transparent); }
   label.fld { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); }
+  /* Roomier contact form (landing + /contact) */
+  .contactform { gap:16px; }
+  .contactform .fld { font-size:13.5px; gap:7px; }
+  .contactform input, .contactform textarea { font-size:15px; padding:12px 14px; }
+  .contactform textarea { min-height:150px; line-height:1.5; }
+  .contactform button[type=submit] { padding:13px 18px; font-size:15px; margin-top:2px; }
   button { font:inherit; font-weight:560; padding:9px 15px; border:0; border-radius:var(--radius-sm); background:var(--primary); color:var(--on-primary); cursor:pointer; display:inline-flex; align-items:center; gap:7px; transition:transform .08s, box-shadow .15s, filter .15s; box-shadow:var(--shadow); }
   button:hover { filter:brightness(1.05); box-shadow:var(--shadow-lg); }
   button:active { transform:translateY(1px) scale(.99); }
@@ -212,6 +218,7 @@
   .cday:hover { border-color:var(--primary); }
   .cday:active { transform:scale(.98); }
   .cday.today { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
+  .cday.past { opacity:.42; }
   .cday .cd { font-size:10.5px; color:var(--muted); margin-bottom:7px; white-space:nowrap; font-weight:600; }
   .cday .bar { height:6px; border-radius:4px; background:var(--line); }
   .cday .oneoff { position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--accent); }
@@ -278,8 +285,10 @@
   .pick-item:hover { border-color:var(--primary); box-shadow:var(--shadow); }
   .pick-item.sug { border-color:color-mix(in srgb,var(--ok) 40%,transparent); background:var(--ok-soft); }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
-  .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; }
+  .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
   .link-quiet:hover { color:var(--primary); }
+  .link-quiet.active { color:var(--ink); font-weight:650; }
+  .link-quiet.active::after { content:""; position:absolute; left:0; right:0; bottom:-6px; height:2px; border-radius:2px; background:var(--primary); }
 
   /* hero (onboarding) */
   .hero { text-align:center; padding:34px 22px; max-width:520px; margin:26px auto; }
@@ -309,6 +318,11 @@
   .about { max-width:680px; }
   .about-h1 { font-size:30px; letter-spacing:-.02em; margin:30px 0 6px; font-weight:750; }
   .about-h2 { font-size:16px; letter-spacing:-.01em; margin:28px 0 8px; }
+  /* readable prose panel (used on the why/how-it-works page) */
+  .paper { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:22px 26px; margin:22px 0; }
+  .paper > :first-child { margin-top:0; }
+  .paper > :last-child { margin-bottom:0; }
+  .whyhead { text-align:center; font-size:15px; color:var(--muted); font-weight:600; letter-spacing:.02em; margin:34px 0 4px; }
   .about p, .about li { color:var(--ink); font-size:15px; line-height:1.6; }
   .about ul { margin:0; padding-left:20px; display:grid; gap:9px; }
   .about li { padding-left:2px; }
@@ -339,7 +353,7 @@
     <h1>Schedule your City of Stonnington visitor parking permit.</h1>
     <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
     <a href="/schedule"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
-    <p class="lnote">Sign in with a one-time code sent to your email.</p>
+    <p class="lnote">A free service. Sign in with a one-time code sent to your email.</p>
   </section>
   <div class="demos">
     <div class="dm-mini" data-demo="mini">
@@ -359,58 +373,65 @@
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>It stays in sync</h3><p>p.stonn updates the permit to match and records each change. It can notify you by email or push.</p></div>
   </section>
-  <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/about">How it works and security</a></p>
+  {{if .Contact}}
+  <section class="paper" style="max-width:640px;margin:48px auto 0;padding:30px 34px">
+    <h2 class="about-h2" style="margin-top:0">Get in touch</h2>
+    <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">Questions, problems, or feedback? Send a message and it reaches the person running this. Your email is optional, but it's the only way to get a reply.</p>
+    <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:0">
+      <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+      <label class="fld"><span>Your email (optional, for a reply)</span><input type="email" name="email" placeholder="you@example.com" autocomplete="email"></label>
+      <label class="fld"><span>Message</span><textarea name="message" rows="6" required minlength="10" maxlength="4000" placeholder="How can we help?"></textarea></label>
+      <button type="submit" style="justify-content:center">{{template "ic-bell"}} Send message</button>
+    </form>
+  </section>
+  {{end}}
+  <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/about">Security &amp; the fine print</a></p>
 </main>
 
 {{else if eq .State "about"}}
 {{/* ================= PUBLIC ABOUT ================= */}}
 {{template "publicheader" .}}
 <main class="landing about">
-  <h1 class="about-h1">About p.stonn</h1>
+  <section class="paper">
+    <h1 class="about-h1">About p.stonn</h1>
+    <p>p.stonn is a free, unofficial tool that schedules which vehicle is on your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/why">How it works</a>.</p>
 
-  <h2 class="about-h2">What it is</h2>
-  <p>p.stonn is an unofficial tool that schedules which vehicle is allocated to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington.</p>
+    <h2 class="about-h2">The security model, plainly</h2>
+    <ul>
+      <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held by whoever runs this server.</li>
+      <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
+      <li>p.stonn does not store your council password. It does store your email, your schedule, and the encrypted session.</li>
+      <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
+      <li>Use a password that is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
+      <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
+      <li>Consider whether you are comfortable with a third party holding access to your council account before using this. Do not rely on it for anything you can't afford to have go wrong.</li>
+    </ul>
 
-  <h2 class="about-h2">How it works</h2>
-  <ul>
-    <li>You sign in to p.stonn with a one-time code sent to your email.</li>
-    <li>You link your council ePermits account by entering your council password once. p.stonn uses it to log in, stores an encrypted session, and discards the password. It renews that session automatically so it can keep acting for you.</li>
-    <li>You set a weekly schedule and one-off bookings. A background process checks every minute and, whenever the schedule says the vehicle should change, updates your permit and records what it did.</li>
-  </ul>
+    <h2 class="about-h2">Notifications</h2>
+    <ul>
+      <li>p.stonn attempts to notify you (by email and/or push) each time it changes your permit or fails to. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Delivery is not guaranteed.</li>
+      <li>You remain responsible for checking your permit and for any fines. Treat notifications as a convenience, not a guarantee.</li>
+    </ul>
 
-  <h2 class="about-h2">The security model, plainly</h2>
-  <ul>
-    <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held by whoever runs this server.</li>
-    <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
-    <li>p.stonn does not store your council password. It does store your email, your schedule, and the encrypted session.</li>
-    <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
-    <li>Use a password that is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
-    <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
-    <li>Consider whether you are comfortable with a third party holding access to your council account before using this. Do not rely on it for anything you can't afford to have go wrong.</li>
-  </ul>
+    <h2 class="about-h2">No promises</h2>
+    <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
+  </section>
 
-  <h2 class="about-h2">Notifications</h2>
-  <ul>
-    <li>p.stonn attempts to notify you (by email and/or push) each time it changes your permit or fails to. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Delivery is not guaranteed.</li>
-    <li>You remain responsible for checking your permit and for any fines. Treat notifications as a convenience, not a guarantee.</li>
-  </ul>
-
-  <h2 class="about-h2">No promises</h2>
-  <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
-
-  <p class="ldisclaimer" style="margin-top:32px"><a href="/">← Back</a></p>
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/">← Back</a></p>
 </main>
 
 {{else if eq .State "why"}}
 {{/* ================= PUBLIC: WHY / HOW IT WORKS ================= */}}
 {{template "publicheader" .}}
 <main class="landing about">
-  <h1 class="about-h1">Why this exists</h1>
-  <p>Stonnington changed how resident and visitor parking permits work. Since January, permits that used to be free now cost money, and the paper permits anyone could use are being phased out for a digital system. To keep a permit you enter your vehicle registrations into the council's online system, and parking officers check number plates against it.</p>
-  <p>For visitor parking, that means adding the registration of each car that visits, through the council portal, on the day it visits. For a household that relies on regular help (grandparents on pickup, a nanny, a carer), that becomes a recurring task tied to whoever is coming and when.</p>
-  <p>p.stonn handles that part for you. You set which car is on your visitor permit on a weekly schedule, add any one-off bookings, and it keeps the council permit up to date and tells you when it has changed.</p>
+  <section class="paper">
+    <h1 class="about-h1">Why this exists</h1>
+    <p>Stonnington changed how resident and visitor parking permits work. Since January, permits that used to be free now cost money, and the paper permits anyone could use are being phased out for a digital system. To keep a permit you enter your vehicle registrations into the council's online system, and parking officers check number plates against it.</p>
+    <p>For visitor parking, that means adding the registration of each car that visits, through the council portal, on the day it visits. For a household that relies on regular help (grandparents on pickup, a nanny, a carer), that becomes a recurring task tied to whoever is coming and when.</p>
+    <p>p.stonn handles that part for you. You set which car is on your visitor permit on a weekly schedule, add any one-off bookings, and it keeps the council permit up to date and tells you when it has changed.</p>
+  </section>
 
-  <h2 class="about-h2">How it works</h2>
+  <p class="whyhead">How it works</p>
   <div class="demos">
     <div class="dm-grid">
 
@@ -476,24 +497,26 @@
     <p class="dm-foot">A demonstration with made-up plates and names. Not a real permit.</p>
   </div>
 
-  <h2 class="about-h2">Before you start: get a Stonnington ePermit</h2>
-  <p>p.stonn does not replace the council's system. It works on top of a permit you already hold, so you need a City of Stonnington ePermits account with at least one visitor permit first.</p>
-  <p>If you are not set up yet:</p>
-  <ul>
-    <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
-    <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
-    <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
-    <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
-  </ul>
-  <p>The council's own pages have the current fees, forms and details:</p>
-  <ul>
-    <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits" rel="noopener noreferrer">Parking permits</a></li>
-    <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
-    <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
-  </ul>
-  <p>Once your council account has a visitor permit, <a href="/schedule">sign in to p.stonn</a> and connect it.</p>
+  <section class="paper">
+    <h2 class="about-h2" style="margin-top:0">Before you start: get a Stonnington ePermit</h2>
+    <p>p.stonn does not replace the council's system. It works on top of a permit you already hold, so you need a City of Stonnington ePermits account with at least one visitor permit first.</p>
+    <p>If you are not set up yet:</p>
+    <ul>
+      <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
+      <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
+      <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
+      <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
+    </ul>
+    <p>The council's own pages have the current fees, forms and details:</p>
+    <ul>
+      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits" rel="noopener noreferrer">Parking permits</a></li>
+      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
+      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
+    </ul>
+    <p>Once your council account has a visitor permit, <a href="/schedule">sign in to p.stonn</a> and connect it.</p>
+  </section>
 
-  <p class="ldisclaimer" style="margin-top:32px"><a href="/">&larr; Back</a></p>
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/">&larr; Back</a></p>
 </main>
 
 {{else if eq .State "contact"}}
@@ -504,7 +527,7 @@
   <p>Questions, problems, or feedback about p.stonn? Send a message and it reaches the person running this server. Leaving your email is optional, but it's the only way to get a reply.</p>
   {{if .Flash}}<div class="banner ok" style="margin:16px 0">{{template "ic-check"}} <span>{{.Flash}}</span></div>{{end}}
   {{if .Warn}}<div class="banner warn" style="margin:16px 0">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
-  <form method="post" action="/contact" class="stack" style="max-width:none;margin-top:8px">
+  <form method="post" action="/contact" class="stack contactform" style="max-width:560px;margin-top:14px">
     {{/* Honeypot: hidden from people, tempting to bots. Real submissions leave it blank. */}}
     <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
     <label class="fld">
@@ -746,13 +769,13 @@
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit">{{template "ic-plus"}} Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">They get access when they sign in with that email.{{if .Notify.EmailAvailable}} We send them a heads-up so they know to.{{end}} They can manage the schedule and vehicles, but cannot disconnect the council account, delete the account, or change who has access. Someone who already has their own p.stonn account cannot be added.</p>
+    <p class="empty-note" style="margin-top:10px">When you add an email, that person gets access the next time they sign in with it.{{if .Notify.EmailAvailable}} We send them an email to let them know.{{end}} They can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Anyone who already has their own p.stonn account cannot be added.</p>
     {{else}}
     <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
     {{end}}
     {{else}}
     <p class="subtitle">You have shared access to <strong>{{.SharedWith}}</strong>'s account.</p>
-    <p class="empty-note">You can manage the schedule and vehicles. Only the owner can connect or disconnect the council account, or delete the account.</p>
+    <p class="empty-note">You can set the schedule and manage vehicles. Only the account owner can connect or disconnect the council account, or delete the account.</p>
     <form method="post" action="/account/leave" onsubmit="return confirm('Leave this shared account? You go back to your own account.')" style="margin-top:14px">
       <button type="submit" class="ghost">{{template "ic-x"}} Leave this account</button>
     </form>
@@ -792,9 +815,9 @@
 <header class="appbar">
   <a href="/" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <div class="appbar-r">
-    <a href="/why" class="link-quiet">How it works</a>
-    <a href="/about" class="link-quiet">About</a>
-    {{if .Contact}}<a href="/contact" class="link-quiet">Contact</a>{{end}}
+    <a href="/why" class="link-quiet{{if eq .State "why"}} active{{end}}"{{if eq .State "why"}} aria-current="page"{{end}}>How it works</a>
+    <a href="/about" class="link-quiet{{if eq .State "about"}} active{{end}}"{{if eq .State "about"}} aria-current="page"{{end}}>About</a>
+    {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
     <button class="icon-btn" type="button" onclick="toggleTheme()" aria-label="Toggle light / dark"><span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span></button>
     <a href="/schedule"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
   </div>
@@ -887,10 +910,10 @@
   {{end}}
 </div>
 
-<p class="sub" style="margin-top:20px">Next 14 days</p>
+<p class="sub" style="margin-top:20px">This week and next</p>
 <div class="cal">
   {{range .Cal}}
-  <div class="cday {{if .IsToday}}today{{end}}" x-data="{open:false}" @click="open=!open">
+  <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}" @click="open=!open">
     <div class="cd">{{.DayLabel}}</div>
     <div class="bar" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
     {{if .HasOneoff}}<span class="oneoff" title="one-off booking"></span>{{end}}

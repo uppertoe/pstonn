@@ -10,7 +10,6 @@ package notify
 import (
 	"context"
 	crand "crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -331,8 +330,28 @@ func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, ta
 
 // RandomTopic returns an unguessable ntfy topic for a new user (topics are the
 // only access control on a public ntfy server, so they must not be guessable).
+// RandomTopic returns an unguessable but easy-to-type ntfy topic. An ntfy topic
+// is a shared secret the user types by hand into the phone app, so we favour a
+// pronounceable, unambiguous form (alternating consonant/vowel syllables in
+// hyphen-separated groups, no look-alike letters like l/1/o/0) over raw hex.
+// Four four-letter groups give roughly 52 bits of entropy: ample for what is a
+// low-stakes, rate-limited read capability, while staying quick to key in.
 func RandomTopic() string {
-	b := make([]byte, 9)
+	const cons = "bcdfghjkmnpqrstvwxz" // consonants, minus ambiguous l and y
+	const vows = "aeiou"
+	b := make([]byte, 16)
 	_, _ = crand.Read(b)
-	return "pstonn-" + hex.EncodeToString(b)
+	var sb strings.Builder
+	sb.WriteString("pstonn")
+	for i := 0; i < len(b); i++ {
+		if i%4 == 0 {
+			sb.WriteByte('-')
+		}
+		if i%2 == 0 {
+			sb.WriteByte(cons[int(b[i])%len(cons)])
+		} else {
+			sb.WriteByte(vows[int(b[i])%len(vows)])
+		}
+	}
+	return sb.String()
 }
