@@ -771,13 +771,13 @@ func TestPrintedRequestFlow(t *testing.T) {
 	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
 
 	// A foreign permit can't back a printed grant.
-	if _, err := s.CreatePrintedGrant(ctx, owner, bp, "x"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreatePrintedGrant(ctx, owner, bp, "x", "xsealed"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
 	}
 
 	// The printed grant is request-only, allows free plate entry, and stays hidden
 	// from the management list (like the on-screen QR).
-	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "printhash")
+	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "printhash", "sealed1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -794,7 +794,7 @@ func TestPrintedRequestFlow(t *testing.T) {
 
 	// Showing a printed QR again replaces the prior grant for that permit (and, by
 	// cascade, any requests against it), so the old token stops resolving.
-	grantID, err = s.CreatePrintedGrant(ctx, owner, p, "printhash2")
+	grantID, err = s.CreatePrintedGrant(ctx, owner, p, "printhash2", "sealed2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -836,5 +836,73 @@ func TestPrintedRequestFlow(t *testing.T) {
 	}
 	if reqs, _ := s.ListPendingRequests(ctx, owner); len(reqs) != 0 {
 		t.Fatalf("decided request should leave the queue, got %d", len(reqs))
+	}
+}
+
+func TestPrintedGrantPersistence(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner, bob = "u@example.com", "bob@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "1st Visitor Permit")
+	s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// No door QR yet.
+	if _, err := s.PrintedGrantForPermit(ctx, owner, p); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no grant yet = %v, want ErrNotFound", err)
+	}
+	if ds, _ := s.ListPrintedGrants(ctx, owner); len(ds) != 0 {
+		t.Fatalf("empty list expected, got %d", len(ds))
+	}
+
+	// Mint one; it's findable by permit and by id, carries the sealed token + label.
+	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "hashA", "sealedA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPermit, err := s.PrintedGrantForPermit(ctx, owner, p)
+	if err != nil || byPermit.GrantID != grantID || byPermit.TokenSealed != "sealedA" || byPermit.PermitLabel != "1st Visitor Permit" {
+		t.Fatalf("byPermit = %+v, %v", byPermit, err)
+	}
+	byID, err := s.PrintedGrantByID(ctx, owner, grantID)
+	if err != nil || byID.TokenSealed != "sealedA" {
+		t.Fatalf("byID = %+v, %v", byID, err)
+	}
+
+	// Another owner can neither see nor open it.
+	if _, err := s.PrintedGrantByID(ctx, bob, grantID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign byID = %v, want ErrNotFound", err)
+	}
+	if ds, _ := s.ListPrintedGrants(ctx, bob); len(ds) != 0 {
+		t.Fatalf("foreign list should be empty, got %d", len(ds))
+	}
+
+	// Replace rotates the sealed token but keeps one grant per permit.
+	newID, err := s.CreatePrintedGrant(ctx, owner, p, "hashB", "sealedB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newID == grantID {
+		t.Fatal("replace should mint a new grant id")
+	}
+	if _, err := s.PrintedGrantByID(ctx, owner, grantID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old grant should be gone = %v", err)
+	}
+	again, _ := s.PrintedGrantForPermit(ctx, owner, p)
+	if again.TokenSealed != "sealedB" {
+		t.Fatalf("after replace sealed = %q, want sealedB", again.TokenSealed)
+	}
+	if ds, _ := s.ListPrintedGrants(ctx, owner); len(ds) != 1 {
+		t.Fatalf("still one door QR per permit, got %d", len(ds))
+	}
+
+	// Revoke retires it; a second revoke is ErrNotFound.
+	if err := s.RevokePrintedGrant(ctx, owner, newID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if err := s.RevokePrintedGrant(ctx, owner, newID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("double revoke = %v, want ErrNotFound", err)
+	}
+	if _, err := s.PrintedGrantForPermit(ctx, owner, p); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after revoke = %v, want ErrNotFound", err)
 	}
 }

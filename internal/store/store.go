@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS guest_token (
     grant_id        INTEGER NOT NULL REFERENCES guest_grant(id) ON DELETE CASCADE,
     recipient_email TEXT NOT NULL DEFAULT '',
     token_hash      TEXT NOT NULL UNIQUE,
+    token_sealed    TEXT NOT NULL DEFAULT '',   -- printed door QR only: the raw token, encrypted at rest, so the SAME code can be reprinted (inert artifact; a scan can only request approval)
     revoked_at      TEXT NOT NULL DEFAULT '',
     last_used_at    TEXT NOT NULL DEFAULT '',
     expires_at      TEXT NOT NULL DEFAULT '',   -- RFC3339 UTC; '' = never (persistent email link)
@@ -269,6 +270,7 @@ CREATE TABLE IF NOT EXISTS account_flags (
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN request_only INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_token ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_token ADD COLUMN token_sealed TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
@@ -1437,11 +1439,22 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64,
 	return grantID, tx.Commit()
 }
 
-// CreatePrintedGrant creates a durable "printed QR" grant for a permit: a scan
-// only lets a visitor REQUEST the permit (request_only), which the holder must
-// approve. It replaces any existing printed grant for the same permit so there is
-// one active code (a reprint invalidates the old one). Returns the grant id.
-func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID int64, tokenHash string) (int64, error) {
+// PrintedGrant is a durable door-QR pass: one per permit, reprintable because its
+// token is kept (sealed) so the SAME code can be shown again. TokenSealed is the
+// raw token encrypted at rest; the caller opens it to rebuild the activation URL.
+type PrintedGrant struct {
+	GrantID     int64
+	PermitID    int64
+	PermitLabel string
+	TokenSealed string
+	CreatedAt   time.Time
+}
+
+// CreatePrintedGrant mints (or replaces) the printed door QR for a permit: it drops
+// any existing printed grant for that permit and inserts a fresh one. tokenSealed is
+// the raw token encrypted at rest so the same code can be reprinted later; tokenHash
+// is the lookup key used when a visitor scans.
+func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID int64, tokenHash, tokenSealed string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -1469,11 +1482,96 @@ func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID i
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, '', ?, ?)`,
-		grantID, tokenHash, nowUTC()); err != nil {
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, token_sealed, created_at) VALUES (?, '', ?, ?, ?)`,
+		grantID, tokenHash, tokenSealed, nowUTC()); err != nil {
 		return 0, err
 	}
 	return grantID, tx.Commit()
+}
+
+// PrintedGrantByID returns a single owner-scoped printed grant (for the reprint /
+// poster view), including its sealed token so the URL can be rebuilt.
+func (s *Store) PrintedGrantByID(ctx context.Context, owner string, grantID int64) (PrintedGrant, error) {
+	var g PrintedGrant
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.id = ? AND g.owner = ? AND g.request_only = 1`, grantID, owner).
+		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
+	if err == sql.ErrNoRows {
+		return PrintedGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return PrintedGrant{}, err
+	}
+	g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return g, nil
+}
+
+// PrintedGrantForPermit returns the existing door QR for a permit, or ErrNotFound —
+// so creating one can be idempotent (reuse rather than rotate the token).
+func (s *Store) PrintedGrantForPermit(ctx context.Context, owner string, permitID int64) (PrintedGrant, error) {
+	var g PrintedGrant
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1`, owner, permitID).
+		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
+	if err == sql.ErrNoRows {
+		return PrintedGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return PrintedGrant{}, err
+	}
+	g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return g, nil
+}
+
+// ListPrintedGrants returns an owner's durable door QRs, newest first, for the
+// management list on the Guests page.
+func (s *Store) ListPrintedGrants(ctx context.Context, owner string) ([]PrintedGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.request_only = 1
+ORDER BY g.id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PrintedGrant
+	for rows.Next() {
+		var g PrintedGrant
+		var created string
+		if err := rows.Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created); err != nil {
+			return nil, err
+		}
+		g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// RevokePrintedGrant deletes an owner's door QR (cascading its token and any pending
+// requests), retiring the printed code for good.
+func (s *Store) RevokePrintedGrant(ctx context.Context, owner string, grantID int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE id = ? AND owner = ? AND request_only = 1`, grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // CreateGuestRequest records a pending request from a printed-QR scan. nonce is a

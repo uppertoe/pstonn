@@ -69,13 +69,31 @@ type guestReqView struct {
 	Ago         string // "2 min ago"
 }
 
-// qrShowView drives the page the resident shows on-screen for a visitor to scan.
+// qrShowView drives the on-screen visitor QR the resident shows in person (instant,
+// short-lived). The durable printed door QR uses doorQRView / the poster instead.
 type qrShowView struct {
 	PermitLabel string
 	ImageURI    template.URL // the QR as a data: URI (trusted: server-generated)
 	URL         string       // the activation URL (also printed under the QR)
-	ExpiresAt   string       // human-readable expiry ("" for a printed QR that doesn't expire)
-	Printed     bool         // a durable print-and-leave QR (request + approve), not the instant one
+	ExpiresAt   string       // human-readable expiry
+}
+
+// doorQRView drives the styled, printable door-QR poster (State "doorqr"). It is a
+// durable artifact: the same code reprints because the token is kept sealed.
+type doorQRView struct {
+	GrantID     int64
+	PermitLabel string
+	OwnerEmail  string
+	ImageURI    template.URL
+	URL         string
+	CreatedAt   string // "20 Jul 2026"
+}
+
+// doorGrantView is one durable door QR in the holder's management list.
+type doorGrantView struct {
+	GrantID     int64
+	PermitLabel string
+	CreatedAt   string
 }
 
 // guestGrantView + guestRecipientView drive the account holder's management page.
@@ -428,6 +446,14 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 			})
 		}
 	}
+	if doors, derr := s.store.ListPrintedGrants(ctx, owner); derr == nil {
+		for _, d := range doors {
+			base.DoorGrants = append(base.DoorGrants, doorGrantView{
+				GrantID: d.GrantID, PermitLabel: d.PermitLabel,
+				CreatedAt: d.CreatedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"),
+			})
+		}
+	}
 	base.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)
 	return err
 }
@@ -767,16 +793,57 @@ func (s *Server) notifyGuestRequest(permit model.Permit, plate string) {
 // showPrintedQR mints a durable request-only grant and renders a QR to print and
 // leave out (e.g. at the door). A scan of it only requests the permit; the holder
 // approves live. It replaces any existing printed QR for the permit.
+// mintPrintedGrant creates (or replaces) a permit's door QR, sealing the raw token
+// at rest so the same code can be reprinted later. Returns the new grant id.
+func (s *Server) mintPrintedGrant(ctx context.Context, owner string, permitID int64) (int64, error) {
+	raw, hash := newGuestToken()
+	sealed, err := s.box.Seal(raw)
+	if err != nil {
+		return 0, err
+	}
+	return s.store.CreatePrintedGrant(ctx, owner, permitID, hash, sealed)
+}
+
+// showPrintedQR handles "Print a door QR" for a permit. It is idempotent: if the
+// permit already has a door QR it reopens that (same code) rather than rotating the
+// token, so a copy already on the fridge keeps working.
 func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	permitID := atoi64(r.FormValue("permit_id"))
-	raw, hash := newGuestToken()
-	if _, err := s.store.CreatePrintedGrant(r.Context(), owner, permitID, hash); err != nil {
+	if g, err := s.store.PrintedGrantForPermit(r.Context(), owner, permitID); err == nil {
+		http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", g.GrantID), http.StatusSeeOther)
+		return
+	}
+	grantID, err := s.mintPrintedGrant(r.Context(), owner, permitID)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
 			return
 		}
 		s.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", grantID), http.StatusSeeOther)
+}
+
+// viewDoorQR renders the durable, printable poster for an existing door QR. It never
+// rotates the token, so it can be reopened and reprinted as often as needed.
+func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	g, err := s.store.PrintedGrantByID(r.Context(), owner, atoi64(r.PathValue("id")))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.message(w, http.StatusNotFound, "That door QR is no longer available.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	raw, err := s.box.Open(g.TokenSealed)
+	if err != nil {
+		// The at-rest key changed, so we can't reproduce the printed code. Ask the
+		// holder to replace it (which mints a fresh one they can reprint).
+		s.message(w, http.StatusConflict, "This code can't be shown again on this server. Use Replace to print a new one.")
 		return
 	}
 	url := s.guestLink(raw)
@@ -785,17 +852,48 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	permit, _ := s.store.GetPermit(r.Context(), permitID)
 	base, ok := s.appShell(w, r, "guests")
 	if !ok {
 		return
 	}
-	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
+	base.State = "doorqr"
+	base.DoorQR = &doorQRView{
+		GrantID: g.GrantID, PermitLabel: g.PermitLabel, OwnerEmail: owner,
+		ImageURI: template.URL(img), URL: url,
+		CreatedAt: g.CreatedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"),
+	}
+	s.render(w, base)
+}
+
+// replaceDoorQR rotates a door QR to a fresh code (the old one stops working), for
+// when a holder deliberately wants a new one — e.g. the old sheet was lost.
+func (s *Server) replaceDoorQR(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	g, err := s.store.PrintedGrantByID(r.Context(), owner, atoi64(r.PathValue("id")))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.message(w, http.StatusNotFound, "That door QR is no longer available.")
+			return
+		}
 		s.serverError(w, err)
 		return
 	}
-	base.QR = &qrShowView{PermitLabel: permitLabel(permit), ImageURI: template.URL(img), URL: url, Printed: true}
-	s.render(w, base)
+	grantID, err := s.mintPrintedGrant(r.Context(), owner, g.PermitID)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", grantID), http.StatusSeeOther)
+}
+
+// revokeDoorQR retires a door QR for good (its code stops working).
+func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	if err := s.store.RevokePrintedGrant(r.Context(), owner, atoi64(r.PathValue("id"))); err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
 func (s *Server) approveGuestRequest(w http.ResponseWriter, r *http.Request) {

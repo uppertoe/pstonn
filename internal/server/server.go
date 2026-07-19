@@ -23,6 +23,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/scheduler"
+	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/session"
 	"github.com/uppertoe/pstonn/internal/store"
 	"github.com/uppertoe/pstonn/internal/webauth"
@@ -38,6 +39,7 @@ type Server struct {
 	sched    *scheduler.Scheduler
 	notify   *notify.Service
 	mail     *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
+	box      *secretbox.Box // at-rest cipher; seals the reprintable door-QR token
 	terms    Terms
 	contact  *rateLimiter // per-IP throttle on the public contact form
 	// invite-email throttles so a primary can't email-bomb an address or mass-send
@@ -48,10 +50,10 @@ type Server struct {
 }
 
 // New constructs a Server.
-func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council *parking.Client, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer) *Server {
+func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council *parking.Client, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
 	return &Server{
 		cfg: cfg, store: st, sessions: sessions, auth: auth, council: council,
-		sched: sched, notify: notifier, mail: mail, terms: loadTerms(cfg.TermsPath),
+		sched: sched, notify: notifier, mail: mail, box: box, terms: loadTerms(cfg.TermsPath),
 		contact:      newRateLimiter(3, 10*time.Minute),  // 3 messages / 10 min per IP
 		inviteFanout: newRateLimiter(6, time.Hour),       // <=6 invite emails / hour per owner
 		inviteTarget: newRateLimiter(1, 24*time.Hour),    // <=1 invite email / day per recipient
@@ -108,6 +110,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))
 	mux.HandleFunc("POST /guests/qr", s.withConsent(s.showVisitorQR))
 	mux.HandleFunc("POST /guests/printed", s.withConsent(s.showPrintedQR))
+	mux.HandleFunc("GET /guests/door/{id}/view", s.withConsent(s.viewDoorQR))
+	mux.HandleFunc("POST /guests/door/{id}/replace", s.withConsent(s.replaceDoorQR))
+	mux.HandleFunc("POST /guests/door/{id}/revoke", s.withConsent(s.revokeDoorQR))
 	mux.HandleFunc("POST /guests/requests/{id}/approve", s.withConsent(s.approveGuestRequest))
 	mux.HandleFunc("POST /guests/requests/{id}/deny", s.withConsent(s.denyGuestRequest))
 	mux.HandleFunc("POST /guests/{id}", s.withConsent(s.updateGuestGrant))
@@ -498,6 +503,8 @@ type dashboardData struct {
 	NewGuestLinks   []guestLinkView  // links shown once, right after a grant is created
 	Edit            *editGrantView   // non-nil puts the pass form in edit mode
 	QR              *qrShowView      // non-nil shows the on-screen visitor QR
+	DoorQR          *doorQRView      // non-nil renders the printable door-QR poster (State "doorqr")
+	DoorGrants      []doorGrantView  // durable door QRs in the management list
 	PendingRequests []guestReqView   // printed-QR requests awaiting the holder's decision
 	Guest           guestActView     // public activation menu (State "guest")
 	Wait            *guestWaitView   // public "waiting for approval" page (State "guest-wait")
