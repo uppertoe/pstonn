@@ -251,9 +251,9 @@ func TestFailureNotifyDedupAndSuccess(t *testing.T) {
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
 	// Ticks are a minute apart in production; sleep so async delivery lands first.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil) // identical → suppressed
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil) // identical → suppressed
 	time.Sleep(60 * time.Millisecond)
 	// Success (as the reconcile success branch would do).
 	s.clearFailStreak(p.ID)
@@ -290,7 +290,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
 	for i := 0; i < failNotifyThreshold-1; i++ {
-		s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+		s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 		time.Sleep(30 * time.Millisecond)
 	}
 	if n := len(fn.appliedSnap()); n != 0 {
@@ -300,7 +300,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 		t.Fatal("transient failure should still be recorded in the activity log")
 	}
 	// The threshold-th consecutive failure now alarms.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	out := fn.outcomeSnap()
 	if len(out) != 1 || out[0].OK || !out[0].Transient {
@@ -308,7 +308,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 	}
 	// A success resets the streak so the next blip gets a fresh grace period.
 	s.clearFailStreak(p.ID)
-	s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 	time.Sleep(30 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 1 {
 		t.Fatalf("streak not reset after success; got %d notifications", n)
@@ -349,13 +349,13 @@ func TestFailureEscalatesWhenUserNotReached(t *testing.T) {
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
 	// A rejection alarms on the first tick.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.adminSnap()); n != 1 {
 		t.Fatalf("admin escalations = %d, want 1 (user not reached)", n)
 	}
 	// Not marked delivered → an identical repeat is RE-attempted, not suppressed.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 2 {
 		t.Fatalf("undelivered failure must be retried; NotifyApply calls = %d, want 2", n)

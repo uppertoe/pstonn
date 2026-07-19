@@ -57,13 +57,38 @@ func TestResolve(t *testing.T) {
 		}
 	})
 
-	t.Run("most recently started override wins", func(t *testing.T) {
+	t.Run("most recently created override wins", func(t *testing.T) {
+		// Both windows cover `monday`; the one booked later takes the wheel,
+		// regardless of start time.
 		ovr := []Override{
-			{ID: 1, VehicleID: 55, StartsAt: mustTime(t, "2026-07-20 06:00 +1000")},
-			{ID: 2, VehicleID: 66, StartsAt: mustTime(t, "2026-07-20 08:00 +1000")},
+			{ID: 1, VehicleID: 55, StartsAt: mustTime(t, "2026-07-20 06:00 +1000"), CreatedAt: mustTime(t, "2026-07-19 09:00 +1000")},
+			{ID: 2, VehicleID: 66, StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), CreatedAt: mustTime(t, "2026-07-19 10:00 +1000")},
 		}
 		if got := Resolve(monday, rules, ovr); got.VehicleID != 66 {
-			t.Fatalf("overlap: got %+v, want vehicle 66 (latest start)", got)
+			t.Fatalf("overlap: got %+v, want vehicle 66 (created latest)", got)
+		}
+	})
+
+	t.Run("ad-hoc plate override wins with its literal registration", func(t *testing.T) {
+		ovr := []Override{
+			{ID: 1, Registration: "GUEST99", StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), CreatedAt: mustTime(t, "2026-07-20 08:00 +1000")},
+		}
+		got := Resolve(monday, rules, ovr)
+		if got.Source != SourceOverride || got.Registration != "GUEST99" || got.VehicleID != 0 {
+			t.Fatalf("ad-hoc: got %+v, want registration GUEST99, no vehicle", got)
+		}
+	})
+
+	t.Run("a later-created override beats an earlier one that starts later", func(t *testing.T) {
+		// The guest scenario: a fresh activation (created now, starting now) must
+		// win over a pre-existing booking whose window also covers `monday`, even
+		// though that booking starts later in the day.
+		ovr := []Override{
+			{ID: 1, VehicleID: 55, StartsAt: mustTime(t, "2026-07-20 09:00 +1000"), CreatedAt: mustTime(t, "2026-07-19 09:00 +1000")},
+			{ID: 2, VehicleID: 66, StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), CreatedAt: mustTime(t, "2026-07-20 08:00 +1000")},
+		}
+		if got := Resolve(monday, rules, ovr); got.VehicleID != 66 {
+			t.Fatalf("guest overlap: got %+v, want vehicle 66 (created latest)", got)
 		}
 	})
 }

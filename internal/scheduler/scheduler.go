@@ -428,7 +428,7 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 // alarm anyone); a council refusal, which won't fix itself, alarms on the first
 // tick. The message explains the cause, the consequence (what plate is still on
 // the permit), and what to do. It also feeds the systemic-failure detector.
-func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, source string, err error, stats *passStats) {
+func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, wantName, source string, err error, stats *passStats) {
 	kind, op := parking.FailureOf(err)
 	reason, action := describeFailure(kind, op)
 
@@ -456,6 +456,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Owner:       p.Owner,
 		PermitLabel: permitLabel(p),
 		Reg:         want,
+		Name:        wantName,
 		OK:          false,
 		CurrentReg:  p.ActiveRegistration,
 		Reason:      reason,
@@ -605,8 +606,10 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	// its owner's vehicles, so a rule/override that somehow references a foreign
 	// id can never read another user's registration.
 	regByOwnerID := make(map[ownerVehicle]string, len(vehicles))
+	nameByOwnerID := make(map[ownerVehicle]string, len(vehicles))
 	for _, v := range vehicles {
 		regByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Registration
+		nameByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Label
 	}
 	now := time.Now().In(s.loc)
 	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}}
@@ -615,7 +618,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
 	// after each permit that actually hit the council.
 	for _, p := range permits {
-		if s.reconcilePermit(ctx, p, regByOwnerID, now, stats) && s.rateDelay > 0 {
+		if s.reconcilePermit(ctx, p, regByOwnerID, nameByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
 			}
@@ -639,7 +642,7 @@ type passStats struct {
 
 // reconcilePermit applies any needed plate change for one permit. It returns
 // true when it actually contacted the council (so the caller can space bursts).
-func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID map[ownerVehicle]string, now time.Time, stats *passStats) (hitCouncil bool) {
+func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID, nameByOwnerID map[ownerVehicle]string, now time.Time, stats *passStats) (hitCouncil bool) {
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -655,6 +658,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		return false // nothing scheduled right now; leave the permit as-is
 	}
 	want := regByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
+	wantName := nameByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
+	if res.Registration != "" { // an ad-hoc one-off plate (not a saved vehicle)
+		want = res.Registration
+		wantName = ""
+	}
 	if want == "" || want == p.ActiveRegistration {
 		return false // already correct (or unknown/foreign vehicle)
 	}
@@ -666,7 +674,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		s.clearFailStreak(p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Source: string(res.Source), OK: true,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
 		}, "success|"+want)
 		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true
@@ -695,7 +703,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		}
 		return true
 	default:
-		s.handleApplyFailure(ctx, p, want, string(res.Source), err, stats)
+		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
 		log.Printf("scheduler: permit %s apply error: %v", p.CouncilPermitID, err)
 		return true
 	}

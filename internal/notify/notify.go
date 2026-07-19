@@ -132,6 +132,7 @@ type ApplyOutcome struct {
 	Owner       string
 	PermitLabel string
 	Reg         string // the vehicle we tried to set
+	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
 	Source      string // "roster" / "override" (success context)
 	OK          bool
 	CurrentReg  string // what is still on the permit on failure ("" if unknown)
@@ -154,17 +155,28 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		return -1, nil
 	}
 
+	// "car" names the vehicle we set, by friendly name + plate where we have both,
+	// so the subject line tells the reader what is on the permit at a glance.
+	car := o.Reg
+	if o.Name != "" {
+		car = fmt.Sprintf("%s (%s)", o.Name, o.Reg)
+	}
 	var subject, body string
 	if o.OK {
-		subject = fmt.Sprintf("Permit updated: %s is now %s", o.PermitLabel, o.Reg)
-		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, o.Reg, o.Source)
+		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, car)
+		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, car, o.Source)
 	} else {
-		if o.Transient {
+		switch {
+		case o.CurrentReg != "" && o.Transient:
+			subject = fmt.Sprintf("Still updating your %s — it shows %s for now", o.PermitLabel, o.CurrentReg)
+		case o.CurrentReg != "":
+			subject = fmt.Sprintf("Action needed: your %s still shows %s", o.PermitLabel, o.CurrentReg)
+		case o.Transient:
 			subject = fmt.Sprintf("Still updating your %s", o.PermitLabel)
-		} else {
+		default:
 			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
 		}
-		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, o.Reg)}
+		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
 		if o.CurrentReg != "" {
 			lines = append(lines, fmt.Sprintf("Right now the permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
 		} else {
@@ -303,6 +315,26 @@ func (s *Service) SendInvite(to, ownerEmail string) error {
 	lines = append(lines,
 		"",
 		"If you were not expecting this, you can ignore this email. You can also remove your access from Settings after signing in.")
+	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+}
+
+// SendGuestLink emails a recipient their personal guest-pass link (email only,
+// no-op without SMTP). The link lets them set one of the account's cars on the
+// visitor permit without an account of their own.
+func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := "Your link to set a car on " + ownerEmail + "'s parking permit"
+	lines := []string{
+		ownerEmail + " has given you a link to put a car on their City of Stonnington visitor parking permit (" + permitLabel + ").",
+		"",
+		"When you arrive, open the link and choose your car. It stays on the permit until the end of the day.",
+		"",
+		url,
+		"",
+		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
+	}
 	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
 }
 

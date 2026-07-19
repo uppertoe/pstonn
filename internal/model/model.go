@@ -9,6 +9,7 @@ type Vehicle struct {
 	ID           int64
 	Registration string // number plate, normalised upper-case no spaces
 	Label        string // human name, e.g. "Mum's Corolla"
+	Email        string // optional: who drives this car (default guest-pass recipient)
 }
 
 // Permit is a council visitor permit that holds one active vehicle at a time.
@@ -33,12 +34,14 @@ type WeeklyRule struct {
 // Override is a one-off allocation that takes precedence over the roster for its
 // window. EndsAt == nil means "until superseded" (open-ended).
 type Override struct {
-	ID        int64
-	PermitID  int64
-	VehicleID int64
-	StartsAt  time.Time
-	EndsAt    *time.Time
-	CreatedBy string
+	ID           int64
+	PermitID     int64
+	VehicleID    int64  // 0 for an ad-hoc plate (Registration set instead)
+	Registration string // literal one-off plate, not a saved vehicle ("" = use VehicleID)
+	StartsAt     time.Time
+	EndsAt       *time.Time
+	CreatedBy    string
+	CreatedAt    time.Time // when it was booked; the tie-break for overlapping overrides
 }
 
 // Source identifies why a particular vehicle is the resolved allocation.
@@ -50,16 +53,22 @@ const (
 	SourceOverride Source = "override"
 )
 
-// Resolution is the outcome of deciding which vehicle should be active.
+// Resolution is the outcome of deciding which vehicle should be active. For an
+// ad-hoc one-off plate, Registration is set and VehicleID is 0.
 type Resolution struct {
-	VehicleID int64
-	Source    Source
+	VehicleID    int64
+	Registration string
+	Source       Source
 }
 
 // Resolve decides which vehicle should be allocated to a permit at time now.
 // An active override wins over the weekly roster; among overlapping overrides,
-// the one that started most recently wins. now must already be in the timezone
-// rosters are expressed in (weekday is read from it directly).
+// the one created most recently wins. Keying the tie-break on creation time (not
+// start time) means the freshest decision takes the wheel: a guest's just-made
+// activation supersedes the roster and any earlier booking for its window, while
+// a later deliberate booking by the account holder still overrides the guest.
+// now must already be in the timezone rosters are expressed in (weekday is read
+// from it directly).
 func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution {
 	var best *Override
 	for i := range overrides {
@@ -70,12 +79,12 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		if o.EndsAt != nil && !now.Before(*o.EndsAt) {
 			continue // already ended
 		}
-		if best == nil || o.StartsAt.After(best.StartsAt) {
+		if best == nil || o.CreatedAt.After(best.CreatedAt) {
 			best = o
 		}
 	}
 	if best != nil {
-		return Resolution{VehicleID: best.VehicleID, Source: SourceOverride}
+		return Resolution{VehicleID: best.VehicleID, Registration: best.Registration, Source: SourceOverride}
 	}
 
 	wd := now.Weekday()
