@@ -343,6 +343,16 @@
   // Show the top loading bar during any htmx request (incl. boosted navigation).
   addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
   addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
+  // When a session lapses, forward-auth answers a boosted request with a 302 to
+  // the cross-origin login page. htmx (an XHR) can't follow that redirect under
+  // connect-src 'self', so it errors out and nothing happens. Fall back to a real
+  // browser navigation, which follows the redirect natively and lands on login:
+  // a GET re-navigates to the same path; anything else reloads the current page.
+  addEventListener('htmx:sendError', function (e) {
+    var cfg = e.detail && e.detail.requestConfig;
+    if (cfg && cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
+    else { window.location.reload(); }
+  });
 </script>
 
 {{if eq .State "landing"}}
@@ -352,7 +362,7 @@
   <section class="lhero">
     <h1>Schedule your City of Stonnington visitor parking permit.</h1>
     <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
-    <a href="/schedule"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
+    <a href="/schedule" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
     <p class="lnote">A free service. Sign in with a one-time code sent to your email.</p>
   </section>
   <div class="demos">
@@ -513,7 +523,7 @@
       <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
       <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
     </ul>
-    <p>Once your council account has a visitor permit, <a href="/schedule">sign in to p.stonn</a> and connect it.</p>
+    <p>Once your council account has a visitor permit, <a href="/schedule" hx-boost="false">sign in to p.stonn</a> and connect it.</p>
   </section>
 
   <p class="ldisclaimer" style="margin-top:26px"><a href="/">&larr; Back</a></p>
@@ -819,7 +829,7 @@
     <a href="/about" class="link-quiet{{if eq .State "about"}} active{{end}}"{{if eq .State "about"}} aria-current="page"{{end}}>About</a>
     {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
     <button class="icon-btn" type="button" onclick="toggleTheme()" aria-label="Toggle light / dark"><span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span></button>
-    <a href="/schedule"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
+    <a href="/schedule" hx-boost="false"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
   </div>
 </header>
 {{end}}
