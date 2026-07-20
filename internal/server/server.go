@@ -91,7 +91,10 @@ func (s *Server) Handler() http.Handler {
 	// Public, token-only: the guest-pass activation link. GET renders a menu with
 	// NO side effects (scanner/prefetch-safe); POST performs the activation.
 	mux.HandleFunc("GET /g/{token}", s.guestPage)
-	mux.HandleFunc("GET /g/{token}/manifest.webmanifest", s.guestManifest)
+	// Literal "manifest" first segment so it can't clash with /g/req/{id} (a
+	// /g/{token}/manifest.webmanifest would overlap it and panic the mux). Stays
+	// under /g/* so the public Caddy matcher covers it.
+	mux.HandleFunc("GET /g/manifest/{token}", s.guestManifest)
 	mux.HandleFunc("POST /g/{token}", s.guestActivate)
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
 	mux.HandleFunc("GET /g/req/{id}", s.guestRequestStatus)

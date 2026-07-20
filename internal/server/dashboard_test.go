@@ -117,7 +117,7 @@ func TestTemplatesRender(t *testing.T) {
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "add it to your home screen"},
 		{"guest-manifest-link", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "toktok", PermitLabel: "Visitor Permit",
-			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/toktok/manifest.webmanifest"},
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok"},
 		{"guest-result-ok", dashboardData{State: "guest-result", Loc: loc,
 			Flash: "AAA111 is now on the permit until the end of today.", Guest: guestActView{OwnerEmail: "held@example.com"}}, "on the permit"},
 		{"guest-gone", dashboardData{State: "guest-result", Loc: loc,
