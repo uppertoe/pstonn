@@ -148,33 +148,18 @@ type ApplyOutcome struct {
 	Transient   bool   // failure expected to self-heal → soften wording
 }
 
-// NotifyApply tells the permit owner about an apply outcome, honouring their
-// channel choices and "failures only" setting. It returns how many channels
-// ACCEPTED the message: the caller uses 0 to mean "the user was NOT reached" so
-// it can escalate to the operator and retry, rather than silently marking the
-// outcome as delivered. -1 means intentionally not sent (failures-only success).
-func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered int, err error) {
-	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
-	if err != nil {
-		return 0, err
-	}
-	if o.OK && pref.FailuresOnly {
-		return -1, nil
-	}
-
-	// "car" names the vehicle we set, by friendly name + plate where we have both,
-	// so the subject line tells the reader what is on the permit at a glance.
+// composeApply builds the subject/body/priority/tags for an apply notification,
+// shared by the inline NotifyApply (scheduler) and the durable EnqueueApply.
+func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
+	// "car" names the vehicle we set, by friendly name + plate where we have both.
 	car := o.Reg
 	if o.Name != "" {
 		car = fmt.Sprintf("%s (%s)", o.Name, o.Reg)
 	}
-	var subject, body string
 	if o.OK {
 		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, car)
 		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, car, o.Source)
 		if o.By != "" {
-			// A guest activated it via their link; tell the holder who, and that it
-			// overrides the schedule only until it ends (then the roster resumes).
 			body += fmt.Sprintf("\n\nActivated by %s using a guest link. This overrides your schedule until it ends, then your roster resumes.", o.By)
 		}
 	} else {
@@ -200,13 +185,11 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		if o.Action != "" {
 			lines = append(lines, o.Action)
 		}
-		// A failure is a "sort it yourself" moment: link the council portal so the
-		// user can set the permit's vehicle directly and avoid a fine.
+		// A failure is a "sort it yourself" moment: link the council portal.
 		lines = append(lines, "", "You can set the vehicle on your permit directly with the council:", councilPortalURL)
 		body = strings.Join(lines, "\n")
 	}
-
-	priority, tags := "default", "white_check_mark"
+	priority, tags = "default", "white_check_mark"
 	if !o.OK {
 		tags = "warning"
 		if o.Transient {
@@ -215,6 +198,52 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			priority = "high"
 		}
 	}
+	return
+}
+
+// EnqueueApply durably queues an apply notification, for paths with no reconcile-
+// loop retry behind them (a guest activation): a failed send is retried by the
+// outbox instead of dropped. Honours the owner's channel + failures-only prefs,
+// and dedups so a repeated activation of the same plate doesn't double-notify.
+func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
+	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
+	if err != nil {
+		return err
+	}
+	if o.OK && pref.FailuresOnly {
+		return nil
+	}
+	subject, body, priority, tags := composeApply(o)
+	if s.appURL != "" {
+		body += "\n\n" + s.appURL
+	}
+	m := outMessage{
+		Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
+		DedupKey: fmt.Sprintf("apply|%s|%s|%s|%t", o.Owner, o.PermitLabel, o.Reg, o.OK),
+	}
+	if pref.EmailEnabled && s.mail.Enabled() {
+		m.Recipients, _ = s.store.AccountEmails(ctx, o.Owner)
+	}
+	if pref.NtfyEnabled && s.ntfyBase != "" {
+		m.NtfyTopic = pref.NtfyTopic
+	}
+	return s.enqueue(ctx, m)
+}
+
+// NotifyApply tells the permit owner about an apply outcome, honouring their
+// channel choices and "failures only" setting. It returns how many channels
+// ACCEPTED the message: the caller uses 0 to mean "the user was NOT reached" so
+// it can escalate to the operator and retry, rather than silently marking the
+// outcome as delivered. -1 means intentionally not sent (failures-only success).
+func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered int, err error) {
+	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
+	if err != nil {
+		return 0, err
+	}
+	if o.OK && pref.FailuresOnly {
+		return -1, nil
+	}
+	subject, body, priority, tags := composeApply(o)
 
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
@@ -516,9 +545,15 @@ func (s *Service) drainOutbox(ctx context.Context) {
 		attempts := it.Attempts + 1
 		if attempts >= outboxMaxAttempts {
 			_ = s.store.MarkOutboxDead(ctx, it.ID, lastErr)
-			_ = s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
+			// Always log the drop (the DB 'dead' row is otherwise unsurfaced), and
+			// log if the escalation itself fails — it uses NotifyAdmin, which may
+			// share the very channel that's failing.
+			log.Printf("notify: DROPPED after %d attempts: %q to %v: %s", attempts, it.Subject, it.Recipients, lastErr)
+			if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
 				fmt.Sprintf("A notification could not be delivered after %d attempts and was dropped.\nSubject: %s\nTo: %s\nLast error: %s",
-					attempts, it.Subject, strings.Join(it.Recipients, ", "), lastErr))
+					attempts, it.Subject, strings.Join(it.Recipients, ", "), lastErr)); ae != nil {
+				log.Printf("notify: dead-letter admin alert also failed: %v", ae)
+			}
 			continue
 		}
 		_ = s.store.RescheduleOutbox(ctx, it.ID, attempts, time.Now().Add(outboxBackoff(attempts)), lastErr)
@@ -529,19 +564,24 @@ func (s *Service) drainOutbox(ctx context.Context) {
 // was nothing addressable), else a joined error so the item is retried.
 func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
 	var errs []string
-	delivered, targets := false, 0
+	// Email is the reliable channel. When the message HAS email recipients, success
+	// requires at least one email to be accepted — an ntfy 200 (which the server
+	// returns even with no subscriber) must not mask a total email failure and
+	// silently drop the account's email. When there is no email, ntfy gates.
+	emailTargets, emailOK := 0, false
 	if s.mail.Enabled() {
 		for _, addr := range it.Recipients {
-			targets++
+			emailTargets++
 			if e := s.mail.Send(addr, it.Subject, it.Body); e != nil {
 				errs = append(errs, "email "+addr+": "+e.Error())
 			} else {
-				delivered = true
+				emailOK = true
 			}
 		}
 	}
+	ntfyTargets, ntfyOK := 0, false
 	if it.NtfyTopic != "" && s.ntfyBase != "" {
-		targets++
+		ntfyTargets++
 		pr := it.NtfyPriority
 		if pr == "" {
 			pr = "default"
@@ -549,11 +589,20 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
 		if e := s.sendNtfy(ctx, it.NtfyTopic, it.Subject, it.Body, pr, it.NtfyTag); e != nil {
 			errs = append(errs, "ntfy: "+e.Error())
 		} else {
-			delivered = true
+			ntfyOK = true
 		}
 	}
-	if targets == 0 || delivered {
-		return "" // nothing to send (channels off), or at least one channel accepted
+	switch {
+	case emailTargets > 0:
+		if emailOK {
+			return "" // reached via the reliable channel (ntfy is a bonus on top)
+		}
+	case ntfyTargets > 0:
+		if ntfyOK {
+			return "" // no email configured; ntfy was all we had and it worked
+		}
+	default:
+		return "" // nothing addressable (all channels off) — nothing to retry
 	}
 	return strings.Join(errs, "; ")
 }

@@ -814,9 +814,13 @@ func TestPrintedRequestFlow(t *testing.T) {
 	}
 
 	// A scan records a pending request the visitor can poll only with its nonce.
-	reqID, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "secretnonce")
-	if err != nil {
-		t.Fatal(err)
+	reqID, _, created, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "secretnonce")
+	if err != nil || !created {
+		t.Fatalf("create request: created=%v err=%v", created, err)
+	}
+	// A second scan of the SAME plate reuses the pending request (no duplicate).
+	if id2, n2, created2, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "othernonce"); err != nil || created2 || id2 != reqID || n2 != "secretnonce" {
+		t.Fatalf("re-scan should reuse pending request: id=%d nonce=%q created=%v err=%v", id2, n2, created2, err)
 	}
 	if _, err := s.GuestRequestForPoll(ctx, reqID, "wrongnonce"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("poll with wrong nonce = %v, want ErrNotFound", err)

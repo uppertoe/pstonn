@@ -1846,14 +1846,31 @@ func (s *Store) RevokePrintedGrant(ctx context.Context, owner string, grantID in
 // CreateGuestRequest records a pending request from a printed-QR scan. nonce is a
 // per-request secret the visitor keeps, so they can poll its status without being
 // able to read other requests.
-func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (int64, error) {
+// CreateGuestRequest records a pending printed-QR request, or reuses an existing
+// still-pending one for the same grant+plate so a double-scan/submit doesn't stack
+// duplicate requests (and duplicate approval nudges). Returns the request id, the
+// effective nonce (the reused row's, so its status page keeps working), and
+// whether a NEW request was created (the caller only notifies when it did).
+func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (id int64, effNonce string, created bool, err error) {
+	var existingID int64
+	var existingNonce string
+	e := s.db.QueryRowContext(ctx,
+		`SELECT id, nonce FROM guest_request WHERE grant_id = ? AND plate = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+		grantID, plate).Scan(&existingID, &existingNonce)
+	if e == nil {
+		return existingID, existingNonce, false, nil
+	}
+	if e != sql.ErrNoRows {
+		return 0, "", false, e
+	}
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
 		grantID, owner, permitID, plate, nonce, nowUTC())
 	if err != nil {
-		return 0, err
+		return 0, "", false, err
 	}
-	return res.LastInsertId()
+	id, err = res.LastInsertId()
+	return id, nonce, true, err
 }
 
 // GuestRequestForPoll returns a request only if the nonce matches — the visitor's

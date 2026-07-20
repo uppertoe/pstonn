@@ -305,7 +305,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = s.store.SetPermitActive(r.Context(), permit.ID, reg)
 		_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "success", "activated by "+createdBy)
-		s.notifyGuestApply(permit, reg, name, createdBy)
+		s.notifyGuestApply(r.Context(), permit, reg, name, createdBy)
 		s.renderGuestResult(w, permit.Owner, true, reg+" is now on the permit until "+until+".")
 		return
 	}
@@ -343,15 +343,16 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
 }
 
-func (s *Server) notifyGuestApply(permit model.Permit, reg, name, by string) {
+func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string) {
+	// Enqueue durably (a fast insert): unlike the scheduler's apply-notify, this
+	// path has no reconcile-loop retry behind it, so a fire-and-forget send could
+	// silently drop the "a guest put their car on your permit" notice.
 	outcome := notify.ApplyOutcome{
 		Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_, _ = s.notify.NotifyApply(ctx, outcome)
-	}()
+	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {
+		log.Printf("guest apply notify enqueue for %s: %v", permit.Owner, err)
+	}
 }
 
 func (s *Server) renderGuestGone(w http.ResponseWriter) {
@@ -781,13 +782,14 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 				PermitLabel: permitLabel(permit), AllowPlate: true, RequestOnly: true}})
 		return
 	}
-	nonce := randNonce()
-	reqID, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, nonce)
+	reqID, nonce, created, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, randNonce())
 	if err != nil {
 		s.renderGuestResult(w, "", false, "Something went wrong sending your request. Please try again.")
 		return
 	}
-	s.notifyGuestRequest(r.Context(), permit, plate)
+	if created { // a re-scan of the same plate reuses the pending request; don't re-nudge
+		s.notifyGuestRequest(r.Context(), permit, plate)
+	}
 	s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation,
 		Wait: &guestWaitView{Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
 }
