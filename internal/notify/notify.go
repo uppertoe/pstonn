@@ -218,6 +218,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 		body += "\n\n" + s.appURL
 	}
 	m := outMessage{
+		Account: o.Owner,
 		Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
 		DedupKey: fmt.Sprintf("apply|%s|%s|%s|%t", o.Owner, o.PermitLabel, o.Reg, o.OK),
 	}
@@ -385,7 +386,7 @@ func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
 // NotifyGuestDisplaced tells a guest (who has no account, so email only) that
 // the car they put on a permit via their link has since been taken off it, so
 // they can move it or re-activate before getting caught out. No-op without SMTP.
-func (s *Service) NotifyGuestDisplaced(ctx context.Context, to, permitLabel, oldReg, newReg string) error {
+func (s *Service) NotifyGuestDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -396,7 +397,7 @@ func (s *Service) NotifyGuestDisplaced(ctx context.Context, to, permitLabel, old
 		"",
 		"If your car is still parked there, please move it or open your link again to put it back on, so you stay covered.",
 	}
-	return s.enqueue(ctx, outMessage{Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n")})
+	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n")})
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a
@@ -412,7 +413,7 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 	if url != "" {
 		lines = append(lines, "", url)
 	}
-	m := outMessage{Subject: subject, Body: strings.Join(lines, "\n"), NtfyPriority: "high", NtfyTag: "bell"}
+	m := outMessage{Account: owner, Subject: subject, Body: strings.Join(lines, "\n"), NtfyPriority: "high", NtfyTag: "bell"}
 	if s.mail.Enabled() {
 		m.Recipients, _ = s.store.AccountEmails(ctx, owner)
 	}
@@ -488,6 +489,7 @@ const (
 
 // outMessage is a composed, addressed notification ready to enqueue.
 type outMessage struct {
+	Account      string // owner the message concerns (so account deletion purges it)
 	DedupKey     string
 	Recipients   []string
 	NtfyTopic    string
@@ -499,7 +501,7 @@ type outMessage struct {
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 	return s.store.EnqueueOutbox(ctx, store.OutboxItem{
-		DedupKey: m.DedupKey, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
+		Account: m.Account, DedupKey: m.DedupKey, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
 	})
 }

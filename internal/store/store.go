@@ -57,7 +57,12 @@ type ApplyRecord struct {
 
 // OpenSQLite opens (creating if needed) the database and runs migrations.
 func OpenSQLite(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// Pin foreign_keys ON in the DSN, not just as a post-open PRAGMA: the pragma is
+	// per-connection and defaults OFF, so if database/sql ever replaces the pooled
+	// connection the ON-DELETE-CASCADE cleanups (guest tokens, rules, overrides on
+	// account/permit deletion) would silently stop firing. The DSN applies it to
+	// every connection modernc opens.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +265,7 @@ CREATE TABLE IF NOT EXISTS account_flags (
 -- attempt is retried instead of dropped. Rows are purged after delivery.
 CREATE TABLE IF NOT EXISTS outbox (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account       TEXT NOT NULL DEFAULT '',        -- owner the message concerns, so account deletion can purge it
     dedup_key     TEXT NOT NULL DEFAULT '',        -- idempotency; skip if a live/sent row shares a non-empty key
     recipients    TEXT NOT NULL DEFAULT '',        -- newline-separated email addresses
     ntfy_topic    TEXT NOT NULL DEFAULT '',
@@ -293,6 +299,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE guest_token ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_token ADD COLUMN token_sealed TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE outbox ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
@@ -932,6 +939,11 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_flags WHERE owner = ?`, owner); err != nil {
 		return err
 	}
+	// Queued/sent/dead notifications about this account (they carry the user's email
+	// and plate), so nothing pending is delivered to a deleted user and no PII lingers.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM outbox WHERE account = ?`, owner); err != nil {
+		return err
+	}
 	// Remove this account's secondary members, and any membership this user held.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE owner = ? OR member_email = ?`, owner, owner); err != nil {
 		return err
@@ -1275,6 +1287,7 @@ ON CONFLICT(owner) DO UPDATE SET
 // OutboxItem is one queued notification (composed and addressed at enqueue time).
 type OutboxItem struct {
 	ID           int64
+	Account      string // owner the message concerns (for account-deletion purge)
 	DedupKey     string
 	Recipients   []string // email addresses
 	NtfyTopic    string
@@ -1302,9 +1315,9 @@ func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 	}
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO outbox (dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-		it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
+INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+		it.Account, it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
 		it.Subject, it.Body, now, now)
 	return err
 }
@@ -1357,12 +1370,14 @@ func (s *Store) MarkOutboxDead(ctx context.Context, id int64, lastErr string) er
 	return err
 }
 
-// PurgeSentOutbox deletes delivered rows older than cutoff, so recipient/content
-// PII isn't kept indefinitely. Returns rows removed.
+// PurgeSentOutbox deletes delivered AND dead rows older than cutoff, so recipient/
+// content PII isn't kept indefinitely (dead rows were previously retained forever).
+// Returns rows removed.
 func (s *Store) PurgeSentOutbox(ctx context.Context, cutoff time.Time) (int64, error) {
+	c := cutoff.UTC().Format(time.RFC3339)
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM outbox WHERE status = 'sent' AND sent_at != '' AND sent_at < ?`,
-		cutoff.UTC().Format(time.RFC3339))
+		`DELETE FROM outbox WHERE (status = 'sent' AND sent_at != '' AND sent_at < ?) OR (status = 'dead' AND created_at < ?)`,
+		c, c)
 	if err != nil {
 		return 0, err
 	}
@@ -1518,7 +1533,8 @@ type GuestRequest struct {
 	Plate       string
 	Status      string // pending | approved | denied
 	RequestedAt time.Time
-	Until       string // human "until …" text, set on approval
+	DecidedAt   time.Time // when the holder approved/denied ("" while pending)
+	Until       string    // human "until …" text, set on approval
 }
 
 // GuestToken is one recipient's link to a grant; the raw token is never stored,
@@ -1893,10 +1909,10 @@ func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64,
 // status check, safe against request-id enumeration.
 func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string) (GuestRequest, error) {
 	var r GuestRequest
-	var requested string
+	var requested, decided string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce).
-		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until)
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, until_at FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &decided, &r.Until)
 	if err == sql.ErrNoRows {
 		return GuestRequest{}, ErrNotFound
 	}
@@ -1904,6 +1920,7 @@ func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string)
 		return GuestRequest{}, err
 	}
 	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	r.DecidedAt, _ = time.Parse(time.RFC3339, decided)
 	return r, nil
 }
 

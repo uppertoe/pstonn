@@ -90,7 +90,7 @@ func (f *fakeNotifier) NotifyAdmin(_ context.Context, subject, body string) erro
 	return nil
 }
 
-func (f *fakeNotifier) NotifyGuestDisplaced(_ context.Context, to, permitLabel, oldReg, newReg string) error {
+func (f *fakeNotifier) NotifyGuestDisplaced(_ context.Context, owner, to, permitLabel, oldReg, newReg string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.displaced = append(f.displaced, to)

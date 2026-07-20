@@ -800,25 +800,43 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	nonce := r.URL.Query().Get("n")
-	req, err := s.store.GuestRequestForPoll(r.Context(), pathInt(r, "id"), nonce)
-	v := guestWaitView{Status: "denied"} // unknown/expired reads as not-approved
-	if err == nil {
+	id, nonce := pathInt(r, "id"), r.URL.Query().Get("n")
+	req, err := s.store.GuestRequestForPoll(r.Context(), id, nonce)
+	var v guestWaitView
+	switch {
+	case err == nil:
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
-		// "approved" means the resident said yes; only report it as on the permit
+		// "approved" means the resident said yes; only report it as ON the permit
 		// once the council's own record (active_registration, set from a confirmed
 		// read-back by the apply or the scheduler) actually shows the plate. Until
 		// then the visitor keeps seeing "being put on", never a false "it's on".
 		if req.Status == "approved" {
 			if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil && strings.EqualFold(permit.ActiveRegistration, req.Plate) {
 				v.Status = "applied"
+			} else if !req.DecidedAt.IsZero() && time.Since(req.DecidedAt) > guestApplyTimeout {
+				// Approved but the council still hasn't confirmed after a while (a
+				// lapsed session, a persistent apply failure). Stop the endless
+				// spinner and tell the visitor to check with the resident.
+				v.Status = "stalled"
 			}
 		}
+	case errors.Is(err, store.ErrNotFound):
+		v = guestWaitView{Status: "denied"} // wrong nonce / unknown id — a real terminal
+	default:
+		// A transient DB error must NOT strand the visitor on a false "Not approved":
+		// keep polling.
+		log.Printf("guest poll %d: %v", id, err)
+		v = guestWaitView{ReqID: id, Nonce: nonce, Status: "pending"}
 	}
 	if e := templates.ExecuteTemplate(w, "guest-req-status", v); e != nil {
 		log.Printf("render guest-req-status: %v", e)
 	}
 }
+
+// guestApplyTimeout is how long an approved printed-QR request may sit unconfirmed
+// on the council before the visitor's page stops spinning and suggests checking
+// with the resident (the scheduler keeps retrying regardless).
+const guestApplyTimeout = 8 * time.Minute
 
 func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, plate string) {
 	// Enqueue durably (a fast DB insert) so the holder's "approve this?" nudge
@@ -926,42 +944,60 @@ func (s *Server) denyGuestRequest(w http.ResponseWriter, r *http.Request) {
 // puts the plate on the permit (end of day) and applies it best-effort.
 func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve bool) {
 	_, owner, _ := s.resolveAccount(r.Context())
+	id := pathInt(r, "id")
 	now := time.Now().In(s.cfg.DisplayLocation)
-	until := untilPhrase(now, false)
-	req, err := s.store.DecideGuestRequest(r.Context(), owner, pathInt(r, "id"), approve, until)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+
+	if !approve {
+		if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, false, ""); err != nil && !errors.Is(err, store.ErrNotFound) {
+			s.serverError(w, err)
+			return
+		}
+		http.Redirect(w, r, "/guests?declined=1", http.StatusSeeOther)
+		return
+	}
+
+	// Approve: set up the plate override BEFORE finalising the approval, so we can
+	// never leave a request marked "approved" that the scheduler has nothing to act
+	// on (which would strand the visitor and mislead the holder).
+	req, rerr := s.store.GuestRequestByID(r.Context(), id)
+	if rerr != nil || req.Status != "pending" {
+		http.Redirect(w, r, "/guests", http.StatusSeeOther) // gone / already decided
+		return
+	}
+	permit, perr := s.store.GetPermit(r.Context(), req.PermitID)
+	if perr != nil || permit.Owner != owner {
+		http.Redirect(w, r, "/guests", http.StatusSeeOther) // not ours / permit removed
+		return
+	}
+	end := dayEndLocal(now, 0)
+	if _, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)"); cerr != nil {
+		s.serverError(w, cerr) // don't approve if we couldn't set up the change
+		return
+	}
+	if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, true, untilPhrase(now, false)); err != nil {
+		if errors.Is(err, store.ErrNotFound) { // raced with another decision; the override is harmless
 			http.Redirect(w, r, "/guests", http.StatusSeeOther)
 			return
 		}
 		s.serverError(w, err)
 		return
 	}
+	// Best-effort synchronous apply for instant feedback; the scheduler converges
+	// otherwise. SetVehicle returns nil only once the council confirms the plate.
 	confirmed := false
-	if approve {
-		if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil && permit.Owner == owner {
-			end := dayEndLocal(now, 0)
-			if _, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)"); cerr == nil {
-				applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-				// SetVehicle returns nil only once the council's own record confirms
-				// the plate, so `confirmed` means it is truly on (not just approved).
-				if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
-					_ = s.store.SetPermitActive(r.Context(), permit.ID, req.Plate)
-					_ = s.store.RecordApply(r.Context(), permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
-					confirmed = true
-				}
-				cancel()
-				s.sched.Kick() // if not confirmed synchronously, the scheduler converges
-			}
-		}
+	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
+		_ = s.store.SetPermitActive(r.Context(), permit.ID, req.Plate)
+		_ = s.store.RecordApply(r.Context(), permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
+		confirmed = true
 	}
+	cancel()
+	s.sched.Kick()
+
 	q := url.Values{}
-	switch {
-	case !approve:
-		q.Set("declined", "1")
-	case confirmed:
+	if confirmed {
 		q.Set("applied", req.Plate)
-	default:
+	} else {
 		q.Set("approving", req.Plate)
 	}
 	http.Redirect(w, r, "/guests?"+q.Encode(), http.StatusSeeOther)

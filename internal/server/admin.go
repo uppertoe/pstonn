@@ -79,15 +79,16 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			row.NtfyTopic = a.NtfyTopic
 		}
 		// Council / keep-warm status.
+		needsAttention := false
 		switch {
 		case !a.Linked:
 			row.Status, row.StatusLabel = "unlinked", "Not linked"
 		case maxAge > 0 && !a.LinkedAt.IsZero() && now.Sub(a.LinkedAt) >= maxAge:
 			row.Status, row.StatusLabel = "relink", "Re-link due"
-			v.Failing++
+			needsAttention = true
 		case a.WarmedAt.IsZero() || now.Sub(a.WarmedAt) > 6*time.Hour:
 			row.Status, row.StatusLabel = "stale", "Keep-warm stale"
-			v.Failing++
+			needsAttention = true
 		default:
 			row.Status, row.StatusLabel = "ok", "OK"
 			v.WarmOK++
@@ -108,8 +109,11 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			}
 			if a.LastApplyStatus != "success" {
 				row.LastApplyBad = true
-				v.Failing++
+				needsAttention = true
 			}
+		}
+		if needsAttention { // count each account at most once
+			v.Failing++
 		}
 		v.Rows = append(v.Rows, row)
 	}

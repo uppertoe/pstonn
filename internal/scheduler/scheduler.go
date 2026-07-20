@@ -52,7 +52,7 @@ type Notifier interface {
 	NotifyAdmin(ctx context.Context, subject, body string) error
 	// NotifyGuestDisplaced tells a guest (no account) their activated car has been
 	// taken off the permit.
-	NotifyGuestDisplaced(ctx context.Context, to, permitLabel, oldReg, newReg string) error
+	NotifyGuestDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
 }
 
 // Options configures the Scheduler's session-lifecycle behaviour.
@@ -780,7 +780,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		// still live, tell that guest (email only) so they aren't caught out. The
 		// notice is enqueued durably (a fast insert), so no goroutine is needed.
 		if guest := s.displacedGuest(ctx, p, overrides, regByOwnerID, prev, now); guest != "" {
-			if err := s.notifier.NotifyGuestDisplaced(ctx, guest, permitLabel(p), prev, want); err != nil {
+			if err := s.notifier.NotifyGuestDisplaced(ctx, p.Owner, guest, permitLabel(p), prev, want); err != nil {
 				log.Printf("scheduler: enqueue guest-displaced for %s: %v", guest, err)
 			}
 		}

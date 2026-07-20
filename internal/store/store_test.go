@@ -458,6 +458,10 @@ func TestDeleteAllForOwner(t *testing.T) {
 		if err := s.RecordApply(ctx, pid, "REG", "roster", "success", ""); err != nil {
 			t.Fatal(err)
 		}
+		// A queued notification about this account (carries their email + plate).
+		if err := s.EnqueueOutbox(ctx, OutboxItem{Account: owner, DedupKey: "d-" + owner, Recipients: []string{owner}, Subject: "S", Body: "B"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := s.DeleteAllForOwner(ctx, alice); err != nil {
@@ -476,6 +480,10 @@ func TestDeleteAllForOwner(t *testing.T) {
 	}
 	if l, _ := s.ListApplyLogFor(ctx, alice, 10); len(l) != 0 {
 		t.Fatalf("alice apply-log survived: %+v", l)
+	}
+	// Alice's queued notification (email + plate) must not survive deletion.
+	if due, _ := s.DueOutbox(ctx, time.Now(), 10); len(due) != 1 || due[0].DedupKey != "d-"+bob {
+		t.Fatalf("outbox after delete = %+v, want only bob's row", due)
 	}
 	// Bob is untouched.
 	if _, err := s.GetCouncilSession(ctx, bob); err != nil {
@@ -1026,9 +1034,11 @@ func TestOutbox(t *testing.T) {
 		t.Fatalf("after sent+dead, due = %d, want 0", len(d))
 	}
 
-	// Purge removes the delivered row (PII hygiene), not the dead one.
+	// Purge removes both the delivered row and the dead one (PII hygiene): a
+	// dead-lettered message still carries recipient email + plate, so it must not
+	// linger indefinitely.
 	n, err := s.PurgeSentOutbox(ctx, time.Now().Add(24*time.Hour))
-	if err != nil || n != 1 {
-		t.Fatalf("purge = %d (%v), want 1", n, err)
+	if err != nil || n != 2 {
+		t.Fatalf("purge = %d (%v), want 2 (sent + dead)", n, err)
 	}
 }
