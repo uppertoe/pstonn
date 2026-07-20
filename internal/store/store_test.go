@@ -651,6 +651,46 @@ func TestGuestPasses(t *testing.T) {
 	}
 }
 
+func TestResetGuestToken(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const alice, bob = "alice@example.com", "bob@example.com"
+	aV, _ := s.CreateVehicle(ctx, alice, "AAA111", "Dad")
+	aPermit, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
+	grantID, err := s.CreateGuestGrant(ctx, alice, aPermit, "Friday", false, []int64{aV},
+		[]GuestRecipient{{Email: "dad@example.com", TokenHash: "hashD"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A foreign owner cannot re-send.
+	if _, err := s.ResetGuestToken(ctx, bob, grantID, "dad@example.com", "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign reset = %v, want ErrNotFound", err)
+	}
+	// Re-sending to someone who was never a recipient is rejected.
+	if _, err := s.ResetGuestToken(ctx, alice, grantID, "stranger@example.com", "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown recipient = %v, want ErrNotFound", err)
+	}
+
+	// Re-send: the old link stops working, the fresh one resolves, permit returned.
+	pid, err := s.ResetGuestToken(ctx, alice, grantID, "dad@example.com", "hashD2")
+	if err != nil || pid != aPermit {
+		t.Fatalf("reset: pid=%d err=%v (want %d)", pid, err, aPermit)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hashD"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("old link should stop working after re-send")
+	}
+	gc, err := s.GuestContextByTokenHash(ctx, "hashD2")
+	if err != nil || gc.Recipient != "dad@example.com" {
+		t.Fatalf("fresh link should resolve to dad: %+v err=%v", gc, err)
+	}
+	// The recipient still appears exactly once (no lingering duplicate row).
+	details, err := s.ListGuestGrants(ctx, alice)
+	if err != nil || len(details) != 1 || len(details[0].Tokens) != 1 {
+		t.Fatalf("recipient should appear once after re-send: %+v err=%v", details, err)
+	}
+}
+
 func TestGuestGrantEdit(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -7,6 +7,7 @@
 <title>p.stonn Visitor Permit Scheduler</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+{{if eq .State "guest"}}{{/* Make a bookmarked guest link feel like an app on the home screen. */}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default">{{end}}
 <script>
   // Apply the saved theme before first paint (no flash), and expose the toggle.
   (function () {
@@ -451,6 +452,7 @@
   .gbrand .word .dot { color:var(--primary); }
   .gmanaged { font-size:13px; color:var(--muted); margin:0; }
   .gnow { font-size:14px; color:var(--muted); margin:8px 0 0; }
+  .gtip { margin:14px 0 0; padding:11px 13px; border-radius:11px; background:var(--primary-soft); color:var(--primary-2); font-size:13px; line-height:1.5; text-align:center; }
   .gcars { display:grid; gap:10px; margin-top:4px; }
   .gcar { justify-content:flex-start; gap:12px; background:var(--surface-2); color:var(--ink); border:1px solid var(--line); border-left:5px solid var(--plate,var(--line)); box-shadow:none; padding:14px 16px; font-size:15px; font-weight:600; }
   .gcar:hover { border-color:var(--primary); filter:none; box-shadow:var(--shadow); }
@@ -802,6 +804,7 @@
       {{end}}
     </form>
     {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes.</p>{{end}}
+    {{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>{{end}}
   </section>
 </main>
 
@@ -1346,10 +1349,19 @@
       <p class="sub">Cars</p>
       <div class="legend" style="gap:8px">{{range .Cars}}<span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>{{end}}</div>
       <p class="sub" style="margin-top:16px">People</p>
+      {{$gid := .ID}}
       {{range .Recipients}}
       <div class="grecip">
-        <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
-        {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
+        <span>
+          <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
+          {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
+        </span>
+        {{if not .Revoked}}
+        <form method="post" action="/guests/{{$gid}}/resend" onsubmit="return confirm('Re-send a fresh link to {{.Email}}? Their previous link stops working.')">
+          <input type="hidden" name="recipient" value="{{.Email}}">
+          <button type="submit" class="ghost sm">{{template "ic-link"}} Re-send</button>
+        </form>
+        {{end}}
       </div>
       {{else}}
       <p class="empty-note" style="margin-top:0">No one added yet &mdash; open <strong>Edit</strong> to send a link.</p>

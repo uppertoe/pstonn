@@ -392,6 +392,8 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Approved — " + q.Get("approving") + " is being put on the permit."
 	case q.Get("declined") != "":
 		base.Flash = "Request declined."
+	case q.Get("resent") != "":
+		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
 	}
 	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
 		s.serverError(w, err)
@@ -550,6 +552,37 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Guest pass created. Copy the links below to share them."
 	}
 	s.render(w, base)
+}
+
+// resendGuestLink emails a recipient a FRESH link for a guest pass they already
+// have. The original link can't be re-sent (only its hash is stored), so this
+// mints a new token and supersedes the old one. Owner-only.
+func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	recipient := strings.TrimSpace(r.FormValue("recipient"))
+	if recipient == "" {
+		s.formError(w, r, "No recipient to re-send to.")
+		return
+	}
+	// Don't rotate the token when we can't deliver the replacement — that would
+	// break the recipient's current link with nothing to replace it.
+	if !s.notify.EmailAvailable() {
+		s.formError(w, r, "Email isn't set up, so links can't be re-sent.")
+		return
+	}
+	raw, hash := newGuestToken()
+	permitID, err := s.store.ResetGuestToken(r.Context(), owner, pathInt(r, "id"), recipient, hash)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.message(w, http.StatusForbidden, "That guest pass or recipient isn't one you manage.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	permit, _ := s.store.GetPermit(r.Context(), permitID)
+	s.emailLinks(owner, permitLabel(permit), []guestLinkView{{Email: recipient, URL: s.guestLink(raw)}})
+	http.Redirect(w, r, "/guests?resent="+url.QueryEscape(recipient), http.StatusSeeOther)
 }
 
 // updateGuestGrant edits a grant's label, cars, and overnight option, and adds

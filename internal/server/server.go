@@ -119,6 +119,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /guests/{id}", s.withConsent(s.updateGuestGrant))
 	mux.HandleFunc("POST /guests/toggle", s.withConsent(s.toggleGuests))
 	mux.HandleFunc("POST /guests/{id}/delete", s.withConsent(s.deleteGuestGrant))
+	mux.HandleFunc("POST /guests/{id}/resend", s.withConsent(s.resendGuestLink))
 	mux.HandleFunc("POST /guests/tokens/{tid}/revoke", s.withConsent(s.revokeGuestToken))
 	mux.HandleFunc("POST /vehicles", s.withConsent(s.addVehicle))
 	mux.HandleFunc("POST /vehicles/{id}/delete", s.withConsent(s.deleteVehicle))

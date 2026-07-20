@@ -413,6 +413,8 @@ func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
 		"",
 		url,
 		"",
+		"Tip: bookmark this link or add it to your phone's home screen — then next time you can open it in one tap, without hunting for this email. The same link works every time.",
+		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
 	}
 	return s.mail.Send(to, subject, strings.Join(lines, "\n"))

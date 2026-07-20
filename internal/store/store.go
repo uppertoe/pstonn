@@ -1706,6 +1706,52 @@ func (s *Store) AddGuestTokens(ctx context.Context, owner string, grantID int64,
 	return added, nil
 }
 
+// ResetGuestToken issues a fresh link for one existing recipient of an emailed
+// grant: it revokes their current token(s) and inserts a new one with newHash, so
+// exactly one link is live per recipient. Used by the "re-send" action — the
+// original link can't be re-sent (only its hash is stored), so re-sending
+// necessarily supersedes it. Owner-scoped; ErrNotFound if the grant isn't the
+// owner's or the recipient was never on it.
+func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64, recipientEmail, newHash string) (permitID int64, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	err = tx.QueryRowContext(ctx,
+		`SELECT permit_id FROM guest_grant WHERE id = ? AND owner = ? AND on_screen = 0 AND request_only = 0`,
+		grantID, owner).Scan(&permitID)
+	if err == sql.ErrNoRows {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	var wasRecipient int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM guest_token WHERE grant_id = ? AND recipient_email = ?)`,
+		grantID, recipientEmail).Scan(&wasRecipient); err != nil {
+		return 0, err
+	}
+	if wasRecipient == 0 {
+		return 0, ErrNotFound
+	}
+	// Drop the recipient's old token(s) and issue one fresh link, so the old link
+	// dies and the recipient still shows exactly once in the management list. The
+	// old link genuinely stops working — it can't be re-sent (hash-only storage).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_token WHERE grant_id = ? AND recipient_email = ?`,
+		grantID, recipientEmail); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+		grantID, recipientEmail, newHash, nowUTC()); err != nil {
+		return 0, err
+	}
+	return permitID, tx.Commit()
+}
+
 // CreateQRGrant creates an ephemeral "on-screen QR" grant for a permit: it allows
 // a visitor to type an arbitrary plate, has no saved cars or email recipients,
 // and its single token expires after ttl. It is hidden from the pass list. Expired
