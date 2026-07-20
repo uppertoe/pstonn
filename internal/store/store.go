@@ -720,6 +720,56 @@ func (s *Store) ClearRule(ctx context.Context, permitID int64, weekday time.Week
 	return err
 }
 
+// CopySchedule clones one permit's weekly roster and its active/upcoming
+// overrides onto another permit of the SAME owner — the "I renewed my permit and
+// re-added it, put my schedule back" flow. Both permits must belong to owner.
+// Weekly rules overwrite any the target already holds for those weekdays;
+// overrides that have already ended are skipped (nothing left to carry). Vehicle
+// references are account-scoped, so they stay valid on the target. Returns the
+// number of rules + overrides copied.
+func (s *Store) CopySchedule(ctx context.Context, owner string, srcID, dstID int64, now time.Time) (int, error) {
+	if srcID == dstID {
+		return 0, errors.New("store: cannot copy a schedule onto itself")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Both permits must belong to the owner (defence in depth over the handler).
+	var owned int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM permit WHERE id IN (?, ?) AND owner = ?`, srcID, dstID, owner).Scan(&owned); err != nil {
+		return 0, err
+	}
+	if owned != 2 {
+		return 0, ErrNotFound
+	}
+
+	rres, err := tx.ExecContext(ctx, `
+INSERT INTO weekly_rule (permit_id, weekday, vehicle_id)
+SELECT ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?
+ON CONFLICT(permit_id, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`, dstID, srcID)
+	if err != nil {
+		return 0, err
+	}
+	ores, err := tx.ExecContext(ctx, `
+INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
+SELECT ?, vehicle_id, registration, starts_at, ends_at, created_by, created_at
+FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
+		dstID, srcID, now.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	rn, _ := rres.RowsAffected()
+	on, _ := ores.RowsAffected()
+	return int(rn + on), nil
+}
+
 // ---- Overrides ----
 
 func (s *Store) CreateOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {

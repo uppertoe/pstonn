@@ -217,6 +217,13 @@
   .permit-expiry svg { width:15px; height:15px; flex:0 0 auto; }
   .permit-expiry.warn { color:var(--warn); font-weight:500; }
   .permit-expiry.bad { color:var(--danger); font-weight:500; }
+  .copysched { margin:14px 0 4px; }
+  .copysched.lead { background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); padding:12px 14px; }
+  .copysched .cs-note { display:flex; align-items:flex-start; gap:8px; margin:0 0 10px; font-size:13px; color:var(--muted); }
+  .copysched .cs-note svg { width:16px; height:16px; flex:0 0 auto; margin-top:1px; }
+  .copysched .cs-form { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; margin-top:8px; }
+  .copysched .cs-form .fld { flex:1 1 200px; }
+  .copysched .cs-form select { width:100%; }
 
   /* legend */
   .legend { display:flex; gap:14px; flex-wrap:wrap; margin:2px 0 4px; }
@@ -1580,6 +1587,26 @@
 </p>
 {{end}}
 
+{{if .CopyFrom}}
+<div class="copysched{{if .RosterEmpty}} lead{{end}}" x-data="{open:{{if .RosterEmpty}}true{{else}}false{{end}}}">
+  {{if .RosterEmpty}}
+  <p class="cs-note">{{template "ic-copy"}} Renewed this permit? Copy your weekly roster and upcoming bookings across from an existing permit.</p>
+  {{else}}
+  <button type="button" class="ghost sm" @click="open=!open">{{template "ic-copy"}} Copy schedule from another permit</button>
+  {{end}}
+  <form x-show="open" x-cloak class="cs-form" hx-post="/permits/{{.Permit.ID}}/copy-schedule" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
+        {{if not .RosterEmpty}}@submit="if(!confirm('Copy that schedule here? It overwrites this permit on the days it covers.')) $event.preventDefault()"{{end}}>
+    <label class="fld">Copy from
+      <select name="source" required>
+        <option value="" disabled selected>Choose a permit…</option>
+        {{range .CopyFrom}}<option value="{{.ID}}">{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <button type="submit" class="sm">{{template "ic-copy"}} Copy schedule</button>
+  </form>
+</div>
+{{end}}
+
 <p class="sub">Weekly roster</p>
 <div class="roster">
   {{$vehicles := .Vehicles}}
@@ -1727,6 +1754,7 @@
 {{define "ic-clock"}}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>{{end}}
 {{define "ic-ticket"}}<svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"/><path d="M13 6v12"/></svg>{{end}}
 {{define "ic-alert"}}<svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg>{{end}}
+{{define "ic-copy"}}<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>{{end}}
 {{define "ic-calendar"}}<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg>{{end}}
 {{define "ic-activity"}}<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg>{{end}}
 {{define "ic-gear"}}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>{{end}}

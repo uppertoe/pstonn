@@ -352,6 +352,66 @@ func TestCouncilPasswordRoundTrip(t *testing.T) {
 	}
 }
 
+// TestCopySchedule covers cloning a renewed permit's roster + live overrides.
+func TestCopySchedule(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	owner := "c@example.com"
+	veh, err := s.CreateVehicle(ctx, owner, "AAA111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := s.UpsertPermit(ctx, owner, "old-1", "14", "Old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := s.UpsertPermit(ctx, owner, "new-1", "14", "New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRule(ctx, src, time.Monday, veh); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRule(ctx, src, time.Friday, veh); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(48 * time.Hour)
+	if _, err := s.CreateOverride(ctx, src, veh, time.Now(), &future, owner); err != nil {
+		t.Fatal(err)
+	}
+	// An already-ended override must NOT be carried over.
+	pastStart := time.Now().Add(-72 * time.Hour)
+	pastEnd := time.Now().Add(-48 * time.Hour)
+	if _, err := s.CreateOverride(ctx, src, veh, pastStart, &pastEnd, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.CopySchedule(ctx, owner, src, dst, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 { // 2 rules + 1 live override
+		t.Fatalf("copied count = %d, want 3", n)
+	}
+	rules, _ := s.ListRules(ctx, dst)
+	if len(rules) != 2 {
+		t.Fatalf("dst rules = %d, want 2", len(rules))
+	}
+	ovs, _ := s.ListOverrides(ctx, dst, time.Now())
+	if len(ovs) != 1 {
+		t.Fatalf("dst live overrides = %d, want 1", len(ovs))
+	}
+	// Self-copy is rejected.
+	if _, err := s.CopySchedule(ctx, owner, dst, dst, time.Now()); err == nil {
+		t.Fatal("self-copy should error")
+	}
+	// Cross-owner source is rejected (ErrNotFound), copying nothing.
+	other, _ := s.UpsertPermit(ctx, "other@example.com", "x-1", "14", "X")
+	if _, err := s.CopySchedule(ctx, owner, other, dst, time.Now()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-owner copy err = %v, want ErrNotFound", err)
+	}
+}
+
 // TestPermitMetaAndExpiryReminder covers persisting the council expiry/status and
 // the reminder flag that re-arms when the expiry date changes.
 func TestPermitMetaAndExpiryReminder(t *testing.T) {

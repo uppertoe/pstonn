@@ -207,6 +207,17 @@ func TestTemplatesRender(t *testing.T) {
 			p.ExpiryIn = "in 168 days"
 			return p
 		}, "Valid until 1 Jan 2027"},
+		{"copy-from-empty", func() permitView {
+			p := samplePermitView(loc)
+			p.RosterEmpty = true
+			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
+			return p
+		}, "Renewed this permit?"},
+		{"copy-from-option", func() permitView {
+			p := samplePermitView(loc)
+			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
+			return p
+		}, "Copy schedule from another permit"},
 	} {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {

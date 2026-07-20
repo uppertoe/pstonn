@@ -134,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /permits/{id}/delete", s.withConsent(s.deletePermit))
 	mux.HandleFunc("POST /permits/{id}/name", s.withConsent(s.renamePermit))
 	mux.HandleFunc("POST /permits/{id}/rules", s.withConsent(s.setRule))
+	mux.HandleFunc("POST /permits/{id}/copy-schedule", s.withConsent(s.copySchedule))
 	mux.HandleFunc("POST /permits/{id}/override", s.withConsent(s.addOverride))
 	mux.HandleFunc("POST /permits/{id}/overrides/{oid}/delete", s.withConsent(s.deleteOverride))
 
@@ -578,6 +579,9 @@ type permitView struct {
 	ExpiryIn    string // "in 12 days" / "tomorrow" / "today" / "3 days ago"
 	ExpiresSoon bool   // within the UI lead window (approaching)
 	Expired     bool   // already past the end date
+	// Copy-schedule affordance (for a renewed/replacement permit).
+	RosterEmpty bool        // no weekly rules yet — a fresh permit
+	CopyFrom    []permitOpt // this owner's OTHER permits, to copy a schedule from
 }
 
 type dayView struct {
@@ -979,8 +983,22 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
+		RosterEmpty: len(rules) == 0,
 	}
 	fillExpiry(&pv, now)
+	// Offer to copy a schedule from the owner's other permits (e.g. after a
+	// renewal creates a fresh permit under a new council id).
+	if siblings, err := s.store.ListPermitsFor(ctx, p.Owner); err == nil {
+		for _, sp := range siblings {
+			if sp.ID != p.ID {
+				label := sp.Label
+				if label == "" {
+					label = "Permit " + sp.CouncilPermitID
+				}
+				pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label})
+			}
+		}
+	}
 	return pv, nil
 }
 
@@ -1224,6 +1242,39 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 	// Re-evaluate so the scheduler drops the now-removed permit promptly.
 	s.sched.Kick()
 	redirectHome(w, r)
+}
+
+// copySchedule clones the weekly roster and active/upcoming one-offs from another
+// of the account's permits onto this one — the "I renewed my permit, put my
+// schedule back" flow. Any account member may do it (it's schedule management).
+func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	dst, ok := s.ownedPermit(w, r, owner) // target = permit in the path
+	if !ok {
+		return
+	}
+	src := atoi64(r.FormValue("source"))
+	if src == 0 || src == dst.ID {
+		s.formError(w, r, "Choose which permit to copy the schedule from.")
+		return
+	}
+	// Confirm the source is also this account's (CopySchedule re-checks, but this
+	// gives a clean 404 rather than a generic error).
+	if sp, err := s.store.GetPermit(r.Context(), src); err != nil || sp.Owner != owner {
+		s.message(w, http.StatusNotFound, "That permit isn't one of yours.")
+		return
+	}
+	n, err := s.store.CopySchedule(r.Context(), owner, src, dst.ID, time.Now())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if n == 0 {
+		s.formError(w, r, "That permit has no schedule to copy.")
+		return
+	}
+	s.sched.Kick()
+	s.respondPermit(w, r, owner, dst)
 }
 
 // cleanLabel trims a user-supplied name and strips control characters (including
