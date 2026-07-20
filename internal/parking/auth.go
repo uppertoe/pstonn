@@ -140,7 +140,7 @@ func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*toke
 // NOTE: this replays the SPA's own login form. It is not yet validated against
 // the live site from a server IP (see the Akamai spike in docs/CAPTURE.md); the
 // form-field harvesting is deliberately lenient in case the page shifts.
-func (c *Client) Link(ctx context.Context, owner, username, password string) error {
+func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword bool) error {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return err
@@ -230,12 +230,42 @@ func (c *Client) Link(ctx context.Context, owner, username, password string) err
 		return errors.New("parking: login did not establish a session (check the username and password)")
 	}
 
-	// 5. Seal and store; the password is dropped from here.
+	// 5. Seal and store the session cookie. The password is sealed and kept only
+	//    if the user opted in to auto-reconnect; otherwise it is dropped here and
+	//    password_sealed is written empty (clearing any previously saved value).
 	sealed, err := c.box.Seal(cookie)
 	if err != nil {
 		return err
 	}
-	return c.store.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed})
+	var sealedPass string
+	if savePassword {
+		if sealedPass, err = c.box.Seal(password); err != nil {
+			return err
+		}
+	}
+	return c.store.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed, Password: sealedPass})
+}
+
+// Reconnect re-establishes an expired session non-interactively using the sealed
+// password the user opted to save. It replays the same headless login as Link,
+// re-saving the (still opted-in) password. Returns ErrNoSavedPassword when the
+// user has not saved one, in which case the caller must fall back to prompting
+// for a manual re-link.
+func (c *Client) Reconnect(ctx context.Context, owner string) error {
+	cs, err := c.store.GetCouncilSession(ctx, owner)
+	if err != nil {
+		return err
+	}
+	if cs.Password == "" {
+		return ErrNoSavedPassword
+	}
+	password, err := c.box.Open(cs.Password)
+	if err != nil {
+		return err
+	}
+	// The council username is pinned to the owner's verified email at link time,
+	// so the owner doubles as the username here.
+	return c.Link(ctx, owner, owner, password, true)
 }
 
 var (

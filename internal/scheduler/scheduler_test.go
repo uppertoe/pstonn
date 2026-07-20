@@ -18,8 +18,11 @@ import (
 // fakeCouncil records calls and returns configured errors, standing in for the
 // real HTTP client.
 type fakeCouncil struct {
-	refreshed  []string
-	refreshErr error
+	refreshed    []string
+	refreshErr   error
+	reconnected  []string
+	reconnectErr error // defaults to ErrNoSavedPassword via reconnectSet
+	reconnectSet bool
 }
 
 func (f *fakeCouncil) SetVehicle(context.Context, string, model.Permit, string) error { return nil }
@@ -29,6 +32,13 @@ func (f *fakeCouncil) CurrentVehicle(context.Context, string, model.Permit) (str
 func (f *fakeCouncil) Refresh(_ context.Context, owner string) error {
 	f.refreshed = append(f.refreshed, owner)
 	return f.refreshErr
+}
+func (f *fakeCouncil) Reconnect(_ context.Context, owner string) error {
+	f.reconnected = append(f.reconnected, owner)
+	if !f.reconnectSet {
+		return parking.ErrNoSavedPassword // no saved password by default
+	}
+	return f.reconnectErr
 }
 
 type sentMail struct {
@@ -241,6 +251,30 @@ func TestKeepWarmUnlinksOnExpiry(t *testing.T) {
 	}
 	if _, err := st.GetCouncilSession(context.Background(), "expired@example.com"); err != store.ErrNotFound {
 		t.Fatalf("expired session should be unlinked, got err=%v", err)
+	}
+}
+
+// TestKeepWarmAutoReconnects: when the session expires but the user saved their
+// password, the scheduler reconnects silently instead of unlinking + alerting.
+func TestKeepWarmAutoReconnects(t *testing.T) {
+	st := newStore(t)
+	seedSession(t, st, "saved@example.com")
+	seedSchedule(t, st, "saved@example.com")
+	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired, reconnectSet: true} // reconnectErr nil = success
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(context.Background())
+
+	if len(fc.reconnected) != 1 {
+		t.Fatalf("expected one reconnect attempt, got %v", fc.reconnected)
+	}
+	if _, err := st.GetCouncilSession(context.Background(), "saved@example.com"); err != nil {
+		t.Fatalf("auto-reconnected session should be kept, got err=%v", err)
+	}
+	time.Sleep(2 * time.Millisecond) // let any (unexpected) alert goroutine run
+	if got := nf.relinkSnap(); len(got) != 0 {
+		t.Fatalf("auto-reconnect should not alert re-link, got %v", got)
 	}
 }
 

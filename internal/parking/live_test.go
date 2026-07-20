@@ -117,7 +117,7 @@ func TestLiveMeasureIdleTimeout(t *testing.T) {
 	// Obtain a fresh, isolated session in the store, then drive keep-warm Refresh.
 	// Progress goes to stdout (fmt) not t.Log, so it streams live during the run.
 	if user != "" {
-		if err := c.Link(ctx, owner, user, pass); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
 		fmt.Printf("[%s] fresh headless login OK, session isolated to this probe\n", time.Now().Format("15:04:05"))
@@ -228,7 +228,7 @@ func TestLiveLinkLogin(t *testing.T) {
 	c := New(cfg, st, box)
 
 	// 1. Headless login → stores the sealed session cookie, discards the password.
-	if err := c.Link(ctx, owner, username, password); err != nil {
+	if err := c.Link(ctx, owner, username, password, false); err != nil {
 		t.Fatalf("Link (headless login) failed: %v", err)
 	}
 	if !c.Linked(ctx, owner) {

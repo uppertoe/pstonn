@@ -33,6 +33,9 @@ type Council interface {
 	// CurrentVehicle reads the plate the council actually has on the permit right
 	// now (used to detect drift from changes made directly in the council portal).
 	CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error)
+	// Reconnect re-establishes an expired session from the user's opt-in saved
+	// password. Returns parking.ErrNoSavedPassword when none was saved.
+	Reconnect(ctx context.Context, owner string) error
 }
 
 // Notifier sends user-facing notifications (the re-authorise reminder, each
@@ -346,6 +349,15 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 			log.Printf("scheduler: kept session for %s warm", cs.Owner)
 			s.checkDrift(ctx, cs.Owner) // piggyback a gentle council-drift check
 		case errors.Is(err, parking.ErrSessionExpired):
+			// If the user opted to save their password, try to reconnect silently
+			// before giving up and asking them to re-link by hand.
+			if rerr := s.council.Reconnect(ctx, cs.Owner); rerr == nil {
+				log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", cs.Owner)
+				s.checkDrift(ctx, cs.Owner)
+				break
+			} else if !errors.Is(rerr, parking.ErrNoSavedPassword) {
+				log.Printf("scheduler: auto-reconnect for %s failed: %v", cs.Owner, rerr)
+			}
 			if derr := s.store.DeleteCouncilSession(ctx, cs.Owner); derr != nil {
 				log.Printf("scheduler: unlink expired session %s: %v", cs.Owner, derr)
 			} else {

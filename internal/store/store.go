@@ -42,6 +42,7 @@ type CouncilSession struct {
 	LinkedAt     time.Time // last interactive link/re-link; the re-authorise clock
 	ReminderSent time.Time // when the approaching-expiry email was sent (zero = not this cycle)
 	ConfirmToken string    // single-use token for the email confirm link (empty = none outstanding)
+	Password     string    // sealed council password for opt-in auto-reconnect (empty = not saved)
 }
 
 // ApplyRecord is one row of the apply audit log.
@@ -100,7 +101,8 @@ CREATE TABLE IF NOT EXISTS council_session (
     updated_at           TEXT NOT NULL DEFAULT '',
     linked_at            TEXT NOT NULL DEFAULT '',   -- last interactive link; the re-authorise clock
     reminder_sent_at     TEXT NOT NULL DEFAULT '',   -- when the approaching-expiry email was sent
-    confirm_token        TEXT NOT NULL DEFAULT ''    -- single-use token for the email confirm link
+    confirm_token        TEXT NOT NULL DEFAULT '',   -- single-use token for the email confirm link
+    password_sealed      TEXT NOT NULL DEFAULT ''    -- opt-in sealed council password for auto-reconnect (empty = not saved)
 );
 
 CREATE TABLE IF NOT EXISTS vehicle (
@@ -292,6 +294,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE council_session ADD COLUMN linked_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN reminder_sent_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN confirm_token TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE council_session ADD COLUMN password_sealed TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
@@ -760,9 +763,9 @@ func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSes
 	var cs CouncilSession
 	var expiry, updated, linked, reminded string
 	err := s.db.QueryRowContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed
 FROM council_session WHERE owner = ?`, owner).
-		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken)
+		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
 	}
@@ -855,8 +858,8 @@ SELECT
 func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error {
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '')
+INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?)
 ON CONFLICT(owner) DO UPDATE SET
     sub                 = excluded.sub,
     council_email       = excluded.council_email,
@@ -866,9 +869,10 @@ ON CONFLICT(owner) DO UPDATE SET
     updated_at          = excluded.updated_at,
     linked_at           = excluded.linked_at,
     reminder_sent_at    = '',
-    confirm_token       = ''`,
+    confirm_token       = '',
+    password_sealed     = excluded.password_sealed`,
 		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
-		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now)
+		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password)
 	return err
 }
 
@@ -880,6 +884,15 @@ UPDATE council_session
 SET cookie_sealed = ?, access_token_sealed = ?, token_expiry = ?, updated_at = ?
 WHERE owner = ?`,
 		sealedCookie, sealedAccess, expiry.UTC().Format(time.RFC3339), nowUTC(), owner)
+	return err
+}
+
+// ClearCouncilPassword drops a saved (sealed) council password without unlinking
+// the session — used by the settings "stop auto-reconnecting" action. If the
+// session later expires it will require a manual re-link, as if never saved.
+func (s *Store) ClearCouncilPassword(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET password_sealed = '' WHERE owner = ?`, owner)
 	return err
 }
 

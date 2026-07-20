@@ -44,6 +44,9 @@ var (
 	// ErrSessionExpired means the stored session cookie is no longer valid; the
 	// user must re-link (headless login) to obtain a fresh cookie.
 	ErrSessionExpired = errors.New("parking: council session expired; re-link required")
+	// ErrNoSavedPassword means an auto-reconnect was attempted but the user never
+	// opted to save their council password, so a manual re-link is required.
+	ErrNoSavedPassword = errors.New("parking: no saved council password for auto-reconnect")
 	// ErrNotCaptured marks a call whose request/response shape is still unknown.
 	ErrNotCaptured = errors.New("parking: endpoint not yet reverse-engineered (needs a capture)")
 	// ErrCouncilBusy means the portal is pushing back (Akamai 429/403/503) or the

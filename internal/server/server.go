@@ -77,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /terms/decline", s.withUser(s.declineTerms))
 	mux.HandleFunc("POST /council/link", s.withConsent(s.councilLink))
 	mux.HandleFunc("POST /council/unlink", s.withUser(s.councilUnlink)) // allow leaving without re-consent
+	mux.HandleFunc("POST /council/forget-password", s.withUser(s.councilForgetPassword))
 	mux.HandleFunc("POST /account/delete", s.withUser(s.accountDelete)) // allow leaving without re-consent
 	mux.HandleFunc("POST /account/members", s.withConsent(s.addMember))
 	mux.HandleFunc("POST /account/members/remove", s.withConsent(s.removeMember))
@@ -503,12 +504,14 @@ type dashboardData struct {
 	SharedWith string       // for a secondary: the primary account's email
 	Members    []memberView // for a primary: the secondaries with access
 	// dashboard state
-	Vehicles []vehicleView
-	Permits  []permitView
-	Log      []store.ApplyRecord
-	RelinkBy string     // human date the session must be re-authorised by ("" if unknown)
-	Notify   notifyView // settings: notification channels
-	Terms    termsView  // terms state + settings display
+	Vehicles      []vehicleView
+	Permits       []permitView
+	Log           []store.ApplyRecord
+	RelinkBy      string     // human date the session must be re-authorised by ("" if unknown)
+	CouncilLinked bool       // settings: an active council session exists
+	AutoReconnect bool       // settings: a saved password lets p.stonn auto-reconnect
+	Notify        notifyView // settings: notification channels
+	Terms         termsView  // terms state + settings display
 	// picker state
 	Pick []pickView
 	// guest passes
@@ -758,8 +761,12 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	owner := base.Owner
 	user := base.User.Email // the signed-in person; notification prefs are theirs
-	if cs, err := s.store.GetCouncilSession(ctx, owner); err == nil && !cs.LinkedAt.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
-		base.RelinkBy = cs.LinkedAt.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
+	if cs, err := s.store.GetCouncilSession(ctx, owner); err == nil {
+		base.CouncilLinked = true
+		base.AutoReconnect = cs.Password != ""
+		if !cs.LinkedAt.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
+			base.RelinkBy = cs.LinkedAt.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
+		}
 	}
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
@@ -1204,8 +1211,10 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 }
 
 // councilLink onboards the user's council account via a headless login: it takes
-// their council credentials, exchanges them for a session cookie, and discards
-// the password. The credentials are never stored.
+// their council credentials and exchanges them for a session cookie. The password
+// is discarded unless the user opts in to auto-reconnect, in which case it is
+// sealed (DATA_ENCRYPTION_KEY) and stored so the scheduler can silently re-link if
+// the council session later expires.
 func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	user, _, isPrimary := s.resolveAccount(r.Context())
 	// Only the account owner links the council account; a secondary uses the
@@ -1222,7 +1231,8 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Enter your council password.")
 		return
 	}
-	if err := s.council.Link(r.Context(), user, user, password); err != nil {
+	savePassword := r.FormValue("save_password") != ""
+	if err := s.council.Link(r.Context(), user, user, password, savePassword); err != nil {
 		log.Printf("council link for %s: %v", user, err)
 		s.message(w, http.StatusBadGateway, "Couldn't link your council account. Check that your password is correct and that your council account uses this email address.")
 		return
@@ -1244,6 +1254,26 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectHome(w, r)
+}
+
+// councilForgetPassword drops the saved (sealed) council password so p.stonn will
+// no longer reconnect automatically, without disturbing the live session. Owner-
+// only. After this, a session expiry once again requires a manual re-link.
+func (s *Server) councilForgetPassword(w http.ResponseWriter, r *http.Request) {
+	user, _, isPrimary := s.resolveAccount(r.Context())
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can change this.")
+		return
+	}
+	if err := s.store.ClearCouncilPassword(r.Context(), user); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if r.Header.Get("HX-Request") != "" {
+		s.settingsPage(w, r)
+		return
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 // accountDelete erases all of the owner's data (session, permits, vehicles,

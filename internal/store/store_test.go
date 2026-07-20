@@ -310,6 +310,48 @@ func TestSaveCouncilSessionStampsLinkedAt(t *testing.T) {
 	}
 }
 
+// TestCouncilPasswordRoundTrip covers the opt-in saved-password lifecycle: it
+// persists across a save, a token renewal preserves it, a re-save without it
+// clears it, and ClearCouncilPassword drops it while keeping the session.
+func TestCouncilPasswordRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	owner := "p@example.com"
+
+	// Saved with a sealed password.
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c", Password: "sealed-pw"}); err != nil {
+		t.Fatal(err)
+	}
+	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "sealed-pw" {
+		t.Fatalf("password not persisted, got %q", cs.Password)
+	}
+	// A token renewal must preserve the saved password.
+	if err := s.UpdateCouncilToken(ctx, owner, "c2", "at", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "sealed-pw" {
+		t.Fatalf("token renew wiped saved password, got %q", cs.Password)
+	}
+	// ClearCouncilPassword drops it but keeps the session.
+	if err := s.ClearCouncilPassword(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := s.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatalf("session should survive clearing password: %v", err)
+	}
+	if cs.Password != "" {
+		t.Fatalf("password not cleared, got %q", cs.Password)
+	}
+	// Re-linking without opting in leaves it empty.
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c3"}); err != nil {
+		t.Fatal(err)
+	}
+	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "" {
+		t.Fatalf("re-save without password should clear it, got %q", cs.Password)
+	}
+}
+
 // TestReminderAndConfirm covers the reminder token round-trip: mark a reminder,
 // then a confirm consumes the token, resets the re-authorise clock forward, and
 // clears the cycle. Uses a backdated linked_at so the extension is observable.

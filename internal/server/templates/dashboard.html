@@ -172,6 +172,12 @@
   textarea { resize:vertical; min-height:96px; width:100%; }
   input:focus,select:focus,textarea:focus { outline:0; border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 22%,transparent); }
   label.fld { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); }
+  /* Opt-in checkbox row (e.g. save-password) */
+  label.optin { display:flex; gap:10px; align-items:flex-start; font-size:12.5px; color:var(--muted); line-height:1.45; text-align:left; cursor:pointer; }
+  label.optin input { margin-top:3px; flex:0 0 auto; width:16px; height:16px; accent-color:var(--primary); }
+  label.optin strong { color:var(--ink); font-weight:600; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); color:var(--muted); vertical-align:middle; }
+  .pill.ok { background:var(--ok-soft); border-color:color-mix(in srgb,var(--ok) 30%,transparent); color:var(--ok); }
   /* Roomier contact form (landing + /contact) */
   .contactform { gap:16px; }
   .contactform .fld { font-size:13.5px; gap:7px; }
@@ -626,7 +632,7 @@
     <ul>
       <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held by whoever runs this server.</li>
       <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
-      <li>p.stonn does not store your council password. It does store your email, your schedule, and the encrypted session.</li>
+      <li>By default p.stonn does not store your council password &mdash; only your email, your schedule, and the encrypted session. If you opt in to auto-reconnect, your password is also kept, sealed with the same encryption, so the app can sign back in on its own; you can remove it any time in Settings.</li>
       <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
       <li>Use a password that is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
       <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
@@ -663,13 +669,13 @@
     <div class="dm-grid">
 
       <figure class="dm" data-demo="connect">
-        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">your password is never stored</span></figcaption>
+        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">we keep an encrypted session</span></figcaption>
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Connect council account</h2></div>
           <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
           <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
           <div class="dm-btn">{{template "ic-link"}} Link account</div>
-          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> We keep an encrypted session so the app can act for you. Your password is never stored.</div></div>
+          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> We keep an encrypted session so the app can act for you.</div></div>
         </div>
       </figure>
 
@@ -874,8 +880,8 @@
     {{if .IsPrimary}}
     <h2>{{if .Relink}}Re-link your council account{{else}}Link your council account{{end}}</h2>
     <p>
-      {{if .Relink}}Your council sign-in expired. Enter your details again to reconnect. We keep an encrypted session, never your password.
-      {{else}}Sign in once with your City of Stonnington ePermits details. We keep an encrypted session so the app can update your permit for you. Your password is never stored.{{end}}
+      {{if .Relink}}Your council sign-in expired. Enter your details again to reconnect. We keep an encrypted session so the app can update your permit for you.
+      {{else}}Sign in once with your City of Stonnington ePermits details. We keep an encrypted session so the app can update your permit for you.{{end}}
     </p>
     <form class="stack" method="post" action="/council/link">
       <label class="fld">Council email (your verified sign-in)
@@ -884,10 +890,18 @@
       <label class="fld">Council password
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>
+      <label class="optin">
+        <input type="checkbox" name="save_password" value="1" checked>
+        <span>
+          <strong>Save my password so p.stonn can reconnect on its own.</strong>
+          It's sealed with encryption only this app can open, and used only to sign back in if the council ends your session.
+          <br>Without it, if you ever sign in to the Stonnington ePermits site yourself, that logs p.stonn out — you'll need to come back here and re-link before your schedule runs again.
+        </span>
+      </label>
       <button type="submit">{{template "ic-link"}} Link account</button>
     </form>
     <p class="empty-note" style="margin-top:12px">Your council account must use <strong>{{.User.Email}}</strong>, the email you signed in with.</p>
-    <p class="empty-note" style="margin-top:6px">Tip: use a password unique to your council account. You can disconnect any time in Settings, and changing your council password also revokes access. <a href="/about">How it works &amp; security</a></p>
+    <p class="empty-note" style="margin-top:6px">Tip: use a password unique to your council account. You can disconnect or stop saving your password any time in Settings, and changing your council password also revokes access. <a href="/about">How it works &amp; security</a></p>
     {{else}}
     <h2>Waiting for the account owner</h2>
     <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>
@@ -1108,6 +1122,24 @@
     {{if .IsPrimary}}
     {{if .RelinkBy}}
     <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. We'll email a one-click link to confirm you're still using it before <strong>{{.RelinkBy}}</strong>.</p>
+    {{end}}
+    {{if .CouncilLinked}}
+    <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="max-width:60ch">
+        <strong>Auto-reconnect</strong>
+        {{if .AutoReconnect}}<span class="pill ok">On</span>
+        <p class="empty-note" style="margin-top:4px">Your password is saved (encrypted) so p.stonn can sign back in on its own if the council ends your session. Note: signing in to the Stonnington ePermits site yourself still logs p.stonn out until the next reconnect.</p>
+        {{else}}<span class="pill">Off</span>
+        <p class="empty-note" style="margin-top:4px">Your password isn't saved. If the council ends your session &mdash; including when you sign in to the ePermits site yourself &mdash; you'll need to re-link by hand. To turn this on, unlink and link again with &ldquo;Save my password&rdquo; ticked.</p>
+        {{end}}
+      </div>
+      {{if .AutoReconnect}}
+      <form method="post" action="/council/forget-password"
+            onsubmit="return confirm('Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires.')">
+        <button type="submit" class="ghost">Turn off</button>
+      </form>
+      {{end}}
+    </div>
     {{end}}
     <div class="row" style="margin-top:14px" x-data="{del:false}">
       <form method="post" action="/council/unlink" onsubmit="return confirm('Unlink your council account? Your schedule is kept and resumes when you re-link.')">
