@@ -307,6 +307,97 @@ func TestLiveSetVehicle(t *testing.T) {
 	t.Logf("OK: live write succeeded, VPP24714 now = %q", after)
 }
 
+// kickExperimentKey is a fixed 32-byte secretbox key so the sealed session stored
+// in phase "link" can be reopened by phase "probe" in a separate process. Only
+// used by the local TestLiveSessionKick experiment against a throwaway DB.
+var kickExperimentKey = []byte("pstonn-session-kick-experiment!!") // exactly 32 bytes
+
+// TestLiveSessionKick answers, experimentally: does logging in to the council
+// ePermits site directly invalidate the session p.stonn is holding? (The
+// suspected cause of the prod disconnect.) It runs in TWO phases against a
+// PERSISTENT DB so you can do a real browser login in between. Run BOTH commands
+// in your OWN terminal so your password never enters the Claude session.
+//
+// Phase 1 — establish an isolated headless session and confirm it's alive:
+//
+//	export PSTONN_LIVE_USERNAME='you@example.com' PSTONN_LIVE_PASSWORD='…'
+//	PSTONN_KICK_DB=/tmp/kick.db PSTONN_KICK_PHASE=link \
+//	  go test ./internal/parking -run TestLiveSessionKick -count=1 -v
+//
+// Then, as the SAME council user, log in at
+// https://parkingpermits.stonnington.vic.gov.au in a browser and finish the login.
+//
+// Phase 2 — re-probe the SAME stored session (no credentials needed):
+//
+//	PSTONN_KICK_DB=/tmp/kick.db PSTONN_KICK_PHASE=probe \
+//	  go test ./internal/parking -run TestLiveSessionKick -count=1 -v
+//
+//	ALIVE   in phase 2 => a browser login does NOT kick p.stonn's session.
+//	EXPIRED in phase 2 => it DOES: hypothesis confirmed, and the opt-in
+//	                      save-password auto-reconnect is the right mitigation.
+//
+// For a clean control, you can re-run phase 2 WITHOUT logging in first: it should
+// stay ALIVE, proving the kill (if any) is the browser login and not mere time.
+func TestLiveSessionKick(t *testing.T) {
+	dbPath := os.Getenv("PSTONN_KICK_DB")
+	phase := os.Getenv("PSTONN_KICK_PHASE")
+	if dbPath == "" || phase == "" {
+		t.Skip("set PSTONN_KICK_DB=/path/kick.db and PSTONN_KICK_PHASE=link|probe (see doc comment)")
+	}
+	ctx := context.Background()
+	const owner = "kick-probe@local"
+
+	cfg := &config.Config{Council: config.CouncilConfig{
+		Issuer:      "https://parkingpermits.stonnington.vic.gov.au/idm",
+		ClientID:    "ePermits.ssp.web",
+		RedirectURI: "https://parkingpermits.stonnington.vic.gov.au/ssp/callback",
+		Scopes:      []string{"openid", "profile", "ePermits.ssp.api.all"},
+		APIBase:     "https://parkingpermits.stonnington.vic.gov.au/ssp-svc",
+	}}
+	box, err := secretbox.New(kickExperimentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c := New(cfg, st, box)
+
+	switch phase {
+	case "link":
+		user := os.Getenv("PSTONN_LIVE_USERNAME")
+		pass := os.Getenv("PSTONN_LIVE_PASSWORD")
+		if user == "" || pass == "" {
+			t.Fatal("phase=link needs PSTONN_LIVE_USERNAME and PSTONN_LIVE_PASSWORD")
+		}
+		if err := c.Link(ctx, owner, user, pass, false); err != nil {
+			t.Fatalf("headless link failed: %v", err)
+		}
+		// Prove it's alive right now via the exact production keep-warm path.
+		if err := c.Refresh(ctx, owner); err != nil {
+			t.Fatalf("session not alive immediately after link: %v", err)
+		}
+		fmt.Printf("[%s] PHASE 1 OK ✓ headless session established and ALIVE (stored in %s).\n",
+			time.Now().Format("15:04:05"), dbPath)
+		fmt.Println("NEXT: log in to the ePermits site in a browser as the same user, then run PSTONN_KICK_PHASE=probe.")
+	case "probe":
+		switch err := c.Refresh(ctx, owner); {
+		case err == nil:
+			fmt.Printf("[%s] RESULT: ALIVE ✓ — the browser login did NOT kick p.stonn's session.\n",
+				time.Now().Format("15:04:05"))
+		case errors.Is(err, ErrSessionExpired):
+			fmt.Printf("[%s] RESULT: EXPIRED ✗ — the browser login KICKED p.stonn's session. Hypothesis confirmed.\n",
+				time.Now().Format("15:04:05"))
+		default:
+			t.Fatalf("probe error (not a clean expiry): %v", err)
+		}
+	default:
+		t.Fatalf("PSTONN_KICK_PHASE must be link or probe, got %q", phase)
+	}
+}
+
 func TestLiveReadFlow(t *testing.T) {
 	cookie := os.Getenv("PSTONN_LIVE_COOKIE")
 	if cookie == "" {

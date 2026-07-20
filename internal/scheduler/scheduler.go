@@ -534,8 +534,12 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 		return
 	}
 	drifted := false
+	now := time.Now()
 	for i := range permits {
 		p := permits[i]
+		if p.Inactive(now) {
+			continue // don't read the council for permits we no longer act on
+		}
 		actual, err := s.council.CurrentVehicle(ctx, owner, p)
 		if err != nil {
 			continue
@@ -745,14 +749,22 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	// boundary (a midnight/9am roster rollover), applying them back-to-back is a
 	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
 	// after each permit that actually hit the council.
+	active := 0
 	for _, p := range permits {
+		// An expired or cancelled permit can't be changed; skip it so we don't
+		// hammer the council with doomed writes or alarm the user with failures.
+		// It stays in the store as a copy-schedule source until removed.
+		if p.Inactive(now) {
+			continue
+		}
+		active++
 		if s.reconcilePermit(ctx, p, regByOwnerID, nameByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
 			}
 		}
 	}
-	s.detectSystemic(ctx, stats, len(permits))
+	s.detectSystemic(ctx, stats, active)
 }
 
 type ownerVehicle struct {

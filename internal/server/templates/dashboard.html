@@ -224,6 +224,14 @@
   .copysched .cs-form { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; margin-top:8px; }
   .copysched .cs-form .fld { flex:1 1 200px; }
   .copysched .cs-form select { width:100%; }
+  .expired-permits { opacity:.92; }
+  .exp-h2 { display:flex; align-items:center; gap:8px; font-size:15px; color:var(--muted); margin:0 0 2px; }
+  .exp-h2 svg { width:17px; height:17px; }
+  .explist { list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+  .exprow { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-2); }
+  .exprow .expmain { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .exprow .expname { font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .exprow .expstatus { font-size:12px; color:var(--muted); }
 
   /* legend */
   .legend { display:flex; gap:14px; flex-wrap:wrap; margin:2px 0 4px; }
@@ -1064,10 +1072,33 @@
     {{template "permit-body" .}}
   </section>
   {{else}}
+  {{if not .ExpiredPermits}}
   <section class="card"><p class="empty-note">No permits managed yet. <a href="/permits/new">Choose a permit →</a></p></section>
   {{end}}
-  {{if .Permits}}
+  {{end}}
+
+  {{if .ExpiredPermits}}
+  <section class="card expired-permits">
+    <h2 class="exp-h2">{{template "ic-clock"}} Expired permits</h2>
+    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore. Renewed one? <a href="/permits/new">Add the new permit</a>, then pick the expired one under &ldquo;Copy schedule from another permit&rdquo;.</p>
+    <ul class="explist">
+      {{range .ExpiredPermits}}
+      <li class="exprow">
+        <div class="expmain"><span class="expname">{{.Label}}</span><span class="expstatus">{{.StatusText}}</span></div>
+        <form method="post" action="/permits/{{.ID}}/delete"
+              onsubmit="return confirm('Remove this expired permit and its saved schedule? Copy it onto your new permit first if you still need it.')">
+          <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if or .Permits .ExpiredPermits}}
   <a class="link-quiet" href="/permits/new">{{template "ic-plus"}} Manage another permit</a>
+  {{end}}
+  {{if .Permits}}
   <button class="fab" type="button"
           onclick="window.dispatchEvent(new CustomEvent('open-oneoff'))">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
   {{end}}

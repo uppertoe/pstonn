@@ -25,9 +25,14 @@ type fakeCouncil struct {
 	reconnectSet bool
 	permits      []parking.PermitInfo
 	permitsErr   error
+	setCalls     []string // council_permit_id per SetVehicle call
+	setErr       error
 }
 
-func (f *fakeCouncil) SetVehicle(context.Context, string, model.Permit, string) error { return nil }
+func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, _ string) error {
+	f.setCalls = append(f.setCalls, p.CouncilPermitID)
+	return f.setErr
+}
 func (f *fakeCouncil) CurrentVehicle(context.Context, string, model.Permit) (string, error) {
 	return "", nil
 }
@@ -311,6 +316,42 @@ func TestPermitExpiryReminder(t *testing.T) {
 	}
 	if p, _ := st.PermitByCouncilID(ctx, cpid); p.ExpiryReminded {
 		t.Fatal("renewal to a new date should clear the reminded flag")
+	}
+}
+
+// TestReconcileSkipsInactivePermits: an expired permit is not written to (no
+// doomed council calls, no failure noise), while an active one still is.
+func TestReconcileSkipsInactivePermits(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	owner := "r@example.com"
+	seedSession(t, st, owner)
+	veh, err := st.CreateVehicle(ctx, owner, "AAA111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	today := time.Now().In(time.UTC).Weekday()
+	future := time.Now().Add(30 * 24 * time.Hour)
+	past := time.Now().Add(-24 * time.Hour)
+
+	act, _ := st.UpsertPermit(ctx, owner, "active-1", "14", "Active")
+	if err := st.SetRule(ctx, act, today, veh); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.UpdatePermitMeta(ctx, owner, "active-1", "Granted", future)
+
+	exp, _ := st.UpsertPermit(ctx, owner, "expired-1", "14", "Expired")
+	if err := st.SetRule(ctx, exp, today, veh); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.UpdatePermitMeta(ctx, owner, "expired-1", "Granted", past)
+
+	fc := &fakeCouncil{}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour})
+	s.reconcileAll(ctx)
+
+	if len(fc.setCalls) != 1 || fc.setCalls[0] != "active-1" {
+		t.Fatalf("SetVehicle calls = %v, want [active-1] only (expired skipped)", fc.setCalls)
 	}
 }
 

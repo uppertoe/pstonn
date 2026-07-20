@@ -5,6 +5,32 @@ import (
 	"time"
 )
 
+func TestPermitInactive(t *testing.T) {
+	now := mustTime(t, "2026-07-20 12:00 +1000")
+	past := now.Add(-24 * time.Hour)
+	future := now.Add(24 * time.Hour)
+	cases := []struct {
+		name string
+		p    Permit
+		want bool
+	}{
+		{"active granted", Permit{Status: "Granted", EndDate: future}, false},
+		{"unknown (no data)", Permit{}, false},
+		{"expired by date", Permit{Status: "Granted", EndDate: past}, true},
+		{"cancelled status", Permit{Status: "Cancelled", EndDate: future}, true},
+		{"suspended status", Permit{Status: "Suspended"}, true},
+		{"expired status word", Permit{Status: "Expired"}, true},
+		{"future end, live status", Permit{Status: "Current", EndDate: future}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.p.Inactive(now); got != c.want {
+				t.Fatalf("Inactive = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func mustTime(t *testing.T, s string) time.Time {
 	t.Helper()
 	// A fixed offset keeps the test independent of tzdata availability.

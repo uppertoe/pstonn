@@ -506,14 +506,15 @@ type dashboardData struct {
 	SharedWith string       // for a secondary: the primary account's email
 	Members    []memberView // for a primary: the secondaries with access
 	// dashboard state
-	Vehicles      []vehicleView
-	Permits       []permitView
-	Log           []store.ApplyRecord
-	RelinkBy      string     // human date the session must be re-authorised by ("" if unknown)
-	CouncilLinked bool       // settings: an active council session exists
-	AutoReconnect bool       // settings: a saved password lets p.stonn auto-reconnect
-	Notify        notifyView // settings: notification channels
-	Terms         termsView  // terms state + settings display
+	Vehicles       []vehicleView
+	Permits        []permitView
+	ExpiredPermits []expiredPermitView // collapsed: expired/cancelled permits kept as copy sources
+	Log            []store.ApplyRecord
+	RelinkBy       string     // human date the session must be re-authorised by ("" if unknown)
+	CouncilLinked  bool       // settings: an active council session exists
+	AutoReconnect  bool       // settings: a saved password lets p.stonn auto-reconnect
+	Notify         notifyView // settings: notification channels
+	Terms          termsView  // terms state + settings display
 	// picker state
 	Pick []pickView
 	// guest passes
@@ -582,6 +583,33 @@ type permitView struct {
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool        // no weekly rules yet — a fresh permit
 	CopyFrom    []permitOpt // this owner's OTHER permits, to copy a schedule from
+}
+
+// expiredPermitView is the compact row shown for a permit p.stonn no longer acts
+// on (expired or cancelled). It's kept so its schedule can still be copied onto a
+// renewed permit, and offers a one-click remove.
+type expiredPermitView struct {
+	ID         int64
+	Label      string
+	StatusText string // "Expired 1 Jul 2026" / "Cancelled"
+}
+
+// buildExpiredView makes the compact row for an inactive permit (no council call).
+func buildExpiredView(p model.Permit, now time.Time, loc *time.Location) expiredPermitView {
+	label := p.Label
+	if label == "" {
+		label = "Permit " + p.CouncilPermitID
+	}
+	var st string
+	switch {
+	case !p.EndDate.IsZero() && now.After(p.EndDate):
+		st = "Expired " + p.EndDate.In(loc).Format("2 Jan 2006")
+	case p.Status != "":
+		st = p.Status
+	default:
+		st = "Inactive"
+	}
+	return expiredPermitView{ID: p.ID, Label: label, StatusText: st}
 }
 
 type dayView struct {
@@ -718,7 +746,14 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var pvs []permitView
+	var expired []expiredPermitView
 	for _, p := range managed {
+		// Expired/cancelled permits collapse into a compact section — no full card,
+		// no council call — but stay available as a copy-schedule source.
+		if p.Inactive(now) {
+			expired = append(expired, buildExpiredView(p, now, s.cfg.DisplayLocation))
+			continue
+		}
 		pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, now)
 		if err != nil {
 			s.serverError(w, err)
@@ -728,6 +763,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	}
 	base.Vehicles = vviews
 	base.Permits = pvs
+	base.ExpiredPermits = expired
 	s.render(w, base)
 }
 
@@ -994,6 +1030,9 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 				label := sp.Label
 				if label == "" {
 					label = "Permit " + sp.CouncilPermitID
+				}
+				if sp.Inactive(now) {
+					label += " (expired)"
 				}
 				pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label})
 			}

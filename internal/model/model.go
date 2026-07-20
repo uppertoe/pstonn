@@ -2,7 +2,10 @@
 // HTTP concerns so the scheduling logic can be unit-tested in isolation.
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Vehicle is a registration that may be allocated to a shared visitor permit.
 type Vehicle struct {
@@ -23,6 +26,29 @@ type Permit struct {
 	EndDate            time.Time // permit expiry from the council record (zero = unknown)
 	Status             string    // council permit status, e.g. "Granted" (empty = unknown)
 	ExpiryReminded     bool      // an expiry reminder has been sent for the current EndDate
+}
+
+// deadStatus reports whether a council PermitStatus means the permit is no longer
+// usable. Matched leniently: the council's exact wording/casing isn't guaranteed,
+// and "Granted"/"Active"/"Current" are the live states we want to keep.
+func deadStatus(s string) bool {
+	s = strings.ToLower(s)
+	for _, k := range []string{"cancel", "expire", "suspend", "surrender", "revok", "lapsed", "closed"} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// Inactive reports whether a permit should no longer be actively reconciled or
+// shown as a live permit: its end date has passed, or its status says it's dead.
+// Zero end date + empty/live status = active (we don't retire on unknown data).
+func (p Permit) Inactive(now time.Time) bool {
+	if !p.EndDate.IsZero() && now.After(p.EndDate) {
+		return true
+	}
+	return deadStatus(p.Status)
 }
 
 // WeeklyRule allocates a vehicle to a permit on a given weekday, the building
