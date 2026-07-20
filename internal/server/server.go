@@ -647,7 +647,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 	}
 	ctx := r.Context()
 	user, owner, isPrimary := s.resolveAccount(ctx)
-	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation, Page: page}
+	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation, Page: page, Contact: s.cfg.ContactEnabled()}
 	if !isPrimary {
 		base.SharedWith = owner
 	}
