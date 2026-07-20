@@ -85,6 +85,10 @@ func (m *Mailer) SendWithReplyTo(to, replyTo, subject, body string) error {
 	return m.send(to, replyTo, subject, body)
 }
 
+// emailBoundary separates the two MIME parts. A fixed, unlikely token is fine for
+// transactional mail (both parts are base64-encoded, so it can't appear in a body).
+const emailBoundary = "==_pstonn_alt_b19c7f42a8=="
+
 func (m *Mailer) send(to, replyTo, subject, body string) error {
 	headers := []string{
 		"From: " + headerValue(m.from),
@@ -93,14 +97,27 @@ func (m *Mailer) send(to, replyTo, subject, body string) error {
 	if replyTo != "" {
 		headers = append(headers, "Reply-To: "+headerValue(replyTo))
 	}
-	msg := strings.Join(append(headers,
+	headers = append(headers,
 		"Subject: "+headerValue(subject),
 		"MIME-Version: 1.0",
-		"Content-Type: text/plain; charset=UTF-8",
-		"",
-		body,
-	), "\r\n")
-	return smtp.SendMail(m.addr, m.auth, senderAddress(m.from), []string{to}, []byte(msg))
+		`Content-Type: multipart/alternative; boundary="`+emailBoundary+`"`,
+	)
+	// multipart/alternative: a plain-text part (the source of truth, always shown
+	// by text-only clients) plus a branded HTML part. Both base64-encoded so long
+	// lines and any UTF-8 are transmitted intact.
+	var b strings.Builder
+	b.WriteString(strings.Join(headers, "\r\n"))
+	b.WriteString("\r\n\r\n")
+	b.WriteString("--" + emailBoundary + "\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(b64Wrap(body) + "\r\n")
+	b.WriteString("--" + emailBoundary + "\r\n")
+	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(b64Wrap(htmlDocument(subject, body)) + "\r\n")
+	b.WriteString("--" + emailBoundary + "--\r\n")
+	return smtp.SendMail(m.addr, m.auth, senderAddress(m.from), []string{to}, []byte(b.String()))
 }
 
 // headerValue neutralises CR/LF in a value destined for an email header, so
