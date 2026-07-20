@@ -554,6 +554,31 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	s.render(w, base)
 }
 
+// guestManifest serves a per-recipient web app manifest, so a guest can install
+// their link to the home screen (Android/Chrome "Install") and have the icon open
+// straight to THEIR menu (start_url is their own link). Public and token-scoped;
+// icons are the app's static PNGs. No token validation: a manifest for a dead link
+// is harmless (the page it points to just shows "no longer active").
+func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
+	// {token} is a single clean path segment (base64url); %q JSON-escapes it.
+	startURL := fmt.Sprintf("%q", "/g/"+r.PathValue("token"))
+	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprint(w, `{
+  "name": "p.stonn parking permit",
+  "short_name": "p.stonn",
+  "start_url": `+startURL+`,
+  "scope": "/g/",
+  "display": "standalone",
+  "theme_color": "#0d9488",
+  "background_color": "#eceff5",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}`)
+}
+
 // resendGuestLink emails a recipient a FRESH link for a guest pass they already
 // have. The original link can't be re-sent (only its hash is stored), so this
 // mints a new token and supersedes the old one. Owner-only.
