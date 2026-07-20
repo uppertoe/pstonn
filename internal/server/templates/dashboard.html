@@ -1419,7 +1419,7 @@
 {{if eq .Status "approved"}}
 <div id="reqstatus">
   <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
-  <p class="gresult">Approved. <span class="plate">{{.Plate}}</span> is on the permit until {{.Until}}.</p>
+  <p class="gresult">Approved &mdash; <span class="plate">{{.Plate}}</span> is being put on the permit until {{.Until}}.</p>
 </div>
 {{else if eq .Status "denied"}}
 <div id="reqstatus">

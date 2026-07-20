@@ -917,3 +917,60 @@ func TestPrintedGrantPersistence(t *testing.T) {
 		t.Fatalf("after revoke = %v, want ErrNotFound", err)
 	}
 }
+
+func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const alice, bob = "alice@example.com", "bob@example.com"
+
+	// Two consented accounts; bob also has an ntfy topic.
+	if err := s.RecordConsent(ctx, alice, "v1", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordConsent(ctx, bob, "v1", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetNotifyPref(ctx, NotifyPref{Owner: bob, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "bob-topic"}); err != nil {
+		t.Fatal(err)
+	}
+	// Give alice something to cascade so deletion touches more than consent.
+	p, _ := s.UpsertPermit(ctx, alice, "P-alice", "14", "Alice permit")
+	if _, err := s.CreatePrintedGrant(ctx, alice, p, "ahash", "asealed"); err != nil {
+		t.Fatal(err)
+	}
+
+	inRoster := func(email string) (RosterEntry, bool) {
+		roster, err := s.NotifyRoster(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range roster {
+			if e.Email == email {
+				return e, true
+			}
+		}
+		return RosterEntry{}, false
+	}
+
+	if e, ok := inRoster(bob); !ok || e.Ntfy != "bob-topic" {
+		t.Fatalf("bob should be in the roster with his ntfy topic, got %+v ok=%v", e, ok)
+	}
+	if _, ok := inRoster(alice); !ok {
+		t.Fatal("alice should be in the roster before deletion")
+	}
+
+	// Deleting alice's account must drop her from the outage-notify roster.
+	if err := s.DeleteAllForOwner(ctx, alice); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := inRoster(alice); ok {
+		t.Fatal("deleted account must not remain in the notify roster")
+	}
+	if _, ok := inRoster(bob); !ok {
+		t.Fatal("bob should still be in the roster")
+	}
+	// Her guest grant (and token) must be gone too, so a leaked token can't resolve.
+	if _, err := s.GuestContextByTokenHash(ctx, "ahash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted account's guest token still resolves = %v, want ErrNotFound", err)
+	}
+}

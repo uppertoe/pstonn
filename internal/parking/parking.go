@@ -446,7 +446,10 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	}
 	cur := mv.PermitVehicles[0]
 	if strings.EqualFold(cur.RegistrationNumber, registration) {
-		return nil // already allocated; portal would send no request either
+		// Already allocated (the read above IS the confirmation). Refresh the cache
+		// so callers reflect the council's own record, then report success.
+		c.regCache.Store(p.CouncilPermitID, cachedReg{reg: cur.RegistrationNumber, at: time.Now()})
+		return nil
 	}
 	permitID, err := strconv.ParseInt(p.CouncilPermitID, 10, 64)
 	if err != nil {
@@ -478,8 +481,24 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if err != nil {
 		return err // classified (non-2xx / transport) or a busy/auth sentinel
 	}
-	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// Confirm the change against the council's OWN record before reporting success,
+	// so every state we then show or store (the dashboard's "on permit now", a
+	// guest's "your plate is on", the apply log) reflects what the council actually
+	// has — not merely a write we sent, which a 2xx does not guarantee took effect.
+	// A mismatch or an unreadable confirmation is treated as not-yet-applied
+	// (transient): the scheduler retries and the user sees "still applying" rather
+	// than a false "done". The fresh read also refreshes the current-plate cache.
+	confirmed, err := c.CurrentVehicle(ctx, owner, p)
+	if err != nil {
+		return councilErr(FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
+	}
+	if !strings.EqualFold(confirmed, registration) {
+		return councilErr(FailTransient, op, fmt.Errorf("change sent but the council still shows %q", confirmed))
+	}
+	c.regCache.Store(p.CouncilPermitID, cachedReg{reg: confirmed, at: time.Now()})
 	return nil
 }
 

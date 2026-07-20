@@ -883,6 +883,18 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM consent WHERE owner = ?`, owner); err != nil {
 		return err
 	}
+	// Guest passes / door QRs (cascades their tokens, vehicle joins and requests via
+	// FK) and the per-account guest flags, so a deleted account leaves nothing behind
+	// that could still resolve a token, and drops off the outage-notify roster.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_grant WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_request WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_flags WHERE owner = ?`, owner); err != nil {
+		return err
+	}
 	// Remove this account's secondary members, and any membership this user held.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE owner = ? OR member_email = ?`, owner, owner); err != nil {
 		return err
