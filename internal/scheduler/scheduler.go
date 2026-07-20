@@ -143,6 +143,18 @@ func (s *Scheduler) Kick() {
 	}
 }
 
+// LastReconcile is the time the scheduler last completed a clean reconcile pass
+// (zero if none yet). An external watchdog uses this to tell a live-but-wedged
+// process from a healthy one: the HTTP server can answer while the work loop is
+// stuck, and a stale timestamp reveals that.
+func (s *Scheduler) LastReconcile() time.Time {
+	ns := s.lastReconcile.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
+}
+
 // Run drives the reconcile loop and a slower keep-warm loop until ctx is
 // cancelled.
 func (s *Scheduler) Run(ctx context.Context) {

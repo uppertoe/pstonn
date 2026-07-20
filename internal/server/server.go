@@ -104,6 +104,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /vehicles", s.withUser(s.vehiclesPage))
 	mux.HandleFunc("GET /activity", s.withUser(s.activityPage))
 	mux.HandleFunc("GET /settings", s.withUser(s.settingsPage))
+	mux.HandleFunc("GET /admin", s.requireAdmin(s.adminPage))
+	mux.HandleFunc("GET /status", s.statusJSON) // machine watchdog; bearer-token gated
 	mux.HandleFunc("GET /permits/new", s.withUser(s.pickerPage))
 	mux.HandleFunc("GET /guests", s.withUser(s.guestsPage))
 	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
@@ -516,6 +518,7 @@ type dashboardData struct {
 	PendingRequests []guestReqView   // printed-QR requests awaiting the holder's decision
 	Guest           guestActView     // public activation menu (State "guest")
 	Wait            *guestWaitView   // public "waiting for approval" page (State "guest-wait")
+	Admin           *adminView       // admin dashboard (State "admin")
 }
 
 type termsView struct {

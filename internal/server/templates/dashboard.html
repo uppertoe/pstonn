@@ -417,6 +417,26 @@
     .posterwrap { padding:0 !important; max-width:none !important; }
     .poster { box-shadow:none !important; border-color:#d7dee1 !important; margin:0 auto !important; }
   }
+  /* Admin dashboard */
+  .adminwrap { max-width:1100px; margin:0 auto; padding:18px 16px 60px; }
+  .adm-health { background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--primary); border-radius:var(--radius-sm); padding:12px 16px; margin:8px 0 18px; display:flex; flex-direction:column; gap:8px; }
+  .adm-health.bad { border-left-color:var(--danger); }
+  .adm-stats { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; color:var(--muted); }
+  .adm-stats .good { color:var(--primary); }
+  .adm-stats .bad { color:var(--danger); font-weight:650; }
+  .adm-tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-sm); }
+  table.adm { width:100%; border-collapse:collapse; font-size:13px; white-space:nowrap; }
+  table.adm th { text-align:left; font-weight:600; font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); padding:10px 12px; border-bottom:1px solid var(--line); background:var(--surface-2); position:sticky; top:0; }
+  table.adm td { padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.adm tr:last-child td { border-bottom:0; }
+  .adm-acct { font-weight:600; white-space:normal; max-width:240px; word-break:break-word; }
+  .adm-sub { font-size:11.5px; color:var(--muted); font-weight:400; }
+  .adm-notify .tag, table.adm .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); color:var(--muted); margin-right:3px; }
+  table.adm .bad { color:var(--danger); }
+  .adm-pill { display:inline-block; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:999px; border:1px solid transparent; }
+  .adm-pill.ok { background:color-mix(in srgb, var(--primary) 16%, transparent); color:var(--primary); }
+  .adm-pill.stale, .adm-pill.relink { background:color-mix(in srgb, var(--warn, #b54708) 16%, transparent); color:var(--warn, #b54708); }
+  .adm-pill.unlinked { background:var(--surface-2); color:var(--muted); }
   /* Public guest activation page */
   .guestwrap { max-width:460px; margin:0 auto; padding:32px 18px 60px; }
   .guestcard { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:26px 24px; }
@@ -914,6 +934,49 @@
   <p class="posterhint noprint">Print it, laminate it, leave it up. This code doesn't expire &mdash; reopen this page any time to reprint the very same one.</p>
 </main>
 
+{{else if eq .State "admin"}}
+{{/* ================= ADMIN (operators only) ================= */}}
+{{template "appbar" .}}
+<main class="adminwrap">
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Admin</div>
+  <div class="adm-health {{if .Admin.SchedulerStale}}bad{{else}}ok{{end}}">
+    <div><strong>Scheduler</strong> {{if .Admin.SchedulerStale}}looks stalled &mdash; last clean pass {{.Admin.SchedulerLast}}{{else}}healthy &mdash; last pass {{.Admin.SchedulerLast}}{{end}}</div>
+    <div class="adm-stats">
+      <span>{{.Admin.Total}} accounts</span>
+      <span>{{.Admin.Linked}} linked</span>
+      <span class="good">{{.Admin.WarmOK}} warm</span>
+      <span class="{{if .Admin.Failing}}bad{{end}}">{{.Admin.Failing}} need attention</span>
+      <span class="muted">status API {{if .Admin.StatusEnabled}}on{{else}}off{{end}}</span>
+    </div>
+  </div>
+  <div class="adm-tablewrap">
+    <table class="adm">
+      <thead><tr>
+        <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
+        <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+      </tr></thead>
+      <tbody>
+      {{range .Admin.Rows}}
+      <tr>
+        <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{end}}</td>
+        <td><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
+        <td>{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{.Permits}}</td>
+        <td>{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td class="adm-notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
+        <td>{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</main>
+
 {{else}}
 {{/* ================= APP (nav + pages) ================= */}}
 {{template "appbar" .}}
@@ -1340,6 +1403,7 @@
       <button class="icon-btn" type="button" @click="open=!open" aria-label="Account">{{template "ic-user"}}</button>
       <div class="menu" x-show="open" x-cloak>
         <div class="menu-email">{{.User.Email}}</div>
+        {{if .User.IsAdmin}}<a href="/admin" class="menu-item">{{template "ic-gear"}} Admin</a>{{end}}
         {{if .LogoutURL}}<a href="{{.LogoutURL}}" class="menu-item">{{template "ic-logout"}} Sign out</a>
         {{else}}<span class="menu-note">Session handled by your login provider</span>{{end}}
       </div>

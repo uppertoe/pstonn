@@ -927,6 +927,128 @@ func (s *Store) AccountEmails(ctx context.Context, owner string) ([]string, erro
 	return emails, nil
 }
 
+// AdminAccount is a per-owner operational summary for the admin dashboard and the
+// machine-readable status endpoint the outage watchdog polls.
+type AdminAccount struct {
+	Owner           string
+	MemberOf        string    // non-empty: this owner is a secondary on another account
+	Linked          bool      // has a stored council session cookie
+	LinkedAt        time.Time // last interactive link (the re-authorise clock start)
+	WarmedAt        time.Time // last keep-warm / refresh (council_session.updated_at)
+	TokenExpiry     time.Time
+	EmailEnabled    bool
+	NtfyEnabled     bool
+	NtfyTopic       string
+	ConsentVersion  string
+	PermitCount     int
+	MemberCount     int
+	Plates          []string // active plate on each managed permit
+	LastApplyAt     time.Time
+	LastApplyStatus string // status of the most recent apply_log row for the account
+}
+
+// AdminAccounts returns an operational summary for every known account (anyone who
+// has consented, linked the council, holds a permit, or set notify prefs), newest
+// council activity aside. It is read-only and owner-agnostic — callers must gate it
+// to admins.
+func (s *Store) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT o.owner,
+  COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner LIMIT 1), ''),
+  COALESCE(cs.cookie_sealed, ''), COALESCE(cs.linked_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
+  COALESCE(np.email_enabled, 1), COALESCE(np.ntfy_enabled, 0), COALESCE(np.ntfy_topic, ''),
+  COALESCE((SELECT version FROM consent c WHERE c.owner = o.owner ORDER BY id DESC LIMIT 1), ''),
+  (SELECT COUNT(*) FROM permit p WHERE p.owner = o.owner),
+  (SELECT COUNT(*) FROM account_member m WHERE m.owner = o.owner),
+  COALESCE((SELECT al.status FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), ''),
+  COALESCE((SELECT al.at     FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), '')
+FROM (
+  SELECT owner FROM council_session
+  UNION SELECT owner FROM permit
+  UNION SELECT owner FROM consent
+  UNION SELECT owner FROM notify_pref
+) o
+LEFT JOIN council_session cs ON cs.owner = o.owner
+LEFT JOIN notify_pref np ON np.owner = o.owner
+ORDER BY o.owner`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminAccount
+	byOwner := map[string]*AdminAccount{}
+	for rows.Next() {
+		var a AdminAccount
+		var cookie, linked, warmed, expiry, lastAt string
+		var emailEn, ntfyEn int
+		if err := rows.Scan(&a.Owner, &a.MemberOf, &cookie, &linked, &warmed, &expiry,
+			&emailEn, &ntfyEn, &a.NtfyTopic, &a.ConsentVersion, &a.PermitCount, &a.MemberCount,
+			&a.LastApplyStatus, &lastAt); err != nil {
+			return nil, err
+		}
+		a.Linked = cookie != ""
+		a.EmailEnabled = emailEn == 1
+		a.NtfyEnabled = ntfyEn == 1
+		a.LinkedAt, _ = time.Parse(time.RFC3339, linked)
+		a.WarmedAt, _ = time.Parse(time.RFC3339, warmed)
+		a.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
+		a.LastApplyAt, _ = time.Parse(time.RFC3339, lastAt)
+		out = append(out, a)
+		byOwner[a.Owner] = &out[len(out)-1]
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Fold in each account's active plates in a single extra query.
+	prows, err := s.db.QueryContext(ctx,
+		`SELECT owner, active_registration FROM permit WHERE active_registration != '' ORDER BY owner, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer prows.Close()
+	for prows.Next() {
+		var owner, reg string
+		if err := prows.Scan(&owner, &reg); err != nil {
+			return nil, err
+		}
+		if a := byOwner[owner]; a != nil {
+			a.Plates = append(a.Plates, reg)
+		}
+	}
+	return out, prows.Err()
+}
+
+// RosterEntry is one account's outage-notification contact.
+type RosterEntry struct {
+	Email string `json:"email"`
+	Ntfy  string `json:"ntfy,omitempty"` // topic, only when ntfy is enabled
+}
+
+// NotifyRoster returns the contact list an outage watchdog would use: every
+// consented account, with its ntfy topic when enabled. Email is the baseline
+// channel, so it is always the account email.
+func (s *Store) NotifyRoster(ctx context.Context) ([]RosterEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT c.owner,
+  CASE WHEN COALESCE(np.ntfy_enabled,0)=1 THEN COALESCE(np.ntfy_topic,'') ELSE '' END
+FROM (SELECT DISTINCT owner FROM consent) c
+LEFT JOIN notify_pref np ON np.owner = c.owner
+ORDER BY c.owner`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RosterEntry
+	for rows.Next() {
+		var e RosterEntry
+		if err := rows.Scan(&e.Email, &e.Ntfy); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // ListMembers returns the secondaries with access to owner's account, oldest first.
 func (s *Store) ListMembers(ctx context.Context, owner string) ([]AccountMember, error) {
 	rows, err := s.db.QueryContext(ctx,

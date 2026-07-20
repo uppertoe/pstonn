@@ -45,7 +45,10 @@ p.{$DOMAIN} {
 		}
 	}
 
-	@public path /about /why /contact /healthz /council/confirm /g/*
+	# /status is the machine-readable status the outage watchdog polls. It carries
+	# its own bearer token (the app checks STATUS_TOKEN), so it bypasses login like
+	# the other token-only routes; forward-auth identity is stripped as usual.
+	@public path /about /why /contact /healthz /council/confirm /g/* /status
 	handle @public {
 		route {
 			import strip_client_identity
@@ -61,6 +64,12 @@ p.{$DOMAIN} {
 				import strip_auth_cookie
 			}
 		}
+	}
+	# The admin dashboard is limited to the admin group (the app double-checks the
+	# Remote-Groups header too). Keep it above the catch-all so it is not treated as
+	# a plain signed-in-user route.
+	handle /admin* {
+		import protected_admin pstonn:8080
 	}
 	# Everything else requires a signed-in user (forward-auth via vps-scaffold-auth).
 	# Needs apps/auth enabled in the server repo (it defines `protected` +
