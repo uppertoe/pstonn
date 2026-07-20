@@ -1183,10 +1183,7 @@
   {{/* ---------- GUEST PASSES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
   <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
-  {{if not .IsPrimary}}
-  <section class="card"><p class="empty-note">Only the account owner can manage guest passes.</p></section>
-
-  {{else if .QR}}
+  {{if .QR}}
   {{/* ---- ON-SCREEN VISITOR QR (instant, expires) ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
     <div class="editbar" style="text-align:left">
