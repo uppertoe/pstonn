@@ -921,7 +921,12 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM council_session WHERE owner = ?`, owner); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, owner); err != nil {
+	// Notification prefs are per-person: drop this account owner's own row AND the
+	// rows of its secondaries (still present in account_member at this point), so a
+	// deleted account leaves no member's channel prefs behind.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM notify_pref WHERE owner = ? OR owner IN (SELECT member_email FROM account_member WHERE owner = ?)`,
+		owner, owner); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM consent WHERE owner = ?`, owner); err != nil {
@@ -1173,14 +1178,21 @@ WHERE (SELECT COUNT(1) FROM account_member WHERE owner = ?) < ?`,
 // RemoveMember revokes a secondary's access, scoped to the owner so one account
 // cannot remove another's member.
 func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner)
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner); err != nil {
+		return err
+	}
+	// Their personal notification prefs go with their access.
+	_, err := s.db.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail)
 	return err
 }
 
 // RemoveMembership lets a secondary leave whatever account they belong to.
 func (s *Store) RemoveMembership(ctx context.Context, memberEmail string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM account_member WHERE member_email = ?`, memberEmail)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM account_member WHERE member_email = ?`, memberEmail); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail)
 	return err
 }
 

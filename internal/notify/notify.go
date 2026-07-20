@@ -201,81 +201,118 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 	return
 }
 
+// memberPref pairs an account member with their OWN notification preference, so a
+// change notifies each person by the channels they chose for themselves.
+type memberPref struct {
+	email string
+	pref  store.NotifyPref
+}
+
+// accountDeliveries returns every member of an account (owner plus any
+// secondaries), each paired with their own notify_pref. Preferences are
+// per-person: a secondary turning their email off must not silence the primary,
+// so we never fold the account into one shared preference. A member with no row
+// yet gets the defaults (email on).
+func (s *Service) accountDeliveries(ctx context.Context, owner string) ([]memberPref, error) {
+	emails, err := s.store.AccountEmails(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]memberPref, 0, len(emails))
+	for _, e := range emails {
+		p, err := s.store.GetNotifyPref(ctx, e)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, memberPref{email: e, pref: p})
+	}
+	return out, nil
+}
+
 // EnqueueApply durably queues an apply notification, for paths with no reconcile-
 // loop retry behind them (a guest activation): a failed send is retried by the
-// outbox instead of dropped. Honours the owner's channel + failures-only prefs,
-// and dedups so a repeated activation of the same plate doesn't double-notify.
+// outbox instead of dropped. Enqueues ONE message per account member, each
+// honouring that member's own channels + failures-only, and dedups per member so
+// a repeated activation of the same plate doesn't double-notify anyone.
 func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
-	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
+	dels, err := s.accountDeliveries(ctx, o.Owner)
 	if err != nil {
 		return err
-	}
-	if o.OK && pref.FailuresOnly {
-		return nil
 	}
 	subject, body, priority, tags := composeApply(o)
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
-	m := outMessage{
-		Account: o.Owner,
-		Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
-		DedupKey: fmt.Sprintf("apply|%s|%s|%s|%t", o.Owner, o.PermitLabel, o.Reg, o.OK),
+	for _, d := range dels {
+		if o.OK && d.pref.FailuresOnly {
+			continue
+		}
+		m := outMessage{
+			Account: o.Owner,
+			Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
+			DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
+		}
+		if d.pref.EmailEnabled && s.mail.Enabled() {
+			m.Recipients = []string{d.email}
+		}
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			m.NtfyTopic = d.pref.NtfyTopic
+		}
+		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
+			continue // this member has no reachable channel
+		}
+		if err := s.enqueue(ctx, m); err != nil {
+			return err
+		}
 	}
-	if pref.EmailEnabled && s.mail.Enabled() {
-		m.Recipients, _ = s.store.AccountEmails(ctx, o.Owner)
-	}
-	if pref.NtfyEnabled && s.ntfyBase != "" {
-		m.NtfyTopic = pref.NtfyTopic
-	}
-	return s.enqueue(ctx, m)
+	return nil
 }
 
-// NotifyApply tells the permit owner about an apply outcome, honouring their
-// channel choices and "failures only" setting. It returns how many channels
-// ACCEPTED the message: the caller uses 0 to mean "the user was NOT reached" so
-// it can escalate to the operator and retry, rather than silently marking the
-// outcome as delivered. -1 means intentionally not sent (failures-only success).
+// NotifyApply tells everyone on the account about an apply outcome, each by the
+// channels THEY chose (a secondary's email-off doesn't silence the primary). It
+// returns how many members were reached: the caller uses 0 to mean "nobody was
+// reached" so it can escalate to the operator and retry, rather than silently
+// marking the outcome as delivered. -1 means intentionally not sent (nobody was
+// due a notification — all suppressed by failures-only, or no channels enabled).
 func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered int, err error) {
-	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
+	dels, err := s.accountDeliveries(ctx, o.Owner)
 	if err != nil {
 		return 0, err
 	}
-	if o.OK && pref.FailuresOnly {
-		return -1, nil
-	}
 	subject, body, priority, tags := composeApply(o)
-
+	emailBody := body
+	if s.appURL != "" {
+		emailBody += "\n\n" + s.appURL
+	}
 	var errs []string
-	if pref.EmailEnabled && s.mail.Enabled() {
-		emailBody := body
-		if s.appURL != "" {
-			emailBody += "\n\n" + s.appURL
+	due := 0 // members with at least one channel that should have received this
+	for _, d := range dels {
+		if o.OK && d.pref.FailuresOnly {
+			continue
 		}
-		// Email every member of the account (owner plus any secondaries), so a
-		// shared household all hear about a change. The account counts as reached
-		// (delivered) if at least one member's email is accepted; a single bad
-		// address does not force endless retries or an operator alert.
-		recipients, _ := s.store.AccountEmails(ctx, o.Owner)
-		sent := 0
-		for _, addr := range recipients {
-			if e := s.mail.Send(addr, subject, emailBody); e != nil {
-				errs = append(errs, "email "+addr+": "+e.Error())
+		reached := false
+		if d.pref.EmailEnabled && s.mail.Enabled() {
+			due++
+			if e := s.mail.Send(d.email, subject, emailBody); e != nil {
+				errs = append(errs, "email "+d.email+": "+e.Error())
 			} else {
-				sent++
+				reached = true
 			}
 		}
-		if sent > 0 {
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			due++
+			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, priority, tags); e != nil {
+				errs = append(errs, "ntfy "+d.email+": "+e.Error())
+			} else {
+				reached = true
+			}
+		}
+		if reached {
 			delivered++
 		}
 	}
-	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
-		// One account push topic that any member can subscribe their own device to.
-		if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, priority, tags); e != nil {
-			errs = append(errs, "ntfy: "+e.Error())
-		} else {
-			delivered++
-		}
+	if due == 0 {
+		return -1, nil // nobody was due a notification
 	}
 	if len(errs) > 0 {
 		return delivered, fmt.Errorf("notify %s: %s", o.Owner, strings.Join(errs, "; "))
@@ -283,10 +320,11 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	return delivered, nil
 }
 
-// SendTest sends a "notifications are working" message on every enabled channel,
-// so the user can confirm their setup from the UI.
-func (s *Service) SendTest(ctx context.Context, owner string) error {
-	pref, err := s.store.GetNotifyPref(ctx, owner)
+// SendTest sends a "notifications are working" message on the acting user's OWN
+// enabled channels (their email, their push topic), so each person confirms their
+// own setup — a secondary's test doesn't reach the primary and vice versa.
+func (s *Service) SendTest(ctx context.Context, user string) error {
+	pref, err := s.store.GetNotifyPref(ctx, user)
 	if err != nil {
 		return err
 	}
@@ -294,11 +332,8 @@ func (s *Service) SendTest(ctx context.Context, owner string) error {
 	const body = "This is a test. Your permit-change notifications are set up correctly."
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
-		recipients, _ := s.store.AccountEmails(ctx, owner)
-		for _, addr := range recipients {
-			if e := s.mail.Send(addr, subject, body); e != nil {
-				errs = append(errs, "email "+addr+": "+e.Error())
-			}
+		if e := s.mail.Send(user, subject, body); e != nil {
+			errs = append(errs, "email "+user+": "+e.Error())
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {

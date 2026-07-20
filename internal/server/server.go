@@ -538,7 +538,6 @@ type notifyView struct {
 	NtfyTopic      string
 	NtfyBase       string
 	UserEmail      string
-	Shared         bool   // account has secondaries, so email goes to everyone with access
 	Status         string // transient confirmation after auto-save
 	Error          string // transient error (e.g. tried to turn everything off)
 }
@@ -753,31 +752,30 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	owner := base.Owner
+	user := base.User.Email // the signed-in person; notification prefs are theirs
 	if cs, err := s.store.GetCouncilSession(ctx, owner); err == nil && !cs.LinkedAt.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
 		base.RelinkBy = cs.LinkedAt.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
 	}
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
 	}
-	pref, err := s.store.GetNotifyPref(ctx, owner)
+	// Notification preferences are per-person: each user (primary or secondary)
+	// controls how THEY are notified, keyed to their own signed-in email.
+	pref, err := s.store.GetNotifyPref(ctx, user)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	// Ensure the account always has an ntfy topic to subscribe to, even before enabling it.
+	// Ensure the user always has their own ntfy topic to subscribe to, even before enabling it.
 	if pref.NtfyTopic == "" {
-		pref.Owner = owner
+		pref.Owner = user
 		pref.NtfyTopic = notify.RandomTopic()
 		_ = s.store.SetNotifyPref(ctx, pref)
-	}
-	shared := false
-	if n, err := s.store.CountMembers(ctx, owner); err == nil && n > 0 {
-		shared = true
 	}
 	base.Notify = notifyView{
 		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
-		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner, Shared: shared,
+		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
 	}
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
@@ -797,15 +795,11 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 
 // renderNotify renders the swappable notifications fragment (auto-save target),
 // or falls back to a redirect for a non-htmx request.
-func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, owner string, pref store.NotifyPref, status, errMsg string) {
-	shared := false
-	if n, err := s.store.CountMembers(r.Context(), owner); err == nil && n > 0 {
-		shared = true
-	}
+func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user string, pref store.NotifyPref, status, errMsg string) {
 	nv := notifyView{
 		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
-		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: owner, Shared: shared,
+		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
 		Status: status, Error: errMsg,
 	}
 	if r.Header.Get("HX-Request") != "" {
@@ -821,18 +815,18 @@ func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, owner stri
 // saveNotify auto-saves the user's channel choices on every toggle, requiring at
 // least one channel to stay on (else it reverts and warns).
 func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
-	pref, err := s.store.GetNotifyPref(r.Context(), owner)
+	user, _, _ := s.resolveAccount(r.Context())
+	pref, err := s.store.GetNotifyPref(r.Context(), user)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	pref.Owner = owner
+	pref.Owner = user
 	email := r.FormValue("email_enabled") != ""
 	ntfy := r.FormValue("ntfy_enabled") != ""
 	if (s.notify.EmailAvailable() || s.notify.NtfyAvailable()) && !email && !ntfy {
 		// Revert: render the still-saved pref (re-checks the box) with a warning.
-		s.renderNotify(w, r, owner, pref, "", "Keep at least one method on.")
+		s.renderNotify(w, r, user, pref, "", "Keep at least one method on.")
 		return
 	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
@@ -840,30 +834,30 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.renderNotify(w, r, owner, pref, "Saved", "")
+	s.renderNotify(w, r, user, pref, "Saved", "")
 }
 
-// regenTopic gives the account a fresh ntfy topic (live), enabling ntfy.
+// regenTopic gives the signed-in user a fresh personal ntfy topic (live), enabling ntfy.
 func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
-	pref, err := s.store.GetNotifyPref(r.Context(), owner)
+	user, _, _ := s.resolveAccount(r.Context())
+	pref, err := s.store.GetNotifyPref(r.Context(), user)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	pref.Owner, pref.NtfyTopic, pref.NtfyEnabled = owner, notify.RandomTopic(), true
+	pref.Owner, pref.NtfyTopic, pref.NtfyEnabled = user, notify.RandomTopic(), true
 	if err := s.store.SetNotifyPref(r.Context(), pref); err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.renderNotify(w, r, owner, pref, "New topic. Re-subscribe in the ntfy app.", "")
+	s.renderNotify(w, r, user, pref, "New topic. Re-subscribe in the ntfy app.", "")
 }
 
-// testNotify sends a test message on every enabled channel.
+// testNotify sends a test message on the signed-in user's own enabled channels.
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
-	if err := s.notify.SendTest(r.Context(), owner); err != nil {
-		log.Printf("test notify %s: %v", owner, err)
+	user, _, _ := s.resolveAccount(r.Context())
+	if err := s.notify.SendTest(r.Context(), user); err != nil {
+		log.Printf("test notify %s: %v", user, err)
 		s.message(w, http.StatusBadGateway, "Couldn't send the test notification: "+err.Error())
 		return
 	}

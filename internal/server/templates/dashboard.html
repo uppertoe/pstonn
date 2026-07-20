@@ -1476,7 +1476,7 @@
 <form hx-post="/notifications" hx-target="#notify-body" hx-swap="innerHTML" hx-trigger="change"
       class="stack notify-form" x-data="{ntfy: {{if .NtfyEnabled}}true{{else}}false{{end}}}">
   {{if .EmailAvailable}}
-  <label class="toggle"><input type="checkbox" name="email_enabled" {{if .EmailEnabled}}checked{{end}}> <span>{{if .Shared}}Email everyone with access to this account{{else}}Email me at <strong>{{.UserEmail}}</strong>{{end}}</span></label>
+  <label class="toggle"><input type="checkbox" name="email_enabled" {{if .EmailEnabled}}checked{{end}}> <span>Email me at <strong>{{.UserEmail}}</strong></span></label>
   {{end}}
   {{if .NtfyAvailable}}
   <div>
