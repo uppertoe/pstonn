@@ -486,7 +486,9 @@
   .hero .ring svg { width:28px; height:28px; }
   .hero h2 { margin:0 0 8px; font-size:21px; letter-spacing:-.02em; }
   .hero p { margin:0 auto 18px; max-width:440px; color:var(--muted); }
-  form.stack { display:grid; gap:11px; max-width:360px; margin:0 auto; text-align:left; }
+  form.stack { display:grid; gap:11px; max-width:none; margin:0; text-align:left; }
+  /* Focused sign-in / onboarding form stays narrow and centred in its hero card. */
+  .card.hero form.stack { max-width:360px; margin:16px auto 0; }
 
   /* landing (public) */
   .appbar-r .cta-btn { text-decoration:none; }
