@@ -85,10 +85,6 @@ func (s *Service) NotifyAdmin(ctx context.Context, subject, body string) error {
 // email is configured), plus push if enabled. Returns the number of channels
 // that accepted the message.
 func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
-	pref, err := s.store.GetNotifyPref(ctx, owner)
-	if err != nil {
-		pref = store.NotifyPref{Owner: owner}
-	}
 	subject := "Action needed: reconnect your p.stonn council account"
 	body := "Your council connection has expired, so p.stonn has stopped updating your visitor permit.\n\n" +
 		"Please open the app and re-link your council account so your schedule keeps running. " +
@@ -97,19 +93,30 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 		body += "\n\nRe-link: " + s.appURL
 	}
 	body += "\nCouncil portal: " + councilPortalURL
-	delivered := 0
-	if s.mail.Enabled() { // re-link is important: always email the verified address
-		if e := s.mail.Send(owner, subject, body); e != nil {
-			log.Printf("notify relink email %s: %v", owner, e)
-		} else {
-			delivered++
-		}
+	// Tell EVERYONE on the account (owner + secondaries) -- a lapsed council
+	// connection can land the whole household a fine, and secondaries help manage
+	// the permit. Re-link is important, so always email each member's verified
+	// address (channel opt-outs don't apply); push to each member's topic too.
+	members, err := s.store.AccountEmails(ctx, owner)
+	if err != nil {
+		members = []string{owner}
 	}
-	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
-		if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, "high", "warning"); e != nil {
-			log.Printf("notify relink ntfy %s: %v", owner, e)
-		} else {
-			delivered++
+	delivered := 0
+	for _, m := range members {
+		mpref, _ := s.store.GetNotifyPref(ctx, m)
+		if s.mail.Enabled() {
+			if e := s.mail.Send(m, subject, body); e != nil {
+				log.Printf("notify relink email %s: %v", m, e)
+			} else {
+				delivered++
+			}
+		}
+		if mpref.NtfyEnabled && s.ntfyBase != "" && mpref.NtfyTopic != "" {
+			if e := s.sendNtfy(ctx, mpref.NtfyTopic, subject, body, "high", "warning"); e != nil {
+				log.Printf("notify relink ntfy %s: %v", m, e)
+			} else {
+				delivered++
+			}
 		}
 	}
 	return delivered
