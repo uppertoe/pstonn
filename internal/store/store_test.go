@@ -974,3 +974,57 @@ func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
 		t.Fatalf("deleted account's guest token still resolves = %v, want ErrNotFound", err)
 	}
 }
+
+func TestOutbox(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.EnqueueOutbox(ctx, OutboxItem{Recipients: []string{"a@x.co"}, Subject: "S1", Body: "B1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "k1", NtfyTopic: "topic", Subject: "S2", Body: "B2"}); err != nil {
+		t.Fatal(err)
+	}
+	// Idempotency: a second enqueue with the same dedup key is a no-op.
+	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "k1", Subject: "dup", Body: "dup"}); err != nil {
+		t.Fatal(err)
+	}
+
+	due, err := s.DueOutbox(ctx, time.Now(), 10)
+	if err != nil || len(due) != 2 {
+		t.Fatalf("due = %d (%v), want 2 (dedup dropped the third)", len(due), err)
+	}
+	// Recipients round-trip through the newline encoding.
+	s1 := due[0]
+	if s1.Subject != "S1" || len(s1.Recipients) != 1 || s1.Recipients[0] != "a@x.co" {
+		t.Fatalf("recipients round-trip: %+v", s1)
+	}
+
+	// Reschedule S1 into the future → not due now, due later.
+	if err := s.RescheduleOutbox(ctx, s1.ID, 1, time.Now().Add(time.Hour), "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now(), 10); len(d) != 1 {
+		t.Fatalf("after reschedule, due now = %d, want 1", len(d))
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now().Add(2*time.Hour), 10); len(d) != 2 {
+		t.Fatalf("after reschedule, due in 2h = %d, want 2", len(d))
+	}
+
+	// Sent and dead both drop out of the due set (survives restart: it's all in SQLite).
+	if err := s.MarkOutboxSent(ctx, s1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkOutboxDead(ctx, due[1].ID, "gave up"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now().Add(2*time.Hour), 10); len(d) != 0 {
+		t.Fatalf("after sent+dead, due = %d, want 0", len(d))
+	}
+
+	// Purge removes the delivered row (PII hygiene), not the dead one.
+	n, err := s.PurgeSentOutbox(ctx, time.Now().Add(24*time.Hour))
+	if err != nil || n != 1 {
+		t.Fatalf("purge = %d (%v), want 1", n, err)
+	}
+}

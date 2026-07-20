@@ -733,13 +733,12 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
 		}, "success|"+want)
 		// If the plate we just removed had been put on by a guest whose booking is
-		// still live, tell that guest (email only) so they aren't caught out.
+		// still live, tell that guest (email only) so they aren't caught out. The
+		// notice is enqueued durably (a fast insert), so no goroutine is needed.
 		if guest := s.displacedGuest(ctx, p, overrides, regByOwnerID, prev, now); guest != "" {
-			go func(to, pl, oldReg, newReg string) {
-				dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				_ = s.notifier.NotifyGuestDisplaced(dctx, to, pl, oldReg, newReg)
-			}(guest, permitLabel(p), prev, want)
+			if err := s.notifier.NotifyGuestDisplaced(ctx, guest, permitLabel(p), prev, want); err != nil {
+				log.Printf("scheduler: enqueue guest-displaced for %s: %v", guest, err)
+			}
 		}
 		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true

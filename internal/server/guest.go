@@ -775,7 +775,7 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		s.renderGuestResult(w, "", false, "Something went wrong sending your request. Please try again.")
 		return
 	}
-	s.notifyGuestRequest(permit, plate)
+	s.notifyGuestRequest(r.Context(), permit, plate)
 	s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation,
 		Wait: &guestWaitView{Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
 }
@@ -797,14 +797,13 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) notifyGuestRequest(permit model.Permit, plate string) {
-	owner, label := permit.Owner, permitLabel(permit)
+func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, plate string) {
+	// Enqueue durably (a fast DB insert) so the holder's "approve this?" nudge
+	// survives a restart and is retried — the printed-QR flow depends on it.
 	url := s.cfg.PublicBaseURL + "/guests"
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = s.notify.NotifyGuestRequest(ctx, owner, label, plate, url)
-	}()
+	if err := s.notify.NotifyGuestRequest(ctx, permit.Owner, permitLabel(permit), plate, url); err != nil {
+		log.Printf("guest request notify enqueue for %s: %v", permit.Owner, err)
+	}
 }
 
 // showPrintedQR mints a durable request-only grant and renders a QR to print and

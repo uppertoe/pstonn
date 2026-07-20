@@ -97,6 +97,7 @@ func run() error {
 	srv := server.New(cfg, st, sessions, auth, council, sched, notifier, mail, box)
 
 	go sched.Run(ctx)
+	go notifier.RunOutbox(ctx) // drain the durable notification queue with retry/backoff
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,

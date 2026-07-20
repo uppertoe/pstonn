@@ -254,6 +254,27 @@ CREATE TABLE IF NOT EXISTS account_flags (
     owner          TEXT PRIMARY KEY,
     guests_enabled INTEGER NOT NULL DEFAULT 1
 );
+
+-- Durable notification outbox: a message is enqueued (composed + addressed) and a
+-- worker delivers it with retry/backoff, so a send survives a restart and a failed
+-- attempt is retried instead of dropped. Rows are purged after delivery.
+CREATE TABLE IF NOT EXISTS outbox (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    dedup_key     TEXT NOT NULL DEFAULT '',        -- idempotency; skip if a live/sent row shares a non-empty key
+    recipients    TEXT NOT NULL DEFAULT '',        -- newline-separated email addresses
+    ntfy_topic    TEXT NOT NULL DEFAULT '',
+    ntfy_priority TEXT NOT NULL DEFAULT '',
+    ntfy_tag      TEXT NOT NULL DEFAULT '',
+    subject       TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending', -- pending | sent | dead
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    next_attempt  TEXT NOT NULL,                   -- RFC3339 UTC; earliest next try
+    last_error    TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    sent_at       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -1231,6 +1252,105 @@ ON CONFLICT(owner) DO UPDATE SET
     failures_only = excluded.failures_only`,
 		p.Owner, b2i(p.EmailEnabled), b2i(p.NtfyEnabled), p.NtfyTopic, b2i(p.FailuresOnly))
 	return err
+}
+
+// ---- Notification outbox ----
+
+// OutboxItem is one queued notification (composed and addressed at enqueue time).
+type OutboxItem struct {
+	ID           int64
+	DedupKey     string
+	Recipients   []string // email addresses
+	NtfyTopic    string
+	NtfyPriority string
+	NtfyTag      string
+	Subject      string
+	Body         string
+	Attempts     int
+}
+
+// EnqueueOutbox durably queues a notification. If DedupKey is non-empty and a
+// pending-or-sent row already carries it, the enqueue is a no-op (idempotency), so
+// a repeated trigger can't send twice.
+func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
+	if it.DedupKey != "" {
+		var exists int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM outbox WHERE dedup_key = ? AND status IN ('pending','sent'))`, it.DedupKey).
+			Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 1 {
+			return nil
+		}
+	}
+	now := nowUTC()
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO outbox (dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+		it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
+		it.Subject, it.Body, now, now)
+	return err
+}
+
+// DueOutbox returns pending notifications whose next attempt is due, oldest first.
+func (s *Store) DueOutbox(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts
+FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
+		now.UTC().Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OutboxItem
+	for rows.Next() {
+		var it OutboxItem
+		var recips string
+		if err := rows.Scan(&it.ID, &it.DedupKey, &recips, &it.NtfyTopic, &it.NtfyPriority, &it.NtfyTag,
+			&it.Subject, &it.Body, &it.Attempts); err != nil {
+			return nil, err
+		}
+		if recips != "" {
+			it.Recipients = strings.Split(recips, "\n")
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// MarkOutboxSent records a delivered notification.
+func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE outbox SET status = 'sent', sent_at = ?, last_error = '' WHERE id = ?`, nowUTC(), id)
+	return err
+}
+
+// RescheduleOutbox bumps the attempt count and defers the next try (backoff).
+func (s *Store) RescheduleOutbox(ctx context.Context, id int64, attempts int, next time.Time, lastErr string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE outbox SET attempts = ?, next_attempt = ?, last_error = ? WHERE id = ?`,
+		attempts, next.UTC().Format(time.RFC3339), lastErr, id)
+	return err
+}
+
+// MarkOutboxDead retires a notification that has exhausted its retries.
+func (s *Store) MarkOutboxDead(ctx context.Context, id int64, lastErr string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE outbox SET status = 'dead', attempts = attempts + 1, last_error = ? WHERE id = ?`, lastErr, id)
+	return err
+}
+
+// PurgeSentOutbox deletes delivered rows older than cutoff, so recipient/content
+// PII isn't kept indefinitely. Returns rows removed.
+func (s *Store) PurgeSentOutbox(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM outbox WHERE status = 'sent' AND sent_at != '' AND sent_at < ?`,
+		cutoff.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func b2i(b bool) int {

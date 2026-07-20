@@ -358,7 +358,7 @@ func (s *Service) NotifyGuestDisplaced(ctx context.Context, to, permitLabel, old
 		"",
 		"If your car is still parked there, please move it or open your link again to put it back on, so you stay covered.",
 	}
-	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+	return s.enqueue(ctx, outMessage{Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n")})
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a
@@ -374,28 +374,16 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 	if url != "" {
 		lines = append(lines, "", url)
 	}
-	body := strings.Join(lines, "\n")
-
-	var errs []string
+	m := outMessage{Subject: subject, Body: strings.Join(lines, "\n"), NtfyPriority: "high", NtfyTag: "bell"}
 	if s.mail.Enabled() {
-		recipients, _ := s.store.AccountEmails(ctx, owner)
-		for _, addr := range recipients {
-			if e := s.mail.Send(addr, subject, body); e != nil {
-				errs = append(errs, "email "+addr+": "+e.Error())
-			}
-		}
+		m.Recipients, _ = s.store.AccountEmails(ctx, owner)
 	}
 	if s.ntfyBase != "" {
-		if pref, e := s.store.GetNotifyPref(ctx, owner); e == nil && pref.NtfyEnabled && pref.NtfyTopic != "" {
-			if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, "high", "bell"); e != nil {
-				errs = append(errs, "ntfy: "+e.Error())
-			}
+		if pref, e := s.store.GetNotifyPref(ctx, owner); e == nil && pref.NtfyEnabled {
+			m.NtfyTopic = pref.NtfyTopic
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("notify request %s: %s", owner, strings.Join(errs, "; "))
-	}
-	return nil
+	return s.enqueue(ctx, m)
 }
 
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
@@ -446,4 +434,129 @@ func RandomTopic() string {
 		}
 	}
 	return sb.String()
+}
+
+// ---- durable notification outbox ----
+//
+// Enqueue composes and addresses a message, then a single worker (RunOutbox)
+// delivers it with retry/backoff, so a send survives a restart and a failed
+// attempt is retried instead of silently dropped.
+
+const (
+	outboxMaxAttempts = 8
+	outboxTick        = 15 * time.Second
+	outboxBatch       = 50
+)
+
+// outMessage is a composed, addressed notification ready to enqueue.
+type outMessage struct {
+	DedupKey     string
+	Recipients   []string
+	NtfyTopic    string
+	NtfyPriority string
+	NtfyTag      string
+	Subject      string
+	Body         string
+}
+
+func (s *Service) enqueue(ctx context.Context, m outMessage) error {
+	return s.store.EnqueueOutbox(ctx, store.OutboxItem{
+		DedupKey: m.DedupKey, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
+		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
+	})
+}
+
+// RunOutbox drains the outbox until ctx is cancelled, retrying failed sends with
+// backoff and dead-lettering (with an operator alert) after too many tries. It
+// also periodically purges delivered rows. Start it once from main.
+func (s *Service) RunOutbox(ctx context.Context) {
+	t := time.NewTicker(outboxTick)
+	defer t.Stop()
+	purge := time.NewTicker(6 * time.Hour)
+	defer purge.Stop()
+	s.drainOutbox(ctx) // flush promptly on startup (a restart resumes pending sends)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.drainOutbox(ctx)
+		case <-purge.C:
+			if _, err := s.store.PurgeSentOutbox(ctx, time.Now().Add(-7*24*time.Hour)); err != nil {
+				log.Printf("notify: purge outbox: %v", err)
+			}
+		}
+	}
+}
+
+func (s *Service) drainOutbox(ctx context.Context) {
+	due, err := s.store.DueOutbox(ctx, time.Now(), outboxBatch)
+	if err != nil {
+		log.Printf("notify: read outbox: %v", err)
+		return
+	}
+	for _, it := range due {
+		if ctx.Err() != nil {
+			return
+		}
+		lastErr := s.deliver(ctx, it)
+		if lastErr == "" {
+			_ = s.store.MarkOutboxSent(ctx, it.ID)
+			continue
+		}
+		attempts := it.Attempts + 1
+		if attempts >= outboxMaxAttempts {
+			_ = s.store.MarkOutboxDead(ctx, it.ID, lastErr)
+			_ = s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
+				fmt.Sprintf("A notification could not be delivered after %d attempts and was dropped.\nSubject: %s\nTo: %s\nLast error: %s",
+					attempts, it.Subject, strings.Join(it.Recipients, ", "), lastErr))
+			continue
+		}
+		_ = s.store.RescheduleOutbox(ctx, it.ID, attempts, time.Now().Add(outboxBackoff(attempts)), lastErr)
+	}
+}
+
+// deliver attempts every channel and returns "" if at least one accepted (or there
+// was nothing addressable), else a joined error so the item is retried.
+func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
+	var errs []string
+	delivered, targets := false, 0
+	if s.mail.Enabled() {
+		for _, addr := range it.Recipients {
+			targets++
+			if e := s.mail.Send(addr, it.Subject, it.Body); e != nil {
+				errs = append(errs, "email "+addr+": "+e.Error())
+			} else {
+				delivered = true
+			}
+		}
+	}
+	if it.NtfyTopic != "" && s.ntfyBase != "" {
+		targets++
+		pr := it.NtfyPriority
+		if pr == "" {
+			pr = "default"
+		}
+		if e := s.sendNtfy(ctx, it.NtfyTopic, it.Subject, it.Body, pr, it.NtfyTag); e != nil {
+			errs = append(errs, "ntfy: "+e.Error())
+		} else {
+			delivered = true
+		}
+	}
+	if targets == 0 || delivered {
+		return "" // nothing to send (channels off), or at least one channel accepted
+	}
+	return strings.Join(errs, "; ")
+}
+
+// outboxBackoff spaces retries: ~1m, 3m, 9m, 27m, ... capped at 3h.
+func outboxBackoff(attempts int) time.Duration {
+	d := time.Minute
+	for i := 1; i < attempts; i++ {
+		d *= 3
+		if d > 3*time.Hour {
+			return 3 * time.Hour
+		}
+	}
+	return d
 }
