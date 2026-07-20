@@ -27,8 +27,12 @@ func TestEnqueueApplyPerMemberPrefs(t *testing.T) {
 	if err := st.AddMember(ctx, primary, secondary); err != nil {
 		t.Fatal(err)
 	}
-	// Primary keeps the default (email on). Secondary turns their email off (and
-	// has no push), so they want nothing.
+	// Primary keeps email on; secondary turns their email off (and has no push), so
+	// they want nothing. Quiet hours disabled (QuietFrom==QuietUntil==0) so the
+	// enqueued item is due immediately and this fan-out test stays deterministic.
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: primary, EmailEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: secondary, EmailEnabled: false, NtfyEnabled: false}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +40,7 @@ func TestEnqueueApplyPerMemberPrefs(t *testing.T) {
 	// A mailer that is "enabled" (Host+From) so EnqueueApply addresses email; it is
 	// never drained here, so nothing is actually sent.
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "", "", "", "", "") // no ntfy configured
+	svc := New(st, m, "", "", "", "", "", time.UTC) // no ntfy configured
 
 	if err := svc.EnqueueApply(ctx, ApplyOutcome{Owner: primary, PermitLabel: "VPP1", Reg: "ABC123", OK: true}); err != nil {
 		t.Fatal(err)

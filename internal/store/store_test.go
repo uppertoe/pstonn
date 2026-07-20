@@ -1280,3 +1280,23 @@ func TestOutbox(t *testing.T) {
 		t.Fatalf("purge = %d (%v), want 2 (sent + dead)", n, err)
 	}
 }
+
+// TestOutboxNotBefore covers quiet-hours deferral: an item enqueued with a future
+// NotBefore isn't due until then; a zero/past NotBefore is due immediately.
+func TestOutboxNotBefore(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	future := time.Now().Add(90 * time.Minute)
+	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "held", Recipients: []string{"a@x.co"}, Subject: "held", Body: "B", NotBefore: future}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "now", Recipients: []string{"a@x.co"}, Subject: "now", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now(), 10); len(d) != 1 || d[0].DedupKey != "now" {
+		t.Fatalf("due now = %+v, want only the immediate one", d)
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now().Add(2*time.Hour), 10); len(d) != 2 {
+		t.Fatalf("due after the hold window = %d, want 2", len(d))
+	}
+}

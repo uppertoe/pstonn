@@ -324,6 +324,11 @@
   .notify-status { font-size:13px; color:var(--muted); margin:0; }
   .notify-status.err { color:var(--danger); }
   .notify-status.ok { color:var(--ok); }
+  .quiet { display:flex; flex-direction:column; gap:10px; padding:14px 0 2px; border-top:1px solid var(--line); }
+  .quiet-times { display:flex; gap:14px; flex-wrap:wrap; padding-left:32px; }
+  .quiet-times .fld { min-width:120px; }
+  .quiet-times select { width:100%; }
+  .quiet-note { font-size:12.5px; color:var(--muted); margin:0; padding-left:32px; line-height:1.45; max-width:60ch; }
   .steps { margin:12px 0 2px; padding:16px 18px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); font-size:14px; }
   .steps-lead { margin:0 0 12px; color:var(--muted); font-size:13px; }
   .steps ol { margin:0; padding-left:22px; display:grid; gap:10px; }
@@ -1585,6 +1590,22 @@
     </div>
   </div>
   {{end}}
+  <div class="quiet" x-data="{quiet: {{if .QuietEnabled}}true{{else}}false{{end}}}">
+    <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
+    <div class="quiet-times" x-show="quiet" x-cloak>
+      <label class="fld">From
+        <select name="quiet_from">
+          {{$qf := .QuietFrom}}{{range hours}}<option value="{{.}}" {{if eq . $qf}}selected{{end}}>{{hourLabel .}}</option>{{end}}
+        </select>
+      </label>
+      <label class="fld">Deliver at
+        <select name="quiet_until">
+          {{$qu := .QuietUntil}}{{range hours}}<option value="{{.}}" {{if eq . $qu}}selected{{end}}>{{hourLabel .}}</option>{{end}}
+        </select>
+      </label>
+    </div>
+    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen on time (your permit is always correct) &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. A failure is held too, but arrives early enough to act on.</p>
+  </div>
   <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}">
     {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
   </p>

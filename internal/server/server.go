@@ -549,8 +549,21 @@ type notifyView struct {
 	NtfyTopic      string
 	NtfyBase       string
 	UserEmail      string
+	QuietEnabled   bool   // hold overnight notices and deliver at QuietUntil
+	QuietFrom      int    // window start hour (local)
+	QuietUntil     int    // deliver-at hour (local)
 	Status         string // transient confirmation after auto-save
 	Error          string // transient error (e.g. tried to turn everything off)
+}
+
+// notifyViewOf builds the settings view of a member's notification preferences.
+func (s *Server) notifyViewOf(user string, pref store.NotifyPref) notifyView {
+	return notifyView{
+		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
+		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
+		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
+		QuietEnabled: pref.QuietFrom != pref.QuietUntil, QuietFrom: pref.QuietFrom, QuietUntil: pref.QuietUntil,
+	}
 }
 
 type vehicleView struct {
@@ -846,11 +859,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		pref.NtfyTopic = notify.RandomTopic()
 		_ = s.store.SetNotifyPref(ctx, pref)
 	}
-	base.Notify = notifyView{
-		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
-		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
-		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
-	}
+	base.Notify = s.notifyViewOf(user, pref)
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
 		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"))
@@ -870,12 +879,8 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 // renderNotify renders the swappable notifications fragment (auto-save target),
 // or falls back to a redirect for a non-htmx request.
 func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user string, pref store.NotifyPref, status, errMsg string) {
-	nv := notifyView{
-		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
-		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
-		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
-		Status: status, Error: errMsg,
-	}
+	nv := s.notifyViewOf(user, pref)
+	nv.Status, nv.Error = status, errMsg
 	if r.Header.Get("HX-Request") != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "notify-body", nv); err != nil {
@@ -904,6 +909,16 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
+	// Quiet hours: hold overnight notices and deliver them at a chosen local hour.
+	if r.FormValue("quiet_enabled") != "" {
+		pref.QuietFrom = clampHour(r.FormValue("quiet_from"), 22)
+		pref.QuietUntil = clampHour(r.FormValue("quiet_until"), 6)
+		if pref.QuietFrom == pref.QuietUntil {
+			pref.QuietUntil = (pref.QuietFrom + 1) % 24 // equal would disable; nudge apart
+		}
+	} else {
+		pref.QuietFrom, pref.QuietUntil = 0, 0 // equal ⇒ disabled (immediate delivery)
+	}
 	if err := s.store.SetNotifyPref(r.Context(), pref); err != nil {
 		s.serverError(w, err)
 		return
@@ -1788,6 +1803,20 @@ func pathInt(r *http.Request, name string) int64 { return atoi64(r.PathValue(nam
 
 func atoi(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
+}
+
+// clampHour parses an hour-of-day field (0-23), falling back to def if empty or
+// out of range.
+func clampHour(s string, def int) int {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return def
+	}
+	n, err := strconv.Atoi(t)
+	if err != nil || n < 0 || n > 23 {
+		return def
+	}
 	return n
 }
 

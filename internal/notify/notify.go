@@ -31,16 +31,20 @@ type Service struct {
 	mail       *mailer.Mailer
 	ntfyBase   string
 	ntfyToken  string
-	appURL     string // public base URL, linked in messages
-	adminEmail string // operator alert address (systemic failures)
-	adminTopic string // operator alert ntfy topic
+	appURL     string         // public base URL, linked in messages
+	adminEmail string         // operator alert address (systemic failures)
+	adminTopic string         // operator alert ntfy topic
+	loc        *time.Location // display timezone, for interpreting quiet-hours settings
 	http       *http.Client
 }
 
 // New builds a Service. mail may be nil (email disabled); ntfyBase may be empty
 // (push disabled). adminEmail/adminTopic receive operator alerts (either may be
 // empty).
-func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEmail, adminTopic string) *Service {
+func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEmail, adminTopic string, loc *time.Location) *Service {
+	if loc == nil {
+		loc = time.Local
+	}
 	return &Service{
 		store:      st,
 		mail:       m,
@@ -49,8 +53,39 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		appURL:     strings.TrimRight(appURL, "/"),
 		adminEmail: strings.TrimSpace(adminEmail),
 		adminTopic: strings.TrimSpace(adminTopic),
+		loc:        loc,
 		http:       &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// quietDefer decides when a notification for this member should actually be
+// delivered. Members can set quiet hours (default 22:00–06:00 local): a message
+// generated inside that window is held and released at the window's end (so a
+// midnight roster change lands as a 6am confirmation, not a 12:01am ping).
+// Messages generated outside the window — and all messages when quiet hours are
+// off (QuietFrom == QuietUntil) — deliver immediately (zero time). now is passed
+// in for testability.
+func (s *Service) quietDefer(pref store.NotifyPref, now time.Time) time.Time {
+	from, until := pref.QuietFrom, pref.QuietUntil
+	if from == until || from < 0 || from > 23 || until < 0 || until > 23 {
+		return time.Time{} // disabled or malformed → immediate
+	}
+	lt := now.In(s.loc)
+	h := lt.Hour()
+	var inQuiet bool
+	if from < until {
+		inQuiet = h >= from && h < until
+	} else { // window wraps midnight, e.g. 22..6
+		inQuiet = h >= from || h < until
+	}
+	if !inQuiet {
+		return time.Time{}
+	}
+	target := time.Date(lt.Year(), lt.Month(), lt.Day(), until, 0, 0, 0, s.loc)
+	if !target.After(lt) {
+		target = target.AddDate(0, 0, 1)
+	}
+	return target
 }
 
 // AdminConfigured reports whether any operator alert channel is set up.
@@ -200,16 +235,26 @@ type ApplyOutcome struct {
 // composeApply builds the subject/body/priority/tags for an apply notification,
 // shared by the inline NotifyApply (scheduler) and the durable EnqueueApply.
 func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
-	// "car" names the vehicle we set, by friendly name + plate where we have both.
+	// "car" names the vehicle by friendly name and plate where we have both, joined
+	// with an em-dash so a nickname that itself contains brackets (e.g.
+	// "Anita's Car (Nanny)") doesn't produce confusing nested parentheses.
 	car := o.Reg
 	if o.Name != "" {
-		car = fmt.Sprintf("%s (%s)", o.Name, o.Reg)
+		car = fmt.Sprintf("%s — %s", o.Name, o.Reg)
 	}
 	if o.OK {
-		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, car)
-		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, car, o.Source)
-		if o.By != "" {
-			body += fmt.Sprintf("\n\nActivated by %s using a guest link. This overrides your schedule until it ends, then your roster resumes.", o.By)
+		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, o.Reg)
+		const confirm = "\n\nNothing to do — this is just your confirmation it went through."
+		switch {
+		case o.By != "":
+			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.",
+				o.PermitLabel, car, o.By)
+		case o.Source == "roster":
+			body = fmt.Sprintf("Your %s is now set to %s for today, as scheduled by your weekly roster.%s", o.PermitLabel, car, confirm)
+		case o.Source == "override":
+			body = fmt.Sprintf("Your %s is now set to %s, for the one-off booking you made.%s", o.PermitLabel, car, confirm)
+		default:
+			body = fmt.Sprintf("Your %s is now set to %s.%s", o.PermitLabel, car, confirm)
 		}
 	} else {
 		switch {
@@ -224,7 +269,7 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 		}
 		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
 		if o.CurrentReg != "" {
-			lines = append(lines, fmt.Sprintf("Right now the permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
+			lines = append(lines, fmt.Sprintf("The permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
 		} else {
 			lines = append(lines, "The vehicle on the permit has not been changed.")
 		}
@@ -235,7 +280,7 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 			lines = append(lines, o.Action)
 		}
 		// A failure is a "sort it yourself" moment: link the council portal.
-		lines = append(lines, "", "You can set the vehicle on your permit directly with the council:", councilPortalURL)
+		lines = append(lines, "", "You can set the vehicle on your permit yourself at the council:", councilPortalURL)
 		body = strings.Join(lines, "\n")
 	}
 	priority, tags = "default", "white_check_mark"
@@ -292,6 +337,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
+	now := time.Now()
 	for _, d := range dels {
 		if o.OK && d.pref.FailuresOnly {
 			continue
@@ -299,7 +345,8 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 		m := outMessage{
 			Account: o.Owner,
 			Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
-			DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
+			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
+			NotBefore: s.quietDefer(d.pref, now),
 		}
 		if d.pref.EmailEnabled && s.mail.Enabled() {
 			m.Recipients = []string{d.email}
@@ -335,21 +382,50 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	}
 	var errs []string
 	due := 0 // members with at least one channel that should have received this
+	now := time.Now()
 	for _, d := range dels {
 		if o.OK && d.pref.FailuresOnly {
 			continue
 		}
+		wantEmail := d.pref.EmailEnabled && s.mail.Enabled()
+		wantNtfy := d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != ""
+		if !wantEmail && !wantNtfy {
+			continue // no reachable channel for this member
+		}
+		due++
+
+		// Quiet hours: hold this member's notice and deliver it via the durable
+		// outbox at the window's end, so a midnight roster change lands as a 6am
+		// confirmation rather than a 12:01am ping. Queuing counts as reached.
+		if nb := s.quietDefer(d.pref, now); !nb.IsZero() {
+			m := outMessage{
+				Account: o.Owner, Subject: subject, Body: emailBody,
+				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,
+				DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
+			}
+			if wantEmail {
+				m.Recipients = []string{d.email}
+			}
+			if wantNtfy {
+				m.NtfyTopic = d.pref.NtfyTopic
+			}
+			if e := s.enqueue(ctx, m); e != nil {
+				errs = append(errs, "queue "+d.email+": "+e.Error())
+			} else {
+				delivered++
+			}
+			continue
+		}
+
 		reached := false
-		if d.pref.EmailEnabled && s.mail.Enabled() {
-			due++
+		if wantEmail {
 			if e := s.mail.Send(d.email, subject, emailBody); e != nil {
 				errs = append(errs, "email "+d.email+": "+e.Error())
 			} else {
 				reached = true
 			}
 		}
-		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
-			due++
+		if wantNtfy {
 			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, priority, tags); e != nil {
 				errs = append(errs, "ntfy "+d.email+": "+e.Error())
 			} else {
@@ -583,12 +659,14 @@ type outMessage struct {
 	NtfyTag      string
 	Subject      string
 	Body         string
+	NotBefore    time.Time // earliest delivery (quiet-hours defer); zero = immediate
 }
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 	return s.store.EnqueueOutbox(ctx, store.OutboxItem{
 		Account: m.Account, DedupKey: m.DedupKey, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
+		NotBefore: m.NotBefore,
 	})
 }
 

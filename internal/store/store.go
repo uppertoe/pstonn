@@ -185,7 +185,9 @@ CREATE TABLE IF NOT EXISTS notify_pref (
     email_enabled INTEGER NOT NULL DEFAULT 1,
     ntfy_enabled  INTEGER NOT NULL DEFAULT 0,
     ntfy_topic    TEXT NOT NULL DEFAULT '',
-    failures_only INTEGER NOT NULL DEFAULT 0  -- 1 = only notify on failures, not every change
+    failures_only INTEGER NOT NULL DEFAULT 0,  -- 1 = only notify on failures, not every change
+    quiet_from    INTEGER NOT NULL DEFAULT 22, -- quiet-hours window start (local hour); == quiet_until disables
+    quiet_until   INTEGER NOT NULL DEFAULT 6   -- overnight notices are held and delivered at this local hour
 );
 
 -- Shared access: a primary account owner may grant up to two other verified
@@ -305,6 +307,8 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE permit ADD COLUMN expiry_reminded TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN permit_number TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN permit_type TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE notify_pref ADD COLUMN quiet_from INTEGER NOT NULL DEFAULT 22`,
+		`ALTER TABLE notify_pref ADD COLUMN quiet_until INTEGER NOT NULL DEFAULT 6`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
@@ -1399,16 +1403,18 @@ type NotifyPref struct {
 	NtfyEnabled  bool
 	NtfyTopic    string
 	FailuresOnly bool
+	QuietFrom    int // quiet-hours window start (local hour, 0-23)
+	QuietUntil   int // overnight notices held to this local hour; == QuietFrom disables
 }
 
 // GetNotifyPref returns the user's notification preferences, or a sensible
 // default (email on, ntfy off) when they have never set them.
 func (s *Store) GetNotifyPref(ctx context.Context, owner string) (NotifyPref, error) {
-	p := NotifyPref{Owner: owner, EmailEnabled: true}
+	p := NotifyPref{Owner: owner, EmailEnabled: true, QuietFrom: 22, QuietUntil: 6}
 	var email, ntfy, failures int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT email_enabled, ntfy_enabled, ntfy_topic, failures_only FROM notify_pref WHERE owner = ?`, owner).
-		Scan(&email, &ntfy, &p.NtfyTopic, &failures)
+		`SELECT email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until FROM notify_pref WHERE owner = ?`, owner).
+		Scan(&email, &ntfy, &p.NtfyTopic, &failures, &p.QuietFrom, &p.QuietUntil)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, nil // defaults
 	}
@@ -1422,14 +1428,16 @@ func (s *Store) GetNotifyPref(ctx context.Context, owner string) (NotifyPref, er
 // SetNotifyPref upserts a user's notification preferences.
 func (s *Store) SetNotifyPref(ctx context.Context, p NotifyPref) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO notify_pref (owner, email_enabled, ntfy_enabled, ntfy_topic, failures_only)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO notify_pref (owner, email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(owner) DO UPDATE SET
     email_enabled = excluded.email_enabled,
     ntfy_enabled  = excluded.ntfy_enabled,
     ntfy_topic    = excluded.ntfy_topic,
-    failures_only = excluded.failures_only`,
-		p.Owner, b2i(p.EmailEnabled), b2i(p.NtfyEnabled), p.NtfyTopic, b2i(p.FailuresOnly))
+    failures_only = excluded.failures_only,
+    quiet_from    = excluded.quiet_from,
+    quiet_until   = excluded.quiet_until`,
+		p.Owner, b2i(p.EmailEnabled), b2i(p.NtfyEnabled), p.NtfyTopic, b2i(p.FailuresOnly), p.QuietFrom, p.QuietUntil)
 	return err
 }
 
@@ -1447,6 +1455,7 @@ type OutboxItem struct {
 	Subject      string
 	Body         string
 	Attempts     int
+	NotBefore    time.Time // earliest delivery; zero = send as soon as due (quiet-hours defer)
 }
 
 // EnqueueOutbox durably queues a notification. If DedupKey is non-empty and a
@@ -1465,11 +1474,17 @@ func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 		}
 	}
 	now := nowUTC()
+	// next_attempt defaults to now, or NotBefore when the caller defers delivery
+	// (quiet hours). created_at stays "now" so ordering/purge use the real time.
+	nextAttempt := now
+	if !it.NotBefore.IsZero() && it.NotBefore.After(time.Now()) {
+		nextAttempt = it.NotBefore.UTC().Format(time.RFC3339)
+	}
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
 		it.Account, it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
-		it.Subject, it.Body, now, now)
+		it.Subject, it.Body, nextAttempt, now)
 	return err
 }
 

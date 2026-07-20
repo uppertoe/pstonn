@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"time"
@@ -63,5 +64,26 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 	},
 	"datetimeLocal": func(t time.Time, loc *time.Location) string {
 		return t.In(loc).Format("2006-01-02T15:04")
+	},
+	// hours lists 0..23 for the quiet-hours hour selects.
+	"hours": func() []int {
+		h := make([]int, 24)
+		for i := range h {
+			h[i] = i
+		}
+		return h
+	},
+	// hourLabel formats an hour-of-day like "6:00 am" / "10:00 pm".
+	"hourLabel": func(h int) string {
+		suffix, hr := "am", h
+		if h >= 12 {
+			suffix = "pm"
+		}
+		if hr == 0 {
+			hr = 12
+		} else if hr > 12 {
+			hr -= 12
+		}
+		return fmt.Sprintf("%d:00 %s", hr, suffix)
 	},
 }).ParseFS(templateFS, "templates/*.html"))
