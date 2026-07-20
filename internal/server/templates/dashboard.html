@@ -652,7 +652,7 @@
     <h1 class="about-h1">Why this exists</h1>
     <p>Stonnington changed how resident and visitor parking permits work. From 2026, paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registrations into the council's online system, which is checked by parking officers for validity.</p>
     <p>Our old physical permits could be easily transferred between cars as needed - the electronic permit system, as currently implemented, is far clunkier. For a household that relies on regular help (grandparents doing childcare pickup, a nanny, a carer), logging in and changing regos becomes a recurring task and an added stress to people with busy lives.</p>
-    <p>p.stonn is an attempt to make this more seamless. After setting up your permit with Stonnington Parking, you can use this app to schedule visitors, add one-off bookings, create QR code one-step check ins - easily and seamlessly.</p>
+    <p>p.stonn is an attempt to make this easier. After setting up your permit with Stonnington Parking, you can use this app to schedule visitors, add one-off bookings, create QR code one-step check ins - easily and seamlessly.</p>
     <p>I hope this little tool makes your life a bit simpler!</p>
   </section>
 
@@ -752,7 +752,7 @@
   <p>Questions, problems, or feedback about p.stonn? Send a message and it reaches the person running this server. Leaving your email is optional, but it's the only way to get a reply.</p>
   {{if .Flash}}<div class="banner ok" style="margin:16px 0">{{template "ic-check"}} <span>{{.Flash}}</span></div>{{end}}
   {{if .Warn}}<div class="banner warn" style="margin:16px 0">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
-  <form method="post" action="/contact" class="stack contactform" style="max-width:560px;margin-top:14px">
+  <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:14px 0 0">
     {{/* Honeypot: hidden from people, tempting to bots. Real submissions leave it blank. */}}
     <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
     <label class="fld">
