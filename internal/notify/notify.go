@@ -20,6 +20,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
+// councilPortalURL is the council's self-service permit portal, linked in
+// failure and re-link notices so a user can set their permit's vehicle
+// themselves (and avoid a fine) when p.stonn can't.
+const councilPortalURL = "https://parkingpermits.stonnington.vic.gov.au/"
+
 // Service dispatches notifications according to each user's stored preferences.
 type Service struct {
 	store      *store.Store
@@ -87,10 +92,11 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	subject := "Action needed: reconnect your p.stonn council account"
 	body := "Your council connection has expired, so p.stonn has stopped updating your visitor permit.\n\n" +
 		"Please open the app and re-link your council account so your schedule keeps running. " +
-		"Until you do, check your permit manually to avoid a fine."
+		"Until you do, set your permit's vehicle directly with the council to avoid a fine."
 	if s.appURL != "" {
-		body += "\n\n" + s.appURL
+		body += "\n\nRe-link: " + s.appURL
 	}
+	body += "\nCouncil portal: " + councilPortalURL
 	delivered := 0
 	if s.mail.Enabled() { // re-link is important: always email the verified address
 		if e := s.mail.Send(owner, subject, body); e != nil {
@@ -194,6 +200,9 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		if o.Action != "" {
 			lines = append(lines, o.Action)
 		}
+		// A failure is a "sort it yourself" moment: link the council portal so the
+		// user can set the permit's vehicle directly and avoid a fine.
+		lines = append(lines, "", "You can set the vehicle on your permit directly with the council:", councilPortalURL)
 		body = strings.Join(lines, "\n")
 	}
 
