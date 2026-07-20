@@ -43,6 +43,42 @@ func samplePermitView(loc *time.Location) permitView {
 	}
 }
 
+// TestFillExpiry locks the calendar-day arithmetic behind the expiry labels.
+func TestFillExpiry(t *testing.T) {
+	loc := melbourne(t)
+	now := time.Date(2026, 7, 20, 15, 0, 0, 0, loc)
+	cases := []struct {
+		name         string
+		end          time.Time
+		in           string
+		soon, expird bool
+	}{
+		{"today", time.Date(2026, 7, 20, 23, 0, 0, 0, loc), "today", true, false},
+		{"tomorrow", time.Date(2026, 7, 21, 1, 0, 0, 0, loc), "tomorrow", true, false},
+		{"in-week", time.Date(2026, 7, 27, 9, 0, 0, 0, loc), "in 7 days", true, false},
+		{"far-off", time.Date(2026, 12, 1, 9, 0, 0, 0, loc), "in 134 days", false, false},
+		{"yesterday", time.Date(2026, 7, 19, 9, 0, 0, 0, loc), "yesterday", false, true},
+		{"expired", time.Date(2026, 7, 10, 9, 0, 0, 0, loc), "10 days ago", false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pv := permitView{Loc: loc, Permit: model.Permit{EndDate: c.end}}
+			fillExpiry(&pv, now)
+			if pv.ExpiryIn != c.in || pv.ExpiresSoon != c.soon || pv.Expired != c.expird {
+				t.Fatalf("got in=%q soon=%v expired=%v; want in=%q soon=%v expired=%v",
+					pv.ExpiryIn, pv.ExpiresSoon, pv.Expired, c.in, c.soon, c.expird)
+			}
+		})
+	}
+	// Unknown expiry stays blank.
+	var pv permitView
+	pv.Loc = loc
+	fillExpiry(&pv, now)
+	if pv.ExpiryLabel != "" || pv.ExpiryIn != "" {
+		t.Fatalf("zero end date should stay blank, got %q/%q", pv.ExpiryLabel, pv.ExpiryIn)
+	}
+}
+
 // TestTemplatesRender exercises the "dashboard" template in every state plus the
 // swappable "permit-body" fragment, verifying they parse and execute cleanly.
 func TestTemplatesRender(t *testing.T) {
@@ -143,6 +179,42 @@ func TestTemplatesRender(t *testing.T) {
 				t.Fatalf("dashboard/%s output missing %q", c.name, c.want)
 			}
 		})
+	}
+
+	// The permit-body fragment surfaces expiry when the permit view carries it.
+	for _, ec := range []struct {
+		name string
+		pv   func() permitView
+		want string
+	}{
+		{"soon", func() permitView {
+			p := samplePermitView(loc)
+			p.ExpiryLabel = "3 Aug 2026"
+			p.ExpiryIn = "in 12 days"
+			p.ExpiresSoon = true
+			return p
+		}, "renew it with the council"},
+		{"expired", func() permitView {
+			p := samplePermitView(loc)
+			p.ExpiryLabel = "1 Jul 2026"
+			p.ExpiryIn = "5 days ago"
+			p.Expired = true
+			return p
+		}, "copy your schedule onto the new permit"},
+		{"valid", func() permitView {
+			p := samplePermitView(loc)
+			p.ExpiryLabel = "1 Jan 2027"
+			p.ExpiryIn = "in 168 days"
+			return p
+		}, "Valid until 1 Jan 2027"},
+	} {
+		var b bytes.Buffer
+		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {
+			t.Fatalf("render permit-body/%s: %v", ec.name, err)
+		}
+		if !strings.Contains(b.String(), ec.want) {
+			t.Fatalf("permit-body/%s missing %q", ec.name, ec.want)
+		}
 	}
 
 	// The htmx fragment must render standalone (it's swapped in on schedule edits).

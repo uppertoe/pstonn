@@ -90,6 +90,7 @@ func run() error {
 		SessionMaxAge: cfg.Council.SessionMaxAge,
 		WarmInterval:  cfg.Council.WarmInterval,
 		ReminderLead:  cfg.Council.ReminderLead,
+		ExpiryLead:    cfg.Council.ExpiryLead,
 		PublicBaseURL: cfg.PublicBaseURL,
 		Notifier:      notifier,
 		RateDelay:     3 * time.Second,

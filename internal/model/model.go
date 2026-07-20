@@ -19,7 +19,10 @@ type Permit struct {
 	CouncilPermitID    string // e.g. "14423"
 	PermitTypeID       string // fkPermitTypeID, e.g. "15"
 	Label              string
-	ActiveRegistration string // last registration we know is allocated
+	ActiveRegistration string    // last registration we know is allocated
+	EndDate            time.Time // permit expiry from the council record (zero = unknown)
+	Status             string    // council permit status, e.g. "Granted" (empty = unknown)
+	ExpiryReminded     bool      // an expiry reminder has been sent for the current EndDate
 }
 
 // WeeklyRule allocates a vehicle to a permit on a given weekday, the building

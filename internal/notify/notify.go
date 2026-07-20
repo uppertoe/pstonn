@@ -122,6 +122,48 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	return delivered
 }
 
+// NotifyPermitExpiry warns the account that a permit is approaching its expiry
+// date, so a lapsed permit doesn't quietly stop being valid. Respects each
+// member's channel preferences (routine reminder, not an emergency). Returns the
+// number of channels that accepted the message.
+func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel string, expiry time.Time) int {
+	date := expiry.Format("2 Jan 2006")
+	subject := fmt.Sprintf("Your %s expires on %s", permitLabel, date)
+	body := fmt.Sprintf("Your %s is due to expire on %s.\n\n", permitLabel, date) +
+		"p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. " +
+		"Once you renew, you can copy your schedule onto the new permit in the app."
+	if s.appURL != "" {
+		body += "\n\nOpen p.stonn: " + s.appURL
+	}
+	body += "\nRenew with the council: " + councilPortalURL
+	dels, err := s.accountDeliveries(ctx, owner)
+	if err != nil {
+		return 0
+	}
+	delivered := 0
+	for _, d := range dels {
+		reached := false
+		if d.pref.EmailEnabled && s.mail.Enabled() {
+			if e := s.mail.Send(d.email, subject, body); e != nil {
+				log.Printf("notify permit-expiry email %s: %v", d.email, e)
+			} else {
+				reached = true
+			}
+		}
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, "default", "calendar"); e != nil {
+				log.Printf("notify permit-expiry ntfy %s: %v", d.email, e)
+			} else {
+				reached = true
+			}
+		}
+		if reached {
+			delivered++
+		}
+	}
+	return delivered
+}
+
 // Enabled reports whether any channel is available at all.
 func (s *Service) Enabled() bool { return s.mail.Enabled() || s.ntfyBase != "" }
 

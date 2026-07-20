@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS permit (
     permit_type_id      TEXT NOT NULL DEFAULT '',
     label               TEXT NOT NULL DEFAULT '',
     active_registration TEXT NOT NULL DEFAULT '',
+    end_date            TEXT NOT NULL DEFAULT '',   -- permit expiry (RFC3339) from the council record
+    status              TEXT NOT NULL DEFAULT '',   -- council permit status, e.g. "Granted"
+    expiry_reminded     TEXT NOT NULL DEFAULT '',   -- '1' once an expiry reminder is sent (cleared when end_date changes)
     updated_at          TEXT NOT NULL
 );
 
@@ -295,6 +298,9 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE council_session ADD COLUMN reminder_sent_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN confirm_token TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN password_sealed TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN end_date TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN status TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN expiry_reminded TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
@@ -494,13 +500,32 @@ func (s *Store) DeleteVehicle(ctx context.Context, owner string, id int64) error
 // which reconciles each permit using its owner's council session).
 func (s *Store) ListPermits(ctx context.Context) ([]model.Permit, error) {
 	return s.queryPermits(ctx,
-		`SELECT id, owner, council_permit_id, permit_type_id, label, active_registration FROM permit ORDER BY label, council_permit_id`)
+		`SELECT `+permitCols+` FROM permit ORDER BY label, council_permit_id`)
 }
 
 // ListPermitsFor returns the permits owned by one app user.
 func (s *Store) ListPermitsFor(ctx context.Context, owner string) ([]model.Permit, error) {
 	return s.queryPermits(ctx,
-		`SELECT id, owner, council_permit_id, permit_type_id, label, active_registration FROM permit WHERE owner = ? ORDER BY label, council_permit_id`, owner)
+		`SELECT `+permitCols+` FROM permit WHERE owner = ? ORDER BY label, council_permit_id`, owner)
+}
+
+// permitCols is the column list backing scanPermit; keep the two in lockstep.
+const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded`
+
+// scanPermit reads one permit row (permitCols order), parsing the stored strings.
+func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
+	var p model.Permit
+	var endDate, reminded string
+	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
+		&p.ActiveRegistration, &endDate, &p.Status, &reminded)
+	if err != nil {
+		return p, err
+	}
+	if endDate != "" {
+		p.EndDate, _ = time.Parse(time.RFC3339, endDate)
+	}
+	p.ExpiryReminded = reminded == "1"
+	return p, nil
 }
 
 func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]model.Permit, error) {
@@ -511,8 +536,8 @@ func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]
 	defer rows.Close()
 	var out []model.Permit
 	for rows.Next() {
-		var p model.Permit
-		if err := rows.Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label, &p.ActiveRegistration); err != nil {
+		p, err := scanPermit(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -521,10 +546,8 @@ func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]
 }
 
 func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
-	var p model.Permit
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, owner, council_permit_id, permit_type_id, label, active_registration FROM permit WHERE id = ?`, id).
-		Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label, &p.ActiveRegistration)
+	p, err := scanPermit(s.db.QueryRowContext(ctx,
+		`SELECT `+permitCols+` FROM permit WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -535,10 +558,8 @@ func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
 // so a caller can check whether it is already managed (and by whom) before
 // claiming it. Returns ErrNotFound when no row exists.
 func (s *Store) PermitByCouncilID(ctx context.Context, councilPermitID string) (model.Permit, error) {
-	var p model.Permit
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, owner, council_permit_id, permit_type_id, label, active_registration FROM permit WHERE council_permit_id = ?`, councilPermitID).
-		Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label, &p.ActiveRegistration)
+	p, err := scanPermit(s.db.QueryRowContext(ctx,
+		`SELECT `+permitCols+` FROM permit WHERE council_permit_id = ?`, councilPermitID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -567,6 +588,34 @@ WHERE permit.owner = excluded.owner`,
 	var id int64
 	err = s.db.QueryRowContext(ctx, `SELECT id FROM permit WHERE council_permit_id = ?`, councilPermitID).Scan(&id)
 	return id, err
+}
+
+// UpdatePermitMeta writes the expiry and status pulled from the council record.
+// If the expiry date changes (a renewal, or a first read), the expiry-reminded
+// flag is cleared so the approaching-expiry reminder re-arms for the new date.
+// Owner-scoped and a no-op if the permit isn't the owner's.
+func (s *Store) UpdatePermitMeta(ctx context.Context, owner, councilPermitID, status string, endDate time.Time) error {
+	var ed string
+	if !endDate.IsZero() {
+		ed = endDate.UTC().Format(time.RFC3339)
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE permit
+SET status = ?, end_date = ?,
+    expiry_reminded = CASE WHEN end_date = ? THEN expiry_reminded ELSE '' END,
+    updated_at = ?
+WHERE council_permit_id = ? AND owner = ?`,
+		status, ed, ed, nowUTC(), councilPermitID, owner)
+	return err
+}
+
+// MarkPermitExpiryReminded records that an approaching-expiry reminder has gone
+// out for the permit's current end date, so it isn't sent again until the date
+// changes (see UpdatePermitMeta, which clears the flag on renewal).
+func (s *Store) MarkPermitExpiryReminded(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET expiry_reminded = '1' WHERE id = ?`, id)
+	return err
 }
 
 // SetPermitLabel renames a permit (owner-scoped) to a name the user chooses, shown

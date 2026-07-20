@@ -36,6 +36,8 @@ type Council interface {
 	// Reconnect re-establishes an expired session from the user's opt-in saved
 	// password. Returns parking.ErrNoSavedPassword when none was saved.
 	Reconnect(ctx context.Context, owner string) error
+	// ListPermits reads the owner's council permits (used to refresh expiry/status).
+	ListPermits(ctx context.Context, owner string) ([]parking.PermitInfo, error)
 }
 
 // Notifier sends user-facing notifications (the re-authorise reminder, each
@@ -51,6 +53,9 @@ type Notifier interface {
 	// NotifyRelinkRequired tells the user to reconnect their council account;
 	// returns the number of channels that accepted it (0 = not reached).
 	NotifyRelinkRequired(ctx context.Context, owner string) int
+	// NotifyPermitExpiry warns the account that a permit is approaching expiry;
+	// returns the number of channels that accepted it (0 = not reached).
+	NotifyPermitExpiry(ctx context.Context, owner, permitLabel string, expiry time.Time) int
 	// NotifyAdmin sends an operator alert to every configured admin channel.
 	NotifyAdmin(ctx context.Context, subject, body string) error
 	// NotifyGuestDisplaced tells a guest (no account) their activated car has been
@@ -63,6 +68,7 @@ type Options struct {
 	SessionMaxAge time.Duration // re-authorise bound from last link (0 disables)
 	WarmInterval  time.Duration // how stale a session may get before renewal (default 45m)
 	ReminderLead  time.Duration // how far before the bound to email the confirm link (0 = no reminder)
+	ExpiryLead    time.Duration // how far before a permit's expiry to warn the account (0 = no reminder)
 	PublicBaseURL string        // absolute base for the email confirm link
 	Notifier      Notifier      // nil/disabled = no emails
 	RateDelay     time.Duration // minimum pause between council calls within a warm pass (anti-burst)
@@ -81,6 +87,7 @@ type Scheduler struct {
 	sessionMaxAge time.Duration
 	warmInterval  time.Duration
 	reminderLead  time.Duration
+	expiryLead    time.Duration
 	publicBaseURL string
 	notifier      Notifier
 	rateDelay     time.Duration
@@ -125,6 +132,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		sessionMaxAge: opts.SessionMaxAge,
 		warmInterval:  warm,
 		reminderLead:  opts.ReminderLead,
+		expiryLead:    opts.ExpiryLead,
 		publicBaseURL: strings.TrimRight(opts.PublicBaseURL, "/"),
 		notifier:      opts.Notifier,
 		rateDelay:     rd,
@@ -541,6 +549,56 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 	}
 	if drifted {
 		s.Kick() // reconcile now: re-apply the schedule over the drift
+	}
+	s.syncPermitExpiry(ctx, owner) // refresh expiry/status + warn if a permit is expiring
+}
+
+// syncPermitExpiry pulls each of the owner's permits from the council, writes back
+// their expiry date and status, and — when a permit is within expiryLead of its
+// end date — sends the account a one-time approaching-expiry warning. Runs on the
+// slow keep-warm cadence off an already-valid session, so it costs one grid call.
+func (s *Scheduler) syncPermitExpiry(ctx context.Context, owner string) {
+	live, err := s.council.ListPermits(ctx, owner)
+	if err != nil {
+		return
+	}
+	byCouncilID := make(map[string]parking.PermitInfo, len(live))
+	for _, pi := range live {
+		byCouncilID[pi.CouncilPermitID] = pi
+		// Update every permit the council reports; owner-scoped, so it only
+		// touches rows this account manages.
+		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.EndDate)
+	}
+	if s.expiryLead <= 0 {
+		return
+	}
+	// Re-read managed permits so we see the (just-updated) expiry + reminded flag.
+	managed, err := s.store.ListPermitsFor(ctx, owner)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for i := range managed {
+		p := managed[i]
+		if p.EndDate.IsZero() || p.ExpiryReminded {
+			continue
+		}
+		// Warn once we're inside the lead window, up until the permit has expired.
+		if now.Before(p.EndDate.Add(-s.expiryLead)) || now.After(p.EndDate) {
+			continue
+		}
+		if s.notifier == nil || !s.notifier.Enabled() {
+			return
+		}
+		label := p.Label
+		if label == "" {
+			label = "visitor permit"
+		}
+		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.loc)) > 0 {
+			if e := s.store.MarkPermitExpiryReminded(ctx, p.ID); e != nil {
+				log.Printf("scheduler: mark permit %d expiry-reminded: %v", p.ID, e)
+			}
+		}
 	}
 }
 

@@ -213,6 +213,10 @@
   .pname-edit { display:flex; align-items:center; gap:8px; flex:1; flex-wrap:wrap; min-width:0; }
   .pname-edit input { flex:1; min-width:150px; font-size:16px; font-weight:600; letter-spacing:-.01em; padding:7px 11px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); }
   .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
+  .permit-expiry { display:flex; align-items:center; gap:7px; margin:2px 0 0; font-size:12.5px; color:var(--muted); }
+  .permit-expiry svg { width:15px; height:15px; flex:0 0 auto; }
+  .permit-expiry.warn { color:var(--warn); font-weight:500; }
+  .permit-expiry.bad { color:var(--danger); font-weight:500; }
 
   /* legend */
   .legend { display:flex; gap:14px; flex-wrap:wrap; margin:2px 0 4px; }
@@ -1567,6 +1571,14 @@
     {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
   </div>
 </div>
+
+{{if .ExpiryLabel}}
+<p class="permit-expiry{{if .Expired}} bad{{else if .ExpiresSoon}} warn{{end}}">
+  {{if .Expired}}{{template "ic-alert"}} This permit expired {{.ExpiryIn}} (on {{.ExpiryLabel}}). Renew it with the council, then copy your schedule onto the new permit.
+  {{else if .ExpiresSoon}}{{template "ic-alert"}} Expires {{.ExpiryLabel}} ({{.ExpiryIn}}) &mdash; renew it with the council to keep it valid.
+  {{else}}{{template "ic-check"}} Valid until {{.ExpiryLabel}} ({{.ExpiryIn}}).{{end}}
+</p>
+{{end}}
 
 <p class="sub">Weekly roster</p>
 <div class="roster">

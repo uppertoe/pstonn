@@ -23,6 +23,8 @@ type fakeCouncil struct {
 	reconnected  []string
 	reconnectErr error // defaults to ErrNoSavedPassword via reconnectSet
 	reconnectSet bool
+	permits      []parking.PermitInfo
+	permitsErr   error
 }
 
 func (f *fakeCouncil) SetVehicle(context.Context, string, model.Permit, string) error { return nil }
@@ -39,6 +41,9 @@ func (f *fakeCouncil) Reconnect(_ context.Context, owner string) error {
 		return parking.ErrNoSavedPassword // no saved password by default
 	}
 	return f.reconnectErr
+}
+func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
+	return f.permits, f.permitsErr
 }
 
 type sentMail struct {
@@ -57,13 +62,15 @@ type fakeNotifier struct {
 	deliverSet bool // when true, NotifyApply returns deliver; else it returns 1
 	deliver    int  // delivered-channel count to report (0 = user not reached)
 
-	mu         sync.Mutex // guards the slices: notifications fire from goroutines
-	sent       []sentMail
-	applied    []appliedNote
-	outcomes   []notify.ApplyOutcome // full outcomes, for asserting message content
-	adminNotes []string
-	relinks    []string
-	displaced  []string // guest emails told their car came off the permit
+	mu            sync.Mutex // guards the slices: notifications fire from goroutines
+	sent          []sentMail
+	applied       []appliedNote
+	outcomes      []notify.ApplyOutcome // full outcomes, for asserting message content
+	adminNotes    []string
+	relinks       []string
+	displaced     []string // guest emails told their car came off the permit
+	expiries      []string // "owner:permitLabel" per expiry warning sent
+	expiryDeliver int      // channels to report delivered (0 => 1)
 }
 
 func (f *fakeNotifier) Enabled() bool         { return f.on }
@@ -91,6 +98,16 @@ func (f *fakeNotifier) NotifyRelinkRequired(_ context.Context, owner string) int
 	defer f.mu.Unlock()
 	f.relinks = append(f.relinks, owner)
 	return 1
+}
+
+func (f *fakeNotifier) NotifyPermitExpiry(_ context.Context, owner, permitLabel string, expiry time.Time) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.expiries = append(f.expiries, owner+":"+permitLabel)
+	if f.expiryDeliver == 0 {
+		return 1
+	}
+	return f.expiryDeliver
 }
 
 func (f *fakeNotifier) NotifyAdmin(_ context.Context, subject, body string) error {
@@ -251,6 +268,49 @@ func TestKeepWarmUnlinksOnExpiry(t *testing.T) {
 	}
 	if _, err := st.GetCouncilSession(context.Background(), "expired@example.com"); err != store.ErrNotFound {
 		t.Fatalf("expired session should be unlinked, got err=%v", err)
+	}
+}
+
+// TestPermitExpiryReminder: keep-warm syncs the permit's expiry from the council,
+// warns the account once when it's within the lead window, doesn't warn again for
+// the same date, and re-arms when a renewal moves the date.
+func TestPermitExpiryReminder(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	owner := "expiry@example.com"
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner) // creates permit "perm-<owner>"
+	cpid := "perm-" + owner
+
+	soon := time.Now().Add(5 * 24 * time.Hour)
+	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: soon}}}
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond,
+		ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
+
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(ctx)
+	if got := len(nf.expiries); got != 1 {
+		t.Fatalf("expected one expiry warning, got %d (%v)", got, nf.expiries)
+	}
+	// Expiry + status were written back to the permit.
+	if p, _ := st.PermitByCouncilID(ctx, cpid); p.Status != "Granted" || p.EndDate.IsZero() {
+		t.Fatalf("permit meta not persisted: status=%q end=%v", p.Status, p.EndDate)
+	}
+	// A second pass must NOT re-warn for the same expiry date.
+	s.keepWarm(ctx)
+	if got := len(nf.expiries); got != 1 {
+		t.Fatalf("expiry warning should be sent once per date, got %d", got)
+	}
+	// A renewal (new, far-off date) clears the flag; it's outside the lead so no
+	// new warning, but the flag being re-armed is what we assert via the date write.
+	fc.permits = []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: time.Now().Add(60 * 24 * time.Hour)}}
+	s.keepWarm(ctx)
+	if got := len(nf.expiries); got != 1 {
+		t.Fatalf("far-off renewal should not warn, got %d", got)
+	}
+	if p, _ := st.PermitByCouncilID(ctx, cpid); p.ExpiryReminded {
+		t.Fatal("renewal to a new date should clear the reminded flag")
 	}
 }
 

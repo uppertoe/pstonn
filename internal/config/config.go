@@ -156,6 +156,10 @@ type CouncilConfig struct {
 	// a "confirm you're still using this" link. COUNCIL_REMINDER_LEAD_DAYS,
 	// default 7.
 	ReminderLead time.Duration
+
+	// ExpiryLead is how far before a permit's own expiry date to warn the account
+	// so they can renew it with the council. COUNCIL_EXPIRY_LEAD_DAYS, default 14.
+	ExpiryLead time.Duration
 }
 
 // Load reads and validates configuration from the environment.
@@ -175,6 +179,7 @@ func Load() (*Config, error) {
 			SessionMaxAge: time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
 			WarmInterval:  envDuration("COUNCIL_WARM_INTERVAL", 75*time.Minute),
 			ReminderLead:  time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
+			ExpiryLead:    time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
 		},
 		AuthLogoutURL: strings.TrimSpace(os.Getenv("AUTH_LOGOUT_URL")),
 		TermsPath:     strings.TrimSpace(os.Getenv("TERMS_PATH")),

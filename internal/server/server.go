@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -572,6 +573,11 @@ type permitView struct {
 	Overrides     []overrideView
 	Vehicles      []vehicleView
 	Loc           *time.Location
+	// Expiry surfacing (empty ExpiryLabel = expiry unknown).
+	ExpiryLabel string // "3 Aug 2026"
+	ExpiryIn    string // "in 12 days" / "tomorrow" / "today" / "3 days ago"
+	ExpiresSoon bool   // within the UI lead window (approaching)
+	Expired     bool   // already past the end date
 }
 
 type dayView struct {
@@ -970,10 +976,54 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		source = string(res.Source)
 	}
 	desiredReg, _, _ := dispReg(res.VehicleID, res.Registration)
-	return permitView{
+	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
-	}, nil
+	}
+	fillExpiry(&pv, now)
+	return pv, nil
+}
+
+// expirySoonLead is how close to a permit's end date the schedule starts flagging
+// it (a little wider than the email reminder lead, so the UI hints first).
+const expirySoonLead = 21 * 24 * time.Hour
+
+// fillExpiry derives the human expiry labels on a permit view from its end date.
+func fillExpiry(pv *permitView, now time.Time) {
+	end := pv.Permit.EndDate
+	if end.IsZero() {
+		return
+	}
+	loc := pv.Loc
+	if loc == nil {
+		loc = time.Local
+	}
+	end = end.In(loc)
+	pv.ExpiryLabel = end.Format("2 Jan 2006")
+	// Whole calendar-day difference in local time. Anchor both dates at noon and
+	// round, so a DST transition (a 23- or 25-hour day) between them doesn't shift
+	// the count by one.
+	startDay := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, loc)
+	endDay := time.Date(end.Year(), end.Month(), end.Day(), 12, 0, 0, 0, loc)
+	days := int(math.Round(endDay.Sub(startDay).Hours() / 24))
+	switch {
+	case days < 0:
+		pv.Expired = true
+		if days == -1 {
+			pv.ExpiryIn = "yesterday"
+		} else {
+			pv.ExpiryIn = fmt.Sprintf("%d days ago", -days)
+		}
+	case days == 0:
+		pv.ExpiresSoon = true
+		pv.ExpiryIn = "today"
+	case days == 1:
+		pv.ExpiresSoon = true
+		pv.ExpiryIn = "tomorrow"
+	default:
+		pv.ExpiryIn = fmt.Sprintf("in %d days", days)
+		pv.ExpiresSoon = end.Sub(now) <= expirySoonLead
+	}
 }
 
 // pickerPage renders the permit picker on its own route (for "manage another
@@ -1151,6 +1201,9 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	if match.CurrentRego != "" {
 		_ = s.store.SetPermitActive(ctx, pid, match.CurrentRego)
 	}
+	// Seed expiry + status so the schedule shows "expires …" straight away; the
+	// scheduler keeps it fresh on the keep-warm cadence thereafter.
+	_ = s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.EndDate)
 	redirectHome(w, r)
 }
 

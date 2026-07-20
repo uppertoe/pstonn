@@ -352,6 +352,51 @@ func TestCouncilPasswordRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPermitMetaAndExpiryReminder covers persisting the council expiry/status and
+// the reminder flag that re-arms when the expiry date changes.
+func TestPermitMetaAndExpiryReminder(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	owner := "e@example.com"
+	pid, err := s.UpsertPermit(ctx, owner, "555", "14", "Visitor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if err := s.UpdatePermitMeta(ctx, owner, "555", "Granted", end); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.GetPermit(ctx, pid)
+	if p.Status != "Granted" || !p.EndDate.Equal(end) {
+		t.Fatalf("meta not persisted: status=%q end=%v", p.Status, p.EndDate)
+	}
+	// Mark reminded; a same-date meta update must preserve the flag.
+	if err := s.MarkPermitExpiryReminded(ctx, pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdatePermitMeta(ctx, owner, "555", "Granted", end); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.GetPermit(ctx, pid); !p.ExpiryReminded {
+		t.Fatal("same-date update should keep reminded flag")
+	}
+	// A new expiry date (renewal) clears the flag.
+	end2 := end.AddDate(0, 3, 0)
+	if err := s.UpdatePermitMeta(ctx, owner, "555", "Granted", end2); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.GetPermit(ctx, pid); p.ExpiryReminded {
+		t.Fatal("changed expiry date should clear reminded flag")
+	}
+	// Owner scoping: a different owner's update is a no-op.
+	if err := s.UpdatePermitMeta(ctx, "other@example.com", "555", "Cancelled", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.GetPermit(ctx, pid); p.Status != "Granted" {
+		t.Fatalf("cross-owner update leaked: status=%q", p.Status)
+	}
+}
+
 // TestReminderAndConfirm covers the reminder token round-trip: mark a reminder,
 // then a confirm consumes the token, resets the re-authorise clock forward, and
 // clears the cycle. Uses a backdated linked_at so the extension is observable.
