@@ -1290,6 +1290,7 @@
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Visitor at the door?</h2>
     <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; you stay in control: the on-screen code is momentary (expires in 15&nbsp;min), and a printed code only ever <em>asks</em> you to approve each scan. No one can use the permit on their own.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
         <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. Expires 15&nbsp;min after you show it.</span></div>
@@ -1361,6 +1362,7 @@
   {{if and .PermitOpts .Vehicles}}
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
+    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     <form method="post" action="/guests" class="stack" x-data="{recips:''}">
       <label class="fld"><span>Permit</span>
         <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
