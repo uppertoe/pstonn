@@ -85,6 +85,9 @@
   #htmx-bar.on { opacity:1; }
   #htmx-bar::before { content:""; position:absolute; height:100%; width:35%; left:-35%; border-radius:0 3px 3px 0; background:linear-gradient(90deg,transparent,var(--primary)); }
   #htmx-bar.on::before { animation:htmxslide 1.1s cubic-bezier(.4,0,.2,1) infinite; }
+  /* Toast for server-side validation errors (surfaced from a 422 response). */
+  #toast { position:fixed; left:50%; bottom:24px; transform:translate(-50%,140%); z-index:120; max-width:min(92vw,420px); padding:12px 16px; border-radius:12px; background:var(--danger-soft); color:var(--danger); border:1px solid var(--danger); box-shadow:var(--shadow-lg); font-size:14px; line-height:1.45; opacity:0; transition:transform .25s cubic-bezier(.4,0,.2,1),opacity .25s; pointer-events:none; }
+  #toast.on { transform:translate(-50%,0); opacity:1; }
   @keyframes htmxslide { 0%{left:-35%} 100%{left:100%} }
 
   /* ---- app bar ---- */
@@ -526,6 +529,7 @@
 </head>
 <body hx-boost="true">
 <div id="htmx-bar" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 <script>
   // Show the top loading bar during any htmx request (incl. boosted navigation).
   addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
@@ -540,6 +544,26 @@
     if (cfg && cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
   });
+  // Surface server-side validation errors. The server returns 422 with a plain
+  // message for these; htmx does NOT swap non-2xx bodies, so without this the
+  // form would appear to do nothing. Show the message as a toast and don't swap.
+  addEventListener('htmx:beforeSwap', function (e) {
+    var x = e.detail && e.detail.xhr;
+    if (x && x.status === 422) {
+      e.detail.shouldSwap = false;
+      e.detail.isError = false;
+      showToast((x.responseText || 'Something needs your attention.').trim());
+    }
+  });
+  var toastTimer;
+  function showToast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
+  }
 </script>
 
 {{if eq .State "landing"}}
@@ -1564,13 +1588,21 @@
 {{/* Add-one-off modal, teleported to <body> so it escapes the card's transform
      (an animated/transformed ancestor becomes the containing block for position:fixed). */}}
 <template x-teleport="body">
-<div class="modal-wrap" x-show="addOpen" x-cloak @keydown.escape.window="addOpen=false" @htmx:after-request="addOpen=false">
+<div class="modal-wrap" x-show="addOpen" x-cloak @keydown.escape.window="addOpen=false" @htmx:after-request="if($event.detail.successful) addOpen=false">
   <div class="scrim" x-show="addOpen" x-transition.opacity @click="addOpen=false"></div>
   <div class="modal" x-show="addOpen" x-transition>
   <div class="modal-head"><strong>Add a one-off booking</strong>
     <button type="button" class="icon-btn" @click="addOpen=false" aria-label="Close">{{template "ic-x"}}</button>
   </div>
-  <form class="stack" hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
+  {{/* method/action are a native fallback: this form is teleported into <body> by
+       Alpine, and htmx's async MutationObserver sometimes hasn't processed it by
+       the time it's submitted — in which case the browser would do a useless GET
+       to the current page. x-init runs htmx.process synchronously at teleport so
+       the AJAX path is deterministic; the method/action make even an un-enhanced
+       submit POST to the right endpoint (full reload) rather than silently no-op. */}}
+  <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override"
+        hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
+        x-init="window.htmx && htmx.process($el)"
         x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:''}">
     <div class="seg">
       <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved car</button>

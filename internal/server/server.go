@@ -389,7 +389,7 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 	u, _ := identity.FromContext(r.Context())
 	for i := range s.terms.Clauses {
 		if r.FormValue(fmt.Sprintf("agree%d", i)) == "" {
-			s.message(w, http.StatusBadRequest, "Please tick all three boxes to continue.")
+			s.formError(w, r, "Please tick all three boxes to continue.")
 			return
 		}
 	}
@@ -1050,7 +1050,7 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	reg := normalizeReg(r.FormValue("registration"))
 	label := cleanLabel(r.FormValue("label"))
 	if !validRego(reg) {
-		s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+		s.formError(w, r, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 		return
 	}
 	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label); err != nil {
@@ -1085,7 +1085,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cpid := strings.TrimSpace(r.FormValue("council_permit_id"))
 	if cpid == "" {
-		s.message(w, http.StatusBadRequest, "Council permit ID is required.")
+		s.formError(w, r, "Council permit ID is required.")
 		return
 	}
 
@@ -1191,7 +1191,7 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 	}
 	label := cleanLabel(r.FormValue("label"))
 	if label == "" {
-		s.message(w, http.StatusBadRequest, "Give the permit a name.")
+		s.formError(w, r, "Give the permit a name.")
 		return
 	}
 	if rs := []rune(label); len(rs) > 40 {
@@ -1220,7 +1220,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	// that matches their own verified email; they supply just the password.
 	password := r.FormValue("council_password")
 	if password == "" {
-		s.message(w, http.StatusBadRequest, "Enter your council password.")
+		s.formError(w, r, "Enter your council password.")
 		return
 	}
 	if err := s.council.Link(r.Context(), user, user, password); err != nil {
@@ -1257,7 +1257,7 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(r.FormValue("confirm")) != "DELETE" {
-		s.message(w, http.StatusBadRequest, "Type DELETE to confirm removing all your data.")
+		s.formError(w, r, "Type DELETE to confirm removing all your data.")
 		return
 	}
 	if err := s.store.DeleteAllForOwner(r.Context(), user); err != nil {
@@ -1279,11 +1279,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	if email == "" || !looksLikeEmail(email) {
-		s.message(w, http.StatusBadRequest, "Enter a valid email address.")
+		s.formError(w, r, "Enter a valid email address.")
 		return
 	}
 	if email == user {
-		s.message(w, http.StatusBadRequest, "That is your own email.")
+		s.formError(w, r, "That is your own email.")
 		return
 	}
 	if isP, _ := s.store.IsPrimary(ctx, email); isP {
@@ -1344,7 +1344,7 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 	user, _, isPrimary := s.resolveAccount(r.Context())
 	if isPrimary {
-		s.message(w, http.StatusBadRequest, "You own this account, so there is nothing to leave.")
+		s.formError(w, r, "You own this account, so there is nothing to leave.")
 		return
 	}
 	if err := s.store.RemoveMembership(r.Context(), user); err != nil {
@@ -1411,7 +1411,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.FormValue("from")); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
 		if err != nil {
-			s.message(w, http.StatusBadRequest, "Couldn't read the start time.")
+			s.formError(w, r, "Couldn't read the start time.")
 			return
 		}
 		startsAt = t
@@ -1420,13 +1420,13 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.FormValue("until")); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
 		if err != nil {
-			s.message(w, http.StatusBadRequest, "Couldn't read the end time.")
+			s.formError(w, r, "Couldn't read the end time.")
 			return
 		}
 		endsAt = &t
 	}
 	if endsAt != nil && !endsAt.After(startsAt) {
-		s.message(w, http.StatusBadRequest, "The end time must be after the start time.")
+		s.formError(w, r, "The end time must be after the start time.")
 		return
 	}
 	// Either a saved vehicle, or a one-off plate that is NOT saved as a vehicle
@@ -1437,7 +1437,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case plate != "":
 		if !validRego(plate) {
-			s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+			s.formError(w, r, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 			return
 		}
 		if _, err := s.store.CreatePlateOverride(r.Context(), p.ID, plate, startsAt, endsAt, user); err != nil {
@@ -1453,7 +1453,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		s.message(w, http.StatusBadRequest, "Choose a saved car or enter a one-off plate.")
+		s.formError(w, r, "Choose a saved car or enter a one-off plate.")
 		return
 	}
 	s.sched.Kick()
@@ -1528,6 +1528,22 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 }
 
 // ---- helpers ----
+
+// formError reports a user-facing validation problem for a form submission. For
+// an htmx request it returns 422 with the bare message, which the client turns
+// into a toast (htmx does NOT swap non-2xx bodies, so returning an error page
+// here would be silently dropped — the form would appear to do nothing). For a
+// normal request it falls back to a full page. The 422 also keeps detail.successful
+// false, so a modal wired to close only on success stays open for a retry.
+func (s *Server) formError(w http.ResponseWriter, r *http.Request, msg string) {
+	if r.Header.Get("HX-Request") != "" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, msg)
+		return
+	}
+	s.message(w, http.StatusBadRequest, msg)
+}
 
 func (s *Server) message(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

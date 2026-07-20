@@ -501,7 +501,7 @@ func agoText(now, t time.Time) string {
 func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	if err := r.ParseForm(); err != nil {
-		s.message(w, http.StatusBadRequest, "Could not read the form. Please try again.")
+		s.formError(w, r, "Could not read the form. Please try again.")
 		return
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
@@ -515,11 +515,11 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	recipients := parseEmails(r.FormValue("recipients"))
 	if len(vehicleIDs) == 0 {
-		s.message(w, http.StatusBadRequest, "Choose at least one car this link may activate.")
+		s.formError(w, r, "Choose at least one car this link may activate.")
 		return
 	}
 	if len(recipients) == 0 {
-		s.message(w, http.StatusBadRequest, "Add at least one recipient email.")
+		s.formError(w, r, "Add at least one recipient email.")
 		return
 	}
 
@@ -558,7 +558,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	id := pathInt(r, "id")
 	if err := r.ParseForm(); err != nil {
-		s.message(w, http.StatusBadRequest, "Could not read the form. Please try again.")
+		s.formError(w, r, "Could not read the form. Please try again.")
 		return
 	}
 	label := strings.TrimSpace(r.FormValue("label"))
@@ -570,7 +570,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(vehicleIDs) == 0 {
-		s.message(w, http.StatusBadRequest, "Choose at least one car this pass may activate.")
+		s.formError(w, r, "Choose at least one car this pass may activate.")
 		return
 	}
 	if err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs); err != nil {
@@ -727,7 +727,7 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	if email != "" && !looksLikeEmail(email) {
-		s.message(w, http.StatusBadRequest, "Enter a valid email address, or leave it blank.")
+		s.formError(w, r, "Enter a valid email address, or leave it blank.")
 		return
 	}
 	if err := s.store.SetVehicleEmail(r.Context(), owner, pathInt(r, "id"), email); err != nil && !errors.Is(err, store.ErrNotFound) {
