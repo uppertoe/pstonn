@@ -110,7 +110,7 @@ type SMTPConfig struct {
 	Port     int    // SMTP_PORT, default 587 (STARTTLS submission)
 	Username string // SMTP_USERNAME
 	Password string // SMTP_PASSWORD
-	From     string // SMTP_FROM, e.g. "pstonn <no-reply@example.com>"
+	From     string // SMTP_FROM, e.g. "p.stonn <notifications@example.com>" (shown as the sender)
 }
 
 // Enabled reports whether outbound email is configured.
