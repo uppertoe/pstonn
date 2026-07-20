@@ -493,10 +493,16 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	// than a false "done". The fresh read also refreshes the current-plate cache.
 	confirmed, err := c.CurrentVehicle(ctx, owner, p)
 	if err != nil {
+		// Couldn't reach the council for the confirm — genuinely transient, retry.
 		return councilErr(FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
 	}
 	if !strings.EqualFold(confirmed, registration) {
-		return councilErr(FailTransient, op, fmt.Errorf("change sent but the council still shows %q", confirmed))
+		// The POST was accepted (2xx) but the council's own record still shows a
+		// different plate: the write did NOT take. This is a durable refusal (a
+		// permission quirk or an API-shape change), not a blip — classify it as
+		// rejected so the user gets an act-now "still shows X" notice rather than a
+		// soothing "we'll keep trying" that never self-heals.
+		return councilErr(FailRejected, op, fmt.Errorf("change was accepted but the council still shows %q", confirmed))
 	}
 	c.regCache.Store(p.CouncilPermitID, cachedReg{reg: confirmed, at: time.Now()})
 	return nil

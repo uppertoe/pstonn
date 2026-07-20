@@ -23,6 +23,9 @@ type fakeCouncil struct {
 }
 
 func (f *fakeCouncil) SetVehicle(context.Context, string, model.Permit, string) error { return nil }
+func (f *fakeCouncil) CurrentVehicle(context.Context, string, model.Permit) (string, error) {
+	return "", nil
+}
 func (f *fakeCouncil) Refresh(_ context.Context, owner string) error {
 	f.refreshed = append(f.refreshed, owner)
 	return f.refreshErr
@@ -264,7 +267,7 @@ func TestFailureNotifyDedupAndSuccess(t *testing.T) {
 	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil) // identical → suppressed
 	time.Sleep(60 * time.Millisecond)
 	// Success (as the reconcile success branch would do).
-	s.clearFailStreak(p.ID)
+	s.clearFailStreak(ctx, p.ID)
 	s.logApply(ctx, p.ID, "AVS619", "override", "success", "")
 	s.notifyUser(ctx, p, notify.ApplyOutcome{Owner: p.Owner, PermitLabel: permitLabel(p), Reg: "AVS619", OK: true}, "success|AVS619")
 	time.Sleep(60 * time.Millisecond)
@@ -315,7 +318,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 		t.Fatalf("expected one transient failure notification, got %+v", out)
 	}
 	// A success resets the streak so the next blip gets a fresh grace period.
-	s.clearFailStreak(p.ID)
+	s.clearFailStreak(ctx, p.ID)
 	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 	time.Sleep(30 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 1 {

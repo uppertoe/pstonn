@@ -79,7 +79,12 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		if o.EndsAt != nil && !now.Before(*o.EndsAt) {
 			continue // already ended
 		}
-		if best == nil || o.CreatedAt.After(best.CreatedAt) {
+		// Freshest decision wins. CreatedAt is only second-precision, so two
+		// overrides booked in the same second tie on CreatedAt; break that by ID
+		// (auto-increment → the later-inserted one), so "freshest wins" stays
+		// deterministic instead of falling back to scan order.
+		if best == nil || o.CreatedAt.After(best.CreatedAt) ||
+			(o.CreatedAt.Equal(best.CreatedAt) && o.ID > best.ID) {
 			best = o
 		}
 	}

@@ -292,6 +292,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE guest_grant ADD COLUMN request_only INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_token ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_token ADD COLUMN token_sealed TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
@@ -571,6 +572,21 @@ func (s *Store) SetPermitLabel(ctx context.Context, owner string, id int64, labe
 		return ErrNotFound
 	}
 	return nil
+}
+
+// BumpFailStreak increments a permit's consecutive-failure counter (persisted so
+// a restart doesn't reset the grace window before a failure is escalated) and
+// returns the new value. ClearFailStreak resets it after a success.
+func (s *Store) BumpFailStreak(ctx context.Context, id int64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`UPDATE permit SET fail_streak = fail_streak + 1 WHERE id = ? RETURNING fail_streak`, id).Scan(&n)
+	return n, err
+}
+
+func (s *Store) ClearFailStreak(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE permit SET fail_streak = 0 WHERE id = ? AND fail_streak != 0`, id)
+	return err
 }
 
 func (s *Store) SetPermitActive(ctx context.Context, id int64, registration string) error {

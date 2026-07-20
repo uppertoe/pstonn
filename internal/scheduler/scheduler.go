@@ -30,6 +30,9 @@ import (
 type Council interface {
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
 	Refresh(ctx context.Context, owner string) error
+	// CurrentVehicle reads the plate the council actually has on the permit right
+	// now (used to detect drift from changes made directly in the council portal).
+	CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error)
 }
 
 // Notifier sends user-facing notifications (the re-authorise reminder, each
@@ -89,11 +92,6 @@ type Scheduler struct {
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
 	lastAlert map[string]time.Time
-
-	// failMu guards failStreak, the count of consecutive failed reconcile ticks
-	// per permit, so a transient blip doesn't alarm the user on the first miss.
-	failMu     sync.Mutex
-	failStreak map[int64]int
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -130,7 +128,6 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		jitterFrac:    jf,
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
-		failStreak:    make(map[int64]int),
 	}
 }
 
@@ -347,6 +344,7 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		switch err := s.council.Refresh(ctx, cs.Owner); {
 		case err == nil:
 			log.Printf("scheduler: kept session for %s warm", cs.Owner)
+			s.checkDrift(ctx, cs.Owner) // piggyback a gentle council-drift check
 		case errors.Is(err, parking.ErrSessionExpired):
 			if derr := s.store.DeleteCouncilSession(ctx, cs.Owner); derr != nil {
 				log.Printf("scheduler: unlink expired session %s: %v", cs.Owner, derr)
@@ -458,7 +456,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	}
 
 	// Transient/unexpected problems get a grace period; a refusal alarms at once.
-	n := s.bumpFailStreak(p.ID)
+	n := s.bumpFailStreak(ctx, p.ID)
 	threshold := failNotifyThreshold
 	if kind == parking.FailRejected {
 		threshold = 1
@@ -500,18 +498,53 @@ func describeFailure(kind parking.FailureKind, op string) (reason, action string
 }
 
 // bumpFailStreak increments and returns the consecutive-failure count for a
-// permit; clearFailStreak resets it after a success.
-func (s *Scheduler) bumpFailStreak(permitID int64) int {
-	s.failMu.Lock()
-	defer s.failMu.Unlock()
-	s.failStreak[permitID]++
-	return s.failStreak[permitID]
+// permit; clearFailStreak resets it after a success. Persisted (on the permit
+// row) so a restart doesn't reset the grace before a transient failure is alerted.
+// checkDrift re-reads the council's actual current plate for the owner's permits
+// and writes it into active_registration. Reconcile skips a permit when the
+// scheduled plate already equals the CACHED active_registration, so if someone
+// changed the vehicle directly in the council portal, reconcile would never
+// notice — until a dashboard visit refreshed the cache. Doing this read on the
+// slow keep-warm cadence (already rate-spaced, once a session refreshes) catches
+// that drift and re-arms reconcile, at gentle council load rather than a per-tick
+// firehose. Any correction is kicked so reconcile re-applies the schedule promptly.
+func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
+	permits, err := s.store.ListPermitsFor(ctx, owner)
+	if err != nil {
+		return
+	}
+	drifted := false
+	for i := range permits {
+		p := permits[i]
+		actual, err := s.council.CurrentVehicle(ctx, owner, p)
+		if err != nil {
+			continue
+		}
+		if !strings.EqualFold(actual, p.ActiveRegistration) {
+			log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
+			if e := s.store.SetPermitActive(ctx, p.ID, actual); e == nil {
+				drifted = true
+			}
+		}
+	}
+	if drifted {
+		s.Kick() // reconcile now: re-apply the schedule over the drift
+	}
 }
 
-func (s *Scheduler) clearFailStreak(permitID int64) {
-	s.failMu.Lock()
-	delete(s.failStreak, permitID)
-	s.failMu.Unlock()
+func (s *Scheduler) bumpFailStreak(ctx context.Context, permitID int64) int {
+	n, err := s.store.BumpFailStreak(ctx, permitID)
+	if err != nil {
+		log.Printf("scheduler: bump fail streak %d: %v", permitID, err)
+		return failNotifyThreshold // on a DB error, don't suppress the alert
+	}
+	return n
+}
+
+func (s *Scheduler) clearFailStreak(ctx context.Context, permitID int64) {
+	if err := s.store.ClearFailStreak(ctx, permitID); err != nil {
+		log.Printf("scheduler: clear fail streak %d: %v", permitID, err)
+	}
 }
 
 // detectSystemic alerts the operator when many users' plate changes fail in one
@@ -522,6 +555,16 @@ func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalP
 		return
 	}
 	failN, unexpectedN := len(stats.failOwners), len(stats.unexpectedOwners)
+	busyN := len(stats.busyOwners)
+	// A widespread ErrCouncilBusy is a systemic block (Akamai / egress-IP throttle)
+	// that leaves permits stuck; treat it like a broad failure so the operator hears.
+	busySystemic := busyN >= 3 || (totalPermits >= 2 && busyN == totalPermits)
+	if busySystemic && !(unexpectedN >= 2 || failN >= 3) {
+		s.systemAlert(ctx, "council-busy-block",
+			"Council is rate-limiting / blocking p.stonn",
+			fmt.Sprintf("This reconcile pass, %d of %d permits were deferred with a council busy/blocked response. p.stonn's egress IP may be rate-limited or soft-blocked; permit changes are stalled until it clears.", busyN, totalPermits))
+		return
+	}
 	systemic := unexpectedN >= 2 || failN >= 3 || (totalPermits >= 2 && failN == totalPermits)
 	if !systemic {
 		return
@@ -627,7 +670,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		nameByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Label
 	}
 	now := time.Now().In(s.loc)
-	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}}
+	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}, busyOwners: map[string]bool{}}
 	// Space out the council writes: when many permits change at the same wall-clock
 	// boundary (a midnight/9am roster rollover), applying them back-to-back is a
 	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
@@ -653,6 +696,7 @@ type ownerVehicle struct {
 type passStats struct {
 	failOwners       map[string]bool
 	unexpectedOwners map[string]bool
+	busyOwners       map[string]bool // council pushed back (ErrCouncilBusy) this pass
 }
 
 // reconcilePermit applies any needed plate change for one permit. It returns
@@ -727,7 +771,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 	switch {
 	case err == nil:
 		_ = s.store.SetPermitActive(ctx, p.ID, want)
-		s.clearFailStreak(p.ID)
+		s.clearFailStreak(ctx, p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
@@ -747,7 +791,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		return false
 	case errors.Is(err, parking.ErrCouncilBusy):
 		// Portal is pushing back (Akamai) or we're in a backoff cooldown; the
-		// client is already spacing retries. Stay quiet at the user level.
+		// client is already spacing retries. Stay quiet at the USER level (it's
+		// expected to be transient), but record it so a FLEET-WIDE block — which
+		// would otherwise leave every permit stuck with no alert at all — surfaces
+		// to the operator via detectSystemic.
+		if stats != nil {
+			stats.busyOwners[p.Owner] = true
+		}
 		log.Printf("scheduler: permit %s deferred: %v", p.CouncilPermitID, err)
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
