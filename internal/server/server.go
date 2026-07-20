@@ -580,6 +580,7 @@ type permitView struct {
 	ExpiryIn    string // "in 12 days" / "tomorrow" / "today" / "3 days ago"
 	ExpiresSoon bool   // within the UI lead window (approaching)
 	Expired     bool   // already past the end date
+	Detail      string // council identifier line: "VPP24714 · 1st Visitor Permit"
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool        // no weekly rules yet — a fresh permit
 	CopyFrom    []permitOpt // this owner's OTHER permits, to copy a schedule from
@@ -591,6 +592,7 @@ type permitView struct {
 type expiredPermitView struct {
 	ID         int64
 	Label      string
+	Detail     string // "VPP24714 · 1st Visitor Permit" (council identifiers)
 	StatusText string // "Expired 1 Jul 2026" / "Cancelled"
 }
 
@@ -609,7 +611,20 @@ func buildExpiredView(p model.Permit, now time.Time, loc *time.Location) expired
 	default:
 		st = "Inactive"
 	}
-	return expiredPermitView{ID: p.ID, Label: label, StatusText: st}
+	return expiredPermitView{ID: p.ID, Label: label, Detail: permitDetail(p), StatusText: st}
+}
+
+// permitDetail is the council identifier line — permit number and/or type — shown
+// under a permit's name. Empty if the council hasn't reported either yet.
+func permitDetail(p model.Permit) string {
+	switch {
+	case p.PermitNumber != "" && p.PermitType != "":
+		return p.PermitNumber + " · " + p.PermitType
+	case p.PermitNumber != "":
+		return p.PermitNumber
+	default:
+		return p.PermitType
+	}
 }
 
 type dayView struct {
@@ -1020,6 +1035,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 		RosterEmpty: len(rules) == 0,
+		Detail:      permitDetail(p),
 	}
 	fillExpiry(&pv, now)
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
@@ -1258,9 +1274,9 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	if match.CurrentRego != "" {
 		_ = s.store.SetPermitActive(ctx, pid, match.CurrentRego)
 	}
-	// Seed expiry + status so the schedule shows "expires …" straight away; the
-	// scheduler keeps it fresh on the keep-warm cadence thereafter.
-	_ = s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.EndDate)
+	// Seed expiry + status + identifiers so the schedule shows them straight away;
+	// the scheduler keeps them fresh on the keep-warm cadence thereafter.
+	_ = s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate)
 	redirectHome(w, r)
 }
 

@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS permit (
     end_date            TEXT NOT NULL DEFAULT '',   -- permit expiry (RFC3339) from the council record
     status              TEXT NOT NULL DEFAULT '',   -- council permit status, e.g. "Granted"
     expiry_reminded     TEXT NOT NULL DEFAULT '',   -- '1' once an expiry reminder is sent (cleared when end_date changes)
+    permit_number       TEXT NOT NULL DEFAULT '',   -- council permit number, e.g. "VPP24714"
+    permit_type         TEXT NOT NULL DEFAULT '',   -- council permit type, e.g. "(A) 1st Visitor Permit"
     updated_at          TEXT NOT NULL
 );
 
@@ -301,6 +303,8 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE permit ADD COLUMN end_date TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN status TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN expiry_reminded TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN permit_number TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN permit_type TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
@@ -510,14 +514,14 @@ func (s *Store) ListPermitsFor(ctx context.Context, owner string) ([]model.Permi
 }
 
 // permitCols is the column list backing scanPermit; keep the two in lockstep.
-const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded`
+const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type`
 
 // scanPermit reads one permit row (permitCols order), parsing the stored strings.
 func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 	var p model.Permit
 	var endDate, reminded string
 	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
-		&p.ActiveRegistration, &endDate, &p.Status, &reminded)
+		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType)
 	if err != nil {
 		return p, err
 	}
@@ -594,18 +598,18 @@ WHERE permit.owner = excluded.owner`,
 // If the expiry date changes (a renewal, or a first read), the expiry-reminded
 // flag is cleared so the approaching-expiry reminder re-arms for the new date.
 // Owner-scoped and a no-op if the permit isn't the owner's.
-func (s *Store) UpdatePermitMeta(ctx context.Context, owner, councilPermitID, status string, endDate time.Time) error {
+func (s *Store) UpdatePermitMeta(ctx context.Context, owner, councilPermitID, status, permitNumber, permitType string, endDate time.Time) error {
 	var ed string
 	if !endDate.IsZero() {
 		ed = endDate.UTC().Format(time.RFC3339)
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE permit
-SET status = ?, end_date = ?,
+SET status = ?, end_date = ?, permit_number = ?, permit_type = ?,
     expiry_reminded = CASE WHEN end_date = ? THEN expiry_reminded ELSE '' END,
     updated_at = ?
 WHERE council_permit_id = ? AND owner = ?`,
-		status, ed, ed, nowUTC(), councilPermitID, owner)
+		status, ed, permitNumber, permitType, ed, nowUTC(), councilPermitID, owner)
 	return err
 }
 

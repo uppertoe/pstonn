@@ -119,8 +119,8 @@ func TestTemplatesRender(t *testing.T) {
 		{"schedule-expired-section", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:        []permitView{samplePermitView(loc)},
-			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Expired 1 Jul 2026"}},
-		}, "Expired permits"},
+			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", Detail: "VPP24714 · 1st Visitor Permit", StatusText: "Expired 1 Jul 2026"}},
+		}, "VPP24714 · 1st Visitor Permit"},
 		{"schedule-only-expired", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Cancelled"}},
@@ -227,6 +227,11 @@ func TestTemplatesRender(t *testing.T) {
 			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
 			return p
 		}, "Copy schedule from another permit"},
+		{"permit-detail", func() permitView {
+			p := samplePermitView(loc)
+			p.Detail = "VPP24714 · (A) 1st Visitor Permit"
+			return p
+		}, "VPP24714 · (A) 1st Visitor Permit"},
 	} {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {

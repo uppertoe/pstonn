@@ -571,7 +571,7 @@ func (s *Scheduler) syncPermitExpiry(ctx context.Context, owner string) {
 		byCouncilID[pi.CouncilPermitID] = pi
 		// Update every permit the council reports; owner-scoped, so it only
 		// touches rows this account manages.
-		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.EndDate)
+		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate)
 	}
 	if s.expiryLead <= 0 {
 		return

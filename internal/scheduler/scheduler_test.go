@@ -338,13 +338,13 @@ func TestReconcileSkipsInactivePermits(t *testing.T) {
 	if err := st.SetRule(ctx, act, today, veh); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.UpdatePermitMeta(ctx, owner, "active-1", "Granted", future)
+	_ = st.UpdatePermitMeta(ctx, owner, "active-1", "Granted", "VPP1", "1st Visitor Permit", future)
 
 	exp, _ := st.UpsertPermit(ctx, owner, "expired-1", "14", "Expired")
 	if err := st.SetRule(ctx, exp, today, veh); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.UpdatePermitMeta(ctx, owner, "expired-1", "Granted", past)
+	_ = st.UpdatePermitMeta(ctx, owner, "expired-1", "Granted", "VPP2", "1st Visitor Permit", past)
 
 	fc := &fakeCouncil{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour})

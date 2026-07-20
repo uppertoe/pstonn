@@ -26,6 +26,8 @@ type Permit struct {
 	EndDate            time.Time // permit expiry from the council record (zero = unknown)
 	Status             string    // council permit status, e.g. "Granted" (empty = unknown)
 	ExpiryReminded     bool      // an expiry reminder has been sent for the current EndDate
+	PermitNumber       string    // council permit number, e.g. "VPP24714" (empty = unknown)
+	PermitType         string    // council permit type, e.g. "(A) 1st Visitor Permit"
 }
 
 // deadStatus reports whether a council PermitStatus means the permit is no longer
