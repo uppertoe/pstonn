@@ -47,7 +47,9 @@
     --shadow-lg:0 12px 32px rgba(16,24,40,.13);
     --pattern:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='30'%3E%3Ccircle cx='2.4' cy='2.4' r='2.4' fill='%230f1729' fill-opacity='0.05'/%3E%3C/svg%3E");
   }
+  :root[data-theme="light"] { color-scheme: light; }
   :root[data-theme="dark"] {
+    color-scheme: dark;
     --primary:#2dd4bf; --primary-2:#14b8a6; --primary-soft:#123f3a; --on-primary:#04201c;
     --accent:#fbbf24; --accent-soft:#3a2f14;
     --bg:#0b1120; --surface:#141d2e; --surface-2:#1a2436;
@@ -73,8 +75,8 @@
   }
   * { box-sizing:border-box; }
   [x-cloak] { display:none !important; }
-  html { scroll-behavior:smooth; }
-  body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; }
+  html { scroll-behavior:smooth; overflow-x:hidden; }
+  body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; overflow-x:hidden; }
   a { color:var(--primary); text-decoration:none; }
   svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; display:block; }
   @keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
@@ -144,7 +146,6 @@
     .nav-item svg { width:22px; height:22px; }
     .nav-item.active::after { top:0; bottom:auto; left:22%; right:22%; border-radius:0 0 3px 3px; }
     main { margin-bottom:88px; }
-    .fab { bottom:84px; }
   }
 
   main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap:16px; }
@@ -183,7 +184,7 @@
   button.icon { padding:9px; }
 
   table { width:100%; border-collapse:collapse; }
-  th,td { text-align:left; padding:11px 6px; border-bottom:1px solid var(--line); font-size:14px; }
+  th,td { text-align:left; padding:11px 6px; border-bottom:1px solid var(--line); font-size:14px; overflow-wrap:anywhere; }
   th { color:var(--muted); font-weight:600; font-size:12px; }
   tr:last-child td { border-bottom:0; }
   .reg { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; font-weight:650; letter-spacing:.4px; background:var(--primary-soft); color:var(--primary-2); padding:3px 8px; border-radius:7px; display:inline-block; }
@@ -195,6 +196,11 @@
   /* status hero */
   .permit-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
   .permit-head h2 { margin:0; font-size:17px; letter-spacing:-.01em; }
+  .pname { display:inline-flex; align-items:center; gap:4px; min-width:0; }
+  .pname .ghost.icon.sm { opacity:.55; }
+  .pname:hover .ghost.icon.sm { opacity:1; }
+  .pname-edit { display:flex; align-items:center; gap:8px; flex:1; flex-wrap:wrap; min-width:0; }
+  .pname-edit input { flex:1; min-width:150px; font-size:16px; font-weight:600; letter-spacing:-.01em; padding:7px 11px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); }
   .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
 
   /* legend */
@@ -202,26 +208,29 @@
   .legend .veh { font-size:13px; }
 
   /* roster */
-  .roster { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; }
-  @media (max-width:640px){ .roster { grid-template-columns:repeat(4,1fr); } }
-  .rcell { position:relative; }
+  .roster { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; }
+  @media (max-width:640px){ .roster { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+  .rcell { position:relative; min-width:0; }
   .rcell > .day { font-size:11px; color:var(--muted); text-align:center; margin-bottom:6px; font-weight:600; }
   .chip { width:100%; border:1px solid var(--line); background:var(--surface); border-radius:var(--radius-sm); padding:10px 8px; min-height:46px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; font-size:12.5px; color:var(--ink); text-align:center; transition:border-color .15s, box-shadow .15s, transform .08s; }
   .chip.empty { color:var(--muted); border-style:dashed; }
   .chip:hover { border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent); }
   .chip:active { transform:scale(.98); }
-  .chip .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+  .chip .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; min-width:0; }
 
   /* calendar */
-  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
   .cday { position:relative; border:1px solid var(--line); border-radius:10px; padding:7px 4px 9px; text-align:center; cursor:pointer; background:var(--surface); transition:border-color .15s, transform .08s; }
   .cday:hover { border-color:var(--primary); }
   .cday:active { transform:scale(.98); }
   .cday.today { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
   .cday.past { opacity:.42; }
-  .cday .cd { font-size:10.5px; color:var(--muted); margin-bottom:7px; white-space:nowrap; font-weight:600; }
+  .cday .cd { font-size:10.5px; color:var(--muted); margin-bottom:4px; white-space:nowrap; font-weight:600; }
+  /* one-off marker: a fixed centred slot between the date and the bar, so it is
+     always the same height (dot present or not) and never widens the cell. */
+  .cday .omk { height:6px; display:flex; align-items:center; justify-content:center; margin-bottom:5px; }
+  .cday .oneoff { width:5px; height:5px; border-radius:50%; background:var(--accent); }
   .cday .bar { height:6px; border-radius:4px; background:var(--line); }
-  .cday .oneoff { position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--accent); }
 
   /* popover */
   .pop { position:absolute; z-index:30; top:100%; left:50%; transform:translateX(-50%); margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; animation:rise .16s ease both; }
@@ -234,6 +243,16 @@
   :root[data-theme="dark"] .vopt.sel { color:var(--primary); }
   .vopt .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .vopt .reg { margin-left:auto; flex:0 0 auto; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden; }
+  .seg button { flex:1; background:var(--surface); color:var(--muted); box-shadow:none; border:0; border-radius:0; font-weight:600; font-size:13px; padding:9px 15px; }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button.on { background:var(--primary); color:var(--on-primary); border-color:var(--primary); }
+  .seg button:not(.on):hover { background:var(--surface-2); color:var(--ink); filter:none; box-shadow:none; }
+  /* Both panes share one grid cell, so the area is always the taller pane's
+     height and the modal doesn't resize when switching tabs. */
+  .segpanes { display:grid; }
+  .segpanes > .segpane { grid-area:1 / 1; }
+  .segpane.hide { visibility:hidden; pointer-events:none; }
   .vpick { position:relative; }
   .vpick-btn { display:flex; align-items:center; gap:9px; width:100%; justify-content:flex-start; background:var(--surface); color:var(--ink); border:1px solid var(--line); box-shadow:none; font-weight:500; padding:9px 11px; }
   .vpick-btn:hover { filter:none; box-shadow:none; border-color:var(--primary); }
@@ -252,7 +271,7 @@
 
   /* one-offs list */
   .oneoff-list { display:grid; gap:8px; margin:2px 0 4px; }
-  .oneoff-item { display:grid; grid-template-columns:1fr 232px 40px; align-items:center; gap:14px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; background:var(--surface-2); }
+  .oneoff-item { display:grid; grid-template-columns:1fr auto 40px; align-items:center; gap:14px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; background:var(--surface-2); }
   .oneoff-item .veh { min-width:0; }
   .oneoff-item .veh .lab, .oneoff-item .veh { overflow:hidden; }
   .oneoff-item .when { font-size:13px; color:var(--muted); text-align:left; white-space:nowrap; }
@@ -283,12 +302,177 @@
   .pick { display:grid; gap:10px; }
   .pick-item { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--line); border-radius:13px; padding:14px 16px; transition:border-color .15s, box-shadow .15s; }
   .pick-item:hover { border-color:var(--primary); box-shadow:var(--shadow); }
-  .pick-item.sug { border-color:color-mix(in srgb,var(--ok) 40%,transparent); background:var(--ok-soft); }
+  .pick-item.disabled { opacity:.6; background:var(--surface-2); }
+  .pick-item.disabled:hover { border-color:var(--line); box-shadow:none; }
+  .pick-reason { font-size:12.5px; color:var(--muted); text-align:right; max-width:200px; flex:0 0 auto; }
+  .permit-foot { display:flex; justify-content:flex-end; margin-top:20px; padding-top:14px; border-top:1px solid var(--line); }
+  .permit-foot button { background:none; box-shadow:none; color:var(--muted); font-weight:550; font-size:12.5px; padding:6px 9px; }
+  .permit-foot button:hover { color:var(--danger); background:var(--danger-soft); filter:none; box-shadow:none; }
+  .permit-foot button svg { width:14px; height:14px; }
+  /* Vehicles list: one row per car (label + plate + delete), email form below */
+  .vlist { display:grid; gap:2px; }
+  .vrow { padding:13px 0; border-bottom:1px solid var(--line); }
+  .vrow:first-child { padding-top:2px; }
+  .vrow:last-child { border-bottom:0; padding-bottom:2px; }
+  .vmain { display:flex; align-items:center; gap:10px; }
+  .vmain .veh { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14.5px; font-weight:550; }
+  .vmain .plate { flex:0 0 auto; }
+  .vemail { display:flex; gap:6px; margin-top:8px; max-width:360px; }
+  .vemail input { font-size:13.5px; padding:7px 10px; flex:1; min-width:0; }
+  .vemail button { padding:7px 12px; font-size:13.5px; }
+  /* Keep the add-a-vehicle inputs the same size as the per-car email inputs */
+  .vaddform input { font-size:13.5px; }
+  /* Number plate: a distinct badge tinted with each car's colour (--plate). */
+  .plate { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:700; font-size:13px; letter-spacing:1px; text-transform:uppercase; padding:4px 9px; border-radius:6px; border:2px solid var(--plate,var(--line)); background:color-mix(in srgb, var(--plate,var(--ink)) 12%, var(--surface)); color:var(--ink); white-space:nowrap; display:inline-block; }
+  /* Guest-pass management */
+  .grants { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .grants .card { margin:0; }
+  @media (max-width:560px){ .grants { grid-template-columns:1fr; } }
+  .card.editing { border-color:var(--sec-vehicles); box-shadow:0 0 0 1px var(--sec-vehicles) inset, var(--shadow); }
+  /* ---- small-screen refinements for the app pages ---- */
+  @media (max-width:560px){
+    main { padding:0 12px; }
+    .card { padding:16px 15px; }
+    /* Calendar keeps 7 weekday columns but tightens so they fit narrow screens */
+    .cal { gap:4px; }
+    .cday { padding:6px 2px 8px; }
+    .cday .cd { font-size:9.5px; letter-spacing:-.02em; }
+    .cday .bar { height:5px; }
+    /* Roster: shrink the chip a touch so a full plate fits a narrow column */
+    .chip { font-size:11.5px; gap:5px; padding:9px 4px; }
+    /* Vehicle driver-email field uses the full width */
+    .vemail { max-width:none; }
+    .vemail input { min-width:0; }
+    /* Activity log: stack each row into a readable block instead of a cramped table */
+    table.mtable, table.mtable tbody, table.mtable tr, table.mtable td { display:block; }
+    table.mtable tr { padding:9px 0; border-bottom:1px solid var(--line); }
+    table.mtable tr:last-child { border-bottom:0; }
+    table.mtable td { border:0; padding:1px 0; }
+    table.mtable td[style*="nowrap"] { font-size:12px; color:var(--muted); }
+  }
+  .editbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px; }
+  .editbar .eyebrow { font-size:12px; font-weight:650; letter-spacing:.04em; text-transform:uppercase; color:var(--sec-vehicles); }
+  .glink { display:flex; flex-direction:column; gap:2px; padding:9px 0; border-top:1px solid var(--line); }
+  .glink code { font-size:12px; word-break:break-all; background:var(--surface-2); padding:6px 8px; border-radius:6px; }
+  .checks { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; margin-top:8px; }
+  .check { display:flex; align-items:center; gap:10px; padding:11px 13px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-2); font-size:13.5px; font-weight:550; color:var(--ink); cursor:pointer; transition:border-color .12s, background .12s; }
+  .check:hover { border-color:var(--muted); }
+  .check:has(input:checked) { border-color:var(--primary); background:var(--primary-soft); }
+  .check .plate { margin-left:auto; }
+  .grecip { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:13.5px; }
+  .ro { padding:9px 12px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--muted); font-size:14px; }
+  .qropts { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .qropt { display:flex; flex-direction:column; gap:10px; padding:14px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); }
+  .qropt-txt { display:flex; flex-direction:column; gap:3px; }
+  .qropt select { width:100%; }
+  .qropt button { margin-top:auto; }
+  @media (max-width:640px){ .qropts { grid-template-columns:1fr; } }
+  .req { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--line); }
+  .req-main { display:flex; align-items:center; gap:12px; min-width:0; }
+  .req-meta { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  /* Durable door-QR management rows */
+  .doorrow { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--line); }
+  .doorrow:first-of-type { border-top:0; padding-top:4px; }
+  .doorrow-main { display:flex; align-items:center; gap:12px; min-width:0; }
+  .doorrow-ic { width:36px; height:36px; border-radius:9px; display:grid; place-items:center; background:var(--surface-2); color:var(--muted); flex:none; }
+  .doorrow-ic svg { width:18px; height:18px; }
+  .doorrow-meta { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  /* Printable door-QR poster (its own 'paper' palette, independent of theme) */
+  .posterwrap { max-width:560px; margin:0 auto; padding:18px 16px 44px; }
+  .posteractions { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .poster { --pp-paper:#fff; --pp-ink:#132734; --pp-muted:#5c6f7c; --pp-accent:#10b789; --pp-accent-ink:#06231b; --pp-line:#e3e9ec;
+    width:440px; max-width:100%; margin:0 auto; background:var(--pp-paper); color:var(--pp-ink);
+    border:1px solid var(--pp-line); border-radius:20px; overflow:hidden; box-shadow:var(--shadow);
+    text-align:center; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .poster-band { background:linear-gradient(135deg,var(--pp-accent),#0c9f95); color:var(--pp-accent-ink); padding:14px 22px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .poster-brand { display:inline-flex; align-items:center; gap:9px; font-family:'Space Grotesk',system-ui,sans-serif; font-weight:600; font-size:18px; letter-spacing:-.02em; }
+  .poster-brand .dot { color:#fff; }
+  .poster-mark { width:26px; height:26px; border-radius:7px; background:rgba(255,255,255,.28); display:grid; place-items:center; }
+  .poster-mark svg { width:16px; height:16px; stroke:currentColor; }
+  .poster-kicker { font-size:11px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; opacity:.85; }
+  .poster-body { padding:26px 30px 22px; }
+  .poster-title { font-size:23px; font-weight:700; letter-spacing:-.01em; margin:0 0 4px; color:var(--pp-ink); text-wrap:balance; }
+  .poster-lead { font-size:15px; font-weight:600; color:var(--pp-ink); margin:0 0 18px; }
+  .poster-qbox { display:block; width:268px; max-width:100%; margin:0 auto; box-sizing:border-box; padding:14px; background:#fff; border:1px solid var(--pp-line); border-radius:14px; }
+  .poster-qbox img { width:100%; height:auto; image-rendering:pixelated; display:block; }
+  .poster-steps { text-align:left; max-width:300px; margin:20px auto 0; padding-left:20px; display:flex; flex-direction:column; gap:7px; font-size:13.5px; color:var(--pp-muted); }
+  .poster-steps li { line-height:1.4; }
+  .poster-steps li::marker { color:var(--pp-accent); font-weight:700; }
+  .poster-note { font-size:12px; color:var(--pp-muted); margin:18px auto 0; max-width:320px; line-height:1.5; }
+  .poster-foot { border-top:1px solid var(--pp-line); padding:12px 22px; font-size:11px; color:var(--pp-muted); }
+  .posterhint { text-align:center; color:var(--muted); font-size:12.5px; margin:18px auto 0; max-width:420px; line-height:1.5; }
+  @media (max-width:520px){
+    .posterwrap { padding:14px 12px 40px; }
+    .posteractions { margin-bottom:12px; }
+    .poster-body { padding:22px 18px 18px; }
+    .poster-band { padding:12px 16px; }
+    .poster-title { font-size:20px; }
+    .poster-lead { font-size:14px; }
+    .poster-steps { max-width:none; }
+  }
+  @media print {
+    @page { margin:16mm; }
+    html, body { background:#fff !important; }
+    #htmx-bar, .appbar, .navwrap, .noprint { display:none !important; }
+    .posterwrap { padding:0 !important; max-width:none !important; }
+    .poster { box-shadow:none !important; border-color:#d7dee1 !important; margin:0 auto !important; }
+  }
+  /* Admin dashboard */
+  .adminwrap { max-width:1100px; margin:0 auto; padding:18px 16px 60px; }
+  .adm-health { background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--primary); border-radius:var(--radius-sm); padding:12px 16px; margin:8px 0 18px; display:flex; flex-direction:column; gap:8px; }
+  .adm-health.bad { border-left-color:var(--danger); }
+  .adm-stats { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; color:var(--muted); }
+  .adm-stats .good { color:var(--primary); }
+  .adm-stats .bad { color:var(--danger); font-weight:650; }
+  .adm-tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-sm); }
+  table.adm { width:100%; border-collapse:collapse; font-size:13px; white-space:nowrap; }
+  table.adm th { text-align:left; font-weight:600; font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); padding:10px 12px; border-bottom:1px solid var(--line); background:var(--surface-2); position:sticky; top:0; }
+  table.adm td { padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.adm tr:last-child td { border-bottom:0; }
+  .adm-acct { font-weight:600; white-space:normal; max-width:240px; word-break:break-word; }
+  .adm-sub { font-size:11.5px; color:var(--muted); font-weight:400; }
+  .adm-notify .tag, table.adm .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); color:var(--muted); margin-right:3px; }
+  table.adm .bad { color:var(--danger); }
+  .adm-pill { display:inline-block; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:999px; border:1px solid transparent; }
+  .adm-pill.ok { background:color-mix(in srgb, var(--primary) 16%, transparent); color:var(--primary); }
+  .adm-pill.stale, .adm-pill.relink { background:color-mix(in srgb, var(--warn, #b54708) 16%, transparent); color:var(--warn, #b54708); }
+  .adm-pill.unlinked { background:var(--surface-2); color:var(--muted); }
+  /* Public guest activation page */
+  .guestwrap { max-width:460px; margin:0 auto; padding:32px 18px 60px; }
+  .guestcard { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:26px 24px; }
+  .guestcard h1 { font-size:20px; letter-spacing:-.02em; margin:2px 0 4px; }
+  .gbrand { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .gbrand .mark { width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:var(--on-primary); display:grid; place-items:center; box-shadow:var(--shadow); flex:0 0 auto; }
+  .gbrand .mark svg { width:18px; height:18px; stroke-width:1.9; }
+  .gbrand .word { font-family:'Space Grotesk',system-ui,sans-serif; font-weight:600; font-size:19px; letter-spacing:-.02em; line-height:1; }
+  .gbrand .word .dot { color:var(--primary); }
+  .gmanaged { font-size:13px; color:var(--muted); margin:0; }
+  .gnow { font-size:14px; color:var(--muted); margin:8px 0 0; }
+  .gcars { display:grid; gap:10px; margin-top:4px; }
+  .gcar { justify-content:flex-start; gap:12px; background:var(--surface-2); color:var(--ink); border:1px solid var(--line); border-left:5px solid var(--plate,var(--line)); box-shadow:none; padding:14px 16px; font-size:15px; font-weight:600; }
+  .gcar:hover { border-color:var(--primary); filter:none; box-shadow:var(--shadow); }
+  .gcar.on { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
+  .gcar .plate { margin-left:auto; }
+  .gcar .gtag { margin-left:8px; font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 8px; border-radius:999px; }
+  .gring { width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:14px auto 12px; }
+  .gring svg { width:28px; height:28px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
+  .gring.ok { background:var(--ok-soft); color:var(--ok); }
+  .gring.warn { background:var(--warn-soft); color:var(--warn); }
+  .gresult { font-size:16px; font-weight:600; line-height:1.5; margin:0 0 6px; }
+  .gspin { width:34px; height:34px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--primary); margin:20px auto 14px; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
   .link-quiet:hover { color:var(--primary); }
   .link-quiet.active { color:var(--ink); font-weight:650; }
   .link-quiet.active::after { content:""; position:absolute; left:0; right:0; bottom:-6px; height:2px; border-radius:2px; background:var(--primary); }
+  /* Public header: brand left, secondary links + actions clustered right; wraps cleanly on phones. */
+  .pubbar { flex-wrap:wrap; }
+  .pubnav { display:inline-flex; align-items:center; gap:18px; margin-left:auto; }
+  @media (max-width:560px){
+    .pubnav { order:3; flex-basis:100%; margin-left:0; justify-content:center; gap:22px; padding-top:2px; }
+    .pubnav .link-quiet.active::after { bottom:-3px; }
+  }
 
   /* hero (onboarding) */
   .hero { text-align:center; padding:34px 22px; max-width:520px; margin:26px auto; }
@@ -333,6 +517,9 @@
   .fab:hover { filter:brightness(1.06); transform:translateY(-2px); }
   .fab:active { transform:scale(.97); }
   @media (max-width:520px){ .fab .fab-label { display:none; } .fab { padding:0; width:52px; justify-content:center; } }
+  /* Below 640px the nav is a fixed bottom bar (z-index 30), so lift the FAB above
+     it. Declared after the base .fab so it wins at equal specificity. */
+  @media (max-width:640px){ .fab { bottom:calc(74px + env(safe-area-inset-bottom, 0px)); z-index:35; } }
   .modal form.stack { max-width:none; margin:0; }
   .modal .fld select, .modal .fld input { width:100%; }
 </style>
@@ -553,6 +740,73 @@
   <p class="ldisclaimer" style="margin-top:32px"><a href="/">← Back</a></p>
 </main>
 
+{{else if eq .State "guest"}}
+{{/* ================= PUBLIC GUEST ACTIVATION (token link) ================= */}}
+<main class="guestwrap">
+  <section class="guestcard">
+    <div class="gbrand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
+    <h1>{{.Guest.PermitLabel}}</h1>
+    {{if not .Guest.RequestOnly}}<p class="gnow">On the permit now: {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="muted">unknown</span>{{end}}</p>{{end}}
+    {{if .Warn}}<div class="banner warn" style="margin-top:14px">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
+    {{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">Enter your plate to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.</p>{{end}}
+    <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px">
+      {{if .Guest.Cars}}
+      <p class="sub">Tap your car to put it on the permit</p>
+      <div class="gcars">
+        {{range .Guest.Cars}}
+        <button class="gcar{{if eq .Registration $.Guest.CurrentReg}} on{{end}}" style="--plate:{{.Color}}" type="submit" name="vehicle_id" value="{{.ID}}">
+          <span class="dot" style="background:{{.Color}}"></span>
+          <span class="glabel">{{.Label}}</span>
+          <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+          {{if eq .Registration $.Guest.CurrentReg}}<span class="gtag">on now</span>{{end}}
+        </button>
+        {{end}}
+      </div>
+      {{end}}
+      {{if .Guest.AllowPlate}}
+      <label class="fld"><span>Your number plate</span>
+        <input type="text" name="plate" placeholder="e.g. ABC123" maxlength="10" autocapitalize="characters" required style="text-transform:uppercase;font-size:17px;letter-spacing:1px;text-align:center">
+      </label>
+      {{end}}
+      {{if .Guest.AllowOvernight}}
+      <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps the car on until the end of tomorrow instead of the end of today.</span></span></label>
+      {{end}}
+      {{if .Guest.AllowPlate}}
+      <button type="submit" style="justify-content:center;margin-top:4px">{{if .Guest.RequestOnly}}{{template "ic-bell"}} Ask to use the permit{{else}}{{template "ic-check"}} Put my car on the permit{{end}}</button>
+      {{end}}
+    </form>
+    {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes.</p>{{end}}
+  </section>
+</main>
+
+{{else if eq .State "guest-wait"}}
+{{/* ============ PRINTED-QR: WAITING FOR APPROVAL (polls) ============ */}}
+<main class="guestwrap">
+  <section class="guestcard" style="text-align:center">
+    <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    {{if .Wait.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>{{end}}
+    <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">{{.Wait.Plate}}</span> on the permit.</p>
+    {{template "guest-req-status" .Wait}}
+  </section>
+</main>
+
+{{else if eq .State "guest-result"}}
+{{/* ================= GUEST ACTIVATION RESULT ================= */}}
+<main class="guestwrap">
+  <section class="guestcard" style="text-align:center">
+    <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    {{if .Flash}}
+    <div class="gring ok">{{template "ic-check"}}</div>
+    <p class="gresult">{{.Flash}}</p>
+    {{else}}
+    <div class="gring warn">{{template "ic-alert"}}</div>
+    <p class="gresult">{{.Warn}}</p>
+    {{end}}
+    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
+  </section>
+</main>
+
 {{else if eq .State "terms"}}
 {{/* ================= TERMS GATE ================= */}}
 {{template "appbar" .}}
@@ -622,11 +876,12 @@
     {{if .Pick}}
     <div class="pick">
       {{range .Pick}}
-      <div class="pick-item {{if .Suggested}}sug{{end}}">
+      <div class="pick-item {{if not .Addable}}disabled{{end}}">
         <div>
-          <div style="font-weight:650">{{.PermitNumber}} {{if .Suggested}}<span class="tag">suggested</span>{{end}}</div>
+          <div style="font-weight:650">{{.PermitNumber}}</div>
           <div class="muted" style="font-size:13px;margin-top:2px">{{.PermitType}}{{if .CurrentRego}} · currently <span class="reg">{{.CurrentRego}}</span>{{end}}</div>
         </div>
+        {{if .Addable}}
         <form method="post" action="/permits">
           <input type="hidden" name="council_permit_id" value="{{.CouncilPermitID}}">
           <input type="hidden" name="permit_type_id" value="{{.PermitTypeID}}">
@@ -634,6 +889,9 @@
           <input type="hidden" name="current_rego" value="{{.CurrentRego}}">
           <button type="submit">{{template "ic-plus"}} Manage</button>
         </form>
+        {{else}}
+        <span class="pick-reason">{{.Reason}}</span>
+        {{end}}
       </div>
       {{end}}
     </div>
@@ -643,6 +901,82 @@
   </section>
 </main>
 
+{{else if eq .State "doorqr"}}
+{{/* ============ PRINTABLE DOOR-QR POSTER (laminate & leave up) ============ */}}
+{{template "appbar" .}}
+<main class="posterwrap">
+  <div class="posteractions noprint">
+    <a href="/guests" hx-boost="false"><button type="button" class="ghost sm">&larr; Guests</button></a>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button type="button" onclick="window.print()">{{template "ic-qr"}} Print</button>
+      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" onsubmit="return confirm('Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards.')"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
+    </div>
+  </div>
+
+  <article class="poster">
+    <div class="poster-band">
+      <span class="poster-brand"><span class="poster-mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></span>
+      <span class="poster-kicker">Visitor parking</span>
+    </div>
+    <div class="poster-body">
+      <h1 class="poster-title">{{.DoorQR.PermitLabel}}</h1>
+      <p class="poster-lead">Scan to ask to use this parking permit</p>
+      <div class="poster-qbox"><img src="{{.DoorQR.ImageURI}}" alt="Scan to request the visitor parking permit" width="240" height="240"></div>
+      <ol class="poster-steps">
+        <li>Point your phone camera at the code</li>
+        <li>Enter your number plate</li>
+        <li>The resident gets a notification and approves it &mdash; then your plate is on the permit</li>
+      </ol>
+      <p class="poster-note">Nothing goes on the permit until the resident approves. Managed by {{.DoorQR.OwnerEmail}}.</p>
+    </div>
+    <div class="poster-foot">Set up with p.stonn &middot; an unofficial City of Stonnington permit helper</div>
+  </article>
+  <p class="posterhint noprint">Print it, laminate it, leave it up. This code doesn't expire &mdash; reopen this page any time to reprint the very same one.</p>
+</main>
+
+{{else if eq .State "admin"}}
+{{/* ================= ADMIN (operators only) ================= */}}
+{{template "appbar" .}}
+<main class="adminwrap">
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Admin</div>
+  <div class="adm-health {{if .Admin.SchedulerStale}}bad{{else}}ok{{end}}">
+    <div><strong>Scheduler</strong> {{if .Admin.SchedulerStale}}looks stalled &mdash; last clean pass {{.Admin.SchedulerLast}}{{else}}healthy &mdash; last pass {{.Admin.SchedulerLast}}{{end}}</div>
+    <div class="adm-stats">
+      <span>{{.Admin.Total}} accounts</span>
+      <span>{{.Admin.Linked}} linked</span>
+      <span class="good">{{.Admin.WarmOK}} warm</span>
+      <span class="{{if .Admin.Failing}}bad{{end}}">{{.Admin.Failing}} need attention</span>
+      <span class="muted">status API {{if .Admin.StatusEnabled}}on{{else}}off{{end}}</span>
+    </div>
+  </div>
+  <div class="adm-tablewrap">
+    <table class="adm">
+      <thead><tr>
+        <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
+        <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+      </tr></thead>
+      <tbody>
+      {{range .Admin.Rows}}
+      <tr>
+        <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{end}}</td>
+        <td><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
+        <td>{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{.Permits}}</td>
+        <td>{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td class="adm-notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
+        <td>{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</main>
+
 {{else}}
 {{/* ================= APP (nav + pages) ================= */}}
 {{template "appbar" .}}
@@ -650,6 +984,7 @@
   <nav class="nav">
     <a href="/schedule" class="nav-item {{if eq .Page "schedule"}}active{{end}}" style="--hue:var(--sec-schedule)">{{template "ic-calendar"}}<span>Schedule</span></a>
     <a href="/vehicles" class="nav-item {{if eq .Page "vehicles"}}active{{end}}" style="--hue:var(--sec-vehicles)">{{template "ic-cars"}}<span>Vehicles</span></a>
+    <a href="/guests" class="nav-item {{if eq .Page "guests"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-users"}}<span>Guests</span></a>
     <a href="/activity" class="nav-item {{if eq .Page "activity"}}active{{end}}" style="--hue:var(--sec-activity)">{{template "ic-activity"}}<span>Activity</span></a>
     <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-gear"}}<span>Settings</span></a>
   </nav>
@@ -686,28 +1021,31 @@
   <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic">{{template "ic-cars"}}</span> Vehicles</div>
   <p class="subtitle">The plates that may share your permit. Each gets a colour used across the schedule.</p>
   <section class="card" style="--hue:var(--sec-vehicles)">
-    <table>
-      <tbody>
+    <div class="vlist">
       {{range .Vehicles}}
-        <tr>
-          <td><span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}</span></td>
-          <td><span class="reg">{{.Registration}}</span></td>
-          <td style="text-align:right">
-            <form method="post" action="/vehicles/{{.ID}}/delete" onsubmit="return confirm('Remove this vehicle?')">
-              <button class="danger icon" type="submit" title="Remove">{{template "ic-trash"}}</button>
-            </form>
-          </td>
-        </tr>
+      <div class="vrow">
+        <div class="vmain">
+          <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}</span>
+          <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
+          <form method="post" action="/vehicles/{{.ID}}/delete" onsubmit="return confirm('Remove this vehicle?')">
+            <button class="danger icon" type="submit" title="Remove">{{template "ic-trash"}}</button>
+          </form>
+        </div>
+        <form method="post" action="/vehicles/{{.ID}}/email" class="vemail">
+          <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off">
+          <button type="submit" class="ghost sm">Save</button>
+        </form>
+      </div>
       {{else}}
-        <tr><td class="empty-note">No vehicles yet. Add the plates that may share a permit.</td></tr>
+      <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
       {{end}}
-      </tbody>
-    </table>
-    <form method="post" action="/vehicles" class="row" style="margin-top:14px">
+    </div>
+    <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px">
       <input class="grow" name="label" placeholder="Label (e.g. Mum's Corolla)" required>
       <input name="registration" placeholder="PLATE" required style="text-transform:uppercase;width:130px">
       <button type="submit">{{template "ic-plus"}} Add</button>
     </form>
+    <p class="empty-note" style="margin-top:10px">A driver email is optional. It is used to pre-fill guest passes, so that person can set their own car on the permit. See <a href="/guests">Guests</a>.</p>
   </section>
 
   {{else if eq .Page "activity"}}
@@ -715,7 +1053,7 @@
   <div class="sectitle" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Activity</div>
   <p class="subtitle">Every plate change the scheduler has applied on your behalf.</p>
   <section class="card" style="--hue:var(--sec-activity)">
-    <table>
+    <table class="mtable">
       <tbody>
       {{range .Log}}
         <tr>
@@ -730,7 +1068,7 @@
     </table>
   </section>
 
-  {{else}}
+  {{else if eq .Page "settings"}}
   {{/* ---------- SETTINGS ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Settings</div>
   <p class="subtitle">Your council connection and account.</p>
@@ -811,6 +1149,223 @@
     <p class="empty-note" style="margin-top:12px">Your login and password are managed by your organisation's sign-in provider, not this app.</p>
     {{if .Terms.Accepted}}<p class="empty-note" style="margin-top:8px">Terms accepted: {{.Terms.Accepted}}.</p>{{end}}
   </section>
+
+  {{else if eq .Page "guests"}}
+  {{/* ---------- GUEST PASSES ---------- */}}
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
+  <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
+  {{if not .IsPrimary}}
+  <section class="card"><p class="empty-note">Only the account owner can manage guest passes.</p></section>
+
+  {{else if .QR}}
+  {{/* ---- ON-SCREEN VISITOR QR (instant, expires) ---- */}}
+  <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
+    <div class="editbar" style="text-align:left">
+      <span class="eyebrow">{{template "ic-qr"}} Visitor QR</span>
+      <a href="/guests"><button type="button" class="ghost sm">&larr; Done</button></a>
+    </div>
+    <h2 style="justify-content:center">{{.QR.PermitLabel}}</h2>
+    <p class="subtitle" style="text-align:center;max-width:360px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
+    <div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
+      <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
+    </div>
+    <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.ExpiresAt}}</strong>. Generate a fresh one each time.</p>
+    <p class="empty-note" style="word-break:break-all;margin-top:10px">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
+  </section>
+
+  {{else if .Edit}}
+  {{/* ---- EDIT MODE: one focused pass, including who has a link ---- */}}
+  <section class="card editing" id="passform" style="--hue:var(--sec-vehicles)">
+    <div class="editbar">
+      <span class="eyebrow">{{template "ic-edit"}} Editing pass</span>
+      <a href="/guests"><button type="button" class="ghost sm">&larr; All passes</button></a>
+    </div>
+    <form method="post" action="/guests/{{.Edit.ID}}" class="stack" x-data="{recips:''}">
+      <div class="fld"><span>Permit</span><div class="ro">{{.Edit.PermitLabel}}</div></div>
+      <label class="fld"><span>Label (optional)</span><input name="label" value="{{.Edit.Label}}" placeholder="e.g. Friday helpers"></label>
+      <div class="fld"><span>Cars this pass may activate</span>
+        <div class="checks">
+          {{range .Vehicles}}
+          <label class="check">
+            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if index $.Edit.Selected .ID}} checked{{end}}{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
+            <span class="dot" style="background:{{.Color}}"></span>
+            <span>{{.Label}}</span>
+            <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+          </label>
+          {{end}}
+        </div>
+        <p class="empty-note" style="margin-top:8px">Need another car? <a href="/vehicles">Add it on the Vehicles page</a> and it appears here.</p>
+      </div>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight"{{if .Edit.AllowOvernight}} checked{{end}} style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="fld"><span>Add more people (optional)</span>
+        <textarea name="recipients" rows="2" x-model="recips" placeholder="grandma@example.com"></textarea>
+        <span class="empty-note" style="margin-top:6px">Each new person gets their own link by email. Ticking a car with a saved driver email adds it here automatically.</span>
+      </label>
+      <div class="row" style="gap:10px">
+        <button type="submit">{{template "ic-check"}} Save changes</button>
+        <a href="/guests"><button type="button" class="ghost">Cancel</button></a>
+      </div>
+    </form>
+    <p class="sub" style="margin-top:22px">People with a link</p>
+    {{range .Edit.Recipients}}
+    <div class="grecip">
+      <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
+      {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<form method="post" action="/guests/tokens/{{.TokenID}}/revoke"><button class="ghost sm" type="submit">Revoke link</button></form>{{end}}
+    </div>
+    {{else}}
+    <p class="empty-note">No one has a link yet. Add someone above.</p>
+    {{end}}
+  </section>
+
+  {{else}}
+  {{/* ---- LIST MODE: all passes + create a new one ---- */}}
+  {{if .NewGuestLinks}}
+  <section class="card" style="--hue:var(--sec-schedule)">
+    <h2><span class="ic">{{template "ic-link"}}</span> New links</h2>
+    <p class="empty-note" style="margin-bottom:4px">Copy these now. For security they are not shown again; to replace one, revoke it and add the person again.</p>
+    {{range .NewGuestLinks}}
+    <div class="glink"><span class="muted">{{.Email}}</span><code>{{.URL}}</code></div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .PendingRequests}}
+  <section class="card" style="--hue:var(--danger)">
+    <h2><span class="ic">{{template "ic-bell"}}</span> Waiting for you</h2>
+    <p class="subtitle">Someone scanned a printed code and wants to use a permit. Approve to put their plate on until the end of today.</p>
+    {{range .PendingRequests}}
+    <div class="req">
+      <div class="req-main">
+        <span class="plate" style="--plate:var(--sec-vehicles)">{{.Plate}}</span>
+        <div class="req-meta"><strong>{{.PermitLabel}}</strong><span class="empty-note">asked {{.Ago}}</span></div>
+      </div>
+      <div class="row" style="gap:8px">
+        <form method="post" action="/guests/requests/{{.ID}}/approve"><button type="submit">{{template "ic-check"}} Allow</button></form>
+        <form method="post" action="/guests/requests/{{.ID}}/deny"><button type="submit" class="ghost">Deny</button></form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
+      <div>
+        <strong>Guest passes are {{if .GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
+        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once, without deleting anything.</div>
+      </div>
+      <form method="post" action="/guests/toggle">
+        <input type="hidden" name="enabled" value="{{if .GuestsEnabled}}{{else}}1{{end}}">
+        <button type="submit" class="{{if .GuestsEnabled}}danger{{end}}">{{if .GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
+      </form>
+    </div>
+  </section>
+
+  {{if .PermitOpts}}
+  <section class="card" style="--hue:var(--sec-schedule)">
+    <h2><span class="ic">{{template "ic-qr"}}</span> Visitor at the door?</h2>
+    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
+    <div class="qropts">
+      <form method="post" action="/guests/qr" class="qropt">
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. Expires 15&nbsp;min after you show it.</span></div>
+        {{if gt (len .PermitOpts) 1}}
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
+      </form>
+      <form method="post" action="/guests/printed" class="qropt">
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Leave it out (door, fridge, counter). A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
+        {{if gt (len .PermitOpts) 1}}
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        <button type="submit" class="ghost">{{template "ic-qr"}} Print a QR</button>
+      </form>
+    </div>
+  </section>
+  {{end}}
+
+  {{if .DoorGrants}}
+  <section class="card" style="--hue:var(--sec-vehicles)">
+    <h2><span class="ic">{{template "ic-qr"}}</span> Your printed QRs</h2>
+    <p class="subtitle">Durable codes to print, laminate, and leave up. Reopen any time to reprint the <em>same</em> one &mdash; the code keeps working. To change the code (say a sheet went missing), remove it and print a new one.</p>
+    {{range .DoorGrants}}
+    <div class="doorrow">
+      <div class="doorrow-main">
+        <span class="doorrow-ic">{{template "ic-qr"}}</span>
+        <div class="doorrow-meta"><strong>{{.PermitLabel}}</strong><span class="empty-note">created {{.CreatedAt}}</span></div>
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <a href="/guests/door/{{.GrantID}}/view" hx-boost="false"><button type="button">{{template "ic-qr"}} View &amp; print</button></a>
+        <form method="post" action="/guests/door/{{.GrantID}}/revoke" onsubmit="return confirm('Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards.')"><button class="ghost icon" type="submit" title="Remove">{{template "ic-trash"}}</button></form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .Guests}}
+  <div class="grants">
+    {{range .Guests}}
+    <section class="card">
+      <div class="permit-head" style="margin-bottom:10px">
+        <h2 style="margin:0">{{if .Label}}{{.Label}}{{else}}{{.PermitLabel}}{{end}}</h2>
+        <div class="row" style="gap:6px">
+          <a href="/guests/{{.ID}}/edit"><button type="button" class="ghost sm">{{template "ic-edit"}} Edit</button></a>
+          <form method="post" action="/guests/{{.ID}}/delete" onsubmit="return confirm('Delete this guest pass? All its links stop working.')">
+            <button class="ghost icon" type="submit" title="Delete pass">{{template "ic-trash"}}</button>
+          </form>
+        </div>
+      </div>
+      <p class="empty-note" style="margin-top:0">{{.PermitLabel}}{{if .AllowOvernight}} &middot; overnight allowed{{end}}</p>
+      <p class="sub">Cars</p>
+      <div class="legend" style="gap:8px">{{range .Cars}}<span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>{{end}}</div>
+      <p class="sub" style="margin-top:16px">People</p>
+      {{range .Recipients}}
+      <div class="grecip">
+        <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
+        {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
+      </div>
+      {{else}}
+      <p class="empty-note" style="margin-top:0">No one added yet &mdash; open <strong>Edit</strong> to send a link.</p>
+      {{end}}
+    </section>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if and .PermitOpts .Vehicles}}
+  <section class="card" style="--hue:var(--sec-vehicles)" id="new">
+    <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
+    <form method="post" action="/guests" class="stack" x-data="{recips:''}">
+      <label class="fld"><span>Permit</span>
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+      </label>
+      <label class="fld"><span>Label (optional)</span><input name="label" placeholder="e.g. Friday helpers"></label>
+      <div class="fld"><span>Cars this pass may activate</span>
+        <div class="checks">
+          {{range .Vehicles}}
+          <label class="check">
+            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
+            <span class="dot" style="background:{{.Color}}"></span>
+            <span>{{.Label}}</span>
+            <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+          </label>
+          {{end}}
+        </div>
+        <p class="empty-note" style="margin-top:8px">Need another car? <a href="/vehicles">Add it on the Vehicles page</a> and it appears here.</p>
+      </div>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="fld"><span>People to send the link to</span>
+        <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
+        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+      </label>
+      <button type="submit">{{template "ic-link"}} Create pass and send links</button>
+    </form>
+  </section>
+  {{else}}
+  <section class="card"><p class="empty-note">Add at least one <a href="/vehicles">vehicle</a> and manage a permit on the <a href="/schedule">Schedule</a> first, then you can create a guest pass.</p></section>
+  {{end}}
+  {{end}}{{/* mode */}}
   {{end}}
 
 </main>
@@ -822,12 +1377,14 @@
 
 {{/* =================== PUBLIC HEADER (landing / about) =================== */}}
 {{define "publicheader"}}
-<header class="appbar">
+<header class="appbar pubbar">
   <a href="/" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
-  <div class="appbar-r">
+  <nav class="pubnav">
     <a href="/why" class="link-quiet{{if eq .State "why"}} active{{end}}"{{if eq .State "why"}} aria-current="page"{{end}}>How it works</a>
     <a href="/about" class="link-quiet{{if eq .State "about"}} active{{end}}"{{if eq .State "about"}} aria-current="page"{{end}}>About</a>
     {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
+  </nav>
+  <div class="appbar-r">
     <button class="icon-btn" type="button" onclick="toggleTheme()" aria-label="Toggle light / dark"><span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span></button>
     <a href="/schedule" hx-boost="false"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
   </div>
@@ -837,7 +1394,7 @@
 {{/* =================== APP BAR (shared) =================== */}}
 {{define "appbar"}}
 <header class="appbar">
-  <div class="brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></div>
+  <a href="/" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
   <div class="appbar-r">
     <button class="icon-btn" type="button" onclick="toggleTheme()" title="Toggle light / dark" aria-label="Toggle theme">
       <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>
@@ -846,6 +1403,7 @@
       <button class="icon-btn" type="button" @click="open=!open" aria-label="Account">{{template "ic-user"}}</button>
       <div class="menu" x-show="open" x-cloak>
         <div class="menu-email">{{.User.Email}}</div>
+        {{if .User.IsAdmin}}<a href="/admin" class="menu-item">{{template "ic-gear"}} Admin</a>{{end}}
         {{if .LogoutURL}}<a href="{{.LogoutURL}}" class="menu-item">{{template "ic-logout"}} Sign out</a>
         {{else}}<span class="menu-note">Session handled by your login provider</span>{{end}}
       </div>
@@ -856,6 +1414,39 @@
 
 
 {{/* =================== NOTIFY BODY (swappable, auto-saves) =================== */}}
+{{/* Printed-QR request status (htmx-polled). Pending re-polls; a decision stops. */}}
+{{define "guest-req-status"}}
+{{if eq .Status "applied"}}
+{{/* council-confirmed: the permit's own record now shows the plate. Terminal. */}}
+<div id="reqstatus">
+  <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
+  <p class="gresult"><span class="plate">{{.Plate}}</span> is on the permit until {{.Until}}.</p>
+</div>
+{{else if eq .Status "denied"}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-x"}}</div>
+  <p class="gresult">Not approved. Ask the resident, or try again.</p>
+</div>
+{{else if eq .Status "stalled"}}
+{{/* approved, but the council hasn't confirmed after a while — stop spinning */}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
+  <p class="gresult">This is taking longer than usual. Your request was approved, but we can't confirm it's on the permit yet &mdash; please check with the resident.</p>
+</div>
+{{else if eq .Status "approved"}}
+{{/* the resident said yes; keep polling until the council confirms the plate is on */}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="gspin"></div>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">Approved &mdash; putting <span class="plate">{{.Plate}}</span> on the permit&hellip;</p>
+</div>
+{{else}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="gspin"></div>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
+</div>
+{{end}}
+{{end}}
+
 {{define "notify-body"}}
 <form hx-post="/notifications" hx-target="#notify-body" hx-swap="innerHTML" hx-trigger="change"
       class="stack notify-form" x-data="{ntfy: {{if .NtfyEnabled}}true{{else}}false{{end}}}">
@@ -887,9 +1478,19 @@
 
 {{/* =================== PERMIT BODY (swappable) =================== */}}
 {{define "permit-body"}}
-<div class="permit-head">
-  <h2>{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</h2>
-  <div class="nowbadge">
+<div class="permit-head" x-data="{rename:false}">
+  <div class="pname" x-show="!rename">
+    <h2>{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</h2>
+    <button type="button" class="ghost icon sm" title="Rename permit" aria-label="Rename permit"
+            @click="rename=true; $nextTick(() => $refs.pname.focus())">{{template "ic-edit"}}</button>
+  </div>
+  <form x-show="rename" x-cloak method="post" action="/permits/{{.Permit.ID}}/name" class="pname-edit" @submit="rename=false">
+    <input name="label" x-ref="pname" maxlength="40" required autocomplete="off" @keydown.escape="rename=false"
+           value="{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}">
+    <button type="submit" class="sm">{{template "ic-check"}} Save</button>
+    <button type="button" class="ghost sm" @click="rename=false">Cancel</button>
+  </form>
+  <div class="nowbadge" x-show="!rename">
     <span class="muted" style="font-size:12.5px">on permit now</span>
     {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
   </div>
@@ -925,8 +1526,8 @@
   {{range .Cal}}
   <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}" @click="open=!open">
     <div class="cd">{{.DayLabel}}</div>
+    <div class="omk">{{if .HasOneoff}}<span class="oneoff" title="one-off booking"></span>{{end}}</div>
     <div class="bar" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
-    {{if .HasOneoff}}<span class="oneoff" title="one-off booking"></span>{{end}}
     <div class="pop" x-show="open" x-cloak @click.outside="open=false">
       <p class="tt">{{.DayLabel}}</p>
       {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
@@ -940,7 +1541,7 @@
 <div class="oneoff-list">
   {{range .Overrides}}
   <div class="oneoff-item">
-    <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}} <span class="reg">{{.Reg}}</span></span>
+    <span class="veh">{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span></span>
     <span class="when">{{localTime .StartsAt $.Loc}} → {{if .EndsAt}}{{localTime .EndsAt $.Loc}}{{else}}open-ended{{end}}</span>
     <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#permit-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?">
       <button class="ghost icon" type="submit" title="Cancel">{{template "ic-x"}}</button>
@@ -952,6 +1553,13 @@
 <p class="empty-note">No one-off bookings scheduled.</p>
 {{end}}
 
+<div class="permit-foot">
+  <form method="post" action="/permits/{{.Permit.ID}}/delete"
+        hx-confirm="Stop managing this permit? Its weekly schedule and one-off bookings will be deleted. The council permit itself is not changed.">
+    <button type="submit">{{template "ic-x"}} Stop managing this permit</button>
+  </form>
+</div>
+
 {{/* Add-one-off modal, teleported to <body> so it escapes the card's transform
      (an animated/transformed ancestor becomes the containing block for position:fixed). */}}
 <template x-teleport="body">
@@ -961,22 +1569,40 @@
   <div class="modal-head"><strong>Add a one-off booking</strong>
     <button type="button" class="icon-btn" @click="addOpen=false" aria-label="Close">{{template "ic-x"}}</button>
   </div>
-  <form class="stack" hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML">
-    <label class="fld">Vehicle
-      <div class="vpick" x-data="{open:false, sel:'', lbl:'', col:''}">
-        <input type="hidden" name="vehicle_id" :value="sel">
-        <button type="button" class="vpick-btn" @click="open=!open">
-          <span class="dot" x-show="col" :style="`background:${col}`"></span>
-          <span x-text="lbl || 'Choose a vehicle…'" :class="{'ph': !lbl}"></span>
-          <span class="vpick-caret">▾</span>
-        </button>
-        <div class="vpick-list" x-show="open" x-cloak @click.outside="open=false">
-          {{range .Vehicles}}
-          <button type="button" class="vopt" data-id="{{.ID}}" data-label="{{.Label}} ({{.Registration}})" data-color="{{.Color}}" @click="sel=$el.dataset.id; lbl=$el.dataset.label; col=$el.dataset.color; open=false"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
-          {{end}}
-        </div>
+  <form class="stack" hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
+        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:''}">
+    <div class="seg">
+      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved car</button>
+      <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">One-off plate</button>
+    </div>
+    {{/* Both panes are stacked in one grid cell so the modal keeps a constant
+         height (the taller pane's) and doesn't jump when you switch tabs. */}}
+    <div class="segpanes">
+      <div class="segpane" :class="{hide: mode!='car'}">
+        <label class="fld">Vehicle
+          <div class="vpick">
+            <input type="hidden" name="vehicle_id" :value="sel">
+            <button type="button" class="vpick-btn" @click="open=!open">
+              <span class="dot" x-show="col" :style="`background:${col}`"></span>
+              <span x-text="lbl || 'Choose a vehicle…'" :class="{'ph': !lbl}"></span>
+              <span class="vpick-caret">▾</span>
+            </button>
+            <div class="vpick-list" x-show="open" x-cloak @click.outside="open=false">
+              {{range .Vehicles}}
+              <button type="button" class="vopt" data-id="{{.ID}}" data-label="{{.Label}} ({{.Registration}})" data-color="{{.Color}}" @click="sel=$el.dataset.id; lbl=$el.dataset.label; col=$el.dataset.color; open=false"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
+              {{end}}
+            </div>
+          </div>
+        </label>
+        <p class="empty-note" style="margin-top:6px">One of the cars saved on your Vehicles page.</p>
       </div>
-    </label>
+      <div class="segpane" :class="{hide: mode!='plate'}">
+        <label class="fld">Number plate
+          <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" style="text-transform:uppercase">
+        </label>
+        <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
+      </div>
+    </div>
     <div class="row2">
       <label class="fld">From<input type="datetime-local" name="from"></label>
       <label class="fld">Until<input type="datetime-local" name="until"></label>
@@ -1011,5 +1637,9 @@
 {{define "ic-calendar"}}<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg>{{end}}
 {{define "ic-activity"}}<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg>{{end}}
 {{define "ic-gear"}}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>{{end}}
+{{define "ic-key"}}<svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5"/><path d="M11.2 11.2L20 20M17 17l2-2M14 14l2-2"/></svg>{{end}}
+{{define "ic-users"}}<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg>{{end}}
+{{define "ic-qr"}}<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg>{{end}}
+{{define "ic-edit"}}<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>{{end}}
 {{define "ic-moon"}}<svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg>{{end}}
 {{define "ic-sun"}}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>{{end}}

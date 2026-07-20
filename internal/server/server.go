@@ -23,6 +23,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/scheduler"
+	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/session"
 	"github.com/uppertoe/pstonn/internal/store"
 	"github.com/uppertoe/pstonn/internal/webauth"
@@ -38,22 +39,25 @@ type Server struct {
 	sched    *scheduler.Scheduler
 	notify   *notify.Service
 	mail     *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
+	box      *secretbox.Box // at-rest cipher; seals the reprintable door-QR token
 	terms    Terms
 	contact  *rateLimiter // per-IP throttle on the public contact form
 	// invite-email throttles so a primary can't email-bomb an address or mass-send
 	// via SMTP: fanout caps per-owner sends, target dedups per recipient.
 	inviteFanout *rateLimiter
 	inviteTarget *rateLimiter
+	guest        *rateLimiter // per-IP throttle on the public guest-activation link
 }
 
 // New constructs a Server.
-func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council *parking.Client, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer) *Server {
+func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council *parking.Client, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
 	return &Server{
 		cfg: cfg, store: st, sessions: sessions, auth: auth, council: council,
-		sched: sched, notify: notifier, mail: mail, terms: loadTerms(cfg.TermsPath),
-		contact:      newRateLimiter(3, 10*time.Minute), // 3 messages / 10 min per IP
-		inviteFanout: newRateLimiter(6, time.Hour),      // <=6 invite emails / hour per owner
-		inviteTarget: newRateLimiter(1, 24*time.Hour),   // <=1 invite email / day per recipient
+		sched: sched, notify: notifier, mail: mail, box: box, terms: loadTerms(cfg.TermsPath),
+		contact:      newRateLimiter(3, 10*time.Minute),  // 3 messages / 10 min per IP
+		inviteFanout: newRateLimiter(6, time.Hour),       // <=6 invite emails / hour per owner
+		inviteTarget: newRateLimiter(1, 24*time.Hour),    // <=1 invite email / day per recipient
+		guest:        newRateLimiter(20, 10*time.Minute), // 20 activation attempts / 10 min per IP
 	}
 }
 
@@ -84,6 +88,13 @@ func (s *Server) Handler() http.Handler {
 	// carries a single-use token and requires no login (so it stays one click).
 	mux.HandleFunc("GET /council/confirm", s.councilConfirm)
 
+	// Public, token-only: the guest-pass activation link. GET renders a menu with
+	// NO side effects (scanner/prefetch-safe); POST performs the activation.
+	mux.HandleFunc("GET /g/{token}", s.guestPage)
+	mux.HandleFunc("POST /g/{token}", s.guestActivate)
+	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
+	mux.HandleFunc("GET /g/req/{id}", s.guestRequestStatus)
+
 	mux.HandleFunc("GET /{$}", s.landing)            // public, not behind forward-auth
 	mux.HandleFunc("GET /about", s.about)            // public
 	mux.HandleFunc("GET /why", s.why)                // public
@@ -93,10 +104,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /vehicles", s.withUser(s.vehiclesPage))
 	mux.HandleFunc("GET /activity", s.withUser(s.activityPage))
 	mux.HandleFunc("GET /settings", s.withUser(s.settingsPage))
+	mux.HandleFunc("GET /admin", s.requireAdmin(s.adminPage))
+	mux.HandleFunc("GET /status", s.statusJSON) // machine watchdog; bearer-token gated
 	mux.HandleFunc("GET /permits/new", s.withUser(s.pickerPage))
+	mux.HandleFunc("GET /guests", s.withUser(s.guestsPage))
+	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
+	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))
+	mux.HandleFunc("POST /guests/qr", s.withConsent(s.showVisitorQR))
+	mux.HandleFunc("POST /guests/printed", s.withConsent(s.showPrintedQR))
+	mux.HandleFunc("GET /guests/door/{id}/view", s.withConsent(s.viewDoorQR))
+	mux.HandleFunc("POST /guests/door/{id}/revoke", s.withConsent(s.revokeDoorQR))
+	mux.HandleFunc("POST /guests/requests/{id}/approve", s.withConsent(s.approveGuestRequest))
+	mux.HandleFunc("POST /guests/requests/{id}/deny", s.withConsent(s.denyGuestRequest))
+	mux.HandleFunc("POST /guests/{id}", s.withConsent(s.updateGuestGrant))
+	mux.HandleFunc("POST /guests/toggle", s.withConsent(s.toggleGuests))
+	mux.HandleFunc("POST /guests/{id}/delete", s.withConsent(s.deleteGuestGrant))
+	mux.HandleFunc("POST /guests/tokens/{tid}/revoke", s.withConsent(s.revokeGuestToken))
 	mux.HandleFunc("POST /vehicles", s.withConsent(s.addVehicle))
 	mux.HandleFunc("POST /vehicles/{id}/delete", s.withConsent(s.deleteVehicle))
+	mux.HandleFunc("POST /vehicles/{id}/email", s.withConsent(s.setVehicleEmail))
 	mux.HandleFunc("POST /permits", s.withConsent(s.addPermit))
+	mux.HandleFunc("POST /permits/{id}/delete", s.withConsent(s.deletePermit))
+	mux.HandleFunc("POST /permits/{id}/name", s.withConsent(s.renamePermit))
 	mux.HandleFunc("POST /permits/{id}/rules", s.withConsent(s.setRule))
 	mux.HandleFunc("POST /permits/{id}/override", s.withConsent(s.addOverride))
 	mux.HandleFunc("POST /permits/{id}/overrides/{oid}/delete", s.withConsent(s.deleteOverride))
@@ -172,6 +201,14 @@ func (s *Server) logoutURL() string {
 // button instead.
 func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
+	// A signed-in visitor goes straight to the app rather than the marketing page.
+	// In production the auth layer already makes this call at the edge (see
+	// deploy/pstonn.caddy) and a signed-in user never reaches here; this covers the
+	// local/dev run (no forward-auth) and any deployment that does pass identity.
+	if signedIn {
+		http.Redirect(w, r, "/schedule", http.StatusSeeOther)
+		return
+	}
 	s.render(w, dashboardData{
 		State: "landing", OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(),
 		SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation,
@@ -469,6 +506,19 @@ type dashboardData struct {
 	Terms    termsView  // terms state + settings display
 	// picker state
 	Pick []pickView
+	// guest passes
+	Guests          []guestGrantView // management page: existing grants
+	GuestsEnabled   bool             // kill-switch state (default on)
+	PermitOpts      []permitOpt      // create-grant permit choices
+	NewGuestLinks   []guestLinkView  // links shown once, right after a grant is created
+	Edit            *editGrantView   // non-nil puts the pass form in edit mode
+	QR              *qrShowView      // non-nil shows the on-screen visitor QR
+	DoorQR          *doorQRView      // non-nil renders the printable door-QR poster (State "doorqr")
+	DoorGrants      []doorGrantView  // durable door QRs in the management list
+	PendingRequests []guestReqView   // printed-QR requests awaiting the holder's decision
+	Guest           guestActView     // public activation menu (State "guest")
+	Wait            *guestWaitView   // public "waiting for approval" page (State "guest-wait")
+	Admin           *adminView       // admin dashboard (State "admin")
 }
 
 type termsView struct {
@@ -498,6 +548,7 @@ type vehicleView struct {
 	Label        string
 	Registration string
 	Color        string
+	Email        string // optional driver email (shown on the Vehicles page)
 }
 
 type memberView struct {
@@ -553,7 +604,8 @@ type pickView struct {
 	PermitNumber    string
 	PermitType      string
 	CurrentRego     string
-	Suggested       bool // visitor permit → highlight
+	Addable         bool   // a visitor permit whose vehicle the holder can change
+	Reason          string // why it can't be added (shown greyed-out when !Addable)
 }
 
 // vehicleViews builds the per-user vehicle view models plus id→colour and
@@ -565,7 +617,7 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 	labelByID = map[int64]string{}
 	for i, v := range vs {
 		c := vehicleColor(i)
-		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c}
+		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c, Email: v.Email}
 		colorByID[v.ID] = c
 		regByID[v.ID] = v.Registration
 		labelByID[v.ID] = v.Label
@@ -839,6 +891,15 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	}
 	res := model.Resolve(now, rules, overrides)
 
+	// dispReg resolves what to show for a resolution or override: a saved vehicle's
+	// reg/label/colour, or an ad-hoc one-off plate (no saved name, neutral colour).
+	dispReg := func(vid int64, plate string) (reg, label, color string) {
+		if plate != "" {
+			return plate, "One-off plate", ""
+		}
+		return regByID[vid], labelByID[vid], colorByID[vid]
+	}
+
 	ruleByWeekday := map[time.Weekday]int64{}
 	for _, ru := range rules {
 		ruleByWeekday[ru.Weekday] = ru.VehicleID
@@ -883,25 +944,28 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		if r.Source != model.SourceNone {
 			src = string(r.Source)
 		}
+		calReg, _, calColor := dispReg(r.VehicleID, r.Registration)
 		cal = append(cal, calView{
-			DayLabel: day.Format("Mon 2"), Reg: regByID[r.VehicleID], Color: colorByID[r.VehicleID],
+			DayLabel: day.Format("Mon 2"), Reg: calReg, Color: calColor,
 			Source: src, HasOneoff: hasOneoff, IsToday: isToday, Past: past,
 		})
 	}
 
 	var ovs []overrideView
 	for _, o := range overrides {
+		reg, label, color := dispReg(o.VehicleID, o.Registration)
 		ovs = append(ovs, overrideView{
-			ID: o.ID, PermitID: p.ID, Reg: regByID[o.VehicleID], Label: labelByID[o.VehicleID],
-			Color: colorByID[o.VehicleID], StartsAt: o.StartsAt, EndsAt: o.EndsAt, CreatedBy: o.CreatedBy,
+			ID: o.ID, PermitID: p.ID, Reg: reg, Label: label,
+			Color: color, StartsAt: o.StartsAt, EndsAt: o.EndsAt, CreatedBy: o.CreatedBy,
 		})
 	}
 	source := ""
 	if res.Source != model.SourceNone {
 		source = string(res.Source)
 	}
+	desiredReg, _, _ := dispReg(res.VehicleID, res.Registration)
 	return permitView{
-		Permit: p, DesiredReg: regByID[res.VehicleID], DesiredSource: source,
+		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 	}, nil
 }
@@ -953,15 +1017,26 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		already[p.CouncilPermitID] = true
 	}
 	for _, p := range permits {
-		// Only offer permits whose holder is actually allowed to change the
-		// vehicle, others (many non-visitor permit types) can't be scheduled.
-		if already[p.CouncilPermitID] || !p.CanChangeVehicle {
+		if already[p.CouncilPermitID] {
 			continue
+		}
+		// Show every permit the account holds, but only a visitor permit whose
+		// holder can change the vehicle can actually be scheduled. The rest are
+		// listed greyed-out with the reason, so the user sees them and isn't left
+		// wondering where a permit went.
+		visitor := isVisitorPermit(p.PermitType)
+		addable := visitor && p.CanChangeVehicle
+		reason := ""
+		switch {
+		case !visitor:
+			reason = "Only visitor permits can be scheduled."
+		case !p.CanChangeVehicle:
+			reason = "Your council account can't change this permit's vehicle."
 		}
 		base.Pick = append(base.Pick, pickView{
 			CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID,
 			PermitNumber: p.PermitNumber, PermitType: p.PermitType, CurrentRego: p.CurrentRego,
-			Suggested: strings.Contains(strings.ToLower(p.PermitType), "visitor"),
+			Addable: addable, Reason: reason,
 		})
 	}
 	base.State = "picker"
@@ -973,12 +1048,16 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	reg := normalizeReg(r.FormValue("registration"))
-	label := strings.TrimSpace(r.FormValue("label"))
-	if reg == "" {
-		s.message(w, http.StatusBadRequest, "Registration is required.")
+	label := cleanLabel(r.FormValue("label"))
+	if !validRego(reg) {
+		s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 		return
 	}
 	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label); err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			s.message(w, http.StatusConflict, "You already have a vehicle with that plate.")
+			return
+		}
 		s.serverError(w, err)
 		return
 	}
@@ -992,6 +1071,13 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
+}
+
+// isVisitorPermit reports whether a council permit type is a visitor permit, the
+// only kind p.stonn schedules. The council names them like "(A) 1st Visitor
+// Permit", so a case-insensitive "visitor" match is the reliable signal.
+func isVisitorPermit(permitType string) bool {
+	return strings.Contains(strings.ToLower(permitType), "visitor")
 }
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
@@ -1025,8 +1111,19 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if match == nil || !match.CanChangeVehicle {
+	if match == nil {
 		s.message(w, http.StatusForbidden, "That permit isn't one your council account can manage.")
+		return
+	}
+	// Enforce the same rule the picker shows: p.stonn only schedules visitor
+	// permits whose vehicle the holder can change. This is the authoritative
+	// gate (the greyed-out picker button is only a UI hint).
+	if !isVisitorPermit(match.PermitType) {
+		s.message(w, http.StatusForbidden, "p.stonn only manages visitor permits.")
+		return
+	}
+	if !match.CanChangeVehicle {
+		s.message(w, http.StatusForbidden, "Your council account can't change the vehicle on that permit.")
 		return
 	}
 
@@ -1047,6 +1144,62 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// it shows immediately instead of "unknown" until the first live refresh.
 	if match.CurrentRego != "" {
 		_ = s.store.SetPermitActive(ctx, pid, match.CurrentRego)
+	}
+	redirectHome(w, r)
+}
+
+// deletePermit stops p.stonn administering a permit: it drops the permit and its
+// schedule (weekly rules + one-offs) and history. The council permit is left
+// exactly as it is; we simply stop changing its plate. Any account member may do
+// this, like adding one — it's part of managing the schedule.
+func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	if err := s.store.DeletePermit(r.Context(), p.ID, owner); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	// Re-evaluate so the scheduler drops the now-removed permit promptly.
+	s.sched.Kick()
+	redirectHome(w, r)
+}
+
+// cleanLabel trims a user-supplied name and strips control characters (including
+// CR/LF), so a label can't smuggle newlines into an email header (defence in depth
+// alongside the mailer's own sanitisation) or odd control bytes into the UI.
+func cleanLabel(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
+}
+
+// renamePermit gives a permit a friendly name the user chooses (e.g. "Nanny"),
+// shown everywhere it appears — schedule, guest passes, door QRs. It's purely a
+// display label; the council record is untouched.
+func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	label := cleanLabel(r.FormValue("label"))
+	if label == "" {
+		s.message(w, http.StatusBadRequest, "Give the permit a name.")
+		return
+	}
+	if rs := []rune(label); len(rs) > 40 {
+		label = string(rs[:40])
+	}
+	if err := s.store.SetPermitLabel(r.Context(), owner, p.ID, label); err != nil {
+		s.serverError(w, err)
+		return
 	}
 	redirectHome(w, r)
 }
@@ -1254,14 +1407,6 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	vehicleID := atoi64(r.FormValue("vehicle_id"))
-	if vehicleID == 0 {
-		s.message(w, http.StatusBadRequest, "Choose a vehicle.")
-		return
-	}
-	if !s.ownsVehicle(w, r, owner, vehicleID) {
-		return
-	}
 	startsAt := time.Now()
 	if raw := strings.TrimSpace(r.FormValue("from")); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
@@ -1284,10 +1429,31 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusBadRequest, "The end time must be after the start time.")
 		return
 	}
-	// CreatedBy records the actual person who made the booking (audit), even
-	// though the override belongs to the shared account's permit.
-	if _, err := s.store.CreateOverride(r.Context(), p.ID, vehicleID, startsAt, endsAt, user); err != nil {
-		s.serverError(w, err)
+	// Either a saved vehicle, or a one-off plate that is NOT saved as a vehicle
+	// (a visitor's car, a hire car). CreatedBy records the actual person who made
+	// the booking (audit), even though the permit belongs to the shared account.
+	plate := normalizeReg(r.FormValue("plate"))
+	vehicleID := atoi64(r.FormValue("vehicle_id"))
+	switch {
+	case plate != "":
+		if !validRego(plate) {
+			s.message(w, http.StatusBadRequest, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+			return
+		}
+		if _, err := s.store.CreatePlateOverride(r.Context(), p.ID, plate, startsAt, endsAt, user); err != nil {
+			s.serverError(w, err)
+			return
+		}
+	case vehicleID != 0:
+		if !s.ownsVehicle(w, r, owner, vehicleID) {
+			return
+		}
+		if _, err := s.store.CreateOverride(r.Context(), p.ID, vehicleID, startsAt, endsAt, user); err != nil {
+			s.serverError(w, err)
+			return
+		}
+	default:
+		s.message(w, http.StatusBadRequest, "Choose a saved car or enter a one-off plate.")
 		return
 	}
 	s.sched.Kick()
@@ -1384,6 +1550,23 @@ func redirectHome(w http.ResponseWriter, r *http.Request) {
 
 func normalizeReg(s string) string {
 	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
+}
+
+// validRego reports whether s (already normalised: upper-case, no spaces) is a
+// plausible number plate: 2–8 alphanumeric characters. It is a sanity gate to
+// catch typos and junk, not a strict format check — Australian plates vary by
+// state and custom plates differ, so we stay lenient; the council makes the
+// authoritative check when the plate is actually set.
+func validRego(s string) bool {
+	if len(s) < 2 || len(s) > 8 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func pathInt(r *http.Request, name string) int64 { return atoi64(r.PathValue(name)) }

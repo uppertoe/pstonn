@@ -30,6 +30,9 @@ import (
 type Council interface {
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
 	Refresh(ctx context.Context, owner string) error
+	// CurrentVehicle reads the plate the council actually has on the permit right
+	// now (used to detect drift from changes made directly in the council portal).
+	CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error)
 }
 
 // Notifier sends user-facing notifications (the re-authorise reminder, each
@@ -47,6 +50,9 @@ type Notifier interface {
 	NotifyRelinkRequired(ctx context.Context, owner string) int
 	// NotifyAdmin sends an operator alert to every configured admin channel.
 	NotifyAdmin(ctx context.Context, subject, body string) error
+	// NotifyGuestDisplaced tells a guest (no account) their activated car has been
+	// taken off the permit.
+	NotifyGuestDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
 }
 
 // Options configures the Scheduler's session-lifecycle behaviour.
@@ -86,11 +92,6 @@ type Scheduler struct {
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
 	lastAlert map[string]time.Time
-
-	// failMu guards failStreak, the count of consecutive failed reconcile ticks
-	// per permit, so a transient blip doesn't alarm the user on the first miss.
-	failMu     sync.Mutex
-	failStreak map[int64]int
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -127,7 +128,6 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		jitterFrac:    jf,
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
-		failStreak:    make(map[int64]int),
 	}
 }
 
@@ -138,6 +138,18 @@ func (s *Scheduler) Kick() {
 	case s.trigger <- struct{}{}:
 	default:
 	}
+}
+
+// LastReconcile is the time the scheduler last completed a clean reconcile pass
+// (zero if none yet). An external watchdog uses this to tell a live-but-wedged
+// process from a healthy one: the HTTP server can answer while the work loop is
+// stuck, and a stale timestamp reveals that.
+func (s *Scheduler) LastReconcile() time.Time {
+	ns := s.lastReconcile.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
 
 // Run drives the reconcile loop and a slower keep-warm loop until ctx is
@@ -332,6 +344,7 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		switch err := s.council.Refresh(ctx, cs.Owner); {
 		case err == nil:
 			log.Printf("scheduler: kept session for %s warm", cs.Owner)
+			s.checkDrift(ctx, cs.Owner) // piggyback a gentle council-drift check
 		case errors.Is(err, parking.ErrSessionExpired):
 			if derr := s.store.DeleteCouncilSession(ctx, cs.Owner); derr != nil {
 				log.Printf("scheduler: unlink expired session %s: %v", cs.Owner, derr)
@@ -428,7 +441,7 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 // alarm anyone); a council refusal, which won't fix itself, alarms on the first
 // tick. The message explains the cause, the consequence (what plate is still on
 // the permit), and what to do. It also feeds the systemic-failure detector.
-func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, source string, err error, stats *passStats) {
+func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, wantName, source string, err error, stats *passStats) {
 	kind, op := parking.FailureOf(err)
 	reason, action := describeFailure(kind, op)
 
@@ -443,7 +456,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	}
 
 	// Transient/unexpected problems get a grace period; a refusal alarms at once.
-	n := s.bumpFailStreak(p.ID)
+	n := s.bumpFailStreak(ctx, p.ID)
 	threshold := failNotifyThreshold
 	if kind == parking.FailRejected {
 		threshold = 1
@@ -456,6 +469,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Owner:       p.Owner,
 		PermitLabel: permitLabel(p),
 		Reg:         want,
+		Name:        wantName,
 		OK:          false,
 		CurrentReg:  p.ActiveRegistration,
 		Reason:      reason,
@@ -484,18 +498,53 @@ func describeFailure(kind parking.FailureKind, op string) (reason, action string
 }
 
 // bumpFailStreak increments and returns the consecutive-failure count for a
-// permit; clearFailStreak resets it after a success.
-func (s *Scheduler) bumpFailStreak(permitID int64) int {
-	s.failMu.Lock()
-	defer s.failMu.Unlock()
-	s.failStreak[permitID]++
-	return s.failStreak[permitID]
+// permit; clearFailStreak resets it after a success. Persisted (on the permit
+// row) so a restart doesn't reset the grace before a transient failure is alerted.
+// checkDrift re-reads the council's actual current plate for the owner's permits
+// and writes it into active_registration. Reconcile skips a permit when the
+// scheduled plate already equals the CACHED active_registration, so if someone
+// changed the vehicle directly in the council portal, reconcile would never
+// notice — until a dashboard visit refreshed the cache. Doing this read on the
+// slow keep-warm cadence (already rate-spaced, once a session refreshes) catches
+// that drift and re-arms reconcile, at gentle council load rather than a per-tick
+// firehose. Any correction is kicked so reconcile re-applies the schedule promptly.
+func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
+	permits, err := s.store.ListPermitsFor(ctx, owner)
+	if err != nil {
+		return
+	}
+	drifted := false
+	for i := range permits {
+		p := permits[i]
+		actual, err := s.council.CurrentVehicle(ctx, owner, p)
+		if err != nil {
+			continue
+		}
+		if !strings.EqualFold(actual, p.ActiveRegistration) {
+			log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
+			if e := s.store.SetPermitActive(ctx, p.ID, actual); e == nil {
+				drifted = true
+			}
+		}
+	}
+	if drifted {
+		s.Kick() // reconcile now: re-apply the schedule over the drift
+	}
 }
 
-func (s *Scheduler) clearFailStreak(permitID int64) {
-	s.failMu.Lock()
-	delete(s.failStreak, permitID)
-	s.failMu.Unlock()
+func (s *Scheduler) bumpFailStreak(ctx context.Context, permitID int64) int {
+	n, err := s.store.BumpFailStreak(ctx, permitID)
+	if err != nil {
+		log.Printf("scheduler: bump fail streak %d: %v", permitID, err)
+		return failNotifyThreshold // on a DB error, don't suppress the alert
+	}
+	return n
+}
+
+func (s *Scheduler) clearFailStreak(ctx context.Context, permitID int64) {
+	if err := s.store.ClearFailStreak(ctx, permitID); err != nil {
+		log.Printf("scheduler: clear fail streak %d: %v", permitID, err)
+	}
 }
 
 // detectSystemic alerts the operator when many users' plate changes fail in one
@@ -506,6 +555,16 @@ func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalP
 		return
 	}
 	failN, unexpectedN := len(stats.failOwners), len(stats.unexpectedOwners)
+	busyN := len(stats.busyOwners)
+	// A widespread ErrCouncilBusy is a systemic block (Akamai / egress-IP throttle)
+	// that leaves permits stuck; treat it like a broad failure so the operator hears.
+	busySystemic := busyN >= 3 || (totalPermits >= 2 && busyN == totalPermits)
+	if busySystemic && !(unexpectedN >= 2 || failN >= 3) {
+		s.systemAlert(ctx, "council-busy-block",
+			"Council is rate-limiting / blocking p.stonn",
+			fmt.Sprintf("This reconcile pass, %d of %d permits were deferred with a council busy/blocked response. p.stonn's egress IP may be rate-limited or soft-blocked; permit changes are stalled until it clears.", busyN, totalPermits))
+		return
+	}
 	systemic := unexpectedN >= 2 || failN >= 3 || (totalPermits >= 2 && failN == totalPermits)
 	if !systemic {
 		return
@@ -605,17 +664,19 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	// its owner's vehicles, so a rule/override that somehow references a foreign
 	// id can never read another user's registration.
 	regByOwnerID := make(map[ownerVehicle]string, len(vehicles))
+	nameByOwnerID := make(map[ownerVehicle]string, len(vehicles))
 	for _, v := range vehicles {
 		regByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Registration
+		nameByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Label
 	}
 	now := time.Now().In(s.loc)
-	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}}
+	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}, busyOwners: map[string]bool{}}
 	// Space out the council writes: when many permits change at the same wall-clock
 	// boundary (a midnight/9am roster rollover), applying them back-to-back is a
 	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
 	// after each permit that actually hit the council.
 	for _, p := range permits {
-		if s.reconcilePermit(ctx, p, regByOwnerID, now, stats) && s.rateDelay > 0 {
+		if s.reconcilePermit(ctx, p, regByOwnerID, nameByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
 			}
@@ -635,11 +696,52 @@ type ownerVehicle struct {
 type passStats struct {
 	failOwners       map[string]bool
 	unexpectedOwners map[string]bool
+	busyOwners       map[string]bool // council pushed back (ErrCouncilBusy) this pass
 }
 
 // reconcilePermit applies any needed plate change for one permit. It returns
 // true when it actually contacted the council (so the caller can space bursts).
-func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID map[ownerVehicle]string, now time.Time, stats *passStats) (hitCouncil bool) {
+// displacedGuest returns the guest email whose still-live activation set `prev`
+// (the plate just removed), or "" if none. Account members are excluded: they
+// get the normal plate-change notice, and their own bookings shouldn't ping them
+// as "displaced". Matching on the outgoing plate is a heuristic; a false miss or
+// spurious note is low-harm.
+func (s *Scheduler) displacedGuest(ctx context.Context, p model.Permit, overrides []model.Override, regByOwnerID map[ownerVehicle]string, prev string, now time.Time) string {
+	if prev == "" {
+		return ""
+	}
+	var by string
+	for i := range overrides {
+		o := overrides[i]
+		if o.StartsAt.After(now) || (o.EndsAt != nil && !now.Before(*o.EndsAt)) {
+			continue // not currently active
+		}
+		reg := o.Registration
+		if reg == "" {
+			reg = regByOwnerID[ownerVehicle{p.Owner, o.VehicleID}]
+		}
+		// Only a real email is contactable (a QR visitor's created_by is not one).
+		if reg == prev && strings.Contains(o.CreatedBy, "@") {
+			by = o.CreatedBy
+			break
+		}
+	}
+	if by == "" {
+		return ""
+	}
+	members, err := s.store.AccountEmails(ctx, p.Owner)
+	if err != nil {
+		return ""
+	}
+	for _, m := range members {
+		if strings.EqualFold(m, by) {
+			return "" // a member's own booking, not a guest
+		}
+	}
+	return by
+}
+
+func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID, nameByOwnerID map[ownerVehicle]string, now time.Time, stats *passStats) (hitCouncil bool) {
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -655,19 +757,33 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		return false // nothing scheduled right now; leave the permit as-is
 	}
 	want := regByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
+	wantName := nameByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
+	if res.Registration != "" { // an ad-hoc one-off plate (not a saved vehicle)
+		want = res.Registration
+		wantName = ""
+	}
 	if want == "" || want == p.ActiveRegistration {
 		return false // already correct (or unknown/foreign vehicle)
 	}
 
+	prev := p.ActiveRegistration // the plate we're changing away from
 	err = s.council.SetVehicle(ctx, p.Owner, p, want)
 	switch {
 	case err == nil:
 		_ = s.store.SetPermitActive(ctx, p.ID, want)
-		s.clearFailStreak(p.ID)
+		s.clearFailStreak(ctx, p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Source: string(res.Source), OK: true,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
 		}, "success|"+want)
+		// If the plate we just removed had been put on by a guest whose booking is
+		// still live, tell that guest (email only) so they aren't caught out. The
+		// notice is enqueued durably (a fast insert), so no goroutine is needed.
+		if guest := s.displacedGuest(ctx, p, overrides, regByOwnerID, prev, now); guest != "" {
+			if err := s.notifier.NotifyGuestDisplaced(ctx, p.Owner, guest, permitLabel(p), prev, want); err != nil {
+				log.Printf("scheduler: enqueue guest-displaced for %s: %v", guest, err)
+			}
+		}
 		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true
 	case errors.Is(err, parking.ErrNotLinked):
@@ -675,7 +791,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		return false
 	case errors.Is(err, parking.ErrCouncilBusy):
 		// Portal is pushing back (Akamai) or we're in a backoff cooldown; the
-		// client is already spacing retries. Stay quiet at the user level.
+		// client is already spacing retries. Stay quiet at the USER level (it's
+		// expected to be transient), but record it so a FLEET-WIDE block — which
+		// would otherwise leave every permit stuck with no alert at all — surfaces
+		// to the operator via detectSystemic.
+		if stats != nil {
+			stats.busyOwners[p.Owner] = true
+		}
 		log.Printf("scheduler: permit %s deferred: %v", p.CouncilPermitID, err)
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
@@ -695,7 +817,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		}
 		return true
 	default:
-		s.handleApplyFailure(ctx, p, want, string(res.Source), err, stats)
+		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
 		log.Printf("scheduler: permit %s apply error: %v", p.CouncilPermitID, err)
 		return true
 	}

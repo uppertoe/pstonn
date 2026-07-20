@@ -87,20 +87,27 @@ func (m *Mailer) SendWithReplyTo(to, replyTo, subject, body string) error {
 
 func (m *Mailer) send(to, replyTo, subject, body string) error {
 	headers := []string{
-		"From: " + m.from,
-		"To: " + to,
+		"From: " + headerValue(m.from),
+		"To: " + headerValue(to),
 	}
 	if replyTo != "" {
-		headers = append(headers, "Reply-To: "+replyTo)
+		headers = append(headers, "Reply-To: "+headerValue(replyTo))
 	}
 	msg := strings.Join(append(headers,
-		"Subject: "+subject,
+		"Subject: "+headerValue(subject),
 		"MIME-Version: 1.0",
 		"Content-Type: text/plain; charset=UTF-8",
 		"",
 		body,
 	), "\r\n")
 	return smtp.SendMail(m.addr, m.auth, senderAddress(m.from), []string{to}, []byte(msg))
+}
+
+// headerValue neutralises CR/LF in a value destined for an email header, so
+// user-influenced content (e.g. a permit or vehicle name in the Subject) can't
+// inject extra headers or body — SMTP header injection.
+func headerValue(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
 // senderAddress extracts the bare address from a possibly-decorated From header

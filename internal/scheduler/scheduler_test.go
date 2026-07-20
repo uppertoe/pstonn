@@ -23,6 +23,9 @@ type fakeCouncil struct {
 }
 
 func (f *fakeCouncil) SetVehicle(context.Context, string, model.Permit, string) error { return nil }
+func (f *fakeCouncil) CurrentVehicle(context.Context, string, model.Permit) (string, error) {
+	return "", nil
+}
 func (f *fakeCouncil) Refresh(_ context.Context, owner string) error {
 	f.refreshed = append(f.refreshed, owner)
 	return f.refreshErr
@@ -50,6 +53,7 @@ type fakeNotifier struct {
 	outcomes   []notify.ApplyOutcome // full outcomes, for asserting message content
 	adminNotes []string
 	relinks    []string
+	displaced  []string // guest emails told their car came off the permit
 }
 
 func (f *fakeNotifier) Enabled() bool         { return f.on }
@@ -83,6 +87,13 @@ func (f *fakeNotifier) NotifyAdmin(_ context.Context, subject, body string) erro
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.adminNotes = append(f.adminNotes, subject)
+	return nil
+}
+
+func (f *fakeNotifier) NotifyGuestDisplaced(_ context.Context, owner, to, permitLabel, oldReg, newReg string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.displaced = append(f.displaced, to)
 	return nil
 }
 
@@ -251,12 +262,12 @@ func TestFailureNotifyDedupAndSuccess(t *testing.T) {
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
 	// Ticks are a minute apart in production; sleep so async delivery lands first.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil) // identical → suppressed
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil) // identical → suppressed
 	time.Sleep(60 * time.Millisecond)
 	// Success (as the reconcile success branch would do).
-	s.clearFailStreak(p.ID)
+	s.clearFailStreak(ctx, p.ID)
 	s.logApply(ctx, p.ID, "AVS619", "override", "success", "")
 	s.notifyUser(ctx, p, notify.ApplyOutcome{Owner: p.Owner, PermitLabel: permitLabel(p), Reg: "AVS619", OK: true}, "success|AVS619")
 	time.Sleep(60 * time.Millisecond)
@@ -290,7 +301,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
 	for i := 0; i < failNotifyThreshold-1; i++ {
-		s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+		s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 		time.Sleep(30 * time.Millisecond)
 	}
 	if n := len(fn.appliedSnap()); n != 0 {
@@ -300,15 +311,15 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 		t.Fatal("transient failure should still be recorded in the activity log")
 	}
 	// The threshold-th consecutive failure now alarms.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	out := fn.outcomeSnap()
 	if len(out) != 1 || out[0].OK || !out[0].Transient {
 		t.Fatalf("expected one transient failure notification, got %+v", out)
 	}
 	// A success resets the streak so the next blip gets a fresh grace period.
-	s.clearFailStreak(p.ID)
-	s.handleApplyFailure(ctx, p, "AVS619", "override", transientErr(), nil)
+	s.clearFailStreak(ctx, p.ID)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
 	time.Sleep(30 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 1 {
 		t.Fatalf("streak not reset after success; got %d notifications", n)
@@ -349,13 +360,13 @@ func TestFailureEscalatesWhenUserNotReached(t *testing.T) {
 	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
 
 	// A rejection alarms on the first tick.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.adminSnap()); n != 1 {
 		t.Fatalf("admin escalations = %d, want 1 (user not reached)", n)
 	}
 	// Not marked delivered → an identical repeat is RE-attempted, not suppressed.
-	s.handleApplyFailure(ctx, p, "AVS619", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 2 {
 		t.Fatalf("undelivered failure must be retried; NotifyApply calls = %d, want 2", n)
@@ -442,3 +453,42 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 		t.Fatalf("confirm did not reset the cycle: %+v", cs2)
 	}
 }
+
+func TestDisplacedGuest(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	s := New(st, &fakeCouncil{}, time.UTC, Options{})
+	const owner = "owner@example.com"
+	p := model.Permit{ID: 1, Owner: owner}
+	now := time.Now()
+	end := now.Add(2 * time.Hour)
+	reg := map[ownerVehicle]string{{owner, 5}: "MUM123"}
+
+	guestOvr := []model.Override{
+		{ID: 1, PermitID: 1, Registration: "GUEST99", StartsAt: now.Add(-time.Hour), EndsAt: &end, CreatedBy: "dad@example.com", CreatedAt: now.Add(-time.Hour)},
+	}
+	// The removed plate was the guest's live activation → that guest is notified.
+	if got := s.displacedGuest(ctx, p, guestOvr, reg, "GUEST99", now); got != "dad@example.com" {
+		t.Fatalf("displacedGuest = %q, want dad@example.com", got)
+	}
+	// A plate not set by any active override → nobody.
+	if got := s.displacedGuest(ctx, p, guestOvr, reg, "SOMETHINGELSE", now); got != "" {
+		t.Fatalf("no match should be empty, got %q", got)
+	}
+	// The account owner's own booking is not a "displaced guest".
+	ownOvr := []model.Override{
+		{ID: 2, PermitID: 1, Registration: "OWN123", StartsAt: now.Add(-time.Hour), EndsAt: &end, CreatedBy: owner, CreatedAt: now},
+	}
+	if got := s.displacedGuest(ctx, p, ownOvr, reg, "OWN123", now); got != "" {
+		t.Fatalf("member's own booking should not notify, got %q", got)
+	}
+	// An expired guest override is not "active", so no notification.
+	expired := []model.Override{
+		{ID: 3, PermitID: 1, Registration: "GUEST99", StartsAt: now.Add(-3 * time.Hour), EndsAt: ptr(now.Add(-time.Hour)), CreatedBy: "dad@example.com", CreatedAt: now.Add(-3 * time.Hour)},
+	}
+	if got := s.displacedGuest(ctx, p, expired, reg, "GUEST99", now); got != "" {
+		t.Fatalf("expired override should not notify, got %q", got)
+	}
+}
+
+func ptr(t time.Time) *time.Time { return &t }

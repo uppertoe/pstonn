@@ -20,6 +20,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
+// councilPortalURL is the council's self-service permit portal, linked in
+// failure and re-link notices so a user can set their permit's vehicle
+// themselves (and avoid a fine) when p.stonn can't.
+const councilPortalURL = "https://parkingpermits.stonnington.vic.gov.au/"
+
 // Service dispatches notifications according to each user's stored preferences.
 type Service struct {
 	store      *store.Store
@@ -87,10 +92,11 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	subject := "Action needed: reconnect your p.stonn council account"
 	body := "Your council connection has expired, so p.stonn has stopped updating your visitor permit.\n\n" +
 		"Please open the app and re-link your council account so your schedule keeps running. " +
-		"Until you do, check your permit manually to avoid a fine."
+		"Until you do, set your permit's vehicle directly with the council to avoid a fine."
 	if s.appURL != "" {
-		body += "\n\n" + s.appURL
+		body += "\n\nRe-link: " + s.appURL
 	}
+	body += "\nCouncil portal: " + councilPortalURL
 	delivered := 0
 	if s.mail.Enabled() { // re-link is important: always email the verified address
 		if e := s.mail.Send(owner, subject, body); e != nil {
@@ -132,12 +138,97 @@ type ApplyOutcome struct {
 	Owner       string
 	PermitLabel string
 	Reg         string // the vehicle we tried to set
-	Source      string // "roster" / "override" (success context)
+	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
+	By          string // who made the change, when it was a guest activation ("" otherwise)
+	Source      string // "roster" / "override" / "guest" (success context)
 	OK          bool
 	CurrentReg  string // what is still on the permit on failure ("" if unknown)
 	Reason      string // one plain sentence: why it failed
 	Action      string // one plain sentence: what the user should do
 	Transient   bool   // failure expected to self-heal → soften wording
+}
+
+// composeApply builds the subject/body/priority/tags for an apply notification,
+// shared by the inline NotifyApply (scheduler) and the durable EnqueueApply.
+func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
+	// "car" names the vehicle we set, by friendly name + plate where we have both.
+	car := o.Reg
+	if o.Name != "" {
+		car = fmt.Sprintf("%s (%s)", o.Name, o.Reg)
+	}
+	if o.OK {
+		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, car)
+		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, car, o.Source)
+		if o.By != "" {
+			body += fmt.Sprintf("\n\nActivated by %s using a guest link. This overrides your schedule until it ends, then your roster resumes.", o.By)
+		}
+	} else {
+		switch {
+		case o.CurrentReg != "" && o.Transient:
+			subject = fmt.Sprintf("Still updating your %s — it shows %s for now", o.PermitLabel, o.CurrentReg)
+		case o.CurrentReg != "":
+			subject = fmt.Sprintf("Action needed: your %s still shows %s", o.PermitLabel, o.CurrentReg)
+		case o.Transient:
+			subject = fmt.Sprintf("Still updating your %s", o.PermitLabel)
+		default:
+			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
+		}
+		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
+		if o.CurrentReg != "" {
+			lines = append(lines, fmt.Sprintf("Right now the permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
+		} else {
+			lines = append(lines, "The vehicle on the permit has not been changed.")
+		}
+		if o.Reason != "" {
+			lines = append(lines, "", o.Reason)
+		}
+		if o.Action != "" {
+			lines = append(lines, o.Action)
+		}
+		// A failure is a "sort it yourself" moment: link the council portal.
+		lines = append(lines, "", "You can set the vehicle on your permit directly with the council:", councilPortalURL)
+		body = strings.Join(lines, "\n")
+	}
+	priority, tags = "default", "white_check_mark"
+	if !o.OK {
+		tags = "warning"
+		if o.Transient {
+			priority = "default"
+		} else {
+			priority = "high"
+		}
+	}
+	return
+}
+
+// EnqueueApply durably queues an apply notification, for paths with no reconcile-
+// loop retry behind them (a guest activation): a failed send is retried by the
+// outbox instead of dropped. Honours the owner's channel + failures-only prefs,
+// and dedups so a repeated activation of the same plate doesn't double-notify.
+func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
+	pref, err := s.store.GetNotifyPref(ctx, o.Owner)
+	if err != nil {
+		return err
+	}
+	if o.OK && pref.FailuresOnly {
+		return nil
+	}
+	subject, body, priority, tags := composeApply(o)
+	if s.appURL != "" {
+		body += "\n\n" + s.appURL
+	}
+	m := outMessage{
+		Account: o.Owner,
+		Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
+		DedupKey: fmt.Sprintf("apply|%s|%s|%s|%t", o.Owner, o.PermitLabel, o.Reg, o.OK),
+	}
+	if pref.EmailEnabled && s.mail.Enabled() {
+		m.Recipients, _ = s.store.AccountEmails(ctx, o.Owner)
+	}
+	if pref.NtfyEnabled && s.ntfyBase != "" {
+		m.NtfyTopic = pref.NtfyTopic
+	}
+	return s.enqueue(ctx, m)
 }
 
 // NotifyApply tells the permit owner about an apply outcome, honouring their
@@ -153,41 +244,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if o.OK && pref.FailuresOnly {
 		return -1, nil
 	}
-
-	var subject, body string
-	if o.OK {
-		subject = fmt.Sprintf("Permit updated: %s is now %s", o.PermitLabel, o.Reg)
-		body = fmt.Sprintf("Your %s has been set to %s (%s).", o.PermitLabel, o.Reg, o.Source)
-	} else {
-		if o.Transient {
-			subject = fmt.Sprintf("Still updating your %s", o.PermitLabel)
-		} else {
-			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
-		}
-		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, o.Reg)}
-		if o.CurrentReg != "" {
-			lines = append(lines, fmt.Sprintf("Right now the permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
-		} else {
-			lines = append(lines, "The vehicle on the permit has not been changed.")
-		}
-		if o.Reason != "" {
-			lines = append(lines, "", o.Reason)
-		}
-		if o.Action != "" {
-			lines = append(lines, o.Action)
-		}
-		body = strings.Join(lines, "\n")
-	}
-
-	priority, tags := "default", "white_check_mark"
-	if !o.OK {
-		tags = "warning"
-		if o.Transient {
-			priority = "default"
-		} else {
-			priority = "high"
-		}
-	}
+	subject, body, priority, tags := composeApply(o)
 
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
@@ -306,6 +363,68 @@ func (s *Service) SendInvite(to, ownerEmail string) error {
 	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
 }
 
+// SendGuestLink emails a recipient their personal guest-pass link (email only,
+// no-op without SMTP). The link lets them set one of the account's cars on the
+// visitor permit without an account of their own.
+func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := "Your link to set a car on " + ownerEmail + "'s parking permit"
+	lines := []string{
+		ownerEmail + " has given you a link to put a car on their City of Stonnington visitor parking permit (" + permitLabel + ").",
+		"",
+		"When you arrive, open the link and choose your car. It stays on the permit until the end of the day.",
+		"",
+		url,
+		"",
+		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
+	}
+	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+}
+
+// NotifyGuestDisplaced tells a guest (who has no account, so email only) that
+// the car they put on a permit via their link has since been taken off it, so
+// they can move it or re-activate before getting caught out. No-op without SMTP.
+func (s *Service) NotifyGuestDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := fmt.Sprintf("Heads up: %s is no longer on the %s", oldReg, permitLabel)
+	lines := []string{
+		fmt.Sprintf("The car you put on the visitor permit (%s) has just been taken off it.", oldReg),
+		fmt.Sprintf("The permit now shows %s instead.", newReg),
+		"",
+		"If your car is still parked there, please move it or open your link again to put it back on, so you stay covered.",
+	}
+	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n")})
+}
+
+// NotifyGuestRequest tells the account (all members) that someone scanned a
+// printed QR and is asking to put a plate on the permit, so they can approve or
+// decline it in the app. Goes to every enabled channel.
+func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string) error {
+	subject := fmt.Sprintf("Approve %s on your %s?", plate, permitLabel)
+	lines := []string{
+		fmt.Sprintf("Someone at your door scanned your printed QR and is asking to put %s on your %s.", plate, permitLabel),
+		"",
+		"Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.",
+	}
+	if url != "" {
+		lines = append(lines, "", url)
+	}
+	m := outMessage{Account: owner, Subject: subject, Body: strings.Join(lines, "\n"), NtfyPriority: "high", NtfyTag: "bell"}
+	if s.mail.Enabled() {
+		m.Recipients, _ = s.store.AccountEmails(ctx, owner)
+	}
+	if s.ntfyBase != "" {
+		if pref, e := s.store.GetNotifyPref(ctx, owner); e == nil && pref.NtfyEnabled {
+			m.NtfyTopic = pref.NtfyTopic
+		}
+	}
+	return s.enqueue(ctx, m)
+}
+
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.ntfyBase+"/"+topic, strings.NewReader(body))
 	if err != nil {
@@ -354,4 +473,150 @@ func RandomTopic() string {
 		}
 	}
 	return sb.String()
+}
+
+// ---- durable notification outbox ----
+//
+// Enqueue composes and addresses a message, then a single worker (RunOutbox)
+// delivers it with retry/backoff, so a send survives a restart and a failed
+// attempt is retried instead of silently dropped.
+
+const (
+	outboxMaxAttempts = 8
+	outboxTick        = 15 * time.Second
+	outboxBatch       = 50
+)
+
+// outMessage is a composed, addressed notification ready to enqueue.
+type outMessage struct {
+	Account      string // owner the message concerns (so account deletion purges it)
+	DedupKey     string
+	Recipients   []string
+	NtfyTopic    string
+	NtfyPriority string
+	NtfyTag      string
+	Subject      string
+	Body         string
+}
+
+func (s *Service) enqueue(ctx context.Context, m outMessage) error {
+	return s.store.EnqueueOutbox(ctx, store.OutboxItem{
+		Account: m.Account, DedupKey: m.DedupKey, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
+		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
+	})
+}
+
+// RunOutbox drains the outbox until ctx is cancelled, retrying failed sends with
+// backoff and dead-lettering (with an operator alert) after too many tries. It
+// also periodically purges delivered rows. Start it once from main.
+func (s *Service) RunOutbox(ctx context.Context) {
+	t := time.NewTicker(outboxTick)
+	defer t.Stop()
+	purge := time.NewTicker(6 * time.Hour)
+	defer purge.Stop()
+	s.drainOutbox(ctx) // flush promptly on startup (a restart resumes pending sends)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.drainOutbox(ctx)
+		case <-purge.C:
+			if _, err := s.store.PurgeSentOutbox(ctx, time.Now().Add(-7*24*time.Hour)); err != nil {
+				log.Printf("notify: purge outbox: %v", err)
+			}
+		}
+	}
+}
+
+func (s *Service) drainOutbox(ctx context.Context) {
+	due, err := s.store.DueOutbox(ctx, time.Now(), outboxBatch)
+	if err != nil {
+		log.Printf("notify: read outbox: %v", err)
+		return
+	}
+	for _, it := range due {
+		if ctx.Err() != nil {
+			return
+		}
+		lastErr := s.deliver(ctx, it)
+		if lastErr == "" {
+			_ = s.store.MarkOutboxSent(ctx, it.ID)
+			continue
+		}
+		attempts := it.Attempts + 1
+		if attempts >= outboxMaxAttempts {
+			_ = s.store.MarkOutboxDead(ctx, it.ID, lastErr)
+			// Always log the drop (the DB 'dead' row is otherwise unsurfaced), and
+			// log if the escalation itself fails — it uses NotifyAdmin, which may
+			// share the very channel that's failing.
+			log.Printf("notify: DROPPED after %d attempts: %q to %v: %s", attempts, it.Subject, it.Recipients, lastErr)
+			if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
+				fmt.Sprintf("A notification could not be delivered after %d attempts and was dropped.\nSubject: %s\nTo: %s\nLast error: %s",
+					attempts, it.Subject, strings.Join(it.Recipients, ", "), lastErr)); ae != nil {
+				log.Printf("notify: dead-letter admin alert also failed: %v", ae)
+			}
+			continue
+		}
+		_ = s.store.RescheduleOutbox(ctx, it.ID, attempts, time.Now().Add(outboxBackoff(attempts)), lastErr)
+	}
+}
+
+// deliver attempts every channel and returns "" if at least one accepted (or there
+// was nothing addressable), else a joined error so the item is retried.
+func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
+	var errs []string
+	// Email is the reliable channel. When the message HAS email recipients, success
+	// requires at least one email to be accepted — an ntfy 200 (which the server
+	// returns even with no subscriber) must not mask a total email failure and
+	// silently drop the account's email. When there is no email, ntfy gates.
+	emailTargets, emailOK := 0, false
+	if s.mail.Enabled() {
+		for _, addr := range it.Recipients {
+			emailTargets++
+			if e := s.mail.Send(addr, it.Subject, it.Body); e != nil {
+				errs = append(errs, "email "+addr+": "+e.Error())
+			} else {
+				emailOK = true
+			}
+		}
+	}
+	ntfyTargets, ntfyOK := 0, false
+	if it.NtfyTopic != "" && s.ntfyBase != "" {
+		ntfyTargets++
+		pr := it.NtfyPriority
+		if pr == "" {
+			pr = "default"
+		}
+		if e := s.sendNtfy(ctx, it.NtfyTopic, it.Subject, it.Body, pr, it.NtfyTag); e != nil {
+			errs = append(errs, "ntfy: "+e.Error())
+		} else {
+			ntfyOK = true
+		}
+	}
+	switch {
+	case emailTargets > 0:
+		if emailOK {
+			return "" // reached via the reliable channel (ntfy is a bonus on top)
+		}
+	case ntfyTargets > 0:
+		if ntfyOK {
+			return "" // no email configured; ntfy was all we had and it worked
+		}
+	default:
+		return "" // nothing addressable (all channels off) — nothing to retry
+	}
+	return strings.Join(errs, "; ")
+}
+
+// outboxBackoff spaces retries: ~1m, 3m, 9m, 27m, ... capped at 3h.
+func outboxBackoff(attempts int) time.Duration {
+	d := time.Minute
+	for i := 1; i < attempts; i++ {
+		d *= 3
+		if d > 3*time.Hour {
+			return 3 * time.Hour
+		}
+	}
+	return d
 }

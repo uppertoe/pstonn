@@ -125,12 +125,23 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	if p.Label != "Alice permit" {
 		t.Fatalf("label overwritten to %q by non-owner upsert", p.Label)
 	}
-	// The real owner can still update their own permit.
-	if _, err := s.UpsertPermit(ctx, alice, "14576", "14", "Alice renamed"); err != nil {
+	// Re-adding the permit no longer clobbers the label, so a name the owner chose
+	// survives a re-add through the picker.
+	if _, err := s.UpsertPermit(ctx, alice, "14576", "14", "ignored on re-add"); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := s.PermitByCouncilID(ctx, "14576"); p.Label != "Alice renamed" {
-		t.Fatalf("owner update did not apply: %+v", p)
+	if p, _ := s.PermitByCouncilID(ctx, "14576"); p.Label != "Alice permit" {
+		t.Fatalf("re-add should keep the existing label, got %q", p.Label)
+	}
+	// Renaming goes through SetPermitLabel, and only the owner may do it.
+	if err := s.SetPermitLabel(ctx, bob, p.ID, "Bob rename"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-owner rename = %v, want ErrNotFound", err)
+	}
+	if err := s.SetPermitLabel(ctx, alice, p.ID, "Nanny"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.PermitByCouncilID(ctx, "14576"); got.Label != "Nanny" {
+		t.Fatalf("SetPermitLabel did not apply: %+v", got)
 	}
 }
 
@@ -447,6 +458,10 @@ func TestDeleteAllForOwner(t *testing.T) {
 		if err := s.RecordApply(ctx, pid, "REG", "roster", "success", ""); err != nil {
 			t.Fatal(err)
 		}
+		// A queued notification about this account (carries their email + plate).
+		if err := s.EnqueueOutbox(ctx, OutboxItem{Account: owner, DedupKey: "d-" + owner, Recipients: []string{owner}, Subject: "S", Body: "B"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := s.DeleteAllForOwner(ctx, alice); err != nil {
@@ -466,6 +481,10 @@ func TestDeleteAllForOwner(t *testing.T) {
 	if l, _ := s.ListApplyLogFor(ctx, alice, 10); len(l) != 0 {
 		t.Fatalf("alice apply-log survived: %+v", l)
 	}
+	// Alice's queued notification (email + plate) must not survive deletion.
+	if due, _ := s.DueOutbox(ctx, time.Now(), 10); len(due) != 1 || due[0].DedupKey != "d-"+bob {
+		t.Fatalf("outbox after delete = %+v, want only bob's row", due)
+	}
 	// Bob is untouched.
 	if _, err := s.GetCouncilSession(ctx, bob); err != nil {
 		t.Fatalf("bob session removed: %v", err)
@@ -475,5 +494,551 @@ func TestDeleteAllForOwner(t *testing.T) {
 	}
 	if l, _ := s.ListApplyLogFor(ctx, bob, 10); len(l) != 1 {
 		t.Fatalf("bob apply-log = %+v, want 1", l)
+	}
+}
+
+func TestDeletePermit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const alice, bob = "alice@example.com", "bob@example.com"
+
+	veh, err := s.CreateVehicle(ctx, alice, "AAA111", "car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := s.UpsertPermit(ctx, alice, "14576", "14", "Alice permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRule(ctx, pid, time.Monday, veh); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(time.Hour)
+	if _, err := s.CreateOverride(ctx, pid, veh, time.Now(), &end, alice); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordApply(ctx, pid, "AAA111", "roster", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// A different account cannot delete this permit, and it must survive intact.
+	if err := s.DeletePermit(ctx, pid, bob); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob deleting alice's permit = %v, want ErrNotFound", err)
+	}
+	if ps, _ := s.ListPermitsFor(ctx, alice); len(ps) != 1 {
+		t.Fatalf("permit should survive a foreign delete, got %d", len(ps))
+	}
+
+	// The owner removes it: permit gone, schedule cascaded, history cleared.
+	if err := s.DeletePermit(ctx, pid, alice); err != nil {
+		t.Fatalf("alice delete: %v", err)
+	}
+	if ps, _ := s.ListPermitsFor(ctx, alice); len(ps) != 0 {
+		t.Fatalf("permit not removed, got %d", len(ps))
+	}
+	if rs, _ := s.ListRules(ctx, pid); len(rs) != 0 {
+		t.Errorf("weekly rules not cascaded, got %d", len(rs))
+	}
+	if ovs, _ := s.ListOverrides(ctx, pid, time.Now()); len(ovs) != 0 {
+		t.Errorf("overrides not cascaded, got %d", len(ovs))
+	}
+
+	// Deleting again is a clean not-found; the vehicle is untouched.
+	if err := s.DeletePermit(ctx, pid, alice); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second delete = %v, want ErrNotFound", err)
+	}
+	if vs, _ := s.ListVehiclesFor(ctx, alice); len(vs) != 1 {
+		t.Errorf("vehicle should survive permit removal, got %d", len(vs))
+	}
+}
+
+func TestGuestPasses(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const alice, bob = "alice@example.com", "bob@example.com"
+
+	aV1, _ := s.CreateVehicle(ctx, alice, "AAA111", "Mum")
+	aV2, _ := s.CreateVehicle(ctx, alice, "AAA222", "Dad")
+	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob")
+	aPermit, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
+	bPermit, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// A foreign permit is rejected.
+	if _, err := s.CreateGuestGrant(ctx, alice, bPermit, "x", false, []int64{aV1}, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
+	}
+	// A foreign car is rejected.
+	if _, err := s.CreateGuestGrant(ctx, alice, aPermit, "x", false, []int64{bV}, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign vehicle = %v, want ErrNotFound", err)
+	}
+
+	recips := []GuestRecipient{{Email: "dad@example.com", TokenHash: "hashD"}, {Email: "mum@example.com", TokenHash: "hashM"}}
+	grantID, err := s.CreateGuestGrant(ctx, alice, aPermit, "Friday", true, []int64{aV1, aV2}, recips)
+	if err != nil {
+		t.Fatalf("create grant: %v", err)
+	}
+
+	// A live token resolves to the grant, recipient, and allowed cars.
+	gc, err := s.GuestContextByTokenHash(ctx, "hashD")
+	if err != nil {
+		t.Fatalf("resolve token: %v", err)
+	}
+	if gc.Grant.Owner != alice || gc.Grant.PermitID != aPermit || gc.Recipient != "dad@example.com" ||
+		!gc.Grant.AllowOvernight || len(gc.Vehicles) != 2 {
+		t.Fatalf("unexpected context: %+v", gc)
+	}
+	// An unknown token is not found.
+	if _, err := s.GuestContextByTokenHash(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown token = %v, want ErrNotFound", err)
+	}
+
+	// The kill-switch disables every link; re-enabling restores them.
+	if err := s.SetGuestsEnabled(ctx, alice, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hashD"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("kill-switch: token still resolves")
+	}
+	if on, _ := s.GuestsEnabled(ctx, alice); on {
+		t.Fatal("GuestsEnabled should be false")
+	}
+	if err := s.SetGuestsEnabled(ctx, alice, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hashD"); err != nil {
+		t.Fatalf("re-enabled token: %v", err)
+	}
+
+	// Find dad's token id via the management listing.
+	details, err := s.ListGuestGrants(ctx, alice)
+	if err != nil || len(details) != 1 || len(details[0].Tokens) != 2 || len(details[0].Vehicles) != 2 {
+		t.Fatalf("list grants: %+v err=%v", details, err)
+	}
+	var dadTok int64
+	for _, tk := range details[0].Tokens {
+		if tk.RecipientEmail == "dad@example.com" {
+			dadTok = tk.ID
+		}
+	}
+
+	// A foreign owner cannot revoke; the real owner can.
+	if err := s.RevokeGuestToken(ctx, bob, dadTok); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign revoke = %v, want ErrNotFound", err)
+	}
+	if err := s.RevokeGuestToken(ctx, alice, dadTok); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hashD"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("revoked token still resolves")
+	}
+	// Mum's token still works.
+	if _, err := s.GuestContextByTokenHash(ctx, "hashM"); err != nil {
+		t.Fatalf("mum's token: %v", err)
+	}
+
+	// Deleting the grant (owner-scoped) removes it and its tokens.
+	if err := s.DeleteGuestGrant(ctx, bob, grantID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign delete = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteGuestGrant(ctx, alice, grantID); err != nil {
+		t.Fatalf("delete grant: %v", err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hashM"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("token survives grant deletion")
+	}
+	if ds, _ := s.ListGuestGrants(ctx, alice); len(ds) != 0 {
+		t.Fatalf("grant not deleted: %+v", ds)
+	}
+}
+
+func TestGuestGrantEdit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const alice, bob = "alice@example.com", "bob@example.com"
+
+	v1, _ := s.CreateVehicle(ctx, alice, "AAA111", "Mum")
+	v2, _ := s.CreateVehicle(ctx, alice, "AAA222", "Dad")
+	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob")
+	p, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
+
+	gid, err := s.CreateGuestGrant(ctx, alice, p, "Friday", false, []int64{v1}, []GuestRecipient{{Email: "mum@example.com", TokenHash: "h1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Update: relabel, allow overnight, swap the car set to {v1, v2}.
+	if err := s.UpdateGuestGrant(ctx, alice, gid, "Weekend", true, []int64{v1, v2}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	// A foreign owner cannot update; a foreign car is rejected.
+	if err := s.UpdateGuestGrant(ctx, bob, gid, "x", false, []int64{v1}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign update = %v, want ErrNotFound", err)
+	}
+	if err := s.UpdateGuestGrant(ctx, alice, gid, "x", false, []int64{bV}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign car update = %v, want ErrNotFound", err)
+	}
+
+	details, _ := s.ListGuestGrants(ctx, alice)
+	if len(details) != 1 || details[0].Grant.Label != "Weekend" || !details[0].Grant.AllowOvernight || len(details[0].Vehicles) != 2 {
+		t.Fatalf("after update: %+v", details[0].Grant)
+	}
+
+	// AddGuestTokens: a new recipient is added; an existing live one is skipped.
+	added, err := s.AddGuestTokens(ctx, alice, gid, []GuestRecipient{
+		{Email: "dad@example.com", TokenHash: "h2"}, {Email: "mum@example.com", TokenHash: "hdup"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 || added[0] != "dad@example.com" {
+		t.Fatalf("added = %v, want just dad", added)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "h2"); err != nil {
+		t.Fatalf("new token h2: %v", err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hdup"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("duplicate recipient should not have been added")
+	}
+	// Foreign owner cannot add tokens.
+	if _, err := s.AddGuestTokens(ctx, bob, gid, []GuestRecipient{{Email: "x@example.com", TokenHash: "h9"}}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign add = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPlateOverride(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "u@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Saved car")
+	now := time.Now()
+	end := now.Add(2 * time.Hour)
+
+	// An ad-hoc plate override: no vehicle, literal registration.
+	if _, err := s.CreatePlateOverride(ctx, p, "VISITOR1", now, &end, owner); err != nil {
+		t.Fatalf("plate override: %v", err)
+	}
+	// A saved-vehicle override for comparison.
+	if _, err := s.CreateOverride(ctx, p, v, now, &end, owner); err != nil {
+		t.Fatalf("vehicle override: %v", err)
+	}
+
+	ovs, err := s.ListOverrides(ctx, p, now)
+	if err != nil || len(ovs) != 2 {
+		t.Fatalf("list: %v (%d)", err, len(ovs))
+	}
+	var gotPlate, gotVehicle bool
+	for _, o := range ovs {
+		if o.Registration == "VISITOR1" && o.VehicleID == 0 {
+			gotPlate = true
+		}
+		if o.VehicleID == v && o.Registration == "" {
+			gotVehicle = true
+		}
+	}
+	if !gotPlate {
+		t.Error("ad-hoc plate override not read back with registration + null vehicle")
+	}
+	if !gotVehicle {
+		t.Error("saved-vehicle override should have a vehicle id and empty registration")
+	}
+}
+
+func TestQRGrant(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner, bob = "u@example.com", "bob@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// A foreign permit is rejected.
+	if _, err := s.CreateQRGrant(ctx, owner, bp, "x", time.Hour); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
+	}
+
+	// A valid QR grant resolves with plate entry allowed and no cars.
+	if _, err := s.CreateQRGrant(ctx, owner, p, "qrhash", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	gc, err := s.GuestContextByTokenHash(ctx, "qrhash")
+	if err != nil {
+		t.Fatalf("resolve QR token: %v", err)
+	}
+	if !gc.Grant.AllowPlate || len(gc.Vehicles) != 0 || gc.Grant.Owner != owner {
+		t.Fatalf("QR context: %+v", gc)
+	}
+
+	// It is hidden from the management list.
+	if ds, _ := s.ListGuestGrants(ctx, owner); len(ds) != 0 {
+		t.Fatalf("QR grant should be hidden from the pass list, got %d", len(ds))
+	}
+
+	// An expired token is treated as not-found.
+	if _, err := s.CreateQRGrant(ctx, owner, p, "expiredhash", -time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "expiredhash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired QR token = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPrintedRequestFlow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner, bob = "u@example.com", "bob@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// A foreign permit can't back a printed grant.
+	if _, err := s.CreatePrintedGrant(ctx, owner, bp, "x", "xsealed"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
+	}
+
+	// The printed grant is request-only, allows free plate entry, and stays hidden
+	// from the management list (like the on-screen QR).
+	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "printhash", "sealed1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gc, err := s.GuestContextByTokenHash(ctx, "printhash")
+	if err != nil {
+		t.Fatalf("resolve printed token: %v", err)
+	}
+	if !gc.Grant.AllowPlate || !gc.Grant.RequestOnly || gc.Grant.Owner != owner {
+		t.Fatalf("printed context: %+v", gc)
+	}
+	if ds, _ := s.ListGuestGrants(ctx, owner); len(ds) != 0 {
+		t.Fatalf("printed grant should be hidden from the pass list, got %d", len(ds))
+	}
+
+	// Showing a printed QR again replaces the prior grant for that permit (and, by
+	// cascade, any requests against it), so the old token stops resolving.
+	grantID, err = s.CreatePrintedGrant(ctx, owner, p, "printhash2", "sealed2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "printhash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("replaced printed token still resolves = %v, want ErrNotFound", err)
+	}
+
+	// A scan records a pending request the visitor can poll only with its nonce.
+	reqID, _, created, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "secretnonce")
+	if err != nil || !created {
+		t.Fatalf("create request: created=%v err=%v", created, err)
+	}
+	// A second scan of the SAME plate reuses the pending request (no duplicate).
+	if id2, n2, created2, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "othernonce"); err != nil || created2 || id2 != reqID || n2 != "secretnonce" {
+		t.Fatalf("re-scan should reuse pending request: id=%d nonce=%q created=%v err=%v", id2, n2, created2, err)
+	}
+	if _, err := s.GuestRequestForPoll(ctx, reqID, "wrongnonce"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("poll with wrong nonce = %v, want ErrNotFound", err)
+	}
+	if r, err := s.GuestRequestForPoll(ctx, reqID, "secretnonce"); err != nil || r.Status != "pending" {
+		t.Fatalf("poll with nonce = %+v, %v", r, err)
+	}
+
+	// It appears in the owner's approvals queue, but not another owner's.
+	if reqs, _ := s.ListPendingRequests(ctx, owner); len(reqs) != 1 || reqs[0].Plate != "TRADIE1" {
+		t.Fatalf("owner queue = %+v", reqs)
+	}
+	if reqs, _ := s.ListPendingRequests(ctx, bob); len(reqs) != 0 {
+		t.Fatalf("foreign owner should see no requests, got %d", len(reqs))
+	}
+
+	// Another owner can't decide it; the real owner can approve once.
+	if _, err := s.DecideGuestRequest(ctx, bob, reqID, true, "2026-07-21T00:00:00Z"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign decide = %v, want ErrNotFound", err)
+	}
+	dec, err := s.DecideGuestRequest(ctx, owner, reqID, true, "2026-07-21T00:00:00Z")
+	if err != nil || dec.Status != "approved" || dec.Until != "2026-07-21T00:00:00Z" {
+		t.Fatalf("approve = %+v, %v", dec, err)
+	}
+	// Deciding again is a no-op (no longer pending) and drops out of the queue.
+	if _, err := s.DecideGuestRequest(ctx, owner, reqID, true, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("re-decide = %v, want ErrNotFound", err)
+	}
+	if reqs, _ := s.ListPendingRequests(ctx, owner); len(reqs) != 0 {
+		t.Fatalf("decided request should leave the queue, got %d", len(reqs))
+	}
+}
+
+func TestPrintedGrantPersistence(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner, bob = "u@example.com", "bob@example.com"
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "1st Visitor Permit")
+	s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
+
+	// No door QR yet.
+	if _, err := s.PrintedGrantForPermit(ctx, owner, p); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no grant yet = %v, want ErrNotFound", err)
+	}
+	if ds, _ := s.ListPrintedGrants(ctx, owner); len(ds) != 0 {
+		t.Fatalf("empty list expected, got %d", len(ds))
+	}
+
+	// Mint one; it's findable by permit and by id, carries the sealed token + label.
+	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "hashA", "sealedA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPermit, err := s.PrintedGrantForPermit(ctx, owner, p)
+	if err != nil || byPermit.GrantID != grantID || byPermit.TokenSealed != "sealedA" || byPermit.PermitLabel != "1st Visitor Permit" {
+		t.Fatalf("byPermit = %+v, %v", byPermit, err)
+	}
+	byID, err := s.PrintedGrantByID(ctx, owner, grantID)
+	if err != nil || byID.TokenSealed != "sealedA" {
+		t.Fatalf("byID = %+v, %v", byID, err)
+	}
+
+	// Another owner can neither see nor open it.
+	if _, err := s.PrintedGrantByID(ctx, bob, grantID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign byID = %v, want ErrNotFound", err)
+	}
+	if ds, _ := s.ListPrintedGrants(ctx, bob); len(ds) != 0 {
+		t.Fatalf("foreign list should be empty, got %d", len(ds))
+	}
+
+	// Replace rotates the sealed token but keeps one grant per permit.
+	newID, err := s.CreatePrintedGrant(ctx, owner, p, "hashB", "sealedB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newID == grantID {
+		t.Fatal("replace should mint a new grant id")
+	}
+	if _, err := s.PrintedGrantByID(ctx, owner, grantID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old grant should be gone = %v", err)
+	}
+	again, _ := s.PrintedGrantForPermit(ctx, owner, p)
+	if again.TokenSealed != "sealedB" {
+		t.Fatalf("after replace sealed = %q, want sealedB", again.TokenSealed)
+	}
+	if ds, _ := s.ListPrintedGrants(ctx, owner); len(ds) != 1 {
+		t.Fatalf("still one door QR per permit, got %d", len(ds))
+	}
+
+	// Revoke retires it; a second revoke is ErrNotFound.
+	if err := s.RevokePrintedGrant(ctx, owner, newID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if err := s.RevokePrintedGrant(ctx, owner, newID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("double revoke = %v, want ErrNotFound", err)
+	}
+	if _, err := s.PrintedGrantForPermit(ctx, owner, p); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after revoke = %v, want ErrNotFound", err)
+	}
+}
+
+func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const alice, bob = "alice@example.com", "bob@example.com"
+
+	// Two consented accounts; bob also has an ntfy topic.
+	if err := s.RecordConsent(ctx, alice, "v1", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordConsent(ctx, bob, "v1", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetNotifyPref(ctx, NotifyPref{Owner: bob, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "bob-topic"}); err != nil {
+		t.Fatal(err)
+	}
+	// Give alice something to cascade so deletion touches more than consent.
+	p, _ := s.UpsertPermit(ctx, alice, "P-alice", "14", "Alice permit")
+	if _, err := s.CreatePrintedGrant(ctx, alice, p, "ahash", "asealed"); err != nil {
+		t.Fatal(err)
+	}
+
+	inRoster := func(email string) (RosterEntry, bool) {
+		roster, err := s.NotifyRoster(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range roster {
+			if e.Email == email {
+				return e, true
+			}
+		}
+		return RosterEntry{}, false
+	}
+
+	if e, ok := inRoster(bob); !ok || e.Ntfy != "bob-topic" {
+		t.Fatalf("bob should be in the roster with his ntfy topic, got %+v ok=%v", e, ok)
+	}
+	if _, ok := inRoster(alice); !ok {
+		t.Fatal("alice should be in the roster before deletion")
+	}
+
+	// Deleting alice's account must drop her from the outage-notify roster.
+	if err := s.DeleteAllForOwner(ctx, alice); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := inRoster(alice); ok {
+		t.Fatal("deleted account must not remain in the notify roster")
+	}
+	if _, ok := inRoster(bob); !ok {
+		t.Fatal("bob should still be in the roster")
+	}
+	// Her guest grant (and token) must be gone too, so a leaked token can't resolve.
+	if _, err := s.GuestContextByTokenHash(ctx, "ahash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted account's guest token still resolves = %v, want ErrNotFound", err)
+	}
+}
+
+func TestOutbox(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.EnqueueOutbox(ctx, OutboxItem{Recipients: []string{"a@x.co"}, Subject: "S1", Body: "B1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "k1", NtfyTopic: "topic", Subject: "S2", Body: "B2"}); err != nil {
+		t.Fatal(err)
+	}
+	// Idempotency: a second enqueue with the same dedup key is a no-op.
+	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "k1", Subject: "dup", Body: "dup"}); err != nil {
+		t.Fatal(err)
+	}
+
+	due, err := s.DueOutbox(ctx, time.Now(), 10)
+	if err != nil || len(due) != 2 {
+		t.Fatalf("due = %d (%v), want 2 (dedup dropped the third)", len(due), err)
+	}
+	// Recipients round-trip through the newline encoding.
+	s1 := due[0]
+	if s1.Subject != "S1" || len(s1.Recipients) != 1 || s1.Recipients[0] != "a@x.co" {
+		t.Fatalf("recipients round-trip: %+v", s1)
+	}
+
+	// Reschedule S1 into the future → not due now, due later.
+	if err := s.RescheduleOutbox(ctx, s1.ID, 1, time.Now().Add(time.Hour), "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now(), 10); len(d) != 1 {
+		t.Fatalf("after reschedule, due now = %d, want 1", len(d))
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now().Add(2*time.Hour), 10); len(d) != 2 {
+		t.Fatalf("after reschedule, due in 2h = %d, want 2", len(d))
+	}
+
+	// Sent and dead both drop out of the due set (survives restart: it's all in SQLite).
+	if err := s.MarkOutboxSent(ctx, s1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkOutboxDead(ctx, due[1].ID, "gave up"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.DueOutbox(ctx, time.Now().Add(2*time.Hour), 10); len(d) != 0 {
+		t.Fatalf("after sent+dead, due = %d, want 0", len(d))
+	}
+
+	// Purge removes both the delivered row and the dead one (PII hygiene): a
+	// dead-lettered message still carries recipient email + plate, so it must not
+	// linger indefinitely.
+	n, err := s.PurgeSentOutbox(ctx, time.Now().Add(24*time.Hour))
+	if err != nil || n != 2 {
+		t.Fatalf("purge = %d (%v), want 2 (sent + dead)", n, err)
 	}
 }

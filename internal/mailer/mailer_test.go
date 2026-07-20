@@ -1,6 +1,7 @@
 package mailer
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,19 @@ func TestNewDisabledWhenUnset(t *testing.T) {
 	}
 	if err := nilM.SendRenewalReminder("a@b", time.Time{}, "url"); err != nil {
 		t.Fatalf("nil mailer send should be a no-op: %v", err)
+	}
+}
+
+func TestHeaderValueStripsCRLF(t *testing.T) {
+	// A CR/LF in a header value (e.g. a permit name flowing into Subject) must not
+	// be able to inject additional headers or body — SMTP header injection.
+	// Each CR and LF becomes a space; the invariant that matters is simply that no
+	// CR or LF survives in the output.
+	for _, in := range []string{"Nanny", "Nanny\r\nBcc: attacker@x.co", "a\nb", "a\rb", "line1\r\n\r\nInjected body"} {
+		got := headerValue(in)
+		if strings.ContainsAny(got, "\r\n") {
+			t.Errorf("headerValue(%q) = %q still contains CR/LF", in, got)
+		}
 	}
 }
 

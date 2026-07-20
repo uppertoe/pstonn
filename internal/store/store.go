@@ -19,6 +19,9 @@ import (
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("not found")
 
+// ErrDuplicate is returned when an insert violates a uniqueness constraint.
+var ErrDuplicate = errors.New("already exists")
+
 // Store wraps the database handle.
 type Store struct {
 	db *sql.DB
@@ -54,7 +57,12 @@ type ApplyRecord struct {
 
 // OpenSQLite opens (creating if needed) the database and runs migrations.
 func OpenSQLite(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// Pin foreign_keys ON in the DSN, not just as a post-open PRAGMA: the pragma is
+	// per-connection and defaults OFF, so if database/sql ever replaces the pooled
+	// connection the ON-DELETE-CASCADE cleanups (guest tokens, rules, overrides on
+	// account/permit deletion) would silently stop firing. The DSN applies it to
+	// every connection modernc opens.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -123,13 +131,14 @@ CREATE TABLE IF NOT EXISTS weekly_rule (
 );
 
 CREATE TABLE IF NOT EXISTS override (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    permit_id  INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
-    vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
-    starts_at  TEXT NOT NULL,             -- RFC3339 UTC
-    ends_at    TEXT,                      -- RFC3339 UTC, NULL = open-ended
-    created_by TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id    INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    vehicle_id   INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,  -- NULL for an ad-hoc plate
+    registration TEXT NOT NULL DEFAULT '',   -- literal plate used when vehicle_id IS NULL (not a saved car)
+    starts_at    TEXT NOT NULL,              -- RFC3339 UTC
+    ends_at      TEXT,                       -- RFC3339 UTC, NULL = open-ended
+    created_by   TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id);
 
@@ -190,6 +199,88 @@ CREATE TABLE IF NOT EXISTS oauth_state (
     kind       TEXT NOT NULL DEFAULT '',   -- "app" (the OIDC provider login) | "council" (permit link)
     created_at TEXT NOT NULL
 );
+
+-- Guest passes: a link that lets a non-account person put one of a permitted set
+-- of the account's registered cars onto a permit, for the day (or overnight).
+CREATE TABLE IF NOT EXISTS guest_grant (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner           TEXT NOT NULL,             -- account (primary owner) that created it
+    permit_id       INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    label           TEXT NOT NULL DEFAULT '',
+    allow_overnight INTEGER NOT NULL DEFAULT 0,
+    allow_plate     INTEGER NOT NULL DEFAULT 0,  -- visitor may type an arbitrary plate
+    on_screen       INTEGER NOT NULL DEFAULT 0,  -- ephemeral QR grant (hidden from the pass list)
+    request_only    INTEGER NOT NULL DEFAULT 0,  -- printed QR: scanning only REQUESTS; holder must approve
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_guest_grant_owner ON guest_grant(owner);
+
+-- The cars a grant is allowed to activate (all belong to the grant's owner).
+CREATE TABLE IF NOT EXISTS guest_grant_vehicle (
+    grant_id   INTEGER NOT NULL REFERENCES guest_grant(id) ON DELETE CASCADE,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
+    PRIMARY KEY (grant_id, vehicle_id)
+);
+
+-- One row per recipient of a grant: the emailed link carries a random token, and
+-- only its sha256 hash is stored here (the raw token is never persisted).
+CREATE TABLE IF NOT EXISTS guest_token (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    grant_id        INTEGER NOT NULL REFERENCES guest_grant(id) ON DELETE CASCADE,
+    recipient_email TEXT NOT NULL DEFAULT '',
+    token_hash      TEXT NOT NULL UNIQUE,
+    token_sealed    TEXT NOT NULL DEFAULT '',   -- printed door QR only: the raw token, encrypted at rest, so the SAME code can be reprinted (inert artifact; a scan can only request approval)
+    revoked_at      TEXT NOT NULL DEFAULT '',
+    last_used_at    TEXT NOT NULL DEFAULT '',
+    expires_at      TEXT NOT NULL DEFAULT '',   -- RFC3339 UTC; '' = never (persistent email link)
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_guest_token_grant ON guest_token(grant_id);
+
+-- A visitor's request to use a printed-QR permit: created inert on scan, it does
+-- nothing until the account holder approves it live (the security boundary).
+CREATE TABLE IF NOT EXISTS guest_request (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    grant_id     INTEGER NOT NULL REFERENCES guest_grant(id) ON DELETE CASCADE,
+    owner        TEXT NOT NULL,             -- account owner (scopes approvals)
+    permit_id    INTEGER NOT NULL,
+    plate        TEXT NOT NULL,
+    nonce        TEXT NOT NULL DEFAULT '',  -- per-request secret so the visitor can poll status without enumeration
+    status       TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
+    requested_at TEXT NOT NULL,
+    decided_at   TEXT NOT NULL DEFAULT '',
+    until_at     TEXT NOT NULL DEFAULT ''   -- human when-it-ends, set on approval
+);
+CREATE INDEX IF NOT EXISTS idx_guest_request_owner ON guest_request(owner, status);
+
+-- Per-account flags. guests_enabled is the global kill-switch for guest passes.
+CREATE TABLE IF NOT EXISTS account_flags (
+    owner          TEXT PRIMARY KEY,
+    guests_enabled INTEGER NOT NULL DEFAULT 1
+);
+
+-- Durable notification outbox: a message is enqueued (composed + addressed) and a
+-- worker delivers it with retry/backoff, so a send survives a restart and a failed
+-- attempt is retried instead of dropped. Rows are purged after delivery.
+CREATE TABLE IF NOT EXISTS outbox (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account       TEXT NOT NULL DEFAULT '',        -- owner the message concerns, so account deletion can purge it
+    dedup_key     TEXT NOT NULL DEFAULT '',        -- idempotency; skip if a live/sent row shares a non-empty key
+    recipients    TEXT NOT NULL DEFAULT '',        -- newline-separated email addresses
+    ntfy_topic    TEXT NOT NULL DEFAULT '',
+    ntfy_priority TEXT NOT NULL DEFAULT '',
+    ntfy_tag      TEXT NOT NULL DEFAULT '',
+    subject       TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending', -- pending | sent | dead
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    next_attempt  TEXT NOT NULL,                   -- RFC3339 UTC; earliest next try
+    last_error    TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    sent_at       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -201,6 +292,14 @@ CREATE TABLE IF NOT EXISTS oauth_state (
 		`ALTER TABLE council_session ADD COLUMN linked_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN reminder_sent_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN confirm_token TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_grant ADD COLUMN request_only INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_token ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_token ADD COLUMN token_sealed TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE outbox ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
@@ -212,7 +311,73 @@ CREATE TABLE IF NOT EXISTS oauth_state (
 		`UPDATE council_session SET linked_at = updated_at WHERE linked_at = '' AND updated_at != ''`); err != nil {
 		return err
 	}
+	// Rebuild `override` if it predates the ad-hoc-plate columns: SQLite cannot
+	// relax vehicle_id's NOT NULL/foreign key in place, so redefine the table and
+	// copy the rows. Nothing references override, so this is safe; foreign keys are
+	// toggled off around it per the SQLite table-redefinition guidance.
+	if has, err := s.columnExists("override", "registration"); err != nil {
+		return err
+	} else if !has {
+		if err := s.rebuildOverrideTable(); err != nil {
+			return fmt.Errorf("migrate override table: %w", err)
+		}
+	}
 	return nil
+}
+
+// columnExists reports whether table has a column named col.
+func (s *Store) columnExists(table, col string) (bool, error) {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == col {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// rebuildOverrideTable redefines override with a nullable vehicle_id and a
+// registration column, preserving existing rows.
+func (s *Store) rebuildOverrideTable() error {
+	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys=ON`)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`CREATE TABLE override_new (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id    INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    vehicle_id   INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,
+    registration TEXT NOT NULL DEFAULT '',
+    starts_at    TEXT NOT NULL,
+    ends_at      TEXT,
+    created_by   TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+)`,
+		`INSERT INTO override_new (id, permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
+    SELECT id, permit_id, vehicle_id, '', starts_at, ends_at, created_by, created_at FROM override`,
+		`DROP TABLE override`,
+		`ALTER TABLE override_new RENAME TO override`,
+		`CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
@@ -222,7 +387,7 @@ func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 // ListVehicles returns every vehicle across all owners (used by the scheduler to
 // map vehicle IDs to registrations for permits it reconciles).
 func (s *Store) ListVehicles(ctx context.Context) ([]model.Vehicle, error) {
-	return s.queryVehicles(ctx, `SELECT id, registration, label FROM vehicle ORDER BY label, registration`)
+	return s.queryVehicles(ctx, `SELECT id, registration, label, email FROM vehicle ORDER BY label, registration`)
 }
 
 // VehicleRef is a vehicle plus its owner, used by the scheduler to resolve a
@@ -232,12 +397,13 @@ type VehicleRef struct {
 	ID           int64
 	Owner        string
 	Registration string
+	Label        string
 }
 
 // ListVehicleRefs returns every vehicle with its owner, for owner-scoped
 // resolution in the scheduler.
 func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration FROM vehicle`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label FROM vehicle`)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +411,7 @@ func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
 	var out []VehicleRef
 	for rows.Next() {
 		var v VehicleRef
-		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration); err != nil {
+		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -265,7 +431,7 @@ func (s *Store) VehicleOwnedBy(ctx context.Context, owner string, id int64) (boo
 // ListVehiclesFor returns the vehicles owned by one app user.
 func (s *Store) ListVehiclesFor(ctx context.Context, owner string) ([]model.Vehicle, error) {
 	return s.queryVehicles(ctx,
-		`SELECT id, registration, label FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
+		`SELECT id, registration, label, email FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
 }
 
 func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([]model.Vehicle, error) {
@@ -277,7 +443,7 @@ func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([
 	var out []model.Vehicle
 	for rows.Next() {
 		var v model.Vehicle
-		if err := rows.Scan(&v.ID, &v.Registration, &v.Label); err != nil {
+		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -290,9 +456,26 @@ func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label st
 		`INSERT INTO vehicle (owner, registration, label, created_at) VALUES (?, ?, ?, ?)`,
 		owner, registration, label, nowUTC())
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			return 0, ErrDuplicate
+		}
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// SetVehicleEmail sets (or clears) the optional driver email on a vehicle,
+// scoped to its owner.
+func (s *Store) SetVehicleEmail(ctx context.Context, owner string, id int64, email string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE vehicle SET email = ? WHERE id = ? AND owner = ?`, email, id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteVehicle removes a vehicle, scoped to its owner (so one user cannot delete
@@ -359,19 +542,19 @@ func (s *Store) PermitByCouncilID(ctx context.Context, councilPermitID string) (
 	return p, err
 }
 
-// UpsertPermit inserts a permit, or updates the label/type of one the SAME owner
+// UpsertPermit inserts a permit, or refreshes the type of one the SAME owner
 // already holds. It never reassigns ownership: the ON CONFLICT update is guarded
 // by owner, so one user can never take over another user's permit row by
 // re-submitting its council permit id. Callers must confirm the permit belongs
 // to the owner's council account first (see addPermit); this is the last line of
-// defence. Returns the row id.
+// defence. The label is only set on first insert — re-adding a permit keeps any
+// name the user has since chosen (see SetPermitLabel). Returns the row id.
 func (s *Store) UpsertPermit(ctx context.Context, owner, councilPermitID, permitTypeID, label string) (int64, error) {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO permit (owner, council_permit_id, permit_type_id, label, updated_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(council_permit_id) DO UPDATE SET
     permit_type_id = excluded.permit_type_id,
-    label          = excluded.label,
     updated_at     = excluded.updated_at
 WHERE permit.owner = excluded.owner`,
 		owner, councilPermitID, permitTypeID, label, nowUTC())
@@ -383,11 +566,69 @@ WHERE permit.owner = excluded.owner`,
 	return id, err
 }
 
+// SetPermitLabel renames a permit (owner-scoped) to a name the user chooses, shown
+// everywhere the permit appears. Returns ErrNotFound if it isn't the owner's.
+func (s *Store) SetPermitLabel(ctx context.Context, owner string, id int64, label string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET label = ?, updated_at = ? WHERE id = ? AND owner = ?`,
+		label, nowUTC(), id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// BumpFailStreak increments a permit's consecutive-failure counter (persisted so
+// a restart doesn't reset the grace window before a failure is escalated) and
+// returns the new value. ClearFailStreak resets it after a success.
+func (s *Store) BumpFailStreak(ctx context.Context, id int64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`UPDATE permit SET fail_streak = fail_streak + 1 WHERE id = ? RETURNING fail_streak`, id).Scan(&n)
+	return n, err
+}
+
+func (s *Store) ClearFailStreak(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE permit SET fail_streak = 0 WHERE id = ? AND fail_streak != 0`, id)
+	return err
+}
+
 func (s *Store) SetPermitActive(ctx context.Context, id int64, registration string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE permit SET active_registration = ?, updated_at = ? WHERE id = ?`,
 		registration, nowUTC(), id)
 	return err
+}
+
+// DeletePermit stops administering one permit: it removes the permit row (its
+// weekly_rule + override schedule cascade via ON DELETE CASCADE) plus the
+// apply-log history and notify bookkeeping, neither of which has an FK cascade.
+// Scoped to owner, and returns ErrNotFound if no such permit belongs to them, so
+// a member can only remove a permit their own account manages. The council
+// permit itself is untouched — p.stonn simply stops changing its plate.
+func (s *Store) DeletePermit(ctx context.Context, id int64, owner string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM permit WHERE id = ? AND owner = ?`, id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM apply_log WHERE permit_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM permit_notify WHERE permit_id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---- Weekly rules ----
@@ -430,18 +671,34 @@ func (s *Store) ClearRule(ctx context.Context, permitID int64, weekday time.Week
 // ---- Overrides ----
 
 func (s *Store) CreateOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {
-	var endsStr sql.NullString
-	if endsAt != nil {
-		endsStr = sql.NullString{String: endsAt.UTC().Format(time.RFC3339), Valid: true}
-	}
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, starts_at, ends_at, created_by, created_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
-		permitID, vehicleID, startsAt.UTC().Format(time.RFC3339), endsStr, createdBy, nowUTC())
+INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
+VALUES (?, ?, '', ?, ?, ?, ?)`,
+		permitID, vehicleID, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// CreatePlateOverride books a one-off using a literal, unsaved number plate
+// (vehicle_id IS NULL). The plate is normalised by the caller.
+func (s *Store) CreatePlateOverride(ctx context.Context, permitID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
+VALUES (?, NULL, ?, ?, ?, ?, ?)`,
+		permitID, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func endsAtSQL(endsAt *time.Time) sql.NullString {
+	if endsAt == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: endsAt.UTC().Format(time.RFC3339), Valid: true}
 }
 
 // ListOverrides returns a permit's active and upcoming overrides (those not yet
@@ -450,7 +707,7 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 func (s *Store) ListOverrides(ctx context.Context, permitID int64, now time.Time) ([]model.Override, error) {
 	nowStr := now.UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, permit_id, vehicle_id, starts_at, ends_at, created_by
+SELECT id, permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at
 FROM override
 WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)
 ORDER BY starts_at ASC`, permitID, nowStr)
@@ -461,12 +718,17 @@ ORDER BY starts_at ASC`, permitID, nowStr)
 	var out []model.Override
 	for rows.Next() {
 		var o model.Override
-		var starts string
+		var starts, created string
 		var ends sql.NullString
-		if err := rows.Scan(&o.ID, &o.PermitID, &o.VehicleID, &starts, &ends, &o.CreatedBy); err != nil {
+		var vid sql.NullInt64
+		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &starts, &ends, &o.CreatedBy, &created); err != nil {
 			return nil, err
 		}
+		o.VehicleID = vid.Int64 // 0 when NULL (an ad-hoc plate)
 		if o.StartsAt, err = time.Parse(time.RFC3339, starts); err != nil {
+			return nil, err
+		}
+		if o.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 			return nil, err
 		}
 		if ends.Valid {
@@ -665,6 +927,23 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM consent WHERE owner = ?`, owner); err != nil {
 		return err
 	}
+	// Guest passes / door QRs (cascades their tokens, vehicle joins and requests via
+	// FK) and the per-account guest flags, so a deleted account leaves nothing behind
+	// that could still resolve a token, and drops off the outage-notify roster.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_grant WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_request WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_flags WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	// Queued/sent/dead notifications about this account (they carry the user's email
+	// and plate), so nothing pending is delivered to a deleted user and no PII lingers.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM outbox WHERE account = ?`, owner); err != nil {
+		return err
+	}
 	// Remove this account's secondary members, and any membership this user held.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE owner = ? OR member_email = ?`, owner, owner); err != nil {
 		return err
@@ -707,6 +986,128 @@ func (s *Store) AccountEmails(ctx context.Context, owner string) ([]string, erro
 		emails = append(emails, m.Email)
 	}
 	return emails, nil
+}
+
+// AdminAccount is a per-owner operational summary for the admin dashboard and the
+// machine-readable status endpoint the outage watchdog polls.
+type AdminAccount struct {
+	Owner           string
+	MemberOf        string    // non-empty: this owner is a secondary on another account
+	Linked          bool      // has a stored council session cookie
+	LinkedAt        time.Time // last interactive link (the re-authorise clock start)
+	WarmedAt        time.Time // last keep-warm / refresh (council_session.updated_at)
+	TokenExpiry     time.Time
+	EmailEnabled    bool
+	NtfyEnabled     bool
+	NtfyTopic       string
+	ConsentVersion  string
+	PermitCount     int
+	MemberCount     int
+	Plates          []string // active plate on each managed permit
+	LastApplyAt     time.Time
+	LastApplyStatus string // status of the most recent apply_log row for the account
+}
+
+// AdminAccounts returns an operational summary for every known account (anyone who
+// has consented, linked the council, holds a permit, or set notify prefs), newest
+// council activity aside. It is read-only and owner-agnostic — callers must gate it
+// to admins.
+func (s *Store) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT o.owner,
+  COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner LIMIT 1), ''),
+  COALESCE(cs.cookie_sealed, ''), COALESCE(cs.linked_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
+  COALESCE(np.email_enabled, 1), COALESCE(np.ntfy_enabled, 0), COALESCE(np.ntfy_topic, ''),
+  COALESCE((SELECT version FROM consent c WHERE c.owner = o.owner ORDER BY id DESC LIMIT 1), ''),
+  (SELECT COUNT(*) FROM permit p WHERE p.owner = o.owner),
+  (SELECT COUNT(*) FROM account_member m WHERE m.owner = o.owner),
+  COALESCE((SELECT al.status FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), ''),
+  COALESCE((SELECT al.at     FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), '')
+FROM (
+  SELECT owner FROM council_session
+  UNION SELECT owner FROM permit
+  UNION SELECT owner FROM consent
+  UNION SELECT owner FROM notify_pref
+) o
+LEFT JOIN council_session cs ON cs.owner = o.owner
+LEFT JOIN notify_pref np ON np.owner = o.owner
+ORDER BY o.owner`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminAccount
+	byOwner := map[string]*AdminAccount{}
+	for rows.Next() {
+		var a AdminAccount
+		var cookie, linked, warmed, expiry, lastAt string
+		var emailEn, ntfyEn int
+		if err := rows.Scan(&a.Owner, &a.MemberOf, &cookie, &linked, &warmed, &expiry,
+			&emailEn, &ntfyEn, &a.NtfyTopic, &a.ConsentVersion, &a.PermitCount, &a.MemberCount,
+			&a.LastApplyStatus, &lastAt); err != nil {
+			return nil, err
+		}
+		a.Linked = cookie != ""
+		a.EmailEnabled = emailEn == 1
+		a.NtfyEnabled = ntfyEn == 1
+		a.LinkedAt, _ = time.Parse(time.RFC3339, linked)
+		a.WarmedAt, _ = time.Parse(time.RFC3339, warmed)
+		a.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
+		a.LastApplyAt, _ = time.Parse(time.RFC3339, lastAt)
+		out = append(out, a)
+		byOwner[a.Owner] = &out[len(out)-1]
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Fold in each account's active plates in a single extra query.
+	prows, err := s.db.QueryContext(ctx,
+		`SELECT owner, active_registration FROM permit WHERE active_registration != '' ORDER BY owner, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer prows.Close()
+	for prows.Next() {
+		var owner, reg string
+		if err := prows.Scan(&owner, &reg); err != nil {
+			return nil, err
+		}
+		if a := byOwner[owner]; a != nil {
+			a.Plates = append(a.Plates, reg)
+		}
+	}
+	return out, prows.Err()
+}
+
+// RosterEntry is one account's outage-notification contact.
+type RosterEntry struct {
+	Email string `json:"email"`
+	Ntfy  string `json:"ntfy,omitempty"` // topic, only when ntfy is enabled
+}
+
+// NotifyRoster returns the contact list an outage watchdog would use: every
+// consented account, with its ntfy topic when enabled. Email is the baseline
+// channel, so it is always the account email.
+func (s *Store) NotifyRoster(ctx context.Context) ([]RosterEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT c.owner,
+  CASE WHEN COALESCE(np.ntfy_enabled,0)=1 THEN COALESCE(np.ntfy_topic,'') ELSE '' END
+FROM (SELECT DISTINCT owner FROM consent) c
+LEFT JOIN notify_pref np ON np.owner = c.owner
+ORDER BY c.owner`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RosterEntry
+	for rows.Next() {
+		var e RosterEntry
+		if err := rows.Scan(&e.Email, &e.Ntfy); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // ListMembers returns the secondaries with access to owner's account, oldest first.
@@ -881,6 +1282,108 @@ ON CONFLICT(owner) DO UPDATE SET
 	return err
 }
 
+// ---- Notification outbox ----
+
+// OutboxItem is one queued notification (composed and addressed at enqueue time).
+type OutboxItem struct {
+	ID           int64
+	Account      string // owner the message concerns (for account-deletion purge)
+	DedupKey     string
+	Recipients   []string // email addresses
+	NtfyTopic    string
+	NtfyPriority string
+	NtfyTag      string
+	Subject      string
+	Body         string
+	Attempts     int
+}
+
+// EnqueueOutbox durably queues a notification. If DedupKey is non-empty and a
+// pending-or-sent row already carries it, the enqueue is a no-op (idempotency), so
+// a repeated trigger can't send twice.
+func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
+	if it.DedupKey != "" {
+		var exists int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM outbox WHERE dedup_key = ? AND status IN ('pending','sent'))`, it.DedupKey).
+			Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 1 {
+			return nil
+		}
+	}
+	now := nowUTC()
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+		it.Account, it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
+		it.Subject, it.Body, now, now)
+	return err
+}
+
+// DueOutbox returns pending notifications whose next attempt is due, oldest first.
+func (s *Store) DueOutbox(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts
+FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
+		now.UTC().Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OutboxItem
+	for rows.Next() {
+		var it OutboxItem
+		var recips string
+		if err := rows.Scan(&it.ID, &it.DedupKey, &recips, &it.NtfyTopic, &it.NtfyPriority, &it.NtfyTag,
+			&it.Subject, &it.Body, &it.Attempts); err != nil {
+			return nil, err
+		}
+		if recips != "" {
+			it.Recipients = strings.Split(recips, "\n")
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// MarkOutboxSent records a delivered notification.
+func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE outbox SET status = 'sent', sent_at = ?, last_error = '' WHERE id = ?`, nowUTC(), id)
+	return err
+}
+
+// RescheduleOutbox bumps the attempt count and defers the next try (backoff).
+func (s *Store) RescheduleOutbox(ctx context.Context, id int64, attempts int, next time.Time, lastErr string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE outbox SET attempts = ?, next_attempt = ?, last_error = ? WHERE id = ?`,
+		attempts, next.UTC().Format(time.RFC3339), lastErr, id)
+	return err
+}
+
+// MarkOutboxDead retires a notification that has exhausted its retries.
+func (s *Store) MarkOutboxDead(ctx context.Context, id int64, lastErr string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE outbox SET status = 'dead', attempts = attempts + 1, last_error = ? WHERE id = ?`, lastErr, id)
+	return err
+}
+
+// PurgeSentOutbox deletes delivered AND dead rows older than cutoff, so recipient/
+// content PII isn't kept indefinitely (dead rows were previously retained forever).
+// Returns rows removed.
+func (s *Store) PurgeSentOutbox(ctx context.Context, cutoff time.Time) (int64, error) {
+	c := cutoff.UTC().Format(time.RFC3339)
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM outbox WHERE (status = 'sent' AND sent_at != '' AND sent_at < ?) OR (status = 'dead' AND created_at < ?)`,
+		c, c)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func b2i(b bool) int {
 	if b {
 		return 1
@@ -1001,4 +1504,644 @@ func (s *Store) TakeOAuthState(ctx context.Context, state string) (OAuthState, e
 	}
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM oauth_state WHERE state = ?`, state)
 	return os, nil
+}
+
+// ---- Guest passes ----
+
+// GuestGrant is a link-based permission the account holder creates: it lets a
+// non-account recipient put one of a permitted set of the account's cars onto a
+// permit. Tokens (one per recipient) live in guest_token.
+type GuestGrant struct {
+	ID             int64
+	Owner          string
+	PermitID       int64
+	Label          string
+	AllowOvernight bool
+	AllowPlate     bool // visitor may type an arbitrary plate (tradie / on-screen QR)
+	RequestOnly    bool // printed QR: a scan only requests; the holder approves live
+	Enabled        bool
+	CreatedAt      time.Time
+}
+
+// GuestRequest is a visitor's pending/approved/denied request to use a
+// printed-QR permit.
+type GuestRequest struct {
+	ID          int64
+	GrantID     int64
+	Owner       string
+	PermitID    int64
+	Plate       string
+	Status      string // pending | approved | denied
+	RequestedAt time.Time
+	DecidedAt   time.Time // when the holder approved/denied ("" while pending)
+	Until       string    // human "until …" text, set on approval
+}
+
+// GuestToken is one recipient's link to a grant; the raw token is never stored,
+// only its hash.
+type GuestToken struct {
+	ID             int64
+	GrantID        int64
+	RecipientEmail string
+	Revoked        bool
+	CreatedAt      time.Time
+}
+
+// GuestRecipient is a (recipient, token-hash) pair passed to CreateGuestGrant;
+// the caller generates the raw token, keeps it to build the link, and hands the
+// store only the hash.
+type GuestRecipient struct {
+	Email     string
+	TokenHash string
+}
+
+// GuestContext is everything the public activation page needs, resolved from a
+// presented token hash. It is only returned when the token is live (not revoked),
+// its grant enabled, and the owner's kill-switch on — otherwise ErrNotFound.
+type GuestContext struct {
+	Grant     GuestGrant
+	TokenID   int64
+	Recipient string
+	Vehicles  []model.Vehicle
+}
+
+// GuestGrantDetail is a grant with its allowed cars and recipient links, for the
+// account holder's management UI.
+type GuestGrantDetail struct {
+	Grant    GuestGrant
+	Vehicles []model.Vehicle
+	Tokens   []GuestToken
+}
+
+// CreateGuestGrant creates a grant, its allowed-vehicle set, and one token per
+// recipient, all in a transaction. Every vehicle must belong to owner (IDOR
+// guard). Returns the new grant id.
+func (s *Store) CreateGuestGrant(ctx context.Context, owner string, permitID int64, label string, allowOvernight bool, vehicleIDs []int64, recipients []GuestRecipient) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// The permit must belong to the owner.
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
+		owner, permitID, label, boolInt(allowOvernight), nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	for _, vid := range vehicleIDs {
+		// Insert only if the vehicle belongs to the owner; a foreign id inserts
+		// nothing rather than binding a stranger's car into the grant.
+		r, err := tx.ExecContext(ctx,
+			`INSERT INTO guest_grant_vehicle (grant_id, vehicle_id)
+			 SELECT ?, ? WHERE EXISTS(SELECT 1 FROM vehicle WHERE id = ? AND owner = ?)`,
+			grantID, vid, vid, owner)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := r.RowsAffected(); n == 0 {
+			return 0, ErrNotFound
+		}
+	}
+	for _, rc := range recipients {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+			grantID, rc.Email, rc.TokenHash, nowUTC()); err != nil {
+			return 0, err
+		}
+	}
+	return grantID, tx.Commit()
+}
+
+// UpdateGuestGrant changes a grant's label, overnight policy, and allowed-vehicle
+// set (replacing it wholesale), scoped to owner. The permit is not changed — its
+// tokens are bound to it. Every vehicle must belong to owner.
+func (s *Store) UpdateGuestGrant(ctx context.Context, owner string, grantID int64, label string, allowOvernight bool, vehicleIDs []int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE guest_grant SET label = ?, allow_overnight = ? WHERE id = ? AND owner = ?`,
+		label, boolInt(allowOvernight), grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_grant_vehicle WHERE grant_id = ?`, grantID); err != nil {
+		return err
+	}
+	for _, vid := range vehicleIDs {
+		r, err := tx.ExecContext(ctx,
+			`INSERT INTO guest_grant_vehicle (grant_id, vehicle_id)
+			 SELECT ?, ? WHERE EXISTS(SELECT 1 FROM vehicle WHERE id = ? AND owner = ?)`,
+			grantID, vid, vid, owner)
+		if err != nil {
+			return err
+		}
+		if n, _ := r.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+	}
+	return tx.Commit()
+}
+
+// AddGuestTokens adds recipient tokens to an existing grant (scoped to owner),
+// skipping any email that already has a live token on it. Returns the emails
+// actually added, so the caller can email and display just those links.
+func (s *Store) AddGuestTokens(ctx context.Context, owner string, grantID int64, recipients []GuestRecipient) ([]string, error) {
+	var ok int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM guest_grant WHERE id = ? AND owner = ?)`, grantID, owner).Scan(&ok); err != nil {
+		return nil, err
+	}
+	if ok == 0 {
+		return nil, ErrNotFound
+	}
+	var added []string
+	for _, rc := range recipients {
+		var live int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM guest_token WHERE grant_id = ? AND recipient_email = ? AND revoked_at = '')`,
+			grantID, rc.Email).Scan(&live); err != nil {
+			return added, err
+		}
+		if live == 1 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+			grantID, rc.Email, rc.TokenHash, nowUTC()); err != nil {
+			return added, err
+		}
+		added = append(added, rc.Email)
+	}
+	return added, nil
+}
+
+// CreateQRGrant creates an ephemeral "on-screen QR" grant for a permit: it allows
+// a visitor to type an arbitrary plate, has no saved cars or email recipients,
+// and its single token expires after ttl. It is hidden from the pass list. Expired
+// on-screen grants for the owner are pruned first so they do not accumulate.
+// Returns the token hash to store (caller keeps the raw token for the QR URL).
+func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64, tokenHash string, ttl time.Duration) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+	// Prune the owner's already-expired on-screen grants (cascades their tokens).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND on_screen = 1
+		 AND id IN (SELECT grant_id FROM guest_token WHERE expires_at != '' AND expires_at <= ?)`,
+		owner, nowUTC()); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, enabled, created_at)
+		 VALUES (?, ?, 'Visitor QR', 0, 1, 1, 1, ?)`,
+		owner, permitID, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	expires := time.Now().UTC().Add(ttl).Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, expires_at, created_at) VALUES (?, '', ?, ?, ?)`,
+		grantID, tokenHash, expires, nowUTC()); err != nil {
+		return 0, err
+	}
+	return grantID, tx.Commit()
+}
+
+// PrintedGrant is a durable door-QR pass: one per permit, reprintable because its
+// token is kept (sealed) so the SAME code can be shown again. TokenSealed is the
+// raw token encrypted at rest; the caller opens it to rebuild the activation URL.
+type PrintedGrant struct {
+	GrantID     int64
+	PermitID    int64
+	PermitLabel string
+	TokenSealed string
+	CreatedAt   time.Time
+}
+
+// CreatePrintedGrant mints (or replaces) the printed door QR for a permit: it drops
+// any existing printed grant for that permit and inserts a fresh one. tokenSealed is
+// the raw token encrypted at rest so the same code can be reprinted later; tokenHash
+// is the lookup key used when a visitor scans.
+func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID int64, tokenHash, tokenSealed string) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`, owner, permitID); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, request_only, enabled, created_at)
+		 VALUES (?, ?, 'Printed QR', 0, 1, 0, 1, 1, ?)`, owner, permitID, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, token_sealed, created_at) VALUES (?, '', ?, ?, ?)`,
+		grantID, tokenHash, tokenSealed, nowUTC()); err != nil {
+		return 0, err
+	}
+	return grantID, tx.Commit()
+}
+
+// PrintedGrantByID returns a single owner-scoped printed grant (for the reprint /
+// poster view), including its sealed token so the URL can be rebuilt.
+func (s *Store) PrintedGrantByID(ctx context.Context, owner string, grantID int64) (PrintedGrant, error) {
+	var g PrintedGrant
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.id = ? AND g.owner = ? AND g.request_only = 1`, grantID, owner).
+		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
+	if err == sql.ErrNoRows {
+		return PrintedGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return PrintedGrant{}, err
+	}
+	g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return g, nil
+}
+
+// PrintedGrantForPermit returns the existing door QR for a permit, or ErrNotFound —
+// so creating one can be idempotent (reuse rather than rotate the token).
+func (s *Store) PrintedGrantForPermit(ctx context.Context, owner string, permitID int64) (PrintedGrant, error) {
+	var g PrintedGrant
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1`, owner, permitID).
+		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
+	if err == sql.ErrNoRows {
+		return PrintedGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return PrintedGrant{}, err
+	}
+	g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return g, nil
+}
+
+// ListPrintedGrants returns an owner's durable door QRs, newest first, for the
+// management list on the Guests page.
+func (s *Store) ListPrintedGrants(ctx context.Context, owner string) ([]PrintedGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.request_only = 1
+ORDER BY g.id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PrintedGrant
+	for rows.Next() {
+		var g PrintedGrant
+		var created string
+		if err := rows.Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created); err != nil {
+			return nil, err
+		}
+		g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// RevokePrintedGrant deletes an owner's door QR (cascading its token and any pending
+// requests), retiring the printed code for good.
+func (s *Store) RevokePrintedGrant(ctx context.Context, owner string, grantID int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE id = ? AND owner = ? AND request_only = 1`, grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CreateGuestRequest records a pending request from a printed-QR scan. nonce is a
+// per-request secret the visitor keeps, so they can poll its status without being
+// able to read other requests.
+// CreateGuestRequest records a pending printed-QR request, or reuses an existing
+// still-pending one for the same grant+plate so a double-scan/submit doesn't stack
+// duplicate requests (and duplicate approval nudges). Returns the request id, the
+// effective nonce (the reused row's, so its status page keeps working), and
+// whether a NEW request was created (the caller only notifies when it did).
+func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (id int64, effNonce string, created bool, err error) {
+	var existingID int64
+	var existingNonce string
+	e := s.db.QueryRowContext(ctx,
+		`SELECT id, nonce FROM guest_request WHERE grant_id = ? AND plate = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+		grantID, plate).Scan(&existingID, &existingNonce)
+	if e == nil {
+		return existingID, existingNonce, false, nil
+	}
+	if e != sql.ErrNoRows {
+		return 0, "", false, e
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+		grantID, owner, permitID, plate, nonce, nowUTC())
+	if err != nil {
+		return 0, "", false, err
+	}
+	id, err = res.LastInsertId()
+	return id, nonce, true, err
+}
+
+// GuestRequestForPoll returns a request only if the nonce matches — the visitor's
+// status check, safe against request-id enumeration.
+func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string) (GuestRequest, error) {
+	var r GuestRequest
+	var requested, decided string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, until_at FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &decided, &r.Until)
+	if err == sql.ErrNoRows {
+		return GuestRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	r.DecidedAt, _ = time.Parse(time.RFC3339, decided)
+	return r, nil
+}
+
+// GuestRequestByID returns a request (used by the visitor's polling status page).
+func (s *Store) GuestRequestByID(ctx context.Context, id int64) (GuestRequest, error) {
+	var r GuestRequest
+	var requested string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request WHERE id = ?`, id).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until)
+	if err == sql.ErrNoRows {
+		return GuestRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	return r, nil
+}
+
+// ListPendingRequests returns an owner's still-pending printed-QR requests, newest
+// first (the approvals queue).
+func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestRequest, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request
+		 WHERE owner = ? AND status = 'pending' ORDER BY id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestRequest
+	for rows.Next() {
+		var r GuestRequest
+		var requested string
+		if err := rows.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until); err != nil {
+			return nil, err
+		}
+		r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DecideGuestRequest approves or denies a pending request, scoped to owner. It
+// returns the request (so the caller can apply the plate on approval) or
+// ErrNotFound if it is not the owner's or no longer pending.
+func (s *Store) DecideGuestRequest(ctx context.Context, owner string, id int64, approve bool, until string) (GuestRequest, error) {
+	status := "denied"
+	if approve {
+		status = "approved"
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE guest_request SET status = ?, decided_at = ?, until_at = ?
+		 WHERE id = ? AND owner = ? AND status = 'pending'`,
+		status, nowUTC(), until, id, owner)
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return GuestRequest{}, ErrNotFound
+	}
+	return s.GuestRequestByID(ctx, id)
+}
+
+// GuestContextByTokenHash resolves a presented token hash to the grant, recipient
+// and allowed vehicles — only if the token is live, its grant enabled, and the
+// owner's guest passes are not globally paused. Any failed gate returns
+// ErrNotFound so the caller can show one neutral "no longer active" page.
+func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
+	var gc GuestContext
+	var created string
+	var overnight, plate, reqOnly, enabled int
+	err := s.db.QueryRowContext(ctx, `
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.enabled, g.created_at
+FROM guest_token t
+JOIN guest_grant g ON g.id = t.grant_id
+WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
+  AND (t.expires_at = '' OR t.expires_at > ?)
+  AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
+		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
+		&gc.Grant.Label, &overnight, &plate, &reqOnly, &enabled, &created)
+	if err == sql.ErrNoRows {
+		return GuestContext{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestContext{}, err
+	}
+	gc.Grant.AllowOvernight = overnight == 1
+	gc.Grant.AllowPlate = plate == 1
+	gc.Grant.RequestOnly = reqOnly == 1
+	gc.Grant.Enabled = enabled == 1
+	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+		return GuestContext{}, err
+	}
+	gc.Vehicles, err = s.queryVehicles(ctx, `
+SELECT v.id, v.registration, v.label, v.email FROM vehicle v
+JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
+WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
+	return gc, err
+}
+
+// ListGuestGrants returns the owner's grants with their cars and recipient tokens.
+func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrantDetail, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 AND request_only = 0 ORDER BY id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestGrantDetail
+	for rows.Next() {
+		var d GuestGrantDetail
+		var overnight, enabled int
+		var created string
+		if err := rows.Scan(&d.Grant.ID, &d.Grant.PermitID, &d.Grant.Label, &overnight, &enabled, &created); err != nil {
+			return nil, err
+		}
+		d.Grant.Owner = owner
+		d.Grant.AllowOvernight = overnight == 1
+		d.Grant.Enabled = enabled == 1
+		if d.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		g := &out[i]
+		g.Vehicles, err = s.queryVehicles(ctx, `
+SELECT v.id, v.registration, v.label, v.email FROM vehicle v
+JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
+WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, g.Grant.ID)
+		if err != nil {
+			return nil, err
+		}
+		g.Tokens, err = s.listGuestTokens(ctx, g.Grant.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) listGuestTokens(ctx context.Context, grantID int64) ([]GuestToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, grant_id, recipient_email, revoked_at, created_at FROM guest_token WHERE grant_id = ? ORDER BY id`, grantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestToken
+	for rows.Next() {
+		var t GuestToken
+		var revoked, created string
+		if err := rows.Scan(&t.ID, &t.GrantID, &t.RecipientEmail, &revoked, &created); err != nil {
+			return nil, err
+		}
+		t.Revoked = revoked != ""
+		if t.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// RevokeGuestToken revokes one recipient's link, scoped to the grant's owner.
+func (s *Store) RevokeGuestToken(ctx context.Context, owner string, tokenID int64) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE guest_token SET revoked_at = ?
+WHERE id = ? AND revoked_at = '' AND grant_id IN (SELECT id FROM guest_grant WHERE owner = ?)`,
+		nowUTC(), tokenID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteGuestGrant removes a grant (its vehicles and tokens cascade), scoped to
+// owner.
+func (s *Store) DeleteGuestGrant(ctx context.Context, owner string, grantID int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM guest_grant WHERE id = ? AND owner = ?`, grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// TouchGuestTokenUsed records the last time a token successfully activated a car.
+func (s *Store) TouchGuestTokenUsed(ctx context.Context, tokenID int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE guest_token SET last_used_at = ? WHERE id = ?`, nowUTC(), tokenID)
+	return err
+}
+
+// GuestsEnabled reports the owner's global kill-switch (default on).
+func (s *Store) GuestsEnabled(ctx context.Context, owner string) (bool, error) {
+	var v int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = ?), 1)`, owner).Scan(&v)
+	return v == 1, err
+}
+
+// SetGuestsEnabled flips the owner's global kill-switch for guest passes.
+func (s *Store) SetGuestsEnabled(ctx context.Context, owner string, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO account_flags (owner, guests_enabled) VALUES (?, ?)
+ON CONFLICT(owner) DO UPDATE SET guests_enabled = excluded.guests_enabled`, owner, boolInt(enabled))
+	return err
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

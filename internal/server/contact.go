@@ -112,5 +112,19 @@ func looksLikeEmail(s string) bool {
 		return false
 	}
 	domain := s[at+1:]
-	return strings.Contains(domain, ".") && !strings.HasSuffix(domain, ".") && !strings.ContainsAny(s, " \t\r\n")
+	if !strings.Contains(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+	// Restrict to a conservative address charset. This covers real-world emails
+	// (which use letters, digits, and . _ + - besides the @) while rejecting the
+	// quotes, brackets, angle brackets and control characters that would let an
+	// address break out of an HTML attribute, a JS string, or an email header.
+	for _, r := range s {
+		if r == '@' || r == '.' || r == '_' || r == '+' || r == '-' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
 }

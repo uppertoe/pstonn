@@ -84,6 +84,10 @@ type Config struct {
 	// may be the failure) doesn't blind the operator. Either or both may be empty.
 	AdminEmail     string // ADMIN_EMAIL (durable; needs SMTP configured)
 	AdminNtfyTopic string // ADMIN_NTFY_TOPIC (instant push; needs NTFY_BASE_URL configured)
+
+	// StatusToken gates the machine-readable /status endpoint the external outage
+	// watchdog polls (bearer token). Empty disables the endpoint. STATUS_TOKEN.
+	StatusToken string
 }
 
 // ContactEnabled reports whether the public contact form should be offered: a
@@ -189,6 +193,7 @@ func Load() (*Config, error) {
 		ContactTo:      strings.TrimSpace(os.Getenv("CONTACT_TO")),
 		AdminEmail:     strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
 		AdminNtfyTopic: strings.TrimSpace(os.Getenv("ADMIN_NTFY_TOPIC")),
+		StatusToken:    strings.TrimSpace(os.Getenv("STATUS_TOKEN")),
 		AppOIDC: AppOIDCConfig{
 			Issuer:       strings.TrimRight(os.Getenv("APP_OIDC_ISSUER"), "/"),
 			ClientID:     os.Getenv("APP_OIDC_CLIENT_ID"),
