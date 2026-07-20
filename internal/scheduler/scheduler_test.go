@@ -355,6 +355,50 @@ func TestReconcileSkipsInactivePermits(t *testing.T) {
 	}
 }
 
+// TestReconnectTransientPreservesSession: a TRANSIENT reconnect failure (busy /
+// network) must NOT delete the session or its saved password — a later pass retries.
+func TestReconnectTransientPreservesSession(t *testing.T) {
+	st := newStore(t)
+	seedSession(t, st, "blip@example.com")
+	seedSchedule(t, st, "blip@example.com")
+	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired, reconnectSet: true,
+		reconnectErr: errors.New("council busy 503")} // transient
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(context.Background())
+
+	if _, err := st.GetCouncilSession(context.Background(), "blip@example.com"); err != nil {
+		t.Fatalf("transient reconnect failure must keep the session, got err=%v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if got := nf.relinkSnap(); len(got) != 0 {
+		t.Fatalf("transient failure should not alert re-link yet, got %v", got)
+	}
+}
+
+// TestReconnectRejectedRetires: a saved password that's genuinely rejected retires
+// the session and prompts a manual re-link (no pointless retrying).
+func TestReconnectRejectedRetires(t *testing.T) {
+	st := newStore(t)
+	seedSession(t, st, "badpw@example.com")
+	seedSchedule(t, st, "badpw@example.com")
+	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired, reconnectSet: true,
+		reconnectErr: parking.ErrLoginRejected}
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(context.Background())
+
+	if _, err := st.GetCouncilSession(context.Background(), "badpw@example.com"); err != store.ErrNotFound {
+		t.Fatalf("rejected password should retire the session, got err=%v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if got := nf.relinkSnap(); len(got) != 1 {
+		t.Fatalf("rejected reconnect should alert re-link once, got %v", got)
+	}
+}
+
 // TestKeepWarmAutoReconnects: when the session expires but the user saved their
 // password, the scheduler reconnects silently instead of unlinking + alerting.
 func TestKeepWarmAutoReconnects(t *testing.T) {

@@ -47,6 +47,11 @@ var (
 	// ErrNoSavedPassword means an auto-reconnect was attempted but the user never
 	// opted to save their council password, so a manual re-link is required.
 	ErrNoSavedPassword = errors.New("parking: no saved council password for auto-reconnect")
+	// ErrLoginRejected means a headless login completed but did NOT establish a
+	// session — the credentials are wrong (as opposed to a transient/network fault).
+	// A saved-password auto-reconnect that hits this must stop retrying and prompt a
+	// manual re-link; any OTHER error is treated as transient and retried.
+	ErrLoginRejected = errors.New("parking: login did not establish a session (check the username and password)")
 	// ErrNotCaptured marks a call whose request/response shape is still unknown.
 	ErrNotCaptured = errors.New("parking: endpoint not yet reverse-engineered (needs a capture)")
 	// ErrCouncilBusy means the portal is pushing back (Akamai 429/403/503) or the

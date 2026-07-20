@@ -723,6 +723,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// The council account belongs to the primary; a secondary can only wait
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
+		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
 		s.render(w, base)
 		return dashboardData{}, false
 	}
@@ -765,7 +766,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	for _, p := range managed {
 		// Expired/cancelled permits collapse into a compact section — no full card,
 		// no council call — but stay available as a copy-schedule source.
-		if p.Inactive(now) {
+		if p.Inactive(now, s.cfg.DisplayLocation) {
 			expired = append(expired, buildExpiredView(p, now, s.cfg.DisplayLocation))
 			continue
 		}
@@ -1047,7 +1048,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 				if label == "" {
 					label = "Permit " + sp.CouncilPermitID
 				}
-				if sp.Inactive(now) {
+				if sp.Inactive(now, loc) {
 					label += " (expired)"
 				}
 				pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label})
@@ -1127,6 +1128,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	permits, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		base.State = "onboarding"
+		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
 		if errors.Is(err, parking.ErrSessionExpired) {
 			base.Relink = true
 		} else {
@@ -1391,7 +1393,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	savePassword := r.FormValue("save_password") != ""
-	if err := s.council.Link(r.Context(), user, user, password, savePassword); err != nil {
+	if err := s.council.Link(r.Context(), user, user, password, savePassword, true); err != nil {
 		log.Printf("council link for %s: %v", user, err)
 		s.message(w, http.StatusBadGateway, "Couldn't link your council account. Check that your password is correct and that your council account uses this email address.")
 		return
@@ -1413,6 +1415,15 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectHome(w, r)
+}
+
+// hasSavedPassword reports whether the account currently has a saved council
+// password (auto-reconnect on). Used to default the link form's "save my
+// password" checkbox to the user's existing choice, so a deliberate opt-out isn't
+// silently reversed on a later re-link.
+func (s *Server) hasSavedPassword(ctx context.Context, owner string) bool {
+	cs, err := s.store.GetCouncilSession(ctx, owner)
+	return err == nil && cs.Password != ""
 }
 
 // councilForgetPassword drops the saved (sealed) council password so p.stonn will

@@ -357,20 +357,8 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 			log.Printf("scheduler: kept session for %s warm", cs.Owner)
 			s.checkDrift(ctx, cs.Owner) // piggyback a gentle council-drift check
 		case errors.Is(err, parking.ErrSessionExpired):
-			// If the user opted to save their password, try to reconnect silently
-			// before giving up and asking them to re-link by hand.
-			if rerr := s.council.Reconnect(ctx, cs.Owner); rerr == nil {
-				log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", cs.Owner)
+			if s.recoverOrRetire(ctx, cs.Owner) {
 				s.checkDrift(ctx, cs.Owner)
-				break
-			} else if !errors.Is(rerr, parking.ErrNoSavedPassword) {
-				log.Printf("scheduler: auto-reconnect for %s failed: %v", cs.Owner, rerr)
-			}
-			if derr := s.store.DeleteCouncilSession(ctx, cs.Owner); derr != nil {
-				log.Printf("scheduler: unlink expired session %s: %v", cs.Owner, derr)
-			} else {
-				log.Printf("scheduler: session for %s expired; unlinked (re-link required)", cs.Owner)
-				s.alertRelink(cs.Owner) // proactively tell the user, don't wait for fine time
 			}
 		case errors.Is(err, parking.ErrNotLinked):
 			// Raced with an unlink; nothing to do.
@@ -380,6 +368,37 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 			log.Printf("scheduler: keep-warm %s: %v", cs.Owner, err)
 		}
 	}
+}
+
+// recoverOrRetire handles an expired council session. It first tries a
+// saved-password auto-reconnect. On success it returns true (session restored).
+// If there is no saved password, or the saved password is genuinely rejected, it
+// retires the session (unlink + prompt a manual re-link). But a TRANSIENT failure
+// (council busy, network blip, a wrong/rotated encryption key) leaves the session
+// AND the saved password in place so a later pass can retry — one unlucky hiccup
+// must not permanently disable auto-reconnect. Returns true only when the session
+// is usable now.
+func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
+	switch rerr := s.council.Reconnect(ctx, owner); {
+	case rerr == nil:
+		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", owner)
+		return true
+	case errors.Is(rerr, parking.ErrNoSavedPassword):
+		// No credentials to retry with → retire and prompt a manual re-link.
+	case errors.Is(rerr, parking.ErrLoginRejected):
+		log.Printf("scheduler: auto-reconnect for %s rejected (saved password no longer valid)", owner)
+	default:
+		// Transient — keep the session + saved password and retry on a later pass.
+		log.Printf("scheduler: auto-reconnect for %s deferred (transient): %v", owner, rerr)
+		return false
+	}
+	if derr := s.store.DeleteCouncilSession(ctx, owner); derr != nil {
+		log.Printf("scheduler: unlink expired session %s: %v", owner, derr)
+	} else {
+		log.Printf("scheduler: session for %s expired; unlinked (re-link required)", owner)
+		s.alertRelink(owner) // proactively tell the user, don't wait for fine time
+	}
+	return false
 }
 
 // alertRelink notifies a user that their council connection dropped and they
@@ -537,7 +556,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 	now := time.Now()
 	for i := range permits {
 		p := permits[i]
-		if p.Inactive(now) {
+		if p.Inactive(now, s.loc) {
 			continue // don't read the council for permits we no longer act on
 		}
 		actual, err := s.council.CurrentVehicle(ctx, owner, p)
@@ -562,13 +581,15 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 // end date — sends the account a one-time approaching-expiry warning. Runs on the
 // slow keep-warm cadence off an already-valid session, so it costs one grid call.
 func (s *Scheduler) syncPermitExpiry(ctx context.Context, owner string) {
+	// Anti-burst: space this council read from the drift reads that just ran.
+	if s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
+		return
+	}
 	live, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		return
 	}
-	byCouncilID := make(map[string]parking.PermitInfo, len(live))
 	for _, pi := range live {
-		byCouncilID[pi.CouncilPermitID] = pi
 		// Update every permit the council reports; owner-scoped, so it only
 		// touches rows this account manages.
 		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate)
@@ -754,7 +775,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		// An expired or cancelled permit can't be changed; skip it so we don't
 		// hammer the council with doomed writes or alarm the user with failures.
 		// It stays in the store as a copy-schedule source until removed.
-		if p.Inactive(now) {
+		if p.Inactive(now, s.loc) {
 			continue
 		}
 		active++
@@ -890,13 +911,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 			fmt.Sprintf("SetVehicle for permit %s returned ErrNotCaptured. If the council changed its API this affects ALL users; investigate promptly.", p.CouncilPermitID))
 		return true
 	case errors.Is(err, parking.ErrSessionExpired):
-		// The cookie died between keep-warm passes. Retire the session once so we
-		// stop retrying every minute, prompt a re-link on the dashboard, AND
-		// proactively notify the user so they aren't caught out by a fine.
-		if derr := s.store.DeleteCouncilSession(ctx, p.Owner); derr == nil {
-			log.Printf("scheduler: session for %s expired; unlinked (re-link required)", p.Owner)
-			s.alertRelink(p.Owner)
-		}
+		// The cookie died between keep-warm passes. Try a saved-password
+		// auto-reconnect; failing that, retire the session once (so we stop
+		// retrying every minute) and prompt a re-link. A transient reconnect
+		// failure preserves the session for a later retry (see recoverOrRetire).
+		s.recoverOrRetire(ctx, p.Owner)
 		return true
 	default:
 		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)

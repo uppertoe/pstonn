@@ -6,25 +6,31 @@ import (
 )
 
 func TestPermitInactive(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
 	now := mustTime(t, "2026-07-20 12:00 +1000")
-	past := now.Add(-24 * time.Hour)
-	future := now.Add(24 * time.Hour)
+	day := func(s string) time.Time { return mustTime(t, s+" 00:00 +1000") }
 	cases := []struct {
 		name string
 		p    Permit
 		want bool
 	}{
-		{"active granted", Permit{Status: "Granted", EndDate: future}, false},
+		{"active granted", Permit{Status: "Granted", EndDate: day("2026-07-25")}, false},
 		{"unknown (no data)", Permit{}, false},
-		{"expired by date", Permit{Status: "Granted", EndDate: past}, true},
-		{"cancelled status", Permit{Status: "Cancelled", EndDate: future}, true},
+		// Inclusive last day: still active THROUGH the EndDate day...
+		{"expires today, still valid", Permit{Status: "Granted", EndDate: day("2026-07-20")}, false},
+		// ...and retired only once the following day has begun.
+		{"expired yesterday", Permit{Status: "Granted", EndDate: day("2026-07-19")}, true},
+		// Word-boundary status match, not substring:
+		{"cancelled status", Permit{Status: "Cancelled", EndDate: day("2026-07-25")}, true},
 		{"suspended status", Permit{Status: "Suspended"}, true},
 		{"expired status word", Permit{Status: "Expired"}, true},
-		{"future end, live status", Permit{Status: "Current", EndDate: future}, false},
+		{"expiring is NOT dead", Permit{Status: "Expiring", EndDate: day("2026-07-25")}, false},
+		{"due to expire is NOT dead", Permit{Status: "Due to expire", EndDate: day("2026-07-25")}, false},
+		{"future end, live status", Permit{Status: "Current", EndDate: day("2026-07-25")}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := c.p.Inactive(now); got != c.want {
+			if got := c.p.Inactive(now, loc); got != c.want {
 				t.Fatalf("Inactive = %v, want %v", got, c.want)
 			}
 		})

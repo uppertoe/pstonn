@@ -30,13 +30,22 @@ type Permit struct {
 	PermitType         string    // council permit type, e.g. "(A) 1st Visitor Permit"
 }
 
-// deadStatus reports whether a council PermitStatus means the permit is no longer
-// usable. Matched leniently: the council's exact wording/casing isn't guaranteed,
-// and "Granted"/"Active"/"Current" are the live states we want to keep.
+// deadStatuses are the council PermitStatus WORDS that mean a permit is no longer
+// usable. Matched whole-word (case-insensitive), NOT as substrings: a substring
+// match would trip on live wording like "Expiring" or "Due to expire" and wrongly
+// retire a still-valid permit → an un-updated plate → a fine. Expiry-by-date is
+// handled separately by EndDate, so this set is really about early termination.
+var deadStatuses = map[string]bool{
+	"cancelled": true, "canceled": true, "cancel": true,
+	"suspended": true, "suspend": true,
+	"surrendered": true, "surrender": true,
+	"revoked": true, "revoke": true,
+	"expired": true, "lapsed": true, "closed": true, "void": true, "voided": true,
+}
+
 func deadStatus(s string) bool {
-	s = strings.ToLower(s)
-	for _, k := range []string{"cancel", "expire", "suspend", "surrender", "revok", "lapsed", "closed"} {
-		if strings.Contains(s, k) {
+	for _, w := range strings.Fields(strings.ToLower(s)) {
+		if deadStatuses[strings.Trim(w, ".,;:()[]{}\"'")] {
 			return true
 		}
 	}
@@ -44,13 +53,26 @@ func deadStatus(s string) bool {
 }
 
 // Inactive reports whether a permit should no longer be actively reconciled or
-// shown as a live permit: its end date has passed, or its status says it's dead.
-// Zero end date + empty/live status = active (we don't retire on unknown data).
-func (p Permit) Inactive(now time.Time) bool {
-	if !p.EndDate.IsZero() && now.After(p.EndDate) {
+// shown as a live permit: its status says it's dead, or its expiry day has fully
+// passed. EndDate is treated as the INCLUSIVE last valid day in the council's
+// timezone (loc): a permit is retired only once the day AFTER EndDate has begun
+// there. That is deliberately conservative — the council reports zoneless local
+// dates (parsed as UTC), so a plain instant compare could retire up to ~half a day
+// early and cause a fine; erring late only costs a harmless doomed write. Zero end
+// date + live status = active (we never retire on unknown data).
+func (p Permit) Inactive(now time.Time, loc *time.Location) bool {
+	if deadStatus(p.Status) {
 		return true
 	}
-	return deadStatus(p.Status)
+	if p.EndDate.IsZero() {
+		return false
+	}
+	if loc == nil {
+		loc = time.Local
+	}
+	end := p.EndDate.In(loc)
+	dayAfterExpiry := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 1)
+	return !now.Before(dayAfterExpiry)
 }
 
 // WeeklyRule allocates a vehicle to a permit on a given weekday, the building

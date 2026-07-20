@@ -912,7 +912,7 @@
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>
       <label class="optin">
-        <input type="checkbox" name="save_password" value="1" checked>
+        <input type="checkbox" name="save_password" value="1"{{if or (not .Relink) .AutoReconnect}} checked{{end}}>
         <span>
           <strong>Save my password so p.stonn can reconnect on its own.</strong>
           It's sealed with encryption only this app can open, and used only to sign back in if the council ends your session.
@@ -1631,7 +1631,7 @@
   <button type="button" class="ghost sm" @click="open=!open">{{template "ic-copy"}} Copy schedule from another permit</button>
   {{end}}
   <form x-show="open" x-cloak class="cs-form" hx-post="/permits/{{.Permit.ID}}/copy-schedule" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
-        {{if not .RosterEmpty}}@submit="if(!confirm('Copy that schedule here? It overwrites this permit on the days it covers.')) $event.preventDefault()"{{end}}>
+        {{if not .RosterEmpty}}@submit="if(!confirm('Copy that schedule here? It replaces this permit\'s weekly roster and upcoming bookings.')) $event.preventDefault()"{{end}}>
     <label class="fld">Copy from
       <select name="source" required>
         <option value="" disabled selected>Choose a permit…</option>

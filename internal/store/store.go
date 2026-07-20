@@ -724,17 +724,20 @@ func (s *Store) ClearRule(ctx context.Context, permitID int64, weekday time.Week
 	return err
 }
 
-// CopySchedule clones one permit's weekly roster and its active/upcoming
-// overrides onto another permit of the SAME owner — the "I renewed my permit and
-// re-added it, put my schedule back" flow. Both permits must belong to owner.
-// Weekly rules overwrite any the target already holds for those weekdays;
-// overrides that have already ended are skipped (nothing left to carry). Vehicle
-// references are account-scoped, so they stay valid on the target. Returns the
-// number of rules + overrides copied.
+// CopySchedule REPLACES a permit's weekly roster and active/upcoming overrides
+// with a copy of another permit's — the "I renewed my permit and re-added it, put
+// my schedule back" flow. Both permits must belong to owner. It clears the
+// target's existing rules and live overrides first, so it is idempotent (running
+// it twice yields the same result, not duplicates) and matches the "replaces this
+// permit's schedule" wording in the UI. Overrides that have already ended are not
+// carried (nothing left to apply); the target's past overrides are left as
+// history. Vehicle references are account-scoped, so they stay valid on the
+// target. Returns the number of rules + overrides copied.
 func (s *Store) CopySchedule(ctx context.Context, owner string, srcID, dstID int64, now time.Time) (int, error) {
 	if srcID == dstID {
 		return 0, errors.New("store: cannot copy a schedule onto itself")
 	}
+	nowStr := now.UTC().Format(time.RFC3339)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -751,10 +754,18 @@ func (s *Store) CopySchedule(ctx context.Context, owner string, srcID, dstID int
 		return 0, ErrNotFound
 	}
 
+	// Clear the target's current roster + live overrides so this is a clean replace.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM weekly_rule WHERE permit_id = ?`, dstID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`, dstID, nowStr); err != nil {
+		return 0, err
+	}
+
 	rres, err := tx.ExecContext(ctx, `
 INSERT INTO weekly_rule (permit_id, weekday, vehicle_id)
-SELECT ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?
-ON CONFLICT(permit_id, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`, dstID, srcID)
+SELECT ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?`, dstID, srcID)
 	if err != nil {
 		return 0, err
 	}
@@ -762,7 +773,7 @@ ON CONFLICT(permit_id, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
 INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
 SELECT ?, vehicle_id, registration, starts_at, ends_at, created_by, created_at
 FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
-		dstID, srcID, now.UTC().Format(time.RFC3339))
+		dstID, srcID, nowStr)
 	if err != nil {
 		return 0, err
 	}
@@ -976,6 +987,18 @@ ON CONFLICT(owner) DO UPDATE SET
     password_sealed     = excluded.password_sealed`,
 		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
 		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password)
+	return err
+}
+
+// SaveReconnectedSession writes the fresh cookie + (re-sealed) saved password
+// after a silent auto-reconnect, WITHOUT advancing linked_at — the re-authorise
+// clock only moves on an interactive re-link. A no-op if the row is gone.
+func (s *Store) SaveReconnectedSession(ctx context.Context, cs CouncilSession) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE council_session
+SET cookie_sealed = ?, password_sealed = ?, updated_at = ?
+WHERE owner = ?`,
+		cs.Cookie, cs.Password, nowUTC(), cs.Owner)
 	return err
 }
 

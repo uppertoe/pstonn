@@ -2,6 +2,7 @@ package parking
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -117,7 +118,7 @@ func TestLiveMeasureIdleTimeout(t *testing.T) {
 	// Obtain a fresh, isolated session in the store, then drive keep-warm Refresh.
 	// Progress goes to stdout (fmt) not t.Log, so it streams live during the run.
 	if user != "" {
-		if err := c.Link(ctx, owner, user, pass, false); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
 		fmt.Printf("[%s] fresh headless login OK, session isolated to this probe\n", time.Now().Format("15:04:05"))
@@ -228,7 +229,7 @@ func TestLiveLinkLogin(t *testing.T) {
 	c := New(cfg, st, box)
 
 	// 1. Headless login → stores the sealed session cookie, discards the password.
-	if err := c.Link(ctx, owner, username, password, false); err != nil {
+	if err := c.Link(ctx, owner, username, password, false, true); err != nil {
 		t.Fatalf("Link (headless login) failed: %v", err)
 	}
 	if !c.Linked(ctx, owner) {
@@ -307,10 +308,13 @@ func TestLiveSetVehicle(t *testing.T) {
 	t.Logf("OK: live write succeeded, VPP24714 now = %q", after)
 }
 
-// kickExperimentKey is a fixed 32-byte secretbox key so the sealed session stored
-// in phase "link" can be reopened by phase "probe" in a separate process. Only
-// used by the local TestLiveSessionKick experiment against a throwaway DB.
-var kickExperimentKey = []byte("pstonn-session-kick-experiment!!") // exactly 32 bytes
+// kickKey derives the throwaway secretbox key for the session-kick experiment
+// from the DB path, so both phases (separate processes) agree on a key without a
+// committed secret. It protects only a local, disposable experiment DB.
+func kickKey(dbPath string) []byte {
+	sum := sha256.Sum256([]byte("pstonn-session-kick:" + dbPath))
+	return sum[:]
+}
 
 // TestLiveSessionKick answers, experimentally: does logging in to the council
 // ePermits site directly invalidate the session p.stonn is holding? (The
@@ -354,7 +358,7 @@ func TestLiveSessionKick(t *testing.T) {
 		Scopes:      []string{"openid", "profile", "ePermits.ssp.api.all"},
 		APIBase:     "https://parkingpermits.stonnington.vic.gov.au/ssp-svc",
 	}}
-	box, err := secretbox.New(kickExperimentKey)
+	box, err := secretbox.New(kickKey(dbPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +376,7 @@ func TestLiveSessionKick(t *testing.T) {
 		if user == "" || pass == "" {
 			t.Fatal("phase=link needs PSTONN_LIVE_USERNAME and PSTONN_LIVE_PASSWORD")
 		}
-		if err := c.Link(ctx, owner, user, pass, false); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
 			t.Fatalf("headless link failed: %v", err)
 		}
 		// Prove it's alive right now via the exact production keep-warm path.

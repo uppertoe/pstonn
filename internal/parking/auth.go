@@ -140,7 +140,11 @@ func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*toke
 // NOTE: this replays the SPA's own login form. It is not yet validated against
 // the live site from a server IP (see the Akamai spike in docs/CAPTURE.md); the
 // form-field harvesting is deliberately lenient in case the page shifts.
-func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword bool) error {
+// interactive=true is a user-initiated link/re-link that advances the
+// re-authorise clock (linked_at); a non-interactive call (auto-reconnect) keeps
+// the clock anchored to the last real interactive link, so the periodic
+// "confirm you're still using this" bound still fires.
+func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword, interactive bool) error {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return err
@@ -227,7 +231,7 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	}
 	cookie := jarCookieHeader(jar, authURLParsed)
 	if !strings.Contains(cookie, "Permits.IDM.Identity") {
-		return errors.New("parking: login did not establish a session (check the username and password)")
+		return ErrLoginRejected
 	}
 
 	// 5. Seal and store the session cookie. The password is sealed and kept only
@@ -243,7 +247,11 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 			return err
 		}
 	}
-	return c.store.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed, Password: sealedPass})
+	cs := store.CouncilSession{Owner: owner, Cookie: sealed, Password: sealedPass}
+	if interactive {
+		return c.store.SaveCouncilSession(ctx, cs) // stamps linked_at = now
+	}
+	return c.store.SaveReconnectedSession(ctx, cs) // preserves linked_at
 }
 
 // Reconnect re-establishes an expired session non-interactively using the sealed
@@ -264,8 +272,9 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 		return err
 	}
 	// The council username is pinned to the owner's verified email at link time,
-	// so the owner doubles as the username here.
-	return c.Link(ctx, owner, owner, password, true)
+	// so the owner doubles as the username here. interactive=false keeps the saved
+	// password and does NOT advance the re-authorise clock.
+	return c.Link(ctx, owner, owner, password, true, false)
 }
 
 var (

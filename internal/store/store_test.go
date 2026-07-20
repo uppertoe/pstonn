@@ -401,6 +401,28 @@ func TestCopySchedule(t *testing.T) {
 	if len(ovs) != 1 {
 		t.Fatalf("dst live overrides = %d, want 1", len(ovs))
 	}
+	// Idempotent replace: copying again yields the SAME result, not duplicates.
+	n2, err := s.CopySchedule(ctx, owner, src, dst, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n2 != 3 {
+		t.Fatalf("second copy count = %d, want 3 (replace, not duplicate)", n2)
+	}
+	if ovs, _ := s.ListOverrides(ctx, dst, time.Now()); len(ovs) != 1 {
+		t.Fatalf("re-copy duplicated overrides: %d live, want 1", len(ovs))
+	}
+	// Replace clears a rule the destination had that the source lacks.
+	otherVeh, _ := s.CreateVehicle(ctx, owner, "BBB222", "Other")
+	if err := s.SetRule(ctx, dst, time.Wednesday, otherVeh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CopySchedule(ctx, owner, src, dst, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if rules, _ := s.ListRules(ctx, dst); len(rules) != 2 {
+		t.Fatalf("replace should leave only the source's 2 rules, got %d", len(rules))
+	}
 	// Self-copy is rejected.
 	if _, err := s.CopySchedule(ctx, owner, dst, dst, time.Now()); err == nil {
 		t.Fatal("self-copy should error")
@@ -409,6 +431,32 @@ func TestCopySchedule(t *testing.T) {
 	other, _ := s.UpsertPermit(ctx, "other@example.com", "x-1", "14", "X")
 	if _, err := s.CopySchedule(ctx, owner, other, dst, time.Now()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-owner copy err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestSaveReconnectedSessionPreservesLinkedAt: an auto-reconnect refreshes the
+// cookie + saved password but must NOT advance linked_at (the 90-day re-authorise
+// clock only moves on an interactive re-link).
+func TestSaveReconnectedSessionPreservesLinkedAt(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	owner := "rc@example.com"
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c1", Password: "pw1"}); err != nil {
+		t.Fatal(err)
+	}
+	orig, _ := s.GetCouncilSession(ctx, owner)
+	if orig.LinkedAt.IsZero() {
+		t.Fatal("interactive link should stamp linked_at")
+	}
+	if err := s.SaveReconnectedSession(ctx, CouncilSession{Owner: owner, Cookie: "c2", Password: "pw2"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetCouncilSession(ctx, owner)
+	if !got.LinkedAt.Equal(orig.LinkedAt) {
+		t.Fatalf("linked_at moved on reconnect: %v -> %v", orig.LinkedAt, got.LinkedAt)
+	}
+	if got.Cookie != "c2" || got.Password != "pw2" {
+		t.Fatalf("reconnect didn't refresh cookie/password: %q / %q", got.Cookie, got.Password)
 	}
 }
 

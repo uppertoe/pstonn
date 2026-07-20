@@ -102,6 +102,9 @@ func TestTemplatesRender(t *testing.T) {
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
+		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
+		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
+		{"relink-savepw-respects-opton", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: true, Loc: loc}, `name="save_password" value="1" checked>`},
 		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Re-link your council account"},
 		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
 		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
