@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -379,6 +380,17 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	base, ok := s.appShell(w, r, "guests")
 	if !ok {
 		return
+	}
+	// Success feedback after deciding a printed-QR request (structured params, so
+	// the message is composed here, not reflected from the URL). The plate is
+	// rego-validated on the way in.
+	switch q := r.URL.Query(); {
+	case q.Get("applied") != "":
+		base.Flash = q.Get("applied") + " is now on the permit."
+	case q.Get("approving") != "":
+		base.Flash = "Approved — " + q.Get("approving") + " is being put on the permit."
+	case q.Get("declined") != "":
+		base.Flash = "Request declined."
 	}
 	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
 		s.serverError(w, err)
@@ -791,6 +803,15 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 	v := guestWaitView{Status: "denied"} // unknown/expired reads as not-approved
 	if err == nil {
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
+		// "approved" means the resident said yes; only report it as on the permit
+		// once the council's own record (active_registration, set from a confirmed
+		// read-back by the apply or the scheduler) actually shows the plate. Until
+		// then the visitor keeps seeing "being put on", never a false "it's on".
+		if req.Status == "approved" {
+			if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil && strings.EqualFold(permit.ActiveRegistration, req.Plate) {
+				v.Status = "applied"
+			}
+		}
 	}
 	if e := templates.ExecuteTemplate(w, "guest-req-status", v); e != nil {
 		log.Printf("render guest-req-status: %v", e)
@@ -914,19 +935,32 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		s.serverError(w, err)
 		return
 	}
+	confirmed := false
 	if approve {
 		if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil && permit.Owner == owner {
 			end := dayEndLocal(now, 0)
 			if _, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)"); cerr == nil {
 				applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+				// SetVehicle returns nil only once the council's own record confirms
+				// the plate, so `confirmed` means it is truly on (not just approved).
 				if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
 					_ = s.store.SetPermitActive(r.Context(), permit.ID, req.Plate)
 					_ = s.store.RecordApply(r.Context(), permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
+					confirmed = true
 				}
 				cancel()
-				s.sched.Kick()
+				s.sched.Kick() // if not confirmed synchronously, the scheduler converges
 			}
 		}
 	}
-	http.Redirect(w, r, "/guests", http.StatusSeeOther)
+	q := url.Values{}
+	switch {
+	case !approve:
+		q.Set("declined", "1")
+	case confirmed:
+		q.Set("applied", req.Plate)
+	default:
+		q.Set("approving", req.Plate)
+	}
+	http.Redirect(w, r, "/guests?"+q.Encode(), http.StatusSeeOther)
 }

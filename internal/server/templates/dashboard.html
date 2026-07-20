@@ -1416,15 +1416,22 @@
 {{/* =================== NOTIFY BODY (swappable, auto-saves) =================== */}}
 {{/* Printed-QR request status (htmx-polled). Pending re-polls; a decision stops. */}}
 {{define "guest-req-status"}}
-{{if eq .Status "approved"}}
+{{if eq .Status "applied"}}
+{{/* council-confirmed: the permit's own record now shows the plate. Terminal. */}}
 <div id="reqstatus">
   <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
-  <p class="gresult">Approved &mdash; <span class="plate">{{.Plate}}</span> is being put on the permit until {{.Until}}.</p>
+  <p class="gresult"><span class="plate">{{.Plate}}</span> is on the permit until {{.Until}}.</p>
 </div>
 {{else if eq .Status "denied"}}
 <div id="reqstatus">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-x"}}</div>
   <p class="gresult">Not approved. Ask the resident, or try again.</p>
+</div>
+{{else if eq .Status "approved"}}
+{{/* the resident said yes; keep polling until the council confirms the plate is on */}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="gspin"></div>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">Approved &mdash; putting <span class="plate">{{.Plate}}</span> on the permit&hellip;</p>
 </div>
 {{else}}
 <div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
