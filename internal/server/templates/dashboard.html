@@ -205,7 +205,7 @@
   .status { font-size:14px; color:var(--muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 
   /* status hero */
-  .permit-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
+  .permit-head { display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:16px; min-height:44px; }
   .permit-head h2 { margin:0; font-size:17px; letter-spacing:-.01em; }
   .pname { display:inline-flex; align-items:center; gap:4px; min-width:0; }
   .pname-txt { display:flex; flex-direction:column; gap:1px; min-width:0; }
@@ -1590,6 +1590,9 @@
     </div>
   </div>
   {{end}}
+  <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}">
+    {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
+  </p>
   <div class="quiet" x-data="{quiet: {{if .QuietEnabled}}true{{else}}false{{end}}}">
     <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
     <div class="quiet-times" x-show="quiet" x-cloak>
@@ -1606,9 +1609,6 @@
     </div>
     <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen on time (your permit is always correct) &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. A failure is held too, but arrives early enough to act on.</p>
   </div>
-  <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}">
-    {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
-  </p>
 </form>
 {{end}}
 

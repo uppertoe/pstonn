@@ -13,6 +13,7 @@ type Vehicle struct {
 	Registration string // number plate, normalised upper-case no spaces
 	Label        string // human name, e.g. "Mum's Corolla"
 	Email        string // optional: who drives this car (default guest-pass recipient)
+	Color        string // stable per-plate colour (hex), the at-a-glance cue
 }
 
 // Permit is a council visitor permit that holds one active vehicle at a time.

@@ -83,6 +83,50 @@ func TestOwnerIsolation(t *testing.T) {
 
 // TestVehicleOwnedBy guards the IDOR fix: a vehicle_id is only bindable into a
 // rule/override by its owner.
+// TestVehicleColorStable: a plate keeps its colour when other plates are added,
+// even one whose label sorts ahead of it (the reported "colours reshuffle" bug).
+func TestVehicleColorStable(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	owner := "v@example.com"
+	if _, err := s.CreateVehicle(ctx, owner, "BBB111", "Bravo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateVehicle(ctx, owner, "CCC111", "Charlie"); err != nil {
+		t.Fatal(err)
+	}
+	colorOf := func() map[string]string {
+		m := map[string]string{}
+		vs, err := s.ListVehiclesFor(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range vs {
+			if v.Color == "" {
+				t.Fatalf("vehicle %s has no colour", v.Registration)
+			}
+			m[v.Registration] = v.Color
+		}
+		return m
+	}
+	before := colorOf()
+	if before["BBB111"] == before["CCC111"] {
+		t.Fatal("two vehicles were given the same colour")
+	}
+	// Add a plate whose label sorts FIRST — the old position-based scheme would
+	// have shifted Bravo/Charlie onto new colours.
+	if _, err := s.CreateVehicle(ctx, owner, "AAA111", "Alpha"); err != nil {
+		t.Fatal(err)
+	}
+	after := colorOf()
+	if after["BBB111"] != before["BBB111"] || after["CCC111"] != before["CCC111"] {
+		t.Fatalf("colours reshuffled on add: before=%v after=%v", before, after)
+	}
+	if after["AAA111"] == after["BBB111"] || after["AAA111"] == after["CCC111"] {
+		t.Fatalf("new plate collided with an existing colour: %v", after)
+	}
+}
+
 func TestVehicleOwnedBy(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)

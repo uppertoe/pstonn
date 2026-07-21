@@ -469,21 +469,6 @@ func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
 
 // ---- view models ----
 
-// vehiclePalette is a small, accessible categorical palette. Each vehicle is
-// assigned a stable colour by its position in the owner's (ordered) vehicle
-// list, so the same car reads identically everywhere, the core at-a-glance cue.
-var vehiclePalette = []string{
-	"#2f6feb", "#127a49", "#b54708", "#7a5af8",
-	"#0e7490", "#be185d", "#4d7c0f", "#9333ea",
-}
-
-func vehicleColor(i int) string {
-	if len(vehiclePalette) == 0 {
-		return "#667085"
-	}
-	return vehiclePalette[i%len(vehiclePalette)]
-}
-
 func shortDay(w time.Weekday) string { return w.String()[:3] }
 
 type dashboardData struct {
@@ -689,7 +674,10 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 	regByID = map[int64]string{}
 	labelByID = map[int64]string{}
 	for i, v := range vs {
-		c := vehicleColor(i)
+		c := v.Color // stable, assigned at creation (see store.CreateVehicle)
+		if c == "" {
+			c = "#667085" // defensive: a pre-backfill row with no colour
+		}
 		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c, Email: v.Email}
 		colorByID[v.ID] = c
 		regByID[v.ID] = v.Registration

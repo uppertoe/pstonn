@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS vehicle (
     owner        TEXT NOT NULL DEFAULT '',   -- app-user email that owns this vehicle
     registration TEXT NOT NULL DEFAULT '',
     label        TEXT NOT NULL DEFAULT '',
+    color        TEXT NOT NULL DEFAULT '',   -- stable per-plate colour, assigned at creation
     created_at   TEXT NOT NULL,
     UNIQUE(owner, registration)
 );
@@ -309,6 +310,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE permit ADD COLUMN permit_type TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE notify_pref ADD COLUMN quiet_from INTEGER NOT NULL DEFAULT 22`,
 		`ALTER TABLE notify_pref ADD COLUMN quiet_until INTEGER NOT NULL DEFAULT 6`,
+		`ALTER TABLE vehicle ADD COLUMN color TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
@@ -404,7 +406,7 @@ func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }
 // ListVehicles returns every vehicle across all owners (used by the scheduler to
 // map vehicle IDs to registrations for permits it reconciles).
 func (s *Store) ListVehicles(ctx context.Context) ([]model.Vehicle, error) {
-	return s.queryVehicles(ctx, `SELECT id, registration, label, email FROM vehicle ORDER BY label, registration`)
+	return s.queryVehicles(ctx, `SELECT id, registration, label, email, color FROM vehicle ORDER BY label, registration`)
 }
 
 // VehicleRef is a vehicle plus its owner, used by the scheduler to resolve a
@@ -448,7 +450,7 @@ func (s *Store) VehicleOwnedBy(ctx context.Context, owner string, id int64) (boo
 // ListVehiclesFor returns the vehicles owned by one app user.
 func (s *Store) ListVehiclesFor(ctx context.Context, owner string) ([]model.Vehicle, error) {
 	return s.queryVehicles(ctx,
-		`SELECT id, registration, label, email FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
+		`SELECT id, registration, label, email, color FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
 }
 
 func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([]model.Vehicle, error) {
@@ -460,7 +462,7 @@ func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([
 	var out []model.Vehicle
 	for rows.Next() {
 		var v model.Vehicle
-		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email); err != nil {
+		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email, &v.Color); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -468,17 +470,107 @@ func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([
 	return out, rows.Err()
 }
 
+// vehiclePalette is a small, accessible categorical palette. A vehicle's colour
+// is assigned ONCE at creation and stored, so the same car reads identically
+// everywhere and adding/removing other cars never re-colours it.
+var vehiclePalette = []string{
+	"#2f6feb", "#127a49", "#b54708", "#7a5af8",
+	"#0e7490", "#be185d", "#4d7c0f", "#9333ea",
+}
+
+// pickVehicleColor returns the first palette colour not already used by this
+// owner, so a household's cars stay visually distinct; once the palette is
+// exhausted it wraps by count (unavoidable collision, but stable).
+func pickVehicleColor(used map[string]bool) string {
+	for _, c := range vehiclePalette {
+		if !used[c] {
+			return c
+		}
+	}
+	return vehiclePalette[len(used)%len(vehiclePalette)]
+}
+
 func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label string) (int64, error) {
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO vehicle (owner, registration, label, created_at) VALUES (?, ?, ?, ?)`,
-		owner, registration, label, nowUTC())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Assign a stable colour: the first palette entry this owner isn't using yet.
+	used := map[string]bool{}
+	rows, err := tx.QueryContext(ctx, `SELECT color FROM vehicle WHERE owner = ? AND color != ''`, owner)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		used[c] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO vehicle (owner, registration, label, color, created_at) VALUES (?, ?, ?, ?, ?)`,
+		owner, registration, label, pickVehicleColor(used), nowUTC())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			return 0, ErrDuplicate
 		}
 		return 0, err
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+// BackfillVehicleColors assigns a stored colour to any vehicle still missing one
+// (pre-migration rows), preserving each owner's CURRENT on-screen colours: it
+// walks their vehicles in the same order the UI lists them (label, registration)
+// and hands out palette colours in that order. Idempotent — a no-op once done.
+func (s *Store) BackfillVehicleColors(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, owner FROM vehicle WHERE color = '' ORDER BY owner, label, registration`)
+	if err != nil {
+		return err
+	}
+	type ov struct {
+		id    int64
+		owner string
+	}
+	var todo []ov
+	for rows.Next() {
+		var r ov
+		if err := rows.Scan(&r.id, &r.owner); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	i, prev := 0, ""
+	for _, r := range todo {
+		if r.owner != prev {
+			i, prev = 0, r.owner
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE vehicle SET color = ? WHERE id = ?`,
+			vehiclePalette[i%len(vehiclePalette)], r.id); err != nil {
+			return err
+		}
+		i++
+	}
+	return nil
 }
 
 // SetVehicleEmail sets (or clears) the optional driver email on a vehicle,
@@ -2228,7 +2320,7 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 		return GuestContext{}, err
 	}
 	gc.Vehicles, err = s.queryVehicles(ctx, `
-SELECT v.id, v.registration, v.label, v.email FROM vehicle v
+SELECT v.id, v.registration, v.label, v.email, v.color FROM vehicle v
 JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
 WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
 	return gc, err
@@ -2264,7 +2356,7 @@ func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrant
 	for i := range out {
 		g := &out[i]
 		g.Vehicles, err = s.queryVehicles(ctx, `
-SELECT v.id, v.registration, v.label, v.email FROM vehicle v
+SELECT v.id, v.registration, v.label, v.email, v.color FROM vehicle v
 JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
 WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, g.Grant.ID)
 		if err != nil {

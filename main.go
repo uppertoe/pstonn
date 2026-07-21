@@ -63,6 +63,12 @@ func run() error {
 	}
 	defer st.Close()
 
+	// One-time: lock in existing vehicles' current colours so later additions
+	// don't re-shuffle them (safe/idempotent after the first run).
+	if err := st.BackfillVehicleColors(context.Background()); err != nil {
+		log.Printf("startup: backfill vehicle colours: %v", err)
+	}
+
 	var sessions *session.Manager
 	if len(cfg.SessionSecret) > 0 {
 		sessions = session.New(cfg.SessionSecret, cfg.CookieSecure)
