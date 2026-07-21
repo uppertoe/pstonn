@@ -210,12 +210,15 @@
   .pname { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 auto; }
   /* The title line reserves a stable height so swapping the name for the rename
      input (same row) doesn't nudge the subtitle or reflow the card below. */
-  .pname-title { display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap; min-height:32px; }
+  .pname-title { display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap; min-height:34px; }
   .pdetail { font-size:11.5px; color:var(--muted); letter-spacing:.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pname-title .ghost.icon.sm { opacity:.55; }
   .pname:hover .ghost.icon.sm { opacity:1; }
   .pname-edit { display:flex; align-items:center; gap:8px; flex:1 1 auto; flex-wrap:wrap; min-width:0; }
-  .pname-edit input { flex:1; min-width:150px; font-size:16px; font-weight:600; letter-spacing:-.01em; padding:7px 11px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); }
+  /* Match the h2 exactly (size/weight/flush-left) with an underline affordance, so
+     swapping the heading for this input doesn't shift the text or the row height. */
+  .pname-edit input { flex:1; min-width:150px; font-size:17px; font-weight:600; letter-spacing:-.01em; padding:1px 2px; border:0; border-bottom:2px solid var(--primary); border-radius:0; background:transparent; color:var(--ink); }
+  .pname-edit input:focus { outline:none; }
   .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
   .permit-expiry { display:flex; align-items:center; gap:7px; margin:2px 0 0; font-size:12.5px; color:var(--muted); }
   .permit-expiry svg { width:15px; height:15px; flex:0 0 auto; }
