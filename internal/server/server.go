@@ -98,6 +98,8 @@ func (s *Server) Handler() http.Handler {
 	// under /g/* so the public Caddy matcher covers it.
 	mux.HandleFunc("GET /g/manifest/{token}", s.guestManifest)
 	mux.HandleFunc("POST /g/{token}", s.guestActivate)
+	mux.HandleFunc("POST /g/{token}/revert", s.guestRevert)
+	mux.HandleFunc("GET /g/live/{token}", s.guestLive)
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
 	mux.HandleFunc("GET /g/req/{id}", s.guestRequestStatus)
 

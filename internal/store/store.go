@@ -139,14 +139,15 @@ CREATE TABLE IF NOT EXISTS weekly_rule (
 );
 
 CREATE TABLE IF NOT EXISTS override (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    permit_id    INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
-    vehicle_id   INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,  -- NULL for an ad-hoc plate
-    registration TEXT NOT NULL DEFAULT '',   -- literal plate used when vehicle_id IS NULL (not a saved car)
-    starts_at    TEXT NOT NULL,              -- RFC3339 UTC
-    ends_at      TEXT,                       -- RFC3339 UTC, NULL = open-ended
-    created_by   TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id      INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    vehicle_id     INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,  -- NULL for an ad-hoc plate
+    registration   TEXT NOT NULL DEFAULT '',   -- literal plate used when vehicle_id IS NULL (not a saved car)
+    starts_at      TEXT NOT NULL,              -- RFC3339 UTC
+    ends_at        TEXT,                       -- RFC3339 UTC, NULL = open-ended
+    created_by     TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    guest_token_id INTEGER NOT NULL DEFAULT 0  -- which guest link created it (0 = not a guest change); lets a guest revert exactly their own changes
 );
 CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id);
 
@@ -244,7 +245,9 @@ CREATE TABLE IF NOT EXISTS guest_token (
     revoked_at      TEXT NOT NULL DEFAULT '',
     last_used_at    TEXT NOT NULL DEFAULT '',
     expires_at      TEXT NOT NULL DEFAULT '',   -- RFC3339 UTC; '' = never (persistent email link)
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    baseline_plate  TEXT NOT NULL DEFAULT '',   -- what was on the permit before this link's current run of activations ('' = unknown)
+    baseline_until  TEXT NOT NULL DEFAULT ''    -- RFC3339 UTC end of that run's window; '' = no run captured
 );
 CREATE INDEX IF NOT EXISTS idx_guest_token_grant ON guest_token(grant_id);
 
@@ -319,6 +322,9 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE guest_token ADD COLUMN token_sealed TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE outbox ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE override ADD COLUMN guest_token_id INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE guest_token ADD COLUMN baseline_plate TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_token ADD COLUMN baseline_until TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
@@ -884,10 +890,16 @@ FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
 // ---- Overrides ----
 
 func (s *Store) CreateOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {
+	return s.CreateGuestOverride(ctx, permitID, vehicleID, startsAt, endsAt, createdBy, 0)
+}
+
+// CreateGuestOverride is CreateOverride tagged with the guest link that made it,
+// so a guest's revert can remove exactly their own changes.
+func (s *Store) CreateGuestOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
-VALUES (?, ?, '', ?, ?, ?, ?)`,
-		permitID, vehicleID, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
+INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
+VALUES (?, ?, '', ?, ?, ?, ?, ?)`,
+		permitID, vehicleID, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID)
 	if err != nil {
 		return 0, err
 	}
@@ -897,14 +909,32 @@ VALUES (?, ?, '', ?, ?, ?, ?)`,
 // CreatePlateOverride books a one-off using a literal, unsaved number plate
 // (vehicle_id IS NULL). The plate is normalised by the caller.
 func (s *Store) CreatePlateOverride(ctx context.Context, permitID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {
+	return s.CreateGuestPlateOverride(ctx, permitID, registration, startsAt, endsAt, createdBy, 0)
+}
+
+// CreateGuestPlateOverride is CreatePlateOverride tagged with the guest link
+// that made it (see CreateGuestOverride).
+func (s *Store) CreateGuestPlateOverride(ctx context.Context, permitID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
-VALUES (?, NULL, ?, ?, ?, ?, ?)`,
-		permitID, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
+INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
+VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
+		permitID, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// DeleteGuestOverrides removes every override a guest link created on a permit
+// (the sweep behind a guest's "put it back" revert). A zero tokenID is refused:
+// it would match every non-guest override.
+func (s *Store) DeleteGuestOverrides(ctx context.Context, permitID, guestTokenID int64) error {
+	if guestTokenID == 0 {
+		return errors.New("store: DeleteGuestOverrides requires a guest token id")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM override WHERE permit_id = ? AND guest_token_id = ?`, permitID, guestTokenID)
+	return err
 }
 
 func endsAtSQL(endsAt *time.Time) sql.NullString {
@@ -1821,6 +1851,12 @@ type GuestContext struct {
 	TokenID   int64
 	Recipient string
 	Vehicles  []model.Vehicle
+	// BaselinePlate is what was on the permit before this link's current run of
+	// activations began ('' = unknown), and BaselineUntil is when that run's
+	// window ends (zero = no run captured). Together they let the guest revert
+	// their changes back to the pre-existing plate.
+	BaselinePlate string
+	BaselineUntil time.Time
 }
 
 // GuestGrantDetail is a grant with its allowed cars and recipient links, for the
@@ -2295,17 +2331,17 @@ func (s *Store) DecideGuestRequest(ctx context.Context, owner string, id int64, 
 // ErrNotFound so the caller can show one neutral "no longer active" page.
 func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
 	var gc GuestContext
-	var created string
+	var created, blUntil string
 	var overnight, plate, reqOnly, enabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.enabled, g.created_at
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.enabled, g.created_at, t.baseline_plate, t.baseline_until
 FROM guest_token t
 JOIN guest_grant g ON g.id = t.grant_id
 WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
   AND (t.expires_at = '' OR t.expires_at > ?)
   AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
 		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
-		&gc.Grant.Label, &overnight, &plate, &reqOnly, &enabled, &created)
+		&gc.Grant.Label, &overnight, &plate, &reqOnly, &enabled, &created, &gc.BaselinePlate, &blUntil)
 	if err == sql.ErrNoRows {
 		return GuestContext{}, ErrNotFound
 	}
@@ -2318,6 +2354,10 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 	gc.Grant.Enabled = enabled == 1
 	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 		return GuestContext{}, err
+	}
+	if blUntil != "" {
+		// A malformed timestamp reads as "no baseline" rather than failing the link.
+		gc.BaselineUntil, _ = time.Parse(time.RFC3339, blUntil)
 	}
 	gc.Vehicles, err = s.queryVehicles(ctx, `
 SELECT v.id, v.registration, v.label, v.email, v.color FROM vehicle v
@@ -2424,6 +2464,23 @@ func (s *Store) DeleteGuestGrant(ctx context.Context, owner string, grantID int6
 // TouchGuestTokenUsed records the last time a token successfully activated a car.
 func (s *Store) TouchGuestTokenUsed(ctx context.Context, tokenID int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE guest_token SET last_used_at = ? WHERE id = ?`, nowUTC(), tokenID)
+	return err
+}
+
+// SetGuestBaseline remembers what was on the permit before a guest link's run of
+// activations (and how long that run's window lasts), so the guest can revert.
+func (s *Store) SetGuestBaseline(ctx context.Context, tokenID int64, plate string, until time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE guest_token SET baseline_plate = ?, baseline_until = ? WHERE id = ?`,
+		plate, until.UTC().Format(time.RFC3339), tokenID)
+	return err
+}
+
+// ClearGuestBaseline forgets a link's captured baseline (after a revert), so the
+// next activation captures a fresh one.
+func (s *Store) ClearGuestBaseline(ctx context.Context, tokenID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE guest_token SET baseline_plate = '', baseline_until = '' WHERE id = ?`, tokenID)
 	return err
 }
 

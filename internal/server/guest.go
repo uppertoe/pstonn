@@ -49,6 +49,13 @@ type guestActView struct {
 	AllowOvernight bool          // whether the overnight checkbox is offered
 	AllowPlate     bool          // whether the visitor may type an arbitrary plate
 	RequestOnly    bool          // printed QR: entering a plate only requests approval
+	RevertPlate    string        // pre-existing plate the guest may put back ("" = no revert offered)
+	PendingReg     string        // plate the schedule targets but the council doesn't show yet ("" = settled)
+	Stalled        bool          // the pending change has taken suspiciously long; stop polling
+	SelectedReg    string        // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
+	UntilText      string        // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
+	KeepForm       bool          // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
+	FP             string        // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
 }
 
 // guestWaitView drives the visitor's "waiting for approval" page (State
@@ -196,49 +203,264 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
-		s.renderGuestGone(w)
+		s.renderGuestGone(w, r)
 		return
+	}
+	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
+}
+
+// guestCurrentPlate is the plate to show as "on the permit now": the council's
+// own (cached) record when reachable, else our stored belief. Never an error —
+// a council hiccup must not fail the page.
+func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit model.Permit) string {
+	if gc.Grant.RequestOnly {
+		return "" // a printed door QR must not disclose the current plate
+	}
+	current := permit.ActiveRegistration
+	if actual, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+		model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
+		current = actual
+	}
+	return current
+}
+
+// revertPlate decides whether a guest may revert, and to what: the captured
+// baseline, only while its window lasts, only when it isn't already on the
+// permit, and only when it is NOT one of the link's own cars (those they can
+// simply tap; the revert exists to restore a plate they could not pick).
+func revertPlate(baseline string, until time.Time, current string, cars []model.Vehicle, now time.Time) string {
+	if baseline == "" || !now.Before(until) || strings.EqualFold(baseline, current) {
+		return ""
+	}
+	for _, v := range cars {
+		if strings.EqualFold(v.Registration, baseline) {
+			return ""
+		}
+	}
+	return baseline
+}
+
+// guestDesired returns the plate the schedule is currently steering the permit
+// toward ("" when nothing is scheduled), when that decision was made, and when
+// its booking ends (both zero when roster-driven/open-ended). It is the same
+// resolution the scheduler acts on, so the page's "still applying" state can
+// never disagree with what will be applied.
+func (s *Server) guestDesired(ctx context.Context, permit model.Permit) (want string, decidedAt, until time.Time) {
+	now := time.Now().In(s.cfg.DisplayLocation)
+	rules, err := s.store.ListRules(ctx, permit.ID)
+	if err != nil {
+		return "", time.Time{}, time.Time{}
+	}
+	overrides, err := s.store.ListOverrides(ctx, permit.ID, now)
+	if err != nil {
+		return "", time.Time{}, time.Time{}
+	}
+	res := model.Resolve(now, rules, overrides)
+	if res.Source == model.SourceNone {
+		return "", time.Time{}, time.Time{}
+	}
+	if res.Registration != "" {
+		want = res.Registration
+	} else {
+		vehicles, verr := s.store.ListVehiclesFor(ctx, permit.Owner)
+		if verr != nil {
+			return "", time.Time{}, time.Time{}
+		}
+		for _, v := range vehicles {
+			if v.ID == res.VehicleID {
+				want = v.Registration
+				break
+			}
+		}
+	}
+	if res.Source == model.SourceOverride {
+		// Re-find the winner with Resolve's own tie-break (freshest CreatedAt, then
+		// highest ID): its creation time is when the pending change was asked for
+		// (the stall clock) and its end is when the booking lapses (the "until").
+		var best *model.Override
+		for i := range overrides {
+			o := &overrides[i]
+			if o.StartsAt.After(now) || (o.EndsAt != nil && !now.Before(*o.EndsAt)) {
+				continue
+			}
+			if best == nil || o.CreatedAt.After(best.CreatedAt) ||
+				(o.CreatedAt.Equal(best.CreatedAt) && o.ID > best.ID) {
+				best = o
+			}
+		}
+		if best != nil {
+			decidedAt = best.CreatedAt
+			if best.EndsAt != nil {
+				until = *best.EndsAt
+			}
+		}
+	}
+	return want, decidedAt, until
+}
+
+// untilText phrases when the winning booking ends, or "" when there is nothing
+// to phrase (no end, open-ended). now and end must be in the display location.
+func untilText(now, end time.Time) string {
+	if end.IsZero() {
+		return ""
+	}
+	switch {
+	case !end.After(dayEndLocal(now, 0)):
+		return "until the end of today"
+	case !end.After(dayEndLocal(now, 1)):
+		return "until the end of tomorrow (" + now.AddDate(0, 0, 1).Weekday().String() + ")"
+	default:
+		return "until " + end.Format("Mon 2 Jan")
+	}
+}
+
+// revertPinEnd bounds the revert pin: never past the end of today. The guest's
+// own overrides are already swept, so tomorrow belongs to the owner's schedule —
+// an overnight mistake must not pin yesterday's plate over tomorrow's roster.
+func revertPinEnd(now, baselineUntil time.Time) time.Time {
+	if today := dayEndLocal(now, 0); baselineUntil.After(today) {
+		return today
+	}
+	return baselineUntil
+}
+
+// pendingState reports whether the council record has caught up to the
+// schedule's target: a non-empty pendingReg means "still applying"; stalled
+// means it has been outstanding past guestApplyTimeout and polling should stop.
+func pendingState(actual, want string, decidedAt, now time.Time) (pendingReg string, stalled bool) {
+	if want == "" || strings.EqualFold(actual, want) {
+		return "", false
+	}
+	return want, !decidedAt.IsZero() && now.Sub(decidedAt) > guestApplyTimeout
+}
+
+// buildGuestView assembles the activation-menu view model from actual state:
+// the council-side current plate, the revert offer, and the pending/stalled
+// status against the schedule's resolved target.
+func (s *Server) buildGuestView(ctx context.Context, gc guestCtx, permit model.Permit, current string) guestActView {
+	cars, _, _, _ := vehicleViews(gc.Vehicles)
+	view := guestActView{
+		Token: gc.rawToken, PermitLabel: permitLabel(permit),
+		Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
+		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
 	}
 	// A printed door QR is meant to be left out in public, so the page must not
 	// disclose the holder's email or the plate currently on the permit to anyone
 	// who scans it. For emailed links / on-screen QR (a known or present visitor)
 	// the current plate and "managed by" address are useful trust signals.
-	var ownerEmail, current string
 	if !gc.Grant.RequestOnly {
-		ownerEmail = permit.Owner
-		current = permit.ActiveRegistration // best-effort; never fail the page on a council hiccup
-		if actual, err := s.council.CurrentVehicleCached(r.Context(), permit.Owner,
-			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
-			current = actual
+		view.OwnerEmail = permit.Owner
+		view.CurrentReg = current
+		view.RevertPlate = revertPlate(gc.BaselinePlate, gc.BaselineUntil, current, gc.Vehicles, time.Now())
+		want, decidedAt, until := s.guestDesired(ctx, permit)
+		view.PendingReg, view.Stalled = pendingState(current, want, decidedAt, time.Now())
+		if !until.IsZero() {
+			now := time.Now().In(s.cfg.DisplayLocation)
+			view.UntilText = untilText(now, until.In(s.cfg.DisplayLocation))
+		}
+		// The highlight follows the guest's choice the moment it is saved; the
+		// "on now" pill follows the council's actual record as it catches up.
+		view.SelectedReg = current
+		if view.PendingReg != "" {
+			view.SelectedReg = view.PendingReg
 		}
 	}
-	cars, _, _, _ := vehicleViews(gc.Vehicles)
-	s.render(w, dashboardData{
-		State: "guest", Loc: s.cfg.DisplayLocation,
-		Guest: guestActView{
-			Token: gc.rawToken, OwnerEmail: ownerEmail, PermitLabel: permitLabel(permit),
-			CurrentReg: current, Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
-			AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
-		},
-	})
+	view.FP = guestFP(view)
+	return view
 }
+
+// guestFP fingerprints the state a poll could change. Everything else on the
+// page is static per token, so an unchanged fingerprint means an identical body.
+func guestFP(v guestActView) string {
+	stalled := "0"
+	if v.Stalled {
+		stalled = "1"
+	}
+	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + v.RevertPlate + "|" + v.UntilText))
+	return hex.EncodeToString(sum[:6])
+}
+
+// renderGuestMenu renders the activation menu with optional feedback. An htmx
+// request gets just the live-updating body fragment (no navigation); anything
+// else gets the full page. While a change is still applying, the fragment
+// carries a poller so the page keeps showing the council's ACTUAL record until
+// it matches the schedule's target — never just the intended result.
+func (s *Server) renderGuestMenu(w http.ResponseWriter, r *http.Request, gc guestCtx, permit model.Permit, current, flash, warn string) {
+	s.renderGuestMenuOpts(w, r, gc, permit, current, flash, warn, false)
+}
+
+// renderGuestMenuOpts: keepForm=true (poll responses) renders hx-preserve on the
+// form inputs so an in-progress tick/typed plate survives the swap; activation
+// responses use false so the overnight box resets — overnight is a deliberate
+// per-booking choice, never sticky state.
+func (s *Server) renderGuestMenuOpts(w http.ResponseWriter, r *http.Request, gc guestCtx, permit model.Permit, current, flash, warn string, keepForm bool) {
+	noStore(w)
+	view := s.buildGuestView(r.Context(), gc, permit, current)
+	view.KeepForm = keepForm
+	data := dashboardData{State: "guest", Loc: s.cfg.DisplayLocation, Guest: view, Flash: flash, Warn: warn}
+	if isHX(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := templates.ExecuteTemplate(w, "guest-body", data); err != nil {
+			log.Printf("render guest-body: %v", err)
+		}
+		return
+	}
+	s.render(w, data)
+}
+
+// guestLive is the poll endpoint behind the "still applying" state: public,
+// token-gated, side-effect-free. The poll echoes the fingerprint of the state
+// it is showing; an unchanged state answers 204 (htmx swaps nothing), so the
+// page only repaints — and only replays banner animations — on a REAL change.
+// Only pages that rendered a pending banner poll here, so a settled answer
+// means the awaited change (or a superseding one) has landed — announce the
+// ACTUAL plate now on the council record.
+func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
+	if !ok {
+		s.renderGuestGone(w, r)
+		return
+	}
+	if gc.Grant.RequestOnly {
+		s.renderGuestGone(w, r)
+		return
+	}
+	current := s.guestCurrentPlate(r.Context(), gc, permit)
+	view := s.buildGuestView(r.Context(), gc, permit, current)
+	if r.URL.Query().Get("fp") == view.FP {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	flash := ""
+	if view.PendingReg == "" && !view.Stalled {
+		if want, _, _ := s.guestDesired(r.Context(), permit); want != "" && strings.EqualFold(current, want) {
+			flash = current + " is now on the permit."
+		}
+	}
+	s.renderGuestMenuOpts(w, r, gc, permit, current, flash, "", true)
+}
+
+func isHX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 
 // guestActivate performs an activation: it creates a fresh override for the chosen
 // car (end of today, or tomorrow if overnight) and applies it to the council for
-// instant feedback, leaving the scheduler to guarantee eventual consistency.
+// instant feedback, leaving the scheduler to guarantee eventual consistency. The
+// response is the same menu with the result inlined (htmx swaps it in place), so
+// a guest can tap one car, then another, then revert, without navigating.
 func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if !sameOrigin(r) {
-		s.renderGuestResult(w, "", false, "This request could not be verified. Please reopen your link and try again.")
+		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
 		return
 	}
 	if !s.guest.allow(clientIP(r)) {
-		s.renderGuestResult(w, "", false, "Too many attempts. Please wait a little while and try again.")
+		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
 		return
 	}
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
-		s.renderGuestGone(w)
+		s.renderGuestGone(w, r)
 		return
 	}
 
@@ -255,6 +477,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	if overnight {
 		end = dayEndLocal(now, 1)
 	}
+	current := s.guestCurrentPlate(r.Context(), gc, permit)
 
 	// The target is either an arbitrary plate (when the grant allows it, e.g. a
 	// visitor QR) or one of the grant's saved cars. Each becomes a fresh override,
@@ -262,7 +485,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	var reg, name, createdBy string
 	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
 		if !validRego(plate) {
-			s.renderGuestResult(w, permit.Owner, false, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+			s.renderGuestMenu(w, r, gc, permit, current, "", "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 			return
 		}
 		reg = plate
@@ -270,8 +493,8 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		if createdBy == "" {
 			createdBy = "visitor (QR)"
 		}
-		if _, err := s.store.CreatePlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy); err != nil {
-			s.renderGuestResult(w, permit.Owner, false, "Something went wrong saving your plate. Please try again.")
+		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy, gc.TokenID); err != nil {
+			s.renderGuestMenu(w, r, gc, permit, current, "", "Something went wrong saving your plate. Please try again.")
 			return
 		}
 	} else {
@@ -284,16 +507,29 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if chosen == nil {
-			s.renderGuestResult(w, permit.Owner, false, "Please choose one of the cars on your link.")
+			s.renderGuestMenu(w, r, gc, permit, current, "", "Please choose one of the cars on your link.")
 			return
 		}
 		reg, name, createdBy = chosen.Registration, chosen.Label, gc.Recipient
-		if _, err := s.store.CreateOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient); err != nil {
-			s.renderGuestResult(w, permit.Owner, false, "Something went wrong saving your choice. Please try again.")
+		if _, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID); err != nil {
+			s.renderGuestMenu(w, r, gc, permit, current, "", "Something went wrong saving your choice. Please try again.")
 			return
 		}
 	}
 	_ = s.store.TouchGuestTokenUsed(r.Context(), gc.TokenID)
+
+	// Capture (or extend) the revert baseline: the plate that was on the permit
+	// when this run of activations began. A later tap within the window must NOT
+	// re-capture — that would make "revert" restore the guest's own earlier pick
+	// instead of the true pre-existing plate. The window is marked even when the
+	// pre-existing plate is unknown ('' baseline: no revert offered), so a mid-run
+	// tap can't mistake the guest's own plate for the baseline.
+	if gc.BaselineUntil.IsZero() || now.After(gc.BaselineUntil) {
+		gc.BaselinePlate, gc.BaselineUntil = current, end
+	} else if end.After(gc.BaselineUntil) {
+		gc.BaselineUntil = end
+	}
+	_ = s.store.SetGuestBaseline(r.Context(), gc.TokenID, gc.BaselinePlate, gc.BaselineUntil)
 
 	until := untilPhrase(now, overnight)
 	// Best-effort synchronous apply so the visitor gets a real result; the
@@ -306,16 +542,103 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.SetPermitActive(r.Context(), permit.ID, reg)
 		_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "success", "activated by "+createdBy)
 		s.notifyGuestApply(r.Context(), permit, reg, name, createdBy)
-		s.renderGuestResult(w, permit.Owner, true, reg+" is now on the permit until "+until+".")
+		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
 	_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "error", err.Error())
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		// The override is saved; the scheduler will apply it shortly.
-		s.renderGuestResult(w, permit.Owner, true, "Saved "+reg+". It should be on the permit within a minute (until "+until+").")
+		// The override is saved and the scheduler will apply it shortly; the pending
+		// banner + poller (from renderGuestMenu) track the ACTUAL result — no claim.
+		s.renderGuestMenu(w, r, gc, permit, current, "", "")
 		return
 	}
-	s.renderGuestResult(w, permit.Owner, false, "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
+	s.renderGuestMenu(w, r, gc, permit, current, "", "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
+}
+
+// guestRevert restores the plate that was on the permit before this link's run
+// of activations: it sweeps the link's own overrides, re-pins the baseline for
+// the rest of the window, and applies it. Always the ORIGINAL pre-existing
+// plate — tapping between several cars first doesn't change what revert restores.
+func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	if !sameOrigin(r) {
+		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
+		return
+	}
+	if !s.guest.allow(clientIP(r)) {
+		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
+		return
+	}
+	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
+	if !ok {
+		s.renderGuestGone(w, r)
+		return
+	}
+	if gc.Grant.RequestOnly {
+		s.renderGuestGone(w, r) // printed QRs never change the permit directly, so there is nothing to revert
+		return
+	}
+	now := time.Now().In(s.cfg.DisplayLocation)
+	baseline := normalizeReg(gc.BaselinePlate)
+	if baseline == "" || !now.Before(gc.BaselineUntil) || !validRego(baseline) {
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Nothing to put back right now.")
+		return
+	}
+
+	// Sweep this link's overrides, then re-pin the baseline — the pin is what the
+	// scheduler retries from if the immediate apply fails. It is capped at the end
+	// of TODAY even when the run was overnight: with the guest's overrides gone,
+	// tomorrow belongs to the owner's schedule again (see revertPinEnd).
+	if err := s.store.DeleteGuestOverrides(r.Context(), permit.ID, gc.TokenID); err != nil {
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
+		return
+	}
+	createdBy := gc.Recipient
+	if createdBy == "" {
+		createdBy = "visitor (QR)"
+	}
+	end := revertPinEnd(now, gc.BaselineUntil)
+	if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
+		return
+	}
+	// Forget the baseline: the revert consumed it, and hiding the button beats
+	// offering a second no-op undo. The next activation captures a fresh one.
+	_ = s.store.ClearGuestBaseline(r.Context(), gc.TokenID)
+	gc.BaselinePlate, gc.BaselineUntil = "", time.Time{}
+
+	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, baseline)
+	s.sched.Kick()
+	if err == nil {
+		_ = s.store.SetPermitActive(r.Context(), permit.ID, baseline)
+		_ = s.store.RecordApply(r.Context(), permit.ID, baseline, "guest", "success", "put back by "+createdBy)
+		s.notifyGuestApply(r.Context(), permit, baseline, "", createdBy+" (undo)")
+		s.renderGuestMenu(w, r, gc, permit, baseline, baseline+" is back on the permit.", "")
+		return
+	}
+	_ = s.store.RecordApply(r.Context(), permit.ID, baseline, "guest", "error", err.Error())
+	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
+		// The restore pin is saved; the pending banner + poller track the actual result.
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
+		return
+	}
+	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
+}
+
+// guestFail reports a pre-resolution failure (bad origin, rate limit). For an
+// htmx request the whole body is swapped for the notice — the page's reload link
+// restores the menu; for a plain post it falls back to the result page.
+func (s *Server) guestFail(w http.ResponseWriter, r *http.Request, msg string) {
+	if isHX(r) {
+		noStore(w)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="banner warn" style="margin-top:14px"><span>%s</span></div><p class="empty-note" style="margin-top:12px"><a href="">Reload this page</a> to try again.</p>`,
+			template.HTMLEscapeString(msg))
+		return
+	}
+	s.renderGuestResult(w, "", false, msg)
 }
 
 // guestCtx bundles a resolved token with the raw token string (for echoing back).
@@ -355,11 +678,18 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 	}
 }
 
-func (s *Server) renderGuestGone(w http.ResponseWriter) {
+func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
+	const msg = "This link is no longer active. Ask the account holder for a new one."
+	if isHX(r) {
+		// The link died mid-session (revoked, disabled): swap the menu for the notice.
+		noStore(w)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="banner warn" style="margin-top:14px"><span>%s</span></div>`, msg)
+		return
+	}
 	noStore(w)
 	w.WriteHeader(http.StatusNotFound)
-	s.render(w, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation,
-		Warn: "This link is no longer active. Ask the account holder for a new one."})
+	s.render(w, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
 }
 
 func (s *Server) renderGuestResult(w http.ResponseWriter, ownerEmail string, ok bool, msg string) {

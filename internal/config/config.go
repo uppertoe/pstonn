@@ -160,6 +160,10 @@ type CouncilConfig struct {
 	// ExpiryLead is how far before a permit's own expiry date to warn the account
 	// so they can renew it with the council. COUNCIL_EXPIRY_LEAD_DAYS, default 14.
 	ExpiryLead time.Duration
+	// Sandbox (COUNCIL_SANDBOX=1) fakes the council in memory for local
+	// development: any login links, and plate changes land after a short delay so
+	// the pending → settled UX runs end to end. Never set in production.
+	Sandbox bool
 }
 
 // Load reads and validates configuration from the environment.
@@ -178,6 +182,7 @@ func Load() (*Config, error) {
 			APIBase:       env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
 			SessionMaxAge: time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
 			WarmInterval:  envDuration("COUNCIL_WARM_INTERVAL", 75*time.Minute),
+			Sandbox:       env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
 			ReminderLead:  time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
 			ExpiryLead:    time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
 		},

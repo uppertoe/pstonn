@@ -84,7 +84,9 @@ itself (schedule roster, vehicles, activity log, settings).
 
 ```bash
 # No auth layer needed locally: use the dev identity escape hatch.
-DEV_IDENTITY_EMAIL=you@example.com \
+# COUNCIL_SANDBOX=1 fakes the council in memory (any login links; plate changes
+# land after ~6s) so the full apply pipeline works without council credentials.
+COUNCIL_SANDBOX=1 DEV_IDENTITY_EMAIL=you@example.com \
   DATA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
   COOKIE_SECURE=false LISTEN_ADDR=127.0.0.1:8099 SQLITE_PATH=./local.db \
   go run .

@@ -124,6 +124,8 @@ type Client struct {
 	renewLocks    sync.Map // owner -> *sync.Mutex, serialises silent-renew per owner
 	cooldownUntil sync.Map // owner -> time.Time, soft-block backoff deadline
 	strikes       sync.Map // owner -> int, consecutive soft blocks (backoff growth)
+
+	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
 
 type cachedReg struct {
@@ -137,7 +139,12 @@ type cachedReg struct {
 func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 	issuer := strings.TrimRight(cfg.Council.Issuer, "/")
 	apiBase := strings.TrimRight(cfg.Council.APIBase, "/")
+	var sb *councilSandbox
+	if cfg.Council.Sandbox {
+		sb = newCouncilSandbox()
+	}
 	return &Client{
+		sandbox:     sb,
 		clientID:    cfg.Council.ClientID, // public SPA client, no secret
 		redirectURI: cfg.Council.RedirectURI,
 		scope:       strings.Join(cfg.Council.Scopes, " "),
@@ -249,6 +256,9 @@ func (c *Client) accessToken(ctx context.Context, owner string) (string, error) 
 // user's session does not lapse (keep-warm). Returns ErrNotLinked if there is no
 // session and ErrSessionExpired if the cookie is no longer accepted.
 func (c *Client) Refresh(ctx context.Context, owner string) error {
+	if c.sandbox != nil {
+		return nil // sandbox sessions never lapse
+	}
 	// Serialise with accessToken so keep-warm and a reconcile write never renew
 	// the same cookie concurrently.
 	lock := c.ownerLock(owner)
@@ -405,6 +415,9 @@ func (c *Client) managedVehicle(ctx context.Context, owner string, p model.Permi
 // CurrentVehicle returns the registration currently allocated to the permit, or
 // "" if the permit has no vehicle.
 func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error) {
+	if c.sandbox != nil {
+		return c.sandboxCurrentVehicle(p)
+	}
 	mv, err := c.managedVehicle(ctx, owner, p)
 	if err != nil {
 		return "", err
@@ -420,6 +433,9 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 // every page load. Keeps the dashboard's "on permit now" truthful and catches
 // plates changed directly in the council portal.
 func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (string, error) {
+	if c.sandbox != nil {
+		return c.sandboxCurrentVehicle(p) // in-memory: no cache needed
+	}
 	if v, ok := c.regCache.Load(p.CouncilPermitID); ok {
 		if cr := v.(cachedReg); time.Since(cr.at) < maxAge {
 			return cr.reg, nil
@@ -442,6 +458,9 @@ func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model
 // with an empty body.
 func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
 	const op = "change the vehicle on your permit"
+	if c.sandbox != nil {
+		return c.sandboxSetVehicle(p, registration)
+	}
 	mv, err := c.managedVehicle(ctx, owner, p)
 	if err != nil {
 		return err
@@ -552,6 +571,9 @@ type gridRow struct {
 // ListPermits returns the permits on the app user's linked council account.
 func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, error) {
 	const op = "list your permits"
+	if c.sandbox != nil {
+		return c.sandboxListPermits(), nil
+	}
 	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/Index/grid", op,
 		url.Values{"pageNumber": {"0"}, "pageSize": {"0"}}, nil)
 	if err != nil {

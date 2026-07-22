@@ -794,6 +794,65 @@ func TestDeletePermit(t *testing.T) {
 	}
 }
 
+func TestGuestBaselineAndOverrideSweep(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "alice@example.com"
+	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum")
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	if _, err := s.CreateGuestGrant(ctx, owner, p, "pass", false, []int64{v},
+		[]GuestRecipient{{Email: "kid@example.com", TokenHash: "hashK"}}); err != nil {
+		t.Fatalf("create grant: %v", err)
+	}
+	gc, err := s.GuestContextByTokenHash(ctx, "hashK")
+	if err != nil {
+		t.Fatalf("resolve token: %v", err)
+	}
+	if gc.BaselinePlate != "" || !gc.BaselineUntil.IsZero() {
+		t.Fatalf("fresh token should have no baseline, got %q until %v", gc.BaselinePlate, gc.BaselineUntil)
+	}
+
+	until := time.Now().Add(6 * time.Hour).Truncate(time.Second)
+	if err := s.SetGuestBaseline(ctx, gc.TokenID, "ZZZ999", until); err != nil {
+		t.Fatalf("set baseline: %v", err)
+	}
+	gc, _ = s.GuestContextByTokenHash(ctx, "hashK")
+	if gc.BaselinePlate != "ZZZ999" || gc.BaselineUntil.Unix() != until.Unix() {
+		t.Fatalf("baseline round-trip = %q until %v, want ZZZ999 until %v", gc.BaselinePlate, gc.BaselineUntil, until)
+	}
+
+	// Two guest-tagged overrides and one of the owner's own: the sweep must
+	// remove exactly the guest's.
+	end := time.Now().Add(4 * time.Hour)
+	if _, err := s.CreateGuestOverride(ctx, p, v, time.Now(), &end, "kid", gc.TokenID); err != nil {
+		t.Fatalf("guest override: %v", err)
+	}
+	if _, err := s.CreateGuestPlateOverride(ctx, p, "CCC333", time.Now(), &end, "kid", gc.TokenID); err != nil {
+		t.Fatalf("guest plate override: %v", err)
+	}
+	if _, err := s.CreateOverride(ctx, p, v, time.Now(), &end, owner); err != nil {
+		t.Fatalf("owner override: %v", err)
+	}
+	if err := s.DeleteGuestOverrides(ctx, p, 0); err == nil {
+		t.Fatal("sweep with tokenID 0 must be refused")
+	}
+	if err := s.DeleteGuestOverrides(ctx, p, gc.TokenID); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	ovs, err := s.ListOverrides(ctx, p, time.Now())
+	if err != nil || len(ovs) != 1 || ovs[0].CreatedBy != owner {
+		t.Fatalf("after sweep want only the owner's override, got %v (%v)", ovs, err)
+	}
+
+	if err := s.ClearGuestBaseline(ctx, gc.TokenID); err != nil {
+		t.Fatalf("clear baseline: %v", err)
+	}
+	gc, _ = s.GuestContextByTokenHash(ctx, "hashK")
+	if gc.BaselinePlate != "" || !gc.BaselineUntil.IsZero() {
+		t.Fatalf("baseline should be cleared, got %q until %v", gc.BaselinePlate, gc.BaselineUntil)
+	}
+}
+
 func TestGuestPasses(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

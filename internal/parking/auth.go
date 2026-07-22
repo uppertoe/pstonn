@@ -145,6 +145,9 @@ func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*toke
 // the clock anchored to the last real interactive link, so the periodic
 // "confirm you're still using this" bound still fires.
 func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword, interactive bool) error {
+	if c.sandbox != nil {
+		return c.sandboxLink(ctx, owner, username) // any credentials link in sandbox mode
+	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return err
@@ -260,6 +263,9 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 // user has not saved one, in which case the caller must fall back to prompting
 // for a manual re-link.
 func (c *Client) Reconnect(ctx context.Context, owner string) error {
+	if c.sandbox != nil {
+		return nil // sandbox sessions never expire, so there is nothing to re-establish
+	}
 	cs, err := c.store.GetCouncilSession(ctx, owner)
 	if err != nil {
 		return err
