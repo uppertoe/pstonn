@@ -174,3 +174,42 @@ func TestCombineDateTime(t *testing.T) {
 		}
 	}
 }
+
+// TestGuestPageBoostReturnsFullPage locks in the fix for the hx-boost bug: a
+// boosted link click (HX-Request + HX-Boosted) is a navigation and must get the
+// whole page — not the #gbody fragment, which htmx would swap into <body>,
+// dropping the card wrapper (and its padding). An in-page htmx swap (activation
+// POST / poll — HX-Request without HX-Boosted) still gets just the fragment.
+func TestGuestPageBoostReturnsFullPage(t *testing.T) {
+	ctx := context.Background()
+	s := newAuthzServer(t)
+	const owner = "owner@example.com"
+	pid, err := s.store.UpsertPermit(ctx, owner, "VPP1", "1", "VPP1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "boost-test-guest-token-000111222333"
+	if _, err := s.store.CreateQRGrant(ctx, owner, pid, hashGuestToken(raw), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func(headers map[string]string) string {
+		r := httptest.NewRequest("GET", "/g/"+raw, nil)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w.Body.String()
+	}
+
+	if body := get(nil); !strings.Contains(body, "guestwrap") {
+		t.Fatal("full page load must render the card wrapper")
+	}
+	if body := get(map[string]string{"HX-Request": "true", "HX-Boosted": "true"}); !strings.Contains(body, "guestwrap") {
+		t.Fatal("a boosted navigation must return the full page, not the bare fragment")
+	}
+	if body := get(map[string]string{"HX-Request": "true"}); strings.Contains(body, "guestwrap") {
+		t.Fatal("an in-page htmx swap should return just the #gbody fragment")
+	}
+}

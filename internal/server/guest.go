@@ -217,9 +217,11 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 		return "" // a printed door QR must not disclose the current plate
 	}
 	current := permit.ActiveRegistration
-	if actual, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
-		model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
-		current = actual
+	if s.council != nil { // a council hiccup (or, in tests, no client at all) must not fail the page
+		if actual, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
+			current = actual
+		}
 	}
 	return current
 }
@@ -405,7 +407,10 @@ func (s *Server) renderGuestMenuOpts(w http.ResponseWriter, r *http.Request, gc 
 	view := s.buildGuestView(r.Context(), gc, permit, current)
 	view.KeepForm = keepForm
 	data := dashboardData{State: "guest", Loc: s.cfg.DisplayLocation, Guest: view, Flash: flash, Warn: warn}
-	if isHX(r) {
+	// The in-page activation swaps (hx-post car/plate, the live poll) want just the
+	// #gbody fragment; a boosted link navigation wants the whole page (else it
+	// swaps the fragment into <body> and drops the card wrapper/padding).
+	if isHX(r) && !isBoosted(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "guest-body", data); err != nil {
 			log.Printf("render guest-body: %v", err)
@@ -449,6 +454,13 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 }
 
 func isHX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
+
+// isBoosted reports an hx-boost navigation (a clicked link/form the app turned
+// into an AJAX page load). These want a WHOLE page, not an in-page fragment: a
+// boosted request still carries HX-Request, so a fragment-or-page check must
+// exclude it or a boosted link to a standalone page (the guest menu) swaps in
+// only the inner fragment and loses its wrapper — and its padding.
+func isBoosted(r *http.Request) bool { return r.Header.Get("HX-Boosted") == "true" }
 
 // guestActivate performs an activation: it creates a fresh override for the chosen
 // car (end of today, or tomorrow if overnight) and applies it to the council for
@@ -695,8 +707,9 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 
 func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
 	const msg = "This link is no longer active. Ask the account holder for a new one."
-	if isHX(r) {
+	if isHX(r) && !isBoosted(r) {
 		// The link died mid-session (revoked, disabled): swap the menu for the notice.
+		// A boosted link click, though, is a navigation and wants the whole page.
 		noStore(w)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<div class="banner warn" style="margin-top:14px"><span>%s</span></div>`, msg)
