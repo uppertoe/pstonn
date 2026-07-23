@@ -130,7 +130,7 @@
   /* ---- modal ---- */
   .modal-wrap { position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; }
   .scrim { position:absolute; inset:0; background:rgba(8,12,22,.62); }
-  .modal { position:relative; z-index:1; width:min(440px,100%); max-height:88vh; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-lg); padding:22px; }
+  .modal { position:relative; z-index:1; width:min(620px,100%); max-height:88vh; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-lg); padding:22px; }
   .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
   .modal-head strong { font-size:16px; letter-spacing:-.01em; }
   .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
@@ -142,12 +142,19 @@
   .dlg-box { padding:20px; display:flex; flex-direction:column; gap:16px; }
   .dlg-msg { margin:0; font-size:14.5px; line-height:1.55; overflow-wrap:anywhere; }
   .dlg-actions { display:flex; justify-content:flex-end; gap:10px; }
-  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  @media (max-width:520px){ .row2 { grid-template-columns:1fr; } }
-  /* Paired date + time inputs (one-off booking). Each takes half the field; both
-     shrink rather than overflow on a narrow phone. */
-  .dtpair { display:flex; gap:8px; }
-  .dtpair input { flex:1 1 0; min-width:0; }
+  /* From / Until sit side by side when there's room, and drop to one column only
+     when they can't fit — each holds a date + time pair (below), which together
+     are too wide to force two across a narrow modal. auto-fit does this without a
+     hard breakpoint tied to the modal width. */
+  .row2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; }
+  /* Paired date + time inputs (one-off booking). The date field needs more room
+     than the time field (dd/mm/yyyy + calendar icon), so give it the larger
+     share; both clear their native icons. They wrap to two lines only if pinched
+     narrower than a single pair can hold. */
+  .dtpair { display:flex; gap:8px; flex-wrap:wrap; }
+  .dtpair input { min-width:0; }
+  .dtpair input[type="date"] { flex:3 1 150px; }
+  .dtpair input[type="time"] { flex:2 1 100px; }
   .oo-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:20px 0 10px; }
   .oo-head .sub { margin:0; }
   button.sm { padding:7px 12px; font-size:13px; }
@@ -496,11 +503,23 @@
     .poster-steps { max-width:none; }
   }
   @media print {
-    @page { margin:16mm; }
-    html, body { background:#fff !important; }
-    #htmx-bar, .appbar, .navwrap, .noprint { display:none !important; }
-    .posterwrap { padding:0 !important; max-width:none !important; }
-    .poster { box-shadow:none !important; border-color:#d7dee1 !important; margin:0 auto !important; }
+    @page { margin:12mm; }
+    html, body { background:#fff !important; margin:0 !important; height:100%; }
+    /* Nothing decorative should print: no chrome, and no drop shadows from any
+       element (a stray shadow was printing at the poster's corner). */
+    .skip-link, #htmx-bar, .appbar, .navwrap, .noprint { display:none !important; }
+    * { box-shadow:none !important; }
+    /* Fill the whole printable page so the QR prints as one full-page sign —
+       print it and stick it up, no cutting. Fold once down the middle if a
+       half-page card is wanted instead. */
+    .posterwrap { padding:0 !important; max-width:none !important; margin:0 !important; height:100%; display:flex; }
+    .poster { border-color:#d7dee1 !important; width:100% !important; max-width:none !important; margin:0 !important; flex:1; display:flex; flex-direction:column; break-inside:avoid; }
+    .poster-body { flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; padding:10mm 14mm; }
+    .poster-qbox { width:64mm; padding:5mm; }
+    .poster-title { font-size:27px; }
+    .poster-lead { font-size:16px; }
+    .poster-steps { max-width:360px; font-size:14px; margin-top:26px; }
+    .poster-note { font-size:13px; margin-top:22px; }
   }
   /* Admin dashboard */
   .adminwrap { max-width:1100px; margin:0 auto; padding:18px 16px 60px; }
