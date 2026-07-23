@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="htmx-config" content='{"globalViewTransitions":true}'>
 <title>p.stonn Visitor Permit Scheduler</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
@@ -77,6 +77,11 @@
   }
   * { box-sizing:border-box; }
   [x-cloak] { display:none !important; }
+  /* Skip link: off-screen until focused, then pinned top-left so a keyboard user
+     can jump past the app bar and nav straight to the page content. */
+  .skip-link { position:fixed; top:-60px; left:8px; z-index:200; padding:9px 14px; border-radius:10px; background:var(--primary); color:var(--on-primary); font-weight:600; font-size:14px; box-shadow:var(--shadow-lg); transition:top .15s; }
+  .skip-link:focus { top:8px; outline:2px solid var(--on-primary); outline-offset:-4px; }
+  main:focus { outline:none; }
   html { scroll-behavior:smooth; overflow-x:hidden; }
   body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; overflow-x:hidden; }
   a { color:var(--primary); text-decoration:none; }
@@ -129,6 +134,14 @@
   .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
   .modal-head strong { font-size:16px; letter-spacing:-.01em; }
   .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+  /* Shared confirm dialog: native <dialog> for the focus trap / Esc / top-layer
+     guarantees, styled with the app's own surface instead of browser chrome. */
+  dialog.confirm { border:0; padding:0; border-radius:16px; background:var(--surface); color:var(--ink); box-shadow:var(--shadow-lg); width:min(92vw,360px); }
+  dialog.confirm::backdrop { background:rgba(8,12,22,.55); }
+  dialog.confirm[open] { animation:rise .18s ease both; }
+  .dlg-box { padding:20px; display:flex; flex-direction:column; gap:16px; }
+  .dlg-msg { margin:0; font-size:14.5px; line-height:1.55; overflow-wrap:anywhere; }
+  .dlg-actions { display:flex; justify-content:flex-end; gap:10px; }
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   @media (max-width:520px){ .row2 { grid-template-columns:1fr; } }
   .oo-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:20px 0 10px; }
@@ -143,17 +156,25 @@
   .nav-item.active { color:var(--hue,var(--primary)); }
   .nav-item.active::after { content:""; position:absolute; left:12px; right:12px; bottom:0; height:3px; border-radius:3px 3px 0 0; background:var(--hue,var(--primary)); }
   .navwrap { border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--surface) 55%, transparent); position:sticky; top:53px; z-index:15; }
-  /* Material bottom navigation on small screens */
+
+  main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap:16px; }
+  /* Material bottom navigation on small screens. This block must come after the
+     main{} rule above so its margin-bottom override wins. */
   @media (max-width:640px){
-    .navwrap { position:fixed; bottom:0; left:0; right:0; top:auto; border-top:1px solid var(--line); border-bottom:0; background:var(--surface); z-index:30; }
+    .navwrap { position:fixed; bottom:0; left:0; right:0; top:auto; border-top:1px solid var(--line); border-bottom:0; background:var(--surface); z-index:30; padding-bottom:env(safe-area-inset-bottom, 0px); }
+    /* Paint the area the bar exposes during iOS rubber-band overscroll in the
+       bar's own surface, so the dotted page background never peeks out below it. */
+    .navwrap::after { content:""; position:absolute; top:100%; left:0; right:0; height:50vh; background:var(--surface); }
     .nav { justify-content:space-around; padding:0; gap:0; }
     .nav-item { flex-direction:column; gap:3px; font-size:11px; padding:9px 6px 8px; border-radius:0; flex:1; justify-content:center; }
     .nav-item svg { width:22px; height:22px; }
     .nav-item.active::after { top:0; bottom:auto; left:22%; right:22%; border-radius:0 0 3px 3px; }
-    main { margin-bottom:88px; }
+    /* Reserve the bar's height (~60px) plus a small gap under the last card. */
+    main { margin-bottom:calc(76px + env(safe-area-inset-bottom, 0px)); }
+    /* The schedule page's FAB floats above the bar (bottom 74px, height 52px);
+       reserve past its top edge so it can't cover the page's last control. */
+    main:has(> .fab) { margin-bottom:calc(142px + env(safe-area-inset-bottom, 0px)); }
   }
-
-  main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap:16px; }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); animation:rise .28s ease both; }
   .card > h2 { margin:0 0 16px; font-size:15px; display:flex; align-items:center; gap:9px; letter-spacing:-.01em; }
   .card > h2 .ic { color:var(--hue,var(--muted)); display:inline-flex; }
@@ -269,8 +290,10 @@
   .cday .oneoff { width:5px; height:5px; border-radius:50%; background:var(--accent); }
   .cday .bar { height:6px; border-radius:4px; background:var(--line); }
 
-  /* popover */
-  .pop { position:absolute; z-index:30; top:100%; left:50%; transform:translateX(-50%); margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; animation:rise .16s ease both; }
+  /* popover — centred with the standalone translate property, NOT transform:
+     the rise animation ends at transform:none (fill both), which would wipe a
+     transform-based centring and shove the popover half a width off-screen. */
+  .pop { position:absolute; z-index:30; top:100%; left:50%; translate:-50% 0; margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; max-width:calc(100vw - 24px); animation:rise .16s ease both; }
   .pop .tt { font-size:12px; color:var(--muted); margin:0 0 9px; font-weight:600; }
   /* vehicle picker (colour-dotted options) */
   .vopts { display:grid; gap:2px; }
@@ -297,13 +320,13 @@
   .vpick-caret { margin-left:auto; color:var(--muted); font-size:11px; }
   .vpick-list { position:absolute; z-index:5; top:calc(100% + 5px); left:0; right:0; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lg); padding:5px; max-height:230px; overflow:auto; }
   .roster .rcell:nth-child(1) .pop, .roster .rcell:nth-child(2) .pop,
-  .cal .cday:nth-child(7n+1) .pop, .cal .cday:nth-child(7n+2) .pop { left:0; right:auto; transform:none; }
+  .cal .cday:nth-child(7n+1) .pop, .cal .cday:nth-child(7n+2) .pop { left:0; right:auto; translate:none; }
   .roster .rcell:nth-child(6) .pop, .roster .rcell:nth-child(7) .pop,
-  .cal .cday:nth-child(7n+6) .pop, .cal .cday:nth-child(7n) .pop { left:auto; right:0; transform:none; }
+  .cal .cday:nth-child(7n+6) .pop, .cal .cday:nth-child(7n) .pop { left:auto; right:0; translate:none; }
   @media (max-width:640px){
-    .roster .rcell .pop { left:50%; right:auto; transform:translateX(-50%); }
-    .roster .rcell:nth-child(4n+1) .pop { left:0; right:auto; transform:none; }
-    .roster .rcell:nth-child(4n) .pop { left:auto; right:0; transform:none; }
+    .roster .rcell .pop { left:50%; right:auto; translate:-50% 0; }
+    .roster .rcell:nth-child(4n+1) .pop { left:0; right:auto; translate:none; }
+    .roster .rcell:nth-child(4n) .pop { left:auto; right:0; translate:none; }
   }
 
   /* one-offs list */
@@ -321,6 +344,10 @@
 
   .empty-note { color:var(--muted); font-size:13.5px; }
   .toggle { display:flex; align-items:center; gap:11px; font-size:14px; cursor:pointer; }
+  /* Refused-toggle feedback (e.g. unticking the last notification channel). */
+  @keyframes shake { 20%,60% { translate:-4px 0; } 40%,80% { translate:4px 0; } }
+  .toggle.shake { animation:shake .35s ease; }
+  @media (prefers-reduced-motion:reduce){ .toggle.shake { animation:none; } }
   .toggle span { line-height:1.4; }
   .toggle.mini { font-size:13px; color:var(--muted); gap:9px; }
   input[type=checkbox] { accent-color:var(--primary); width:17px; height:17px; flex:0 0 auto; cursor:pointer; }
@@ -330,16 +357,18 @@
   .notify-status.err { color:var(--danger); }
   .notify-status.ok { color:var(--ok); }
   .quiet { display:flex; flex-direction:column; gap:10px; padding:14px 0 2px; border-top:1px solid var(--line); }
-  .quiet-times { display:flex; gap:14px; flex-wrap:wrap; padding-left:32px; }
-  .quiet-times .fld { min-width:120px; }
-  .quiet-times select { width:100%; }
-  .quiet-note { font-size:12.5px; color:var(--muted); margin:0; padding-left:32px; line-height:1.45; max-width:60ch; }
+  .quiet-times { display:flex; align-items:center; gap:9px; flex-wrap:wrap; font-size:13.5px; color:var(--muted); }
+  .quiet-times select { padding:7px 9px; font-size:13.5px; }
+  .quiet-note { font-size:12.5px; color:var(--muted); margin:0; line-height:1.45; max-width:60ch; }
   .steps { margin:12px 0 2px; padding:16px 18px; background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-sm); font-size:14px; }
   .steps-lead { margin:0 0 12px; color:var(--muted); font-size:13px; }
   .steps ol { margin:0; padding-left:22px; display:grid; gap:10px; }
   .steps li { line-height:1.5; padding-left:3px; }
   .steps button.sm { margin-top:16px; }
   code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; background:var(--primary-soft); color:var(--primary-2); padding:3px 7px; border-radius:6px; word-break:break-all; }
+  /* Server/topic pills: wrap to their own line as a unit on narrow screens
+     rather than shattering the URL/topic mid-token. */
+  .steps code { display:inline-block; max-width:100%; }
   :root[data-theme="dark"] code { color:var(--primary); }
   .pick { display:grid; gap:10px; }
   .pick-item { display:flex; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--line); border-radius:13px; padding:14px 16px; transition:border-color .15s, box-shadow .15s; }
@@ -419,8 +448,18 @@
   .doorrow-ic { width:36px; height:36px; border-radius:9px; display:grid; place-items:center; background:var(--surface-2); color:var(--muted); flex:none; }
   .doorrow-ic svg { width:18px; height:18px; }
   .doorrow-meta { display:flex; flex-direction:column; gap:1px; min-width:0; }
-  /* Printable door-QR poster (its own 'paper' palette, independent of theme) */
-  .posterwrap { max-width:560px; margin:0 auto; padding:18px 16px 44px; }
+  @media (max-width:640px){
+    /* When the actions wrap under the icon+meta, span the full row instead of
+       huddling in the leftover corner. */
+    .doorrow > .row { flex:1 0 100%; }
+    .doorrow > .row a { flex:1 1 auto; }
+    .doorrow > .row a button { width:100%; justify-content:center; }
+  }
+  /* Printable door-QR poster (its own 'paper' palette, independent of theme).
+     display:block, not main's grid: in a grid the poster's fixed 440px width
+     grows the auto track, so max-width:100% resolves against 440px and the
+     poster overflows narrow phones instead of shrinking. */
+  .posterwrap { display:block; max-width:560px; margin:0 auto; padding:18px 16px 44px; }
   .posteractions { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
   .poster { --pp-paper:#fff; --pp-ink:#132734; --pp-muted:#5c6f7c; --pp-accent:#10b789; --pp-accent-ink:#06231b; --pp-line:#e3e9ec;
     width:440px; max-width:100%; margin:0 auto; background:var(--pp-paper); color:var(--pp-ink);
@@ -585,6 +624,7 @@
 </style>
 </head>
 <body hx-boost="true">
+<a href="#main" class="skip-link">Skip to content</a>
 <div id="htmx-bar" aria-hidden="true"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
@@ -626,7 +666,7 @@
 {{if eq .State "landing"}}
 {{/* ================= PUBLIC LANDING ================= */}}
 {{template "publicheader" .}}
-<main class="landing">
+<main id="main" tabindex="-1" class="landing">
   <section class="lhero">
     <h1>Schedule your City of Stonnington visitor parking permit.</h1>
     <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
@@ -658,7 +698,7 @@
     <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:0">
       <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
       <label class="fld"><span>Your email (optional, for a reply)</span><input type="email" name="email" placeholder="you@example.com" autocomplete="email"></label>
-      <label class="fld"><span>Message</span><textarea name="message" rows="6" required minlength="10" maxlength="4000" placeholder="How can we help?"></textarea></label>
+      <label class="fld"><span>Message</span><textarea name="message" rows="6" required minlength="10" maxlength="4000" placeholder="Your question, problem, or feedback…"></textarea></label>
       <button type="submit" style="justify-content:center">{{template "ic-bell"}} Send message</button>
     </form>
   </section>
@@ -669,7 +709,7 @@
 {{else if eq .State "about"}}
 {{/* ================= PUBLIC ABOUT ================= */}}
 {{template "publicheader" .}}
-<main class="landing about">
+<main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">About p.stonn</h1>
     <p>p.stonn is a free, unofficial tool that schedules which vehicle is on your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/why">How it works</a>.</p>
@@ -701,13 +741,13 @@
 {{else if eq .State "why"}}
 {{/* ================= PUBLIC: WHY / HOW IT WORKS ================= */}}
 {{template "publicheader" .}}
-<main class="landing about">
+<main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Why this exists</h1>
     <p>Stonnington changed how resident and visitor parking permits work. From 2026, paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registrations into the council's online system, which is checked by parking officers for validity.</p>
-    <p>Our old physical permits could be easily transferred between cars as needed - the electronic permit system, as currently implemented, is far clunkier. For a household that relies on regular help (grandparents doing childcare pickup, a nanny, a carer), logging in and changing regos becomes a recurring task and an added stress to people with busy lives.</p>
-    <p>p.stonn is an attempt to make this easier. After setting up your permit with Stonnington Parking, you can use this app to schedule visitors, add one-off bookings, create QR code one-step check ins - easily and seamlessly.</p>
-    <p>I hope this little tool makes your life a bit simpler!</p>
+    <p>The old paper permits could be moved between cars as needed. The digital system, as it stands, is clunkier: for a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; logging in to change the registration each time becomes a recurring chore.</p>
+    <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
+    <p>I built it to take one recurring chore off my own household's plate. I hope it does the same for yours.</p>
   </section>
 
   <p class="whyhead">How it works</p>
@@ -715,13 +755,13 @@
     <div class="dm-grid">
 
       <figure class="dm" data-demo="connect">
-        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">we keep an encrypted session</span></figcaption>
+        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">p.stonn keeps an encrypted session</span></figcaption>
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Connect council account</h2></div>
           <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
           <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
           <div class="dm-btn">{{template "ic-link"}} Link account</div>
-          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> We keep an encrypted session so the app can act for you.</div></div>
+          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> p.stonn keeps an encrypted session so it can act for you.</div></div>
         </div>
       </figure>
 
@@ -768,7 +808,7 @@
             <div class="dm-toggle">Phone <span class="dm-swi"></span></div>
           </div>
           <div class="dm-push"><span class="badge" style="background:var(--ok)">{{template "ic-check"}}</span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg">Your visitor permit is now <b>ABC123</b> (Nan's car).</div></div></div>
-          <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>We will keep trying</b> and let you know.</div></div></div>
+          <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>Still trying</b> &mdash; you'll hear when it's done.</div></div></div>
         </div>
       </figure>
 
@@ -801,7 +841,7 @@
 {{else if eq .State "contact"}}
 {{/* ================= PUBLIC CONTACT ================= */}}
 {{template "publicheader" .}}
-<main class="landing about">
+<main id="main" tabindex="-1" class="landing about">
   <h1 class="about-h1">Contact</h1>
   <p>Questions, problems, or feedback about p.stonn? Send a message and it reaches the person running this server. Leaving your email is optional, but it's the only way to get a reply.</p>
   {{if .Flash}}<div class="banner ok" style="margin:16px 0">{{template "ic-check"}} <span>{{.Flash}}</span></div>{{end}}
@@ -815,7 +855,7 @@
     </label>
     <label class="fld">
       <span>Message</span>
-      <textarea name="message" rows="7" required minlength="10" maxlength="4000" placeholder="How can we help?">{{.ContactVal}}</textarea>
+      <textarea name="message" rows="7" required minlength="10" maxlength="4000" placeholder="Your question, problem, or feedback…">{{.ContactVal}}</textarea>
     </label>
     <button type="submit" style="justify-content:center">{{template "ic-link"}} Send message</button>
   </form>
@@ -824,7 +864,7 @@
 
 {{else if eq .State "guest"}}
 {{/* ================= PUBLIC GUEST ACTIVATION (token link) ================= */}}
-<main class="guestwrap">
+<main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard">
     <div class="gbrand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
     {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
@@ -835,18 +875,20 @@
 
 {{else if eq .State "guest-wait"}}
 {{/* ============ PRINTED-QR: WAITING FOR APPROVAL (polls) ============ */}}
-<main class="guestwrap">
+<main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard" style="text-align:center">
     <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
     {{if .Wait.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>{{end}}
     <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">{{.Wait.Plate}}</span> on the permit.</p>
-    {{template "guest-req-status" .Wait}}
+    {{/* Stable live region: the poll swaps #reqstatus inside it, so a screen
+         reader announces approved / denied / on-the-permit as it changes. */}}
+    <div aria-live="polite">{{template "guest-req-status" .Wait}}</div>
   </section>
 </main>
 
 {{else if eq .State "guest-result"}}
 {{/* ================= GUEST ACTIVATION RESULT ================= */}}
-<main class="guestwrap">
+<main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard" style="text-align:center">
     <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
     {{if .Flash}}
@@ -863,10 +905,10 @@
 {{else if eq .State "terms"}}
 {{/* ================= TERMS GATE ================= */}}
 {{template "appbar" .}}
-<main>
+<main id="main" tabindex="-1">
   <section class="card" style="max-width:560px;margin:26px auto">
     <div style="text-align:center"><div class="ring" style="margin-bottom:14px">{{template "ic-ticket"}}</div></div>
-    <h2 style="text-align:center;margin:0 0 6px;font-size:20px;letter-spacing:-.02em">{{if .Terms.Updated}}Our terms have changed{{else}}Welcome: a few things first{{end}}</h2>
+    <h2 style="text-align:center;margin:0 0 6px;font-size:20px;letter-spacing:-.02em">{{if .Terms.Updated}}The terms have changed{{else}}Welcome &mdash; a few things first{{end}}</h2>
     <p class="subtitle" style="text-align:center">{{if .Terms.Updated}}Please review and accept the updated terms to keep using p.stonn.{{else if .Terms.Intro}}{{.Terms.Intro}}{{else}}Please read and tick each point to start using p.stonn.{{end}}</p>
     <form method="post" action="/terms/accept" class="stack" style="max-width:none;gap:16px;margin-top:16px">
       {{range $i, $c := .Terms.Clauses}}
@@ -876,7 +918,7 @@
     </form>
     {{if .Terms.Updated}}
     <form method="post" action="/terms/decline" style="text-align:center;margin-top:16px"
-          onsubmit="return confirm('Decline the updated terms? This disconnects your council account and stops p.stonn managing your permit. You will be notified.')">
+          data-confirm="Decline the updated terms? This disconnects your council account and stops p.stonn managing your permit. You will be notified." data-confirm-ok="Decline &amp; disconnect">
       <button type="submit" class="danger">Decline &amp; disconnect my account</button>
     </form>
     <p class="empty-note" style="text-align:center;margin-top:12px">Terms version {{.Terms.Version}}.</p>
@@ -889,15 +931,15 @@
 {{else if eq .State "onboarding"}}
 {{/* ================= ONBOARDING ================= */}}
 {{template "appbar" .}}
-<main>
+<main id="main" tabindex="-1">
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
     {{if .IsPrimary}}
     <h2>{{if .Relink}}Re-link your council account{{else}}Link your council account{{end}}</h2>
     <p>
-      {{if .Relink}}Your council sign-in expired. Enter your details again to reconnect. We keep an encrypted session so the app can update your permit for you.
-      {{else}}Sign in once with your City of Stonnington ePermits details. We keep an encrypted session so the app can update your permit for you.{{end}}
+      {{if .Relink}}Your council sign-in expired. Enter your details again to reconnect. p.stonn keeps an encrypted session so it can update your permit for you.
+      {{else}}Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.{{end}}
     </p>
     <form class="stack" method="post" action="/council/link">
       <label class="fld">Council email (your verified sign-in)
@@ -929,7 +971,7 @@
 {{else if eq .State "picker"}}
 {{/* ================= PERMIT PICKER ================= */}}
 {{template "appbar" .}}
-<main>
+<main id="main" tabindex="-1">
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
   <section class="card">
     <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to manage</div>
@@ -965,12 +1007,12 @@
 {{else if eq .State "doorqr"}}
 {{/* ============ PRINTABLE DOOR-QR POSTER (laminate & leave up) ============ */}}
 {{template "appbar" .}}
-<main class="posterwrap">
+<main id="main" tabindex="-1" class="posterwrap">
   <div class="posteractions noprint">
     <a href="/guests" hx-boost="false"><button type="button" class="ghost sm">&larr; Guests</button></a>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" onclick="window.print()">{{template "ic-qr"}} Print</button>
-      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" onsubmit="return confirm('Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards.')"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
+      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
     </div>
   </div>
 
@@ -998,7 +1040,7 @@
 {{else if eq .State "admin"}}
 {{/* ================= ADMIN (operators only) ================= */}}
 {{template "appbar" .}}
-<main class="adminwrap">
+<main id="main" tabindex="-1" class="adminwrap">
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Admin</div>
   <div class="adm-health {{if .Admin.SchedulerStale}}bad{{else}}ok{{end}}">
     <div><strong>Scheduler</strong> {{if .Admin.SchedulerStale}}looks stalled &mdash; last clean pass {{.Admin.SchedulerLast}}{{else}}healthy &mdash; last pass {{.Admin.SchedulerLast}}{{end}}</div>
@@ -1050,7 +1092,7 @@
     <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-gear"}}<span>Settings</span></a>
   </nav>
 </div>
-<main>
+<main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
 
@@ -1083,7 +1125,7 @@
       <li class="exprow">
         <div class="expmain"><span class="expname">{{.Label}}</span><span class="expstatus">{{.StatusText}}{{if .Detail}} · {{.Detail}}{{end}}</span></div>
         <form method="post" action="/permits/{{.ID}}/delete"
-              onsubmit="return confirm('Remove this expired permit and its saved schedule? Copy it onto your new permit first if you still need it.')">
+              data-confirm="Remove this expired permit and its saved schedule? Copy it onto your new permit first if you still need it." data-confirm-ok="Remove">
           <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
         </form>
       </li>
@@ -1111,8 +1153,8 @@
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}</span>
           <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
-          <form method="post" action="/vehicles/{{.ID}}/delete" onsubmit="return confirm('Remove this vehicle?')">
-            <button class="danger icon" type="submit" title="Remove">{{template "ic-trash"}}</button>
+          <form method="post" action="/vehicles/{{.ID}}/delete" data-confirm="Remove this vehicle?" data-confirm-ok="Remove">
+            <button class="danger icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button>
           </form>
         </div>
         <form method="post" action="/vehicles/{{.ID}}/email" class="vemail">
@@ -1160,7 +1202,7 @@
     <h2><span class="ic">{{template "ic-link"}}</span> Council connection</h2>
     {{if .IsPrimary}}
     {{if .RelinkBy}}
-    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. We'll email a one-click link to confirm you're still using it before <strong>{{.RelinkBy}}</strong>.</p>
+    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. p.stonn will email a one-click link to confirm you're still using it before <strong>{{.RelinkBy}}</strong>.</p>
     {{end}}
     {{if .CouncilLinked}}
     <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">
@@ -1174,14 +1216,14 @@
       </div>
       {{if .AutoReconnect}}
       <form method="post" action="/council/forget-password"
-            onsubmit="return confirm('Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires.')">
+            data-confirm="Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires." data-confirm-ok="Stop saving">
         <button type="submit" class="ghost">Turn off</button>
       </form>
       {{end}}
     </div>
     {{end}}
     <div class="row" style="margin-top:14px" x-data="{del:false}">
-      <form method="post" action="/council/unlink" onsubmit="return confirm('Unlink your council account? Your schedule is kept and resumes when you re-link.')">
+      <form method="post" action="/council/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
         <button type="submit" class="ghost">{{template "ic-x"}} Unlink account</button>
       </form>
       <button type="button" class="danger" @click="del=!del">{{template "ic-trash"}} Delete all my data</button>
@@ -1204,7 +1246,7 @@
       {{range .Members}}
       <li class="row" style="justify-content:space-between">
         <span>{{template "ic-user"}} <strong>{{.Email}}</strong> <span class="muted">added {{.Added}}</span></span>
-        <form method="post" action="/account/members/remove" onsubmit="return confirm('Remove {{.Email}}? They lose access to this account.')">
+        <form method="post" action="/account/members/remove" data-confirm="Remove {{.Email}}? They lose access to this account." data-confirm-ok="Remove">
           <input type="hidden" name="email" value="{{.Email}}">
           <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
         </form>
@@ -1219,14 +1261,14 @@
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit">{{template "ic-plus"}} Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">When you add an email, that person gets access the next time they sign in with it.{{if .Notify.EmailAvailable}} We send them an email to let them know.{{end}} They can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Anyone who already has their own p.stonn account cannot be added.</p>
+    <p class="empty-note" style="margin-top:10px">When you add an email, that person gets access the next time they sign in with it.{{if .Notify.EmailAvailable}} p.stonn sends them a heads-up email.{{end}} They can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Anyone who already has their own p.stonn account cannot be added.</p>
     {{else}}
     <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
     {{end}}
     {{else}}
     <p class="subtitle">You have shared access to <strong>{{.SharedWith}}</strong>'s account.</p>
     <p class="empty-note">You can set the schedule and manage vehicles. Only the account owner can connect or disconnect the council account, or delete the account.</p>
-    <form method="post" action="/account/leave" onsubmit="return confirm('Leave this shared account? You go back to your own account.')" style="margin-top:14px">
+    <form method="post" action="/account/leave" data-confirm="Leave this shared account? You go back to your own account." data-confirm-ok="Leave" style="margin-top:14px">
       <button type="submit" class="ghost">{{template "ic-x"}} Leave this account</button>
     </form>
     <p class="empty-note" style="margin-top:10px">Leave if you need to set up your own council login. The owner's account is not affected.</p>
@@ -1396,7 +1438,7 @@
       </div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <a href="/guests/door/{{.GrantID}}/view" hx-boost="false"><button type="button">{{template "ic-qr"}} View &amp; print</button></a>
-        <form method="post" action="/guests/door/{{.GrantID}}/revoke" onsubmit="return confirm('Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards.')"><button class="ghost icon" type="submit" title="Remove">{{template "ic-trash"}}</button></form>
+        <form method="post" action="/guests/door/{{.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button class="ghost icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button></form>
       </div>
     </div>
     {{end}}
@@ -1411,8 +1453,8 @@
         <h2 style="margin:0">{{if .Label}}{{.Label}}{{else}}{{.PermitLabel}}{{end}}</h2>
         <div class="row" style="gap:6px">
           <a href="/guests/{{.ID}}/edit"><button type="button" class="ghost sm">{{template "ic-edit"}} Edit</button></a>
-          <form method="post" action="/guests/{{.ID}}/delete" onsubmit="return confirm('Delete this guest pass? All its links stop working.')">
-            <button class="ghost icon" type="submit" title="Delete pass">{{template "ic-trash"}}</button>
+          <form method="post" action="/guests/{{.ID}}/delete" data-confirm="Delete this guest pass? All its links stop working." data-confirm-ok="Delete pass">
+            <button class="ghost icon" type="submit" title="Delete pass" aria-label="Delete pass">{{template "ic-trash"}}</button>
           </form>
         </div>
       </div>
@@ -1428,7 +1470,7 @@
           {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
         </span>
         {{if not .Revoked}}
-        <form method="post" action="/guests/{{$gid}}/resend" onsubmit="return confirm('Re-send a fresh link to {{.Email}}? Their previous link stops working.')">
+        <form method="post" action="/guests/{{$gid}}/resend" data-confirm="Re-send a fresh link to {{.Email}}? Their previous link stops working." data-confirm-ok="Re-send">
           <input type="hidden" name="recipient" value="{{.Email}}">
           <button type="submit" class="ghost sm">{{template "ic-link"}} Re-send</button>
         </form>
@@ -1481,6 +1523,71 @@
 </main>
 {{end}}
 
+{{/* Shared confirm dialog. appConfirm() drives it for both data-confirm forms
+     and hx-confirm requests; falls back to native confirm() where <dialog>
+     is unsupported. data-confirm-ok customises the confirm button label. */}}
+<dialog id="confirm-dlg" class="confirm">
+  <div class="dlg-box">
+    <p class="dlg-msg"></p>
+    <div class="dlg-actions">
+      <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
+      <button type="button" class="danger dlg-ok">Confirm</button>
+    </div>
+  </div>
+</dialog>
+<script>
+(function () {
+  if (window.appConfirm) return; // boosted navigations re-run body scripts
+  var pending = null;
+  function dlg() { return document.getElementById('confirm-dlg'); }
+  function settle(ok) {
+    var d = dlg(), res = pending;
+    pending = null;
+    if (d && d.open) d.close();
+    if (res) res(ok);
+  }
+  window.appConfirm = function (message, okLabel) {
+    var d = dlg();
+    if (!d || typeof d.showModal !== 'function') return Promise.resolve(window.confirm(message));
+    if (pending) pending(false);
+    d.querySelector('.dlg-msg').textContent = message;
+    d.querySelector('.dlg-ok').textContent = okLabel || 'Confirm';
+    d.showModal();
+    return new Promise(function (res) { pending = res; });
+  };
+  document.addEventListener('click', function (e) {
+    var d = dlg();
+    if (!d || !d.open) return;
+    if (e.target.closest('.dlg-ok')) settle(true);
+    else if (e.target.closest('.dlg-cancel') || e.target === d) settle(false); // bare-dialog click = backdrop
+  });
+  document.addEventListener('cancel', function (e) { // Esc: dialog closes itself
+    if (e.target === dlg() && pending) { var res = pending; pending = null; res(false); }
+  }, true);
+  {{/* Capture phase so this runs (and stops htmx's own element handler) before
+       any boosted submit; the __confirmed pass-through lets the re-submit
+       continue down the normal path. */}}
+  document.addEventListener('submit', function (e) {
+    var f = e.target, msg = f.dataset && f.dataset.confirm;
+    if (!msg) return;
+    if (f.__confirmed) { f.__confirmed = false; return; }
+    e.preventDefault();
+    e.stopPropagation();
+    appConfirm(msg, f.dataset.confirmOk).then(function (ok) {
+      if (!ok) return;
+      f.__confirmed = true;
+      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+    });
+  }, true);
+  document.addEventListener('htmx:confirm', function (e) {
+    if (!e.detail.question) return; // only intercept explicit hx-confirm
+    e.preventDefault();
+    var elt = e.detail.elt;
+    appConfirm(e.detail.question, elt && elt.dataset ? elt.dataset.confirmOk : null)
+      .then(function (ok) { if (ok) e.detail.issueRequest(true); });
+  });
+})();
+</script>
 </body>
 </html>{{end}}
 
@@ -1510,7 +1617,7 @@
       <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>
     </button>
     <div class="usermenu" x-data="{open:false}" @click.outside="open=false" @keydown.escape.window="open=false">
-      <button class="icon-btn" type="button" @click="open=!open" aria-label="Account">{{template "ic-user"}}</button>
+      <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu">{{template "ic-user"}}</button>
       <div class="menu" x-show="open" x-cloak>
         <div class="menu-email">{{.User.Email}}</div>
         {{if .Contact}}<a href="/contact" class="menu-item">{{template "ic-mail"}} Contact</a>{{end}}
@@ -1599,7 +1706,7 @@
 {{/* approved, but the council hasn't confirmed after a while — stop spinning */}}
 <div id="reqstatus">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
-  <p class="gresult">This is taking longer than usual. Your request was approved, but we can't confirm it's on the permit yet &mdash; please check with the resident.</p>
+  <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
 </div>
 {{else if eq .Status "approved"}}
 {{/* the resident said yes; keep polling until the council confirms the plate is on */}}
@@ -1616,14 +1723,30 @@
 {{end}}
 
 {{define "notify-body"}}
-<form hx-post="/notifications" hx-target="#notify-body" hx-swap="innerHTML" hx-trigger="change"
-      class="stack notify-form" x-data="{ntfy: {{if .NtfyEnabled}}true{{else}}false{{end}}}">
+{{/* hx-swap:none — a clean save must not re-render (the swap made checkboxes and
+     time selects visibly flash); the server forces a swap via HX-Retarget/HX-Reswap
+     only when it rejected or adjusted the submitted state. guard() blocks unticking
+     the last channel entirely client-side: revert, shake, warn — no request. */}}
+<form hx-post="/notifications" hx-target="#notify-body" hx-swap="none" hx-trigger="change"
+      class="stack notify-form"
+      x-data="{ntfy: {{if .NtfyEnabled}}true{{else}}false{{end}},
+               guard(e) {
+                 if (e.target.checked || [...e.target.form.querySelectorAll('.chan')].some(c => c.checked)) return;
+                 e.target.checked = true;
+                 if (e.target.name === 'ntfy_enabled') this.ntfy = true;
+                 e.stopPropagation();
+                 const row = e.target.closest('.toggle');
+                 row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake');
+                 this.$refs.status.textContent = '⚠ Keep at least one method on.';
+                 this.$refs.status.className = 'notify-status err';
+               }}"
+      @htmx:after-request="if ($event.target === $root && $event.detail.successful) { $refs.status.textContent = '✓ Saved'; $refs.status.className = 'notify-status ok'; }">
   {{if .EmailAvailable}}
-  <label class="toggle"><input type="checkbox" name="email_enabled" {{if .EmailEnabled}}checked{{end}}> <span>Email me at <strong>{{.UserEmail}}</strong></span></label>
+  <label class="toggle"><input type="checkbox" class="chan" name="email_enabled" {{if .EmailEnabled}}checked{{end}} @change="guard($event)"> <span>Email me at <strong>{{.UserEmail}}</strong></span></label>
   {{end}}
   {{if .NtfyAvailable}}
   <div>
-    <label class="toggle"><input type="checkbox" name="ntfy_enabled" x-model="ntfy" {{if .NtfyEnabled}}checked{{end}}> <span>Push notifications to my phone</span></label>
+    <label class="toggle"><input type="checkbox" class="chan" name="ntfy_enabled" x-model="ntfy" {{if .NtfyEnabled}}checked{{end}} @change="guard($event)"> <span>Push notifications to my phone</span></label>
     <div class="steps" x-show="ntfy" x-cloak>
       <p class="steps-lead">Free, and takes a minute:</p>
       <ol>
@@ -1633,26 +1756,25 @@
         <li>Topic: <code>{{.NtfyTopic}}</code></li>
       </ol>
       <button type="button" class="ghost sm" hx-post="/notifications/regen-topic" hx-target="#notify-body" hx-swap="innerHTML"
-              hx-confirm="Generate a new topic? Your current topic stops working and you'll need to re-subscribe in the ntfy app.">{{template "ic-plus"}} New topic</button>
+              hx-confirm="Generate a new topic? Your current topic stops working and you'll need to re-subscribe in the ntfy app." data-confirm-ok="New topic">{{template "ic-plus"}} New topic</button>
     </div>
   </div>
   {{end}}
-  <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}">
+  <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}" x-ref="status" role="status" aria-live="polite">
     {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
   </p>
   <div class="quiet" x-data="{quiet: {{if .QuietEnabled}}true{{else}}false{{end}}}">
     <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
     <div class="quiet-times" x-show="quiet" x-cloak>
-      <label class="fld">From
-        <select name="quiet_from">
-          {{$qf := .QuietFrom}}{{range hours}}<option value="{{.}}" {{if eq . $qf}}selected{{end}}>{{hourLabel .}}</option>{{end}}
-        </select>
-      </label>
-      <label class="fld">Deliver at
-        <select name="quiet_until">
-          {{$qu := .QuietUntil}}{{range hours}}<option value="{{.}}" {{if eq . $qu}}selected{{end}}>{{hourLabel .}}</option>{{end}}
-        </select>
-      </label>
+      <span>Hold notices from</span>
+      <select name="quiet_from" aria-label="Start holding notices at">
+        {{$qf := .QuietFrom}}{{range hours}}<option value="{{.}}" {{if eq . $qf}}selected{{end}}>{{hourLabel .}}</option>{{end}}
+      </select>
+      <span>until</span>
+      <select name="quiet_until" aria-label="Deliver held notices at">
+        {{$qu := .QuietUntil}}{{range hours}}<option value="{{.}}" {{if eq . $qu}}selected{{end}}>{{hourLabel .}}</option>{{end}}
+      </select>
+      <span>&mdash; then they're delivered.</span>
     </div>
     <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen on time (your permit is always correct) &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. A failure is held too, but arrives early enough to act on.</p>
   </div>
@@ -1720,7 +1842,9 @@
   {{$pid := .PermitID}}{{$wd := .WeekdayNum}}{{$sel := .VehicleID}}
   <div class="rcell" x-data="{open:false}">
     <div class="day">{{.Name}}</div>
-    <button type="button" class="chip {{if not .Reg}}empty{{end}}" @click="open=!open">
+    <button type="button" class="chip {{if not .Reg}}empty{{end}}" @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no vehicle, choose one{{end}}">
       {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else}}<span class="lab muted">none</span>{{end}}
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false">
@@ -1741,11 +1865,17 @@
 <p class="sub" style="margin-top:20px">This week and next</p>
 <div class="cal">
   {{range .Cal}}
-  <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}" @click="open=!open">
-    <div class="cd">{{.DayLabel}}</div>
-    <div class="omk">{{if .HasOneoff}}<span class="oneoff" title="one-off booking"></span>{{end}}</div>
-    <div class="bar" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
-    <div class="pop" x-show="open" x-cloak @click.outside="open=false">
+  {{/* Read-only day summary. The full information is in the aria-label, so a
+       keyboard/screen-reader user gets it on focus without opening the popover;
+       the popover is a visual convenience and is hidden from assistive tech. */}}
+  <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{.Source}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
+    <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
+    <div class="bar" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true">
       <p class="tt">{{.DayLabel}}</p>
       {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
     </div>
@@ -1760,8 +1890,8 @@
   <div class="oneoff-item">
     <span class="veh">{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span></span>
     <span class="when">{{localTime .StartsAt $.Loc}} → {{if .EndsAt}}{{localTime .EndsAt $.Loc}}{{else}}open-ended{{end}}</span>
-    <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#permit-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?">
-      <button class="ghost icon" type="submit" title="Cancel">{{template "ic-x"}}</button>
+    <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#permit-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
+      <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking">{{template "ic-x"}}</button>
     </form>
   </div>
   {{end}}
@@ -1772,7 +1902,7 @@
 
 <div class="permit-foot">
   <form method="post" action="/permits/{{.Permit.ID}}/delete"
-        hx-confirm="Stop managing this permit? Its weekly schedule and one-off bookings will be deleted. The council permit itself is not changed.">
+        hx-confirm="Stop managing this permit? Its weekly schedule and one-off bookings will be deleted. The council permit itself is not changed." data-confirm-ok="Stop managing">
     <button type="submit">{{template "ic-x"}} Stop managing this permit</button>
   </form>
 </div>

@@ -895,22 +895,35 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 	ntfy := r.FormValue("ntfy_enabled") != ""
 	if (s.notify.EmailAvailable() || s.notify.NtfyAvailable()) && !email && !ntfy {
 		// Revert: render the still-saved pref (re-checks the box) with a warning.
+		// The form saves with hx-swap:none so a clean save changes no DOM; these
+		// headers force the corrective re-render only when the state was rejected.
+		w.Header().Set("HX-Retarget", "#notify-body")
+		w.Header().Set("HX-Reswap", "innerHTML")
 		s.renderNotify(w, r, user, pref, "", "Keep at least one method on.")
 		return
 	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
 	// Quiet hours: hold overnight notices and deliver them at a chosen local hour.
+	nudged := false
 	if r.FormValue("quiet_enabled") != "" {
 		pref.QuietFrom = clampHour(r.FormValue("quiet_from"), 22)
 		pref.QuietUntil = clampHour(r.FormValue("quiet_until"), 6)
 		if pref.QuietFrom == pref.QuietUntil {
 			pref.QuietUntil = (pref.QuietFrom + 1) % 24 // equal would disable; nudge apart
+			nudged = true
 		}
 	} else {
 		pref.QuietFrom, pref.QuietUntil = 0, 0 // equal ⇒ disabled (immediate delivery)
 	}
 	if err := s.store.SetNotifyPref(r.Context(), pref); err != nil {
 		s.serverError(w, err)
+		return
+	}
+	if nudged {
+		// The saved value differs from what the form shows; re-render to sync.
+		w.Header().Set("HX-Retarget", "#notify-body")
+		w.Header().Set("HX-Reswap", "innerHTML")
+		s.renderNotify(w, r, user, pref, "The two times must differ; end time moved.", "")
 		return
 	}
 	s.renderNotify(w, r, user, pref, "Saved", "")
