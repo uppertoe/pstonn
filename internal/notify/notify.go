@@ -232,6 +232,20 @@ type ApplyOutcome struct {
 	Transient   bool   // failure expected to self-heal → soften wording
 }
 
+// actionNeeded reports a hard failure the user must act on (a non-transient
+// error: a dead council session, a rejected plate). These bypass the quiet-hours
+// hold and send immediately — an unattended fine risk shouldn't wait until 6am.
+func (o ApplyOutcome) actionNeeded() bool { return !o.OK && !o.Transient }
+
+// deferUntil returns the quiet-hours delivery time for this outcome, or the zero
+// time (send now) when the outcome is a hard action-needed failure.
+func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, o ApplyOutcome) time.Time {
+	if o.actionNeeded() {
+		return time.Time{}
+	}
+	return s.quietDefer(pref, now)
+}
+
 // composeApply builds the subject/body/priority/tags for an apply notification,
 // shared by the inline NotifyApply (scheduler) and the durable EnqueueApply.
 func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
@@ -346,7 +360,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 			Account: o.Owner,
 			Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
-			NotBefore: s.quietDefer(d.pref, now),
+			NotBefore: s.deferUntil(d.pref, now, o),
 		}
 		if d.pref.EmailEnabled && s.mail.Enabled() {
 			m.Recipients = []string{d.email}
@@ -397,7 +411,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		// Quiet hours: hold this member's notice and deliver it via the durable
 		// outbox at the window's end, so a midnight roster change lands as a 6am
 		// confirmation rather than a 12:01am ping. Queuing counts as reached.
-		if nb := s.quietDefer(d.pref, now); !nb.IsZero() {
+		if nb := s.deferUntil(d.pref, now, o); !nb.IsZero() {
 			m := outMessage{
 				Account: o.Owner, Subject: subject, Body: emailBody,
 				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,

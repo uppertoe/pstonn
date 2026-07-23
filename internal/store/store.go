@@ -986,6 +986,29 @@ ORDER BY starts_at ASC`, permitID, nowStr)
 	return out, rows.Err()
 }
 
+// ActiveGuestOverridePlate returns the registration of the currently-active
+// override this guest link created on a permit (started, not yet ended), newest
+// first, and whether one exists. Used to decide whether a guest's "put it back"
+// revert is still meaningful: if the link no longer has a live override, the
+// guest's activation has already been superseded (e.g. by a later owner booking)
+// and revert must not be offered — reverting would displace that booking.
+func (s *Store) ActiveGuestOverridePlate(ctx context.Context, permitID, guestTokenID int64, now time.Time) (string, bool) {
+	if guestTokenID == 0 {
+		return "", false
+	}
+	var reg string
+	err := s.db.QueryRowContext(ctx, `
+SELECT registration FROM override
+WHERE permit_id = ? AND guest_token_id = ? AND registration != ''
+  AND starts_at <= ? AND (ends_at IS NULL OR ends_at > ?)
+ORDER BY created_at DESC, id DESC LIMIT 1`,
+		permitID, guestTokenID, now.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339)).Scan(&reg)
+	if err != nil {
+		return "", false
+	}
+	return reg, reg != ""
+}
+
 // DeleteOverride removes an override, scoped to the owner of its permit (guards
 // against deleting another user's override by id).
 func (s *Store) DeleteOverride(ctx context.Context, owner string, id int64) error {
@@ -1580,14 +1603,26 @@ type OutboxItem struct {
 	NotBefore    time.Time // earliest delivery; zero = send as soon as due (quiet-hours defer)
 }
 
-// EnqueueOutbox durably queues a notification. If DedupKey is non-empty and a
-// pending-or-sent row already carries it, the enqueue is a no-op (idempotency), so
-// a repeated trigger can't send twice.
+// outboxDedupWindow bounds how long a delivered (sent) row suppresses a
+// re-enqueue of the same dedup_key. It absorbs genuine duplicates — a double-tap,
+// a fast double-trigger, an in-flight retry — without suppressing a legitimately
+// NEW occurrence of the same logical outcome later (an alternating A/B/A roster
+// re-applies "A" days apart; a failure recurs after resolving). A pending row
+// always dedups (the notice is still in flight); a sent row only within this
+// window; a dead row never (a previously-failed notice must be retryable).
+const outboxDedupWindow = 15 * time.Minute
+
+// EnqueueOutbox durably queues a notification. If DedupKey is non-empty and an
+// equivalent row is still pending, or was delivered within outboxDedupWindow, the
+// enqueue is a no-op (idempotency) so a repeated trigger can't double-send.
 func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 	if it.DedupKey != "" {
 		var exists int
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM outbox WHERE dedup_key = ? AND status IN ('pending','sent'))`, it.DedupKey).
+			`SELECT EXISTS(SELECT 1 FROM outbox
+			  WHERE dedup_key = ?
+			    AND (status = 'pending' OR (status = 'sent' AND sent_at > ?)))`,
+			it.DedupKey, time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339)).
 			Scan(&exists); err != nil {
 			return err
 		}

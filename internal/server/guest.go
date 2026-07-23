@@ -351,8 +351,15 @@ func (s *Server) buildGuestView(ctx context.Context, gc guestCtx, permit model.P
 	if !gc.Grant.RequestOnly {
 		view.OwnerEmail = permit.Owner
 		view.CurrentReg = current
-		view.RevertPlate = revertPlate(gc.BaselinePlate, gc.BaselineUntil, current, gc.Vehicles, time.Now())
 		want, decidedAt, until := s.guestDesired(ctx, permit)
+		// Offer "put it back" only while THIS link's activation is still the winning
+		// plate. If the owner (or their schedule) has since booked over it, the guest
+		// has nothing to undo — and reverting would wrongly displace that deliberate
+		// booking. Requiring the link's own live override to match the resolved
+		// winner keeps the offer honest and prevents the clobber.
+		if gp, ok := s.store.ActiveGuestOverridePlate(ctx, permit.ID, gc.TokenID, time.Now()); ok && strings.EqualFold(gp, want) {
+			view.RevertPlate = revertPlate(gc.BaselinePlate, gc.BaselineUntil, current, gc.Vehicles, time.Now())
+		}
 		view.PendingReg, view.Stalled = pendingState(current, want, decidedAt, time.Now())
 		if !until.IsZero() {
 			now := time.Now().In(s.cfg.DisplayLocation)
@@ -585,10 +592,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sweep this link's overrides, then re-pin the baseline — the pin is what the
-	// scheduler retries from if the immediate apply fails. It is capped at the end
-	// of TODAY even when the run was overnight: with the guest's overrides gone,
-	// tomorrow belongs to the owner's schedule again (see revertPinEnd).
+	// Sweep this link's overrides first.
 	if err := s.store.DeleteGuestOverrides(r.Context(), permit.ID, gc.TokenID); err != nil {
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
 		return
@@ -597,10 +601,21 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	if createdBy == "" {
 		createdBy = "visitor (QR)"
 	}
-	end := revertPinEnd(now, gc.BaselineUntil)
-	if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
-		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
-		return
+
+	// Decide what to put back. With the guest's overrides gone, if a deliberate
+	// owner booking or the weekly schedule already covers this moment, THAT wins —
+	// re-pinning the stale baseline would let a fresh pin leapfrog a booking the
+	// owner made after the guest activated. Only when nothing else covers now do we
+	// re-pin the pre-existing baseline (capped at end of today; see revertPinEnd).
+	target := baseline
+	if want, _, _ := s.guestDesired(r.Context(), permit); want != "" {
+		target = want
+	} else {
+		end := revertPinEnd(now, gc.BaselineUntil)
+		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
+			return
+		}
 	}
 	// Forget the baseline: the revert consumed it, and hiding the button beats
 	// offering a second no-op undo. The next activation captures a fresh one.
@@ -609,18 +624,18 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 
 	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, baseline)
+	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, target)
 	s.sched.Kick()
 	if err == nil {
-		_ = s.store.SetPermitActive(r.Context(), permit.ID, baseline)
-		_ = s.store.RecordApply(r.Context(), permit.ID, baseline, "guest", "success", "put back by "+createdBy)
-		s.notifyGuestApply(r.Context(), permit, baseline, "", createdBy+" (undo)")
-		s.renderGuestMenu(w, r, gc, permit, baseline, baseline+" is back on the permit.", "")
+		_ = s.store.SetPermitActive(r.Context(), permit.ID, target)
+		_ = s.store.RecordApply(r.Context(), permit.ID, target, "guest", "success", "put back by "+createdBy)
+		s.notifyGuestApply(r.Context(), permit, target, "", createdBy+" (undo)")
+		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
-	_ = s.store.RecordApply(r.Context(), permit.ID, baseline, "guest", "error", err.Error())
+	_ = s.store.RecordApply(r.Context(), permit.ID, target, "guest", "error", err.Error())
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		// The restore pin is saved; the pending banner + poller track the actual result.
+		// The restore is saved; the pending banner + poller track the actual result.
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
 		return
 	}
@@ -1358,12 +1373,18 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		return
 	}
 	end := dayEndLocal(now, 0)
-	if _, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)"); cerr != nil {
+	ovID, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)")
+	if cerr != nil {
 		s.serverError(w, cerr) // don't approve if we couldn't set up the change
 		return
 	}
 	if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, true, untilPhrase(now, false)); err != nil {
-		if errors.Is(err, store.ErrNotFound) { // raced with another decision; the override is harmless
+		// The approval didn't land — raced with a concurrent deny (ErrNotFound: the
+		// row is no longer pending) or a DB error. Roll back the override we
+		// optimistically created, so a denied or undecided request can never leave a
+		// live plate the scheduler would put on the permit.
+		_ = s.store.DeleteOverride(r.Context(), owner, ovID)
+		if errors.Is(err, store.ErrNotFound) {
 			http.Redirect(w, r, "/guests", http.StatusSeeOther)
 			return
 		}

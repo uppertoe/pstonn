@@ -255,6 +255,20 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SESSION_SECRET must be set (>=16 bytes) when APP_OIDC_ISSUER is configured")
 	}
 
+	// DEV_IDENTITY_EMAIL authenticates every request as that user with the admin
+	// group and puts the at-rest cipher into ephemeral-key mode — a full auth
+	// bypass if it ever ships in production. Refuse to start when it is set
+	// alongside any production signal (a real encryption key or a configured OIDC
+	// login), so it can never silently coexist with a real deployment.
+	if cfg.DevIdentityEmail != "" {
+		if len(cfg.DataEncryptionKey) == 32 {
+			return nil, fmt.Errorf("DEV_IDENTITY_EMAIL must not be set together with DATA_ENCRYPTION_KEY: it bypasses authentication (every request becomes an admin). Unset it for production")
+		}
+		if cfg.AppOIDC.Enabled() {
+			return nil, fmt.Errorf("DEV_IDENTITY_EMAIL must not be set together with APP_OIDC_ISSUER: it bypasses the OIDC login (every request becomes an admin). Unset it for production")
+		}
+	}
+
 	return cfg, nil
 }
 

@@ -671,3 +671,46 @@ func TestDisplacedGuest(t *testing.T) {
 }
 
 func ptr(t time.Time) *time.Time { return &t }
+
+// TestDetectSystemicOwnerCounting locks in the fix that the "everything is
+// blocked" alert compares owner-counts to owner-counts. The failN/busyN sets are
+// owner-keyed, so comparing them to a permit count (the old bug) made the
+// equality unsatisfiable whenever any owner held more than one permit, hiding a
+// fully-blocked small fleet.
+func TestDetectSystemicOwnerCounting(t *testing.T) {
+	ctx := context.Background()
+	nf := &fakeNotifier{on: true, admin: true}
+	s := &Scheduler{notifier: nf, lastAlert: make(map[string]time.Time)}
+
+	// Two owners (each may hold several permits), ALL council-busy. totalOwners=2.
+	stats := &passStats{
+		failOwners:       map[string]bool{},
+		unexpectedOwners: map[string]bool{},
+		busyOwners:       map[string]bool{"a@x.co": true, "b@x.co": true},
+	}
+	s.detectSystemic(ctx, stats, 2)
+	// systemAlert delivers on a goroutine; give it a moment to land.
+	var got []string
+	for i := 0; i < 50; i++ {
+		if got = nf.adminSnap(); len(got) > 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "rate-limiting") {
+		t.Fatalf("all-owners-busy should raise the council-busy alert, got %v", got)
+	}
+
+	// A single owner busy on their own permits is NOT a fleet-wide event.
+	nf2 := &fakeNotifier{on: true, admin: true}
+	s2 := &Scheduler{notifier: nf2, lastAlert: make(map[string]time.Time)}
+	solo := &passStats{
+		failOwners:       map[string]bool{},
+		unexpectedOwners: map[string]bool{},
+		busyOwners:       map[string]bool{"a@x.co": true},
+	}
+	s2.detectSystemic(ctx, solo, 1)
+	if got := nf2.adminSnap(); len(got) != 0 {
+		t.Fatalf("a single busy owner should not self-alert, got %v", got)
+	}
+}

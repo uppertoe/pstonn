@@ -169,6 +169,12 @@ func (s *Scheduler) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
+	// Seed lastReconcile with the start time so the watchdog can detect a FIRST
+	// pass that wedges (hangs before ever stamping a completion). Without this seed
+	// lastReconcile stays 0 and the watchdog's "no pass yet" guard would never fire
+	// — exactly the boot-time hang the dead-man's switch exists to catch.
+	s.lastReconcile.CompareAndSwap(0, time.Now().UnixNano())
+
 	go s.warmLoop(ctx) // keep-warm + reminders on their own cadence, so their
 	// rate-limit pauses never stall reconcile
 	go s.watchdog(ctx) // alert the operator if reconcile goes stale
@@ -565,6 +571,11 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 		}
 		if !strings.EqualFold(actual, p.ActiveRegistration) {
 			log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
+			// Record the external change durably so it appears in the activity log
+			// (nothing p.stonn does to the permit should be invisible) and so the
+			// re-assertion the kicked reconcile is about to perform isn't deduped
+			// away as a no-op against the pre-drift apply row.
+			s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
 			if e := s.store.SetPermitActive(ctx, p.ID, actual); e == nil {
 				drifted = true
 			}
@@ -645,7 +656,12 @@ func (s *Scheduler) clearFailStreak(ctx context.Context, permitID int64) {
 // detectSystemic alerts the operator when many users' plate changes fail in one
 // pass (a council outage or API change), so a fleet-wide break is seen directly
 // rather than only as scattered per-user notices.
-func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalPermits int) {
+// totalOwners is the number of distinct owners whose active permits were
+// reconciled this pass. The failN/busyN counts are owner-keyed sets, so the
+// "everything is blocked" equality must compare owners to owners — comparing an
+// owner count to a permit count would make it unsatisfiable whenever any owner
+// holds more than one permit, hiding a fully-blocked small fleet.
+func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalOwners int) {
 	if stats == nil {
 		return
 	}
@@ -653,14 +669,14 @@ func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalP
 	busyN := len(stats.busyOwners)
 	// A widespread ErrCouncilBusy is a systemic block (Akamai / egress-IP throttle)
 	// that leaves permits stuck; treat it like a broad failure so the operator hears.
-	busySystemic := busyN >= 3 || (totalPermits >= 2 && busyN == totalPermits)
+	busySystemic := busyN >= 3 || (totalOwners >= 2 && busyN == totalOwners)
 	if busySystemic && !(unexpectedN >= 2 || failN >= 3) {
 		s.systemAlert(ctx, "council-busy-block",
 			"Council is rate-limiting / blocking p.stonn",
-			fmt.Sprintf("This reconcile pass, %d of %d permits were deferred with a council busy/blocked response. p.stonn's egress IP may be rate-limited or soft-blocked; permit changes are stalled until it clears.", busyN, totalPermits))
+			fmt.Sprintf("This reconcile pass, %d of %d users' permits were deferred with a council busy/blocked response. p.stonn's egress IP may be rate-limited or soft-blocked; permit changes are stalled until it clears.", busyN, totalOwners))
 		return
 	}
-	systemic := unexpectedN >= 2 || failN >= 3 || (totalPermits >= 2 && failN == totalPermits)
+	systemic := unexpectedN >= 2 || failN >= 3 || (totalOwners >= 2 && failN == totalOwners)
 	if !systemic {
 		return
 	}
@@ -771,6 +787,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
 	// after each permit that actually hit the council.
 	active := 0
+	activeOwners := map[string]bool{}
 	for _, p := range permits {
 		// An expired or cancelled permit can't be changed; skip it so we don't
 		// hammer the council with doomed writes or alarm the user with failures.
@@ -779,13 +796,14 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 			continue
 		}
 		active++
+		activeOwners[p.Owner] = true
 		if s.reconcilePermit(ctx, p, regByOwnerID, nameByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
 			}
 		}
 	}
-	s.detectSystemic(ctx, stats, active)
+	s.detectSystemic(ctx, stats, len(activeOwners))
 }
 
 type ownerVehicle struct {
@@ -876,9 +894,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		_ = s.store.SetPermitActive(ctx, p.ID, want)
 		s.clearFailStreak(ctx, p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
+		// Key the notification on the TRANSITION (prev→want), not just the target.
+		// Keying on "success|want" alone would treat a re-assertion after an external
+		// change (someone edited the plate directly in the council portal, which
+		// checkDrift logs) as a duplicate of the original apply and stay silent — so
+		// the account never hears that their deliberate manual change was reverted.
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
-		}, "success|"+want)
+		}, "success|"+prev+">"+want)
 		// If the plate we just removed had been put on by a guest whose booking is
 		// still live, tell that guest (email only) so they aren't caught out. The
 		// notice is enqueued durably (a fast insert), so no goroutine is needed.

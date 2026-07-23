@@ -1403,3 +1403,106 @@ func TestOutboxNotBefore(t *testing.T) {
 		t.Fatalf("due after the hold window = %d, want 2", len(d))
 	}
 }
+
+// TestOutboxDedupWindow locks in the fix that a delivered notice only suppresses
+// re-enqueues of the same key for a short window, so a legitimately repeated
+// outcome (an alternating A/B/A roster, a recurring failure) still sends rather
+// than being silently dropped against a week-old sent row.
+func TestOutboxDedupWindow(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	countKey := func() int {
+		var n int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE dedup_key = 'k'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	enq := func() {
+		if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "k", Recipients: []string{"a@x.co"}, Subject: "S", Body: "B"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	enq()
+	enq() // while pending, the duplicate is deduped
+	if countKey() != 1 {
+		t.Fatalf("pending dedup: %d rows, want 1", countKey())
+	}
+
+	// Deliver it, then backdate sent_at beyond the dedup window.
+	due, _ := s.DueOutbox(ctx, time.Now(), 10)
+	if len(due) != 1 {
+		t.Fatalf("due = %d, want 1", len(due))
+	}
+	if err := s.MarkOutboxSent(ctx, due[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-outboxDedupWindow - time.Minute).UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `UPDATE outbox SET sent_at = ? WHERE id = ?`, old, due[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later occurrence of the same outcome now re-enqueues (the bug was: it was
+	// dropped against the old sent row for 7 days).
+	enq()
+	if countKey() != 2 {
+		t.Fatalf("after-window re-enqueue: %d rows, want 2", countKey())
+	}
+
+	// But a sent row still WITHIN the window keeps deduping (absorbs a double-tap).
+	due2, _ := s.DueOutbox(ctx, time.Now(), 10)
+	if len(due2) != 1 {
+		t.Fatalf("second due = %d, want 1", len(due2))
+	}
+	if err := s.MarkOutboxSent(ctx, due2[0].ID); err != nil { // sent_at = now (recent)
+		t.Fatal(err)
+	}
+	enq()
+	if countKey() != 2 {
+		t.Fatalf("within-window dedup: %d rows, want 2 (the recent duplicate suppressed)", countKey())
+	}
+}
+
+// TestActiveGuestOverridePlate covers the helper that gates the guest "put it
+// back" offer: it returns this link's own live override plate, and nothing once
+// that override has ended or been swept.
+func TestActiveGuestOverridePlate(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "o@example.com"
+	pid, err := s.UpsertPermit(ctx, owner, "VPP1", "1", "VPP1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	end := now.Add(6 * time.Hour)
+
+	// A zero token id is refused (would match every non-guest override).
+	if _, ok := s.ActiveGuestOverridePlate(ctx, pid, 0, now); ok {
+		t.Fatal("zero token id must not match")
+	}
+
+	// This link's live override is reported.
+	if _, err := s.CreateGuestPlateOverride(ctx, pid, "GST111", now.Add(-time.Minute), &end, "visitor", 42); err != nil {
+		t.Fatal(err)
+	}
+	if reg, ok := s.ActiveGuestOverridePlate(ctx, pid, 42, now); !ok || reg != "GST111" {
+		t.Fatalf("active override = %q,%v, want GST111,true", reg, ok)
+	}
+	// A different token sees nothing.
+	if _, ok := s.ActiveGuestOverridePlate(ctx, pid, 99, now); ok {
+		t.Fatal("another token must not see this link's override")
+	}
+	// After the window ends, nothing is active.
+	if _, ok := s.ActiveGuestOverridePlate(ctx, pid, 42, end.Add(time.Minute)); ok {
+		t.Fatal("an ended override must not be reported")
+	}
+	// Swept overrides disappear.
+	if err := s.DeleteGuestOverrides(ctx, pid, 42); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.ActiveGuestOverridePlate(ctx, pid, 42, now); ok {
+		t.Fatal("a swept override must not be reported")
+	}
+}

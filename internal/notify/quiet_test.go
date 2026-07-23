@@ -41,6 +41,34 @@ func TestQuietDefer(t *testing.T) {
 	}
 }
 
+// TestDeferUntilActionNeeded covers the exemption: a hard "action needed"
+// failure (a non-transient error the user must act on) bypasses the quiet-hours
+// hold and sends immediately, while successes and transient failures still defer.
+func TestDeferUntilActionNeeded(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	svc := &Service{loc: loc}
+	pref := store.NotifyPref{QuietFrom: 22, QuietUntil: 6} // covers 02:00
+	at2am := time.Date(2026, 7, 21, 2, 0, 0, 0, loc)
+	day6 := time.Date(2026, 7, 21, 6, 0, 0, 0, loc)
+
+	cases := []struct {
+		name string
+		o    ApplyOutcome
+		want time.Time // zero = immediate
+	}{
+		{"success defers to 6am", ApplyOutcome{OK: true}, day6},
+		{"transient failure defers to 6am", ApplyOutcome{OK: false, Transient: true}, day6},
+		{"hard failure sends immediately", ApplyOutcome{OK: false, Transient: false}, time.Time{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := svc.deferUntil(pref, at2am, c.o); !got.Equal(c.want) {
+				t.Fatalf("deferUntil = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestComposeApplyCopy(t *testing.T) {
 	// Roster success: subject leads with the plate; body uses an em-dash (no nested
 	// parens) and natural source wording (no trailing "(roster)").
