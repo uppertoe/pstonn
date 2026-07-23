@@ -1618,14 +1618,33 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	s.respondPermit(w, r, owner, p)
 }
 
+// combineDateTime joins a native date input (YYYY-MM-DD) and time input (HH:MM)
+// into the "2006-01-02T15:04" form the parser expects. It returns "" when no date
+// was given (the field is unset); a date with an empty time uses defaultTime.
+func combineDateTime(date, timeStr, defaultTime string) string {
+	date = strings.TrimSpace(date)
+	if date == "" {
+		return ""
+	}
+	t := strings.TrimSpace(timeStr)
+	if t == "" {
+		t = defaultTime
+	}
+	return date + "T" + t
+}
+
 func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
 	}
+	// The form posts separate date + time inputs (datetime-local has no time
+	// picker in some mobile browsers). A blank date means "unset"; a date with no
+	// time defaults to the start of that day for "from" and the end of the day for
+	// "until", so choosing only a day still makes a sensible booking.
 	startsAt := time.Now()
-	if raw := strings.TrimSpace(r.FormValue("from")); raw != "" {
+	if raw := combineDateTime(r.FormValue("from_date"), r.FormValue("from_time"), "00:00"); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
 		if err != nil {
 			s.formError(w, r, "Couldn't read the start time.")
@@ -1634,7 +1653,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		startsAt = t
 	}
 	var endsAt *time.Time
-	if raw := strings.TrimSpace(r.FormValue("until")); raw != "" {
+	if raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "23:59"); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
 		if err != nil {
 			s.formError(w, r, "Couldn't read the end time.")

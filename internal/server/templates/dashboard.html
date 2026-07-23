@@ -144,6 +144,10 @@
   .dlg-actions { display:flex; justify-content:flex-end; gap:10px; }
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   @media (max-width:520px){ .row2 { grid-template-columns:1fr; } }
+  /* Paired date + time inputs (one-off booking). Each takes half the field; both
+     shrink rather than overflow on a narrow phone. */
+  .dtpair { display:flex; gap:8px; }
+  .dtpair input { flex:1 1 0; min-width:0; }
   .oo-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:20px 0 10px; }
   .oo-head .sub { margin:0; }
   button.sm { padding:7px 12px; font-size:13px; }
@@ -1958,11 +1962,19 @@
         <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
       </div>
     </div>
+    {{/* Separate date + time inputs rather than datetime-local: Firefox for
+         Android (and some others) don't offer a time picker for datetime-local,
+         so the hour can't be entered. type=date and type=time are well supported
+         everywhere; the server recombines from_date/from_time (see addOverride). */}}
     <div class="row2">
-      <label class="fld">From<input type="datetime-local" name="from"></label>
-      <label class="fld">Until<input type="datetime-local" name="until"></label>
+      <label class="fld">From
+        <div class="dtpair"><input type="date" name="from_date" aria-label="Start date"><input type="time" name="from_time" aria-label="Start time"></div>
+      </label>
+      <label class="fld">Until
+        <div class="dtpair"><input type="date" name="until_date" aria-label="End date"><input type="time" name="until_time" aria-label="End time"></div>
+      </label>
     </div>
-    <p class="empty-note">Leave "From" blank to start now, "Until" blank to keep it until you change it.</p>
+    <p class="empty-note">Leave "From" blank to start now, "Until" blank to keep it until you change it. Pick a date with no time and it runs from the start of that day to the end of the "Until" day.</p>
     <div class="modal-actions">
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       <button type="submit">{{template "ic-plus"}} Book</button>

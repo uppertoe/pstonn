@@ -155,3 +155,22 @@ func TestAuthorizationMatrix(t *testing.T) {
 		}
 	})
 }
+
+// TestCombineDateTime covers the one-off booking date+time recombination: an
+// empty date is unset, and a date with no time falls back to the default (start
+// of day for "from", end of day for "until").
+func TestCombineDateTime(t *testing.T) {
+	cases := []struct{ date, tm, def, want string }{
+		{"", "", "00:00", ""},
+		{"", "09:30", "00:00", ""}, // time with no date is unset
+		{"2026-07-15", "09:30", "00:00", "2026-07-15T09:30"},
+		{"2026-07-15", "", "00:00", "2026-07-15T00:00"},          // from: default start of day
+		{"2026-07-16", "", "23:59", "2026-07-16T23:59"},          // until: default end of day
+		{" 2026-07-15 ", " 09:30 ", "00:00", "2026-07-15T09:30"}, // trimmed
+	}
+	for _, c := range cases {
+		if got := combineDateTime(c.date, c.tm, c.def); got != c.want {
+			t.Fatalf("combineDateTime(%q,%q,%q) = %q, want %q", c.date, c.tm, c.def, got, c.want)
+		}
+	}
+}
