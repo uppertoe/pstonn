@@ -303,8 +303,11 @@
 
   /* popover — centred with the standalone translate property, NOT transform:
      the rise animation ends at transform:none (fill both), which would wipe a
-     transform-based centring and shove the popover half a width off-screen. */
-  .pop { position:absolute; z-index:30; top:100%; left:50%; translate:-50% 0; margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; max-width:calc(100vw - 24px); animation:rise .16s ease both; }
+     transform-based centring and shove the popover half a width off-screen.
+     --pop-shift is set by popClamp() on open to pull the popover back inside
+     the viewport (body is overflow-x:hidden, so an overhang is clipped, not
+     scrollable). */
+  .pop { position:absolute; z-index:30; top:100%; left:50%; translate:calc(-50% + var(--pop-shift,0px)) 0; margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; max-width:calc(100vw - 24px); animation:rise .16s ease both; }
   .pop .tt { font-size:12px; color:var(--muted); margin:0 0 9px; font-weight:600; }
   /* vehicle picker (colour-dotted options) */
   .vopts { display:grid; gap:2px; }
@@ -330,15 +333,6 @@
   .vpick-btn .ph { color:var(--muted); }
   .vpick-caret { margin-left:auto; color:var(--muted); font-size:11px; }
   .vpick-list { position:absolute; z-index:5; top:calc(100% + 5px); left:0; right:0; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lg); padding:5px; max-height:230px; overflow:auto; }
-  .roster .rcell:nth-child(1) .pop, .roster .rcell:nth-child(2) .pop,
-  .cal .cday:nth-child(7n+1) .pop, .cal .cday:nth-child(7n+2) .pop { left:0; right:auto; translate:none; }
-  .roster .rcell:nth-child(6) .pop, .roster .rcell:nth-child(7) .pop,
-  .cal .cday:nth-child(7n+6) .pop, .cal .cday:nth-child(7n) .pop { left:auto; right:0; translate:none; }
-  @media (max-width:640px){
-    .roster .rcell .pop { left:50%; right:auto; translate:-50% 0; }
-    .roster .rcell:nth-child(4n+1) .pop { left:0; right:auto; translate:none; }
-    .roster .rcell:nth-child(4n) .pop { left:auto; right:0; translate:none; }
-  }
 
   /* one-offs list */
   .oneoff-list { display:grid; gap:8px; margin:2px 0 4px; }
@@ -1562,6 +1556,20 @@
   </div>
 </dialog>
 <script>
+{{/* Keep a schedule popover on-screen: it opens centred on its cell, so ones
+     anchored near a viewport edge overhang it and get clipped (overflow-x is
+     hidden). Measure after open and pull it back via --pop-shift, then scroll
+     it fully into view for bottom-row cells. Re-measure from zero each open so
+     a stale shift from a previous open/rotation doesn't stick. */}}
+window.popClamp = window.popClamp || function (el) {
+  el.style.removeProperty('--pop-shift');
+  var pad = 12, vw = document.documentElement.clientWidth;
+  var r = el.getBoundingClientRect(), dx = 0;
+  if (r.left < pad) dx = pad - r.left;
+  else if (r.right > vw - pad) dx = vw - pad - r.right;
+  if (dx) el.style.setProperty('--pop-shift', dx + 'px');
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
 (function () {
   if (window.appConfirm) return; // boosted navigations re-run body scripts
   var pending = null;
@@ -1873,7 +1881,8 @@
             aria-label="{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no vehicle, choose one{{end}}">
       {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else}}<span class="lab muted">none</span>{{end}}
     </button>
-    <div class="pop" x-show="open" x-cloak @click.outside="open=false">
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">{{.Name}}: pick a vehicle</p>
       <div class="vopts">
         <button type="button" class="vopt {{if not $sel}}sel{{end}}" @click="open=false"
@@ -1901,7 +1910,8 @@
     <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
     <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
     <div class="bar" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
-    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true">
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">{{.DayLabel}}</p>
       {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
     </div>
