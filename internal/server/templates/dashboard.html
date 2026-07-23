@@ -487,10 +487,12 @@
   .poster-lead { font-size:15px; font-weight:600; color:var(--pp-ink); margin:0 0 18px; }
   .poster-qbox { display:block; width:268px; max-width:100%; margin:0 auto; box-sizing:border-box; padding:14px; background:#fff; border:1px solid var(--pp-line); border-radius:14px; }
   .poster-qbox img { width:100%; height:auto; image-rendering:pixelated; display:block; }
-  .poster-steps { text-align:left; max-width:300px; margin:20px auto 0; padding-left:20px; display:flex; flex-direction:column; gap:7px; font-size:13.5px; color:var(--pp-muted); }
+  {{/* Steps and note share the same width, left edge and alignment so the lower
+       block reads as one tidy left-aligned column under the centred QR. */}}
+  .poster-steps { text-align:left; max-width:300px; margin:22px auto 4px; padding-left:24px; display:flex; flex-direction:column; gap:8px; font-size:13.5px; color:var(--pp-muted); }
   .poster-steps li { line-height:1.4; }
   .poster-steps li::marker { color:var(--pp-accent); font-weight:700; }
-  .poster-note { font-size:12px; color:var(--pp-muted); margin:18px auto 0; max-width:320px; line-height:1.5; }
+  .poster-note { text-align:left; font-size:12px; color:var(--pp-muted); margin:14px auto 0; max-width:300px; padding-left:24px; line-height:1.5; }
   .poster-foot { border-top:1px solid var(--pp-line); padding:12px 22px; font-size:11px; color:var(--pp-muted); }
   .posterhint { text-align:center; color:var(--muted); font-size:12.5px; margin:18px auto 0; max-width:420px; line-height:1.5; }
   @media (max-width:520px){
@@ -500,7 +502,7 @@
     .poster-band { padding:12px 16px; }
     .poster-title { font-size:20px; }
     .poster-lead { font-size:14px; }
-    .poster-steps { max-width:none; }
+    .poster-steps, .poster-note { max-width:none; }
   }
   @media print {
     @page { margin:12mm; }
@@ -515,11 +517,12 @@
     .posterwrap { padding:0 !important; max-width:none !important; margin:0 !important; height:100%; display:flex; }
     .poster { border-color:#d7dee1 !important; width:100% !important; max-width:none !important; margin:0 !important; flex:1; display:flex; flex-direction:column; break-inside:avoid; }
     .poster-body { flex:1 1 auto; display:flex; flex-direction:column; justify-content:center; padding:10mm 14mm; }
-    .poster-qbox { width:64mm; padding:5mm; }
-    .poster-title { font-size:27px; }
-    .poster-lead { font-size:16px; }
-    .poster-steps { max-width:360px; font-size:14px; margin-top:26px; }
-    .poster-note { font-size:13px; margin-top:22px; }
+    .poster-qbox { width:78mm; padding:6mm; }
+    .poster-title { font-size:30px; }
+    .poster-lead { font-size:17px; }
+    .poster-steps, .poster-note { max-width:340px; padding-left:26px; }
+    .poster-steps { font-size:15px; gap:11px; margin-top:30px; }
+    .poster-note { font-size:13.5px; margin-top:20px; }
   }
   /* Admin dashboard */
   .adminwrap { max-width:1100px; margin:0 auto; padding:18px 16px 60px; }
