@@ -707,14 +707,14 @@
     </div>
   </div>
   <section class="lsteps">
-    <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>Sign in to ePermits with your council password. p.stonn keeps an encrypted session and discards the password.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>Sign in to ePermits with your council password.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
-    <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>It stays in sync</h3><p>p.stonn updates the permit to match and records each change. It can notify you by email or push.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
   </section>
   {{if .Contact}}
   <section class="paper" style="max-width:640px;margin:48px auto 0;padding:30px 34px">
     <h2 class="about-h2" style="margin-top:0">Get in touch</h2>
-    <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">Questions, problems, or feedback? Send a message and it reaches the person running this. Your email is optional, but it's the only way to get a reply.</p>
+    <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">Questions, problems, or feedback? Send me a message. Your email is optional, but it's the only way to get a reply.</p>
     <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:0">
       <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
       <label class="fld"><span>Your email (optional, for a reply)</span><input type="email" name="email" placeholder="you@example.com" autocomplete="email"></label>
@@ -732,23 +732,24 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">About p.stonn</h1>
-    <p>p.stonn is a free, unofficial tool that schedules which vehicle is on your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/why">How it works</a>.</p>
+    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/why">How it works</a>.</p>
 
-    <h2 class="about-h2">The security model, plainly</h2>
+    <h2 class="about-h2">The security model</h2>
     <ul>
-      <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held by whoever runs this server.</li>
+      <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held on this server.</li>
+      <li>This is necessary to reliably connect to your Stonnington ePermit account.</li>
       <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
-      <li>By default p.stonn does not store your council password &mdash; only your email, your schedule, and the encrypted session. If you opt in to auto-reconnect, your password is also kept, sealed with the same encryption, so the app can sign back in on its own; you can remove it any time in Settings.</li>
+      <li>You may choose to not store your council password &mdash; instead just your email, your schedule, and the encrypted session. Without your password, this app may get disconnected from your Stonnington ePermit account and lose the ability to modify your permit. If you opt in to auto-reconnect, your password is also kept, sealed with the same encryption, so the app can sign back in on its own; you can remove it any time in Settings.</li>
       <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
-      <li>Use a password that is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
+      <li>Please ensure that your Stonnington ePermit password is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
       <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
-      <li>Consider whether you are comfortable with a third party holding access to your council account before using this. Do not rely on it for anything you can't afford to have go wrong.</li>
+      <li>Before using this service, you should consider whether you are comfortable with a third party holding access to your council account. Do not rely on it for anything you can't afford to have go wrong.</li>
     </ul>
 
     <h2 class="about-h2">Notifications</h2>
     <ul>
       <li>p.stonn attempts to notify you (by email and/or push) each time it changes your permit or fails to. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Delivery is not guaranteed.</li>
-      <li>You remain responsible for checking your permit and for any fines. Treat notifications as a convenience, not a guarantee.</li>
+      <li>You remain responsible for checking your permit and for any fines. Treat notifications as a convenience rather than a guarantee.</li>
     </ul>
 
     <h2 class="about-h2">No promises</h2>
@@ -764,10 +765,10 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Why this exists</h1>
-    <p>Stonnington changed how resident and visitor parking permits work. From 2026, paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registrations into the council's online system, which is checked by parking officers for validity.</p>
+    <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
     <p>The old paper permits could be moved between cars as needed. The digital system, as it stands, is clunkier: for a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; logging in to change the registration each time becomes a recurring chore.</p>
     <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
-    <p>I built it to take one recurring chore off my own household's plate. I hope it does the same for yours.</p>
+    <p>I built it to take a chore off my household's plate. I hope it does the same for yours.</p>
   </section>
 
   <p class="whyhead">How it works</p>
