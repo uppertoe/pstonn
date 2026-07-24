@@ -124,3 +124,95 @@ func TestResolve(t *testing.T) {
 		}
 	})
 }
+
+func TestFindDisplaced(t *testing.T) {
+	now := mustTime(t, "2026-07-20 12:00 +1000")
+	end := mustTime(t, "2026-07-20 23:59 +1000")
+	live := func(id int64, vehicleID int64, reg, by string, created time.Time) Override {
+		return Override{ID: id, VehicleID: vehicleID, Registration: reg,
+			StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), EndsAt: &end, CreatedBy: by, CreatedAt: created}
+	}
+	vehicles := map[int64]VehicleInfo{
+		5: {Registration: "MUM123", Label: "Mum's car", Email: "nanny@example.com"},
+		6: {Registration: "NOMAIL1", Label: "Spare"},
+	}
+	members := []string{"owner@example.com", "partner@example.com"}
+	early := mustTime(t, "2026-07-20 09:00 +1000")
+	later := mustTime(t, "2026-07-20 10:00 +1000")
+
+	t.Run("guest booker is warned", func(t *testing.T) {
+		ovr := []Override{live(1, 0, "GUEST99", "pa@example.com", early)}
+		got := FindDisplaced(ovr, vehicles, "GUEST99", "beast-driver@example.com", members, now)
+		if got.Reg != "GUEST99" || got.Contact != "pa@example.com" {
+			t.Fatalf("got %+v, want pa@example.com warned", got)
+		}
+	})
+	t.Run("self-displacement across channels is quiet", func(t *testing.T) {
+		// Pa swaps his own citroen for his own beast: same email, so no warning —
+		// even when the two bookings came through different links or channels.
+		ovr := []Override{live(1, 0, "GUEST99", "pa@example.com", early)}
+		if got := FindDisplaced(ovr, vehicles, "GUEST99", "PA@example.com", members, now); got != (DisplacedBooking{}) {
+			t.Fatalf("got %+v, want quiet", got)
+		}
+	})
+	t.Run("member booking of a saved car warns the attached driver", func(t *testing.T) {
+		// Borrowed-car case: a member booked mum's car on the driver's behalf.
+		ovr := []Override{live(1, 5, "", "owner@example.com", early)}
+		got := FindDisplaced(ovr, vehicles, "MUM123", "", members, now)
+		if got.Contact != "nanny@example.com" {
+			t.Fatalf("got %+v, want nanny@example.com warned", got)
+		}
+	})
+	t.Run("guest booker beats the vehicle's attached email", func(t *testing.T) {
+		// The person who tapped the link is more likely the one parked than the
+		// car's usual driver.
+		ovr := []Override{live(1, 5, "", "pa@example.com", early)}
+		got := FindDisplaced(ovr, vehicles, "MUM123", "", members, now)
+		if got.Contact != "pa@example.com" {
+			t.Fatalf("got %+v, want pa@example.com warned", got)
+		}
+	})
+	t.Run("member's own booking with no driver email is quiet", func(t *testing.T) {
+		ovr := []Override{live(1, 6, "", "owner@example.com", early)}
+		if got := FindDisplaced(ovr, vehicles, "NOMAIL1", "", members, now); got != (DisplacedBooking{}) {
+			t.Fatalf("got %+v, want quiet (fanout covers the member)", got)
+		}
+	})
+	t.Run("vehicle email that is a member is quiet", func(t *testing.T) {
+		veh := map[int64]VehicleInfo{5: {Registration: "MUM123", Email: "partner@example.com"}}
+		ovr := []Override{live(1, 5, "", "visitor (QR)", early)}
+		if got := FindDisplaced(ovr, veh, "MUM123", "", members, now); got != (DisplacedBooking{}) {
+			t.Fatalf("got %+v, want quiet (fanout covers the member)", got)
+		}
+	})
+	t.Run("unreachable booking reports the plate with no contact", func(t *testing.T) {
+		ovr := []Override{live(1, 0, "VIS777", "visitor (printed QR)", early)}
+		got := FindDisplaced(ovr, vehicles, "VIS777", "", members, now)
+		if got.Reg != "VIS777" || got.Contact != "" {
+			t.Fatalf("got %+v, want VIS777 with no contact", got)
+		}
+	})
+	t.Run("annotated CreatedBy still yields a clean address", func(t *testing.T) {
+		ovr := []Override{live(1, 0, "GUEST99", "pa@example.com (undo)", early)}
+		got := FindDisplaced(ovr, vehicles, "GUEST99", "", members, now)
+		if got.Contact != "pa@example.com" {
+			t.Fatalf("got %+v, want pa@example.com (annotation stripped)", got)
+		}
+	})
+	t.Run("newest matching booking decides the contact", func(t *testing.T) {
+		ovr := []Override{
+			live(1, 0, "GUEST99", "old@example.com", early),
+			live(2, 0, "GUEST99", "recent@example.com", later),
+		}
+		got := FindDisplaced(ovr, vehicles, "GUEST99", "", members, now)
+		if got.Contact != "recent@example.com" {
+			t.Fatalf("got %+v, want the newest booking's contact", got)
+		}
+	})
+	t.Run("no live booking for the plate is quiet", func(t *testing.T) {
+		ovr := []Override{live(1, 0, "GUEST99", "pa@example.com", early)}
+		if got := FindDisplaced(ovr, vehicles, "ROSTER1", "", members, now); got != (DisplacedBooking{}) {
+			t.Fatalf("got %+v, want quiet (roster/external plate)", got)
+		}
+	})
+}

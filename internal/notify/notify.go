@@ -230,6 +230,14 @@ type ApplyOutcome struct {
 	Reason      string // one plain sentence: why it failed
 	Action      string // one plain sentence: what the user should do
 	Transient   bool   // failure expected to self-heal → soften wording
+
+	// DisplacedReg is the plate of a still-live third-party booking this change
+	// bumped off the permit ("" when nothing of note was displaced), and
+	// DisplacedTold whether its driver got their own heads-up email. When they
+	// couldn't be reached, the account notification asks the members to relay
+	// the warning — otherwise the displaced car sits uncovered with nobody told.
+	DisplacedReg  string
+	DisplacedTold bool
 }
 
 // actionNeeded reports a hard failure the user must act on (a non-transient
@@ -269,6 +277,13 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 			body = fmt.Sprintf("Your %s is now set to %s, for the one-off booking you made.%s", o.PermitLabel, car, confirm)
 		default:
 			body = fmt.Sprintf("Your %s is now set to %s.%s", o.PermitLabel, car, confirm)
+		}
+		if o.DisplacedReg != "" {
+			if o.DisplacedTold {
+				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on — we've emailed the person responsible for that car a heads-up.", o.DisplacedReg)
+			} else {
+				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on. We had no way to reach whoever drives it — if %s is still parked there, please let them know it's no longer covered.", o.DisplacedReg, o.DisplacedReg)
+			}
 		}
 	} else {
 		switch {
@@ -559,19 +574,20 @@ func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
 	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
 }
 
-// NotifyGuestDisplaced tells a guest (who has no account, so email only) that
-// the car they put on a permit via their link has since been taken off it, so
-// they can move it or re-activate before getting caught out. No-op without SMTP.
-func (s *Service) NotifyGuestDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error {
+// NotifyDriverDisplaced warns whoever is responsible for a displaced car (the
+// guest who booked it, or the saved vehicle's attached driver — someone with no
+// account, so email only) that the car is no longer on the permit, so they can
+// move it or get it put back before getting caught out. No-op without SMTP.
+func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
 	subject := fmt.Sprintf("Heads up: %s is no longer on the %s", oldReg, permitLabel)
 	lines := []string{
-		fmt.Sprintf("The car you put on the visitor permit (%s) has just been taken off it.", oldReg),
+		fmt.Sprintf("%s is no longer the car covered by the visitor permit (%s).", oldReg, permitLabel),
 		fmt.Sprintf("The permit now shows %s instead.", newReg),
 		"",
-		"If your car is still parked there, please move it or open your link again to put it back on, so you stay covered.",
+		fmt.Sprintf("If %s is still parked there, please move it — or put it back on the permit (with your link, or by asking the permit holder) so you stay covered.", oldReg),
 	}
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n")})
 }

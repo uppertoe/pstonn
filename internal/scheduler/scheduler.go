@@ -58,9 +58,10 @@ type Notifier interface {
 	NotifyPermitExpiry(ctx context.Context, owner, permitLabel string, expiry time.Time) int
 	// NotifyAdmin sends an operator alert to every configured admin channel.
 	NotifyAdmin(ctx context.Context, subject, body string) error
-	// NotifyGuestDisplaced tells a guest (no account) their activated car has been
-	// taken off the permit.
-	NotifyGuestDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
+	// NotifyDriverDisplaced warns the driver responsible for a displaced booking
+	// (a guest or a saved vehicle's attached email — no account) that their car
+	// has been taken off the permit.
+	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
 }
 
 // Options configures the Scheduler's session-lifecycle behaviour.
@@ -774,11 +775,9 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	// Key by (owner, id): a permit's scheduled vehicle_id is resolved ONLY among
 	// its owner's vehicles, so a rule/override that somehow references a foreign
 	// id can never read another user's registration.
-	regByOwnerID := make(map[ownerVehicle]string, len(vehicles))
-	nameByOwnerID := make(map[ownerVehicle]string, len(vehicles))
+	vehByOwnerID := make(map[ownerVehicle]model.VehicleInfo, len(vehicles))
 	for _, v := range vehicles {
-		regByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Registration
-		nameByOwnerID[ownerVehicle{v.Owner, v.ID}] = v.Label
+		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email}
 	}
 	now := time.Now().In(s.loc)
 	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}, busyOwners: map[string]bool{}}
@@ -797,7 +796,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		}
 		active++
 		activeOwners[p.Owner] = true
-		if s.reconcilePermit(ctx, p, regByOwnerID, nameByOwnerID, now, stats) && s.rateDelay > 0 {
+		if s.reconcilePermit(ctx, p, vehByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
 			}
@@ -820,49 +819,32 @@ type passStats struct {
 	busyOwners       map[string]bool // council pushed back (ErrCouncilBusy) this pass
 }
 
-// reconcilePermit applies any needed plate change for one permit. It returns
-// true when it actually contacted the council (so the caller can space bursts).
-// displacedGuest returns the guest email whose still-live activation set `prev`
-// (the plate just removed), or "" if none. Account members are excluded: they
-// get the normal plate-change notice, and their own bookings shouldn't ping them
-// as "displaced". Matching on the outgoing plate is a heuristic; a false miss or
-// spurious note is low-harm.
-func (s *Scheduler) displacedGuest(ctx context.Context, p model.Permit, overrides []model.Override, regByOwnerID map[ownerVehicle]string, prev string, now time.Time) string {
+// displaced resolves who should be warned that prev (the plate just removed)
+// belonged to a still-live booking: the shared model.FindDisplaced policy, fed
+// this permit's owner-scoped vehicles and account members. Matching on the
+// outgoing plate is a heuristic; a false miss or spurious note is low-harm.
+func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []model.Override, vehByOwnerID map[ownerVehicle]model.VehicleInfo, prev, actor string, now time.Time) model.DisplacedBooking {
 	if prev == "" {
-		return ""
+		return model.DisplacedBooking{}
 	}
-	var by string
+	vehicles := make(map[int64]model.VehicleInfo)
 	for i := range overrides {
-		o := overrides[i]
-		if o.StartsAt.After(now) || (o.EndsAt != nil && !now.Before(*o.EndsAt)) {
-			continue // not currently active
+		if id := overrides[i].VehicleID; id != 0 {
+			if v, ok := vehByOwnerID[ownerVehicle{p.Owner, id}]; ok {
+				vehicles[id] = v
+			}
 		}
-		reg := o.Registration
-		if reg == "" {
-			reg = regByOwnerID[ownerVehicle{p.Owner, o.VehicleID}]
-		}
-		// Only a real email is contactable (a QR visitor's created_by is not one).
-		if reg == prev && strings.Contains(o.CreatedBy, "@") {
-			by = o.CreatedBy
-			break
-		}
-	}
-	if by == "" {
-		return ""
 	}
 	members, err := s.store.AccountEmails(ctx, p.Owner)
 	if err != nil {
-		return ""
+		return model.DisplacedBooking{} // can't tell member from guest; stay quiet
 	}
-	for _, m := range members {
-		if strings.EqualFold(m, by) {
-			return "" // a member's own booking, not a guest
-		}
-	}
-	return by
+	return model.FindDisplaced(overrides, vehicles, prev, actor, members, now)
 }
 
-func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOwnerID, nameByOwnerID map[ownerVehicle]string, now time.Time, stats *passStats) (hitCouncil bool) {
+// reconcilePermit applies any needed plate change for one permit. It returns
+// true when it actually contacted the council (so the caller can space bursts).
+func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, now time.Time, stats *passStats) (hitCouncil bool) {
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -877,8 +859,8 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 	if res.Source == model.SourceNone {
 		return false // nothing scheduled right now; leave the permit as-is
 	}
-	want := regByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
-	wantName := nameByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
+	want := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}].Registration
+	wantName := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}].Label
 	if res.Registration != "" { // an ad-hoc one-off plate (not a saved vehicle)
 		want = res.Registration
 		wantName = ""
@@ -894,6 +876,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		_ = s.store.SetPermitActive(ctx, p.ID, want)
 		s.clearFailStreak(ctx, p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
+		// If the plate we just removed had been put on by a still-live booking,
+		// warn its driver (email only) so they aren't caught out — and tell the
+		// account when that driver was unreachable, so a member can relay it. The
+		// notice is enqueued durably (a fast insert), so no goroutine is needed.
+		d := s.displaced(ctx, p, overrides, vehByOwnerID, prev, res.By, now)
 		// Key the notification on the TRANSITION (prev→want), not just the target.
 		// Keying on "success|want" alone would treat a re-assertion after an external
 		// change (someone edited the plate directly in the council portal, which
@@ -901,13 +888,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, regByOw
 		// the account never hears that their deliberate manual change was reverted.
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
+			DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
 		}, "success|"+prev+">"+want)
-		// If the plate we just removed had been put on by a guest whose booking is
-		// still live, tell that guest (email only) so they aren't caught out. The
-		// notice is enqueued durably (a fast insert), so no goroutine is needed.
-		if guest := s.displacedGuest(ctx, p, overrides, regByOwnerID, prev, now); guest != "" {
-			if err := s.notifier.NotifyGuestDisplaced(ctx, p.Owner, guest, permitLabel(p), prev, want); err != nil {
-				log.Printf("scheduler: enqueue guest-displaced for %s: %v", guest, err)
+		if d.Contact != "" {
+			if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, want); err != nil {
+				log.Printf("scheduler: enqueue driver-displaced for %s: %v", d.Contact, err)
 			}
 		}
 		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)

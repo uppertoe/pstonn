@@ -113,6 +113,7 @@ type Resolution struct {
 	VehicleID    int64
 	Registration string
 	Source       Source
+	By           string // creator of the winning override ("" for roster/none)
 }
 
 // Resolve decides which vehicle should be allocated to a permit at time now.
@@ -143,7 +144,7 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		}
 	}
 	if best != nil {
-		return Resolution{VehicleID: best.VehicleID, Registration: best.Registration, Source: SourceOverride}
+		return Resolution{VehicleID: best.VehicleID, Registration: best.Registration, Source: SourceOverride, By: best.CreatedBy}
 	}
 
 	wd := now.Weekday()
@@ -153,4 +154,103 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		}
 	}
 	return Resolution{Source: SourceNone}
+}
+
+// VehicleInfo is what displaced-driver resolution needs to know about a saved
+// vehicle: its plate (to match the displaced registration) and the optional
+// email of whoever usually drives it.
+type VehicleInfo struct {
+	Registration string
+	Label        string
+	Email        string
+}
+
+// DisplacedBooking is the outcome of FindDisplaced. Reg == "" means no live
+// third-party booking was displaced (nothing to say). Reg != "" with an empty
+// Contact means a booking WAS displaced but its driver is unreachable — the
+// account notification should say so, so a human can relay the warning.
+type DisplacedBooking struct {
+	Reg     string // the plate that lost its cover
+	Contact string // email to warn ("" = nobody reachable)
+}
+
+// mailAddr extracts a usable email from an override's CreatedBy, which may
+// carry an annotation ("pa@example.com (undo)") or be a non-email marker
+// ("visitor (QR)"). Returns "" when no field looks like an address.
+func mailAddr(createdBy string) string {
+	for _, f := range strings.Fields(createdBy) {
+		if strings.Contains(f, "@") {
+			return f
+		}
+	}
+	return ""
+}
+
+// FindDisplaced decides who should be warned that prevReg was just taken off a
+// permit: the driver of the still-live booking that had put prevReg on, if that
+// driver is a reachable third party. The contact comes from the displaced
+// booking itself, never from a bare plate lookup (a plate is ambiguous; the
+// booking is not): a booker who is NOT an account member (a guest who tapped
+// their link is probably the person parked) wins over the saved vehicle's
+// attached email (the car's usual driver — the right target when a member
+// booked on the driver's behalf, or the car is borrowed). No warning goes out
+// when the displaced driver is the actor who caused the displacement (they just
+// swapped their own cars — compare emails, not links, so this holds across
+// channels) or an account member (the account fanout already tells them).
+func FindDisplaced(overrides []Override, vehicles map[int64]VehicleInfo, prevReg, actor string, members []string, now time.Time) DisplacedBooking {
+	if prevReg == "" {
+		return DisplacedBooking{}
+	}
+	if a := mailAddr(actor); a != "" {
+		actor = a // an annotated creator ("pa@x (undo)") still matches themself
+	}
+	isMember := func(email string) bool {
+		for _, m := range members {
+			if strings.EqualFold(m, email) {
+				return true
+			}
+		}
+		return false
+	}
+	// The displaced booking is the newest-created live override whose car is
+	// prevReg — the one that was winning the resolution until just now.
+	var best *Override
+	for i := range overrides {
+		o := &overrides[i]
+		if o.StartsAt.After(now) || (o.EndsAt != nil && !now.Before(*o.EndsAt)) {
+			continue // not currently active
+		}
+		reg := o.Registration
+		if reg == "" {
+			reg = vehicles[o.VehicleID].Registration
+		}
+		if !strings.EqualFold(reg, prevReg) {
+			continue
+		}
+		if best == nil || o.CreatedAt.After(best.CreatedAt) ||
+			(o.CreatedAt.Equal(best.CreatedAt) && o.ID > best.ID) {
+			best = o
+		}
+	}
+	if best == nil {
+		return DisplacedBooking{} // prevReg wasn't a live booking (roster or external)
+	}
+	contact := mailAddr(best.CreatedBy)
+	if contact == "" || isMember(contact) {
+		// Not booked by a reachable guest: fall back to the saved vehicle's
+		// driver. (A member's own booking of a car with no attached email needs
+		// no extra warning — the member hears via the account fanout.)
+		memberBooking := contact != ""
+		contact = ""
+		if best.VehicleID != 0 {
+			contact = vehicles[best.VehicleID].Email
+		}
+		if contact == "" && memberBooking {
+			return DisplacedBooking{}
+		}
+	}
+	if contact != "" && (strings.EqualFold(contact, actor) || isMember(contact)) {
+		return DisplacedBooking{} // self-displacement, or the fanout covers it
+	}
+	return DisplacedBooking{Reg: prevReg, Contact: contact}
 }

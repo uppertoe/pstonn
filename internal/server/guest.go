@@ -560,7 +560,8 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = s.store.SetPermitActive(r.Context(), permit.ID, reg)
 		_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "success", "activated by "+createdBy)
-		s.notifyGuestApply(r.Context(), permit, reg, name, createdBy)
+		d := s.displacedDriver(r.Context(), permit, current, reg, gc.Recipient)
+		s.notifyGuestApply(r.Context(), permit, reg, name, createdBy, d)
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
@@ -641,7 +642,10 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_ = s.store.SetPermitActive(r.Context(), permit.ID, target)
 		_ = s.store.RecordApply(r.Context(), permit.ID, target, "guest", "success", "put back by "+createdBy)
-		s.notifyGuestApply(r.Context(), permit, target, "", createdBy+" (undo)")
+		// A revert can't displace a third party: the guest's own overrides were
+		// just swept, and the baseline is only re-pinned when nothing else covers
+		// now — so there is no displaced booking to chase.
+		s.notifyGuestApply(r.Context(), permit, target, "", createdBy+" (undo)", model.DisplacedBooking{})
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
@@ -693,16 +697,54 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
 }
 
-func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string) {
+func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string, d model.DisplacedBooking) {
 	// Enqueue durably (a fast insert): unlike the scheduler's apply-notify, this
 	// path has no reconcile-loop retry behind it, so a fire-and-forget send could
 	// silently drop the "a guest put their car on your permit" notice.
 	outcome := notify.ApplyOutcome{
 		Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
+		DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {
 		log.Printf("guest apply notify enqueue for %s: %v", permit.Owner, err)
 	}
+}
+
+// displacedDriver resolves who should be warned that prev was just taken off a
+// permit by actor's change, and notifies them when reachable: the shared
+// model.FindDisplaced policy fed the permit's live overrides, the owner's saved
+// vehicles, and the account members. Returns what it found so sync-apply paths
+// can annotate the account notification (Reg set + no Contact = a booking was
+// displaced but its driver couldn't be told). Best-effort: on any store error it
+// stays quiet — a missed heads-up is low-harm, the account fanout still fires.
+func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev, next, actor string) model.DisplacedBooking {
+	if prev == "" || strings.EqualFold(prev, next) {
+		return model.DisplacedBooking{}
+	}
+	now := time.Now()
+	overrides, err := s.store.ListOverrides(ctx, permit.ID, now)
+	if err != nil {
+		return model.DisplacedBooking{}
+	}
+	saved, err := s.store.ListVehiclesFor(ctx, permit.Owner)
+	if err != nil {
+		return model.DisplacedBooking{}
+	}
+	vehicles := make(map[int64]model.VehicleInfo, len(saved))
+	for _, v := range saved {
+		vehicles[v.ID] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email}
+	}
+	members, err := s.store.AccountEmails(ctx, permit.Owner)
+	if err != nil {
+		return model.DisplacedBooking{}
+	}
+	d := model.FindDisplaced(overrides, vehicles, prev, actor, members, now)
+	if d.Contact != "" {
+		if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, next); err != nil {
+			log.Printf("enqueue driver-displaced for %s: %v", d.Contact, err)
+		}
+	}
+	return d
 }
 
 func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
@@ -1359,7 +1401,7 @@ func (s *Server) denyGuestRequest(w http.ResponseWriter, r *http.Request) {
 // decideRequest approves or denies a pending printed-QR request. On approval it
 // puts the plate on the permit (end of day) and applies it best-effort.
 func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve bool) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	id := pathInt(r, "id")
 	now := time.Now().In(s.cfg.DisplayLocation)
 
@@ -1407,11 +1449,16 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	// Best-effort synchronous apply for instant feedback; the scheduler converges
 	// otherwise. SetVehicle returns nil only once the council confirms the plate.
 	confirmed := false
+	prev := permit.ActiveRegistration
 	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
 		_ = s.store.SetPermitActive(r.Context(), permit.ID, req.Plate)
 		_ = s.store.RecordApply(r.Context(), permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
 		confirmed = true
+		// The approved plate may have bumped a still-live booking's car off the
+		// permit; warn that driver if they're reachable. The approving member saw
+		// the change happen, so no account annotation is needed here.
+		s.displacedDriver(r.Context(), permit, prev, req.Plate, user)
 	}
 	cancel()
 	s.sched.Kick()

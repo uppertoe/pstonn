@@ -423,12 +423,13 @@ type VehicleRef struct {
 	Owner        string
 	Registration string
 	Label        string
+	Email        string
 }
 
 // ListVehicleRefs returns every vehicle with its owner, for owner-scoped
 // resolution in the scheduler.
 func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label FROM vehicle`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email FROM vehicle`)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +437,7 @@ func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
 	var out []VehicleRef
 	for rows.Next() {
 		var v VehicleRef
-		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label); err != nil {
+		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
