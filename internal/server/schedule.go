@@ -59,9 +59,10 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 // buildPermitView assembles one permit's roster grid, 14-day at-a-glance
 // calendar (resolved per day), and upcoming one-offs.
 func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []vehicleView, colorByID, regByID, labelByID map[int64]string, now time.Time) (permitView, error) {
-	// Refresh "on permit now" from the council (cached ≤5 min), so the display is
-	// truthful and external portal changes are caught. On any error, keep the
-	// stored belief, never block the page on a council call.
+	// Refresh "on permit now" from the council (cached ≤5 min, refreshed in the
+	// background — never a synchronous council call), so the display is truthful
+	// and external portal changes are caught. With nothing cached yet, keep the
+	// stored belief; drift shows up on the next render.
 	if actual, err := s.council.CurrentVehicleCached(ctx, p.Owner,
 		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, 5*time.Minute); err == nil && actual != p.ActiveRegistration {
 		p.ActiveRegistration = actual

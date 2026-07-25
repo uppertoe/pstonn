@@ -119,6 +119,28 @@ func run() error {
 	go func() { sched.Run(ctx); loopsDone <- struct{}{} }()
 	go func() { notifier.RunOutbox(ctx); loopsDone <- struct{}{} }() // drain the durable notification queue with retry/backoff
 
+	// Hourly council-traffic summary so the operator can see how often the app
+	// actually touches the portal (renews, applies, background plate refreshes —
+	// page renders never call the council synchronously). Quiet hours log nothing.
+	go func() {
+		tick := time.NewTicker(time.Hour)
+		defer tick.Stop()
+		var pl, pa, pi, po uint64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				l, a, api, o := council.Traffic()
+				if d := (l - pl) + (a - pa) + (api - pi) + (o - po); d > 0 {
+					log.Printf("council traffic: %d requests last hour (login=%d auth=%d api=%d other=%d); since start: login=%d auth=%d api=%d other=%d",
+						d, l-pl, a-pa, api-pi, o-po, l, a, api, o)
+				}
+				pl, pa, pi, po = l, a, api, o
+			}
+		}
+	}()
+
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv.Handler(),

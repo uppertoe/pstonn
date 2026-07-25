@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -33,8 +34,12 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 
 // renderPicker lists the user's council permits (excluding already-managed ones)
 // for them to nominate. A dead session cookie routes back to onboarding.
+// The live council read is inherent to this page, so it gets a deadline well
+// inside the server's 20s WriteTimeout: a slow portal yields the error branch
+// (a rendered page), not a dropped connection.
 func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashboardData) {
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
 	owner := base.Owner
 	permits, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
@@ -94,7 +99,10 @@ func isVisitorPermit(permitType string) bool {
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
-	ctx := r.Context()
+	// Bounded well inside the server's 20s WriteTimeout: the council authorization
+	// read below must fail with a rendered error, not a dropped connection.
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
 	cpid := strings.TrimSpace(r.FormValue("council_permit_id"))
 	if cpid == "" {
 		s.formError(w, r, "Council permit ID is required.")

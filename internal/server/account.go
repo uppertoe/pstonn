@@ -43,7 +43,12 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	savePassword := r.FormValue("save_password") != ""
-	if err := s.council.Link(r.Context(), user, user, password, savePassword, true); err != nil {
+	// The headless council login is several round trips; cap it inside the
+	// server's 20s WriteTimeout so a slow portal yields the error message below
+	// (the user can retry) instead of a dropped connection.
+	linkCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if err := s.council.Link(linkCtx, user, user, password, savePassword, true); err != nil {
 		log.Printf("council link for %s: %v", user, err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")

@@ -121,6 +121,8 @@ type Client struct {
 	box         *secretbox.Box
 	http        *http.Client // redirects handled manually; cookies passed per-user
 	regCache    sync.Map     // councilPermitID -> cachedReg, to bound council reads
+	regRefresh  sync.Map     // councilPermitID -> struct{}, dedupes in-flight background plate refreshes
+	traffic     trafficCounters
 
 	renewLocks    sync.Map   // owner -> *sync.Mutex, serialises silent-renew per owner
 	cooldownUntil sync.Map   // owner -> time.Time, soft-block backoff deadline
@@ -145,7 +147,7 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 	if cfg.Council.Sandbox {
 		sb = newCouncilSandbox()
 	}
-	return &Client{
+	c := &Client{
 		sandbox:     sb,
 		clientID:    cfg.Council.ClientID, // public SPA client, no secret
 		redirectURI: cfg.Council.RedirectURI,
@@ -157,14 +159,16 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		origin:      originOf(issuer, apiBase),
 		store:       st,
 		box:         box,
-		http: &http.Client{
-			Timeout: 30 * time.Second,
-			// Present as a browser on every request (never Go's default UA).
-			Transport: browserTransport{base: http.DefaultTransport},
-			// We inspect 302s ourselves to read the auth code and rotated cookie.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
 	}
+	c.http = &http.Client{
+		Timeout: 30 * time.Second,
+		// Present as a browser on every request (never Go's default UA), and
+		// tally every outbound council request so traffic is measurable.
+		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic},
+		// We inspect 302s ourselves to read the auth code and rotated cookie.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	return c
 }
 
 // originOf returns the scheme://host to use as the browser Origin/Referer for
@@ -497,25 +501,53 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 	return mv.PermitVehicles[0].RegistrationNumber, nil
 }
 
-// CurrentVehicleCached returns the permit's actual current plate from the
-// council, reusing a value fetched within maxAge so a council call isn't made on
-// every page load. Keeps the dashboard's "on permit now" truthful and catches
-// plates changed directly in the council portal.
+// ErrNoCachedPlate means no plate has been fetched from the council yet for
+// this permit; a background refresh has been started and the caller should fall
+// back to its stored belief for now.
+var ErrNoCachedPlate = errors.New("parking: no cached plate yet")
+
+// CurrentVehicleCached returns the permit's plate as last fetched from the
+// council, refreshing in the background once the value is older than maxAge.
+// It NEVER calls the council synchronously: a page render must not block on a
+// slow portal (the council client's 30s timeout outlives the HTTP server's 20s
+// WriteTimeout, so a sync call here turns a slow council into a dropped
+// connection — a 502 at the proxy). A stale value is served while one refresh
+// per permit runs; drift shows up on the next render. Keeps the dashboard's
+// "on permit now" truthful and catches plates changed directly in the portal.
 func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (string, error) {
 	if c.sandbox != nil {
 		return c.sandboxCurrentVehicle(p) // in-memory: no cache needed
 	}
-	if v, ok := c.regCache.Load(p.CouncilPermitID); ok {
-		if cr := v.(cachedReg); time.Since(cr.at) < maxAge {
-			return cr.reg, nil
+	v, ok := c.regCache.Load(p.CouncilPermitID)
+	if ok && time.Since(v.(cachedReg).at) < maxAge {
+		return v.(cachedReg).reg, nil
+	}
+	c.refreshCurrentVehicle(owner, p)
+	if ok {
+		return v.(cachedReg).reg, nil // stale but real; the refresh catches drift
+	}
+	return "", ErrNoCachedPlate
+}
+
+// refreshCurrentVehicle fetches the permit's plate in the background, detached
+// from any request context so a closed tab doesn't cancel it, deduplicating
+// concurrent refreshes per permit. Failures are logged and the stale cache
+// entry is left in place for the next attempt.
+func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
+	if _, inflight := c.regRefresh.LoadOrStore(p.CouncilPermitID, struct{}{}); inflight {
+		return
+	}
+	go func() {
+		defer c.regRefresh.Delete(p.CouncilPermitID)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		reg, err := c.CurrentVehicle(ctx, owner, p)
+		if err != nil {
+			log.Printf("parking: background plate refresh for permit %s: %v", p.CouncilPermitID, err)
+			return
 		}
-	}
-	reg, err := c.CurrentVehicle(ctx, owner, p)
-	if err != nil {
-		return "", err
-	}
-	c.regCache.Store(p.CouncilPermitID, cachedReg{reg: reg, at: time.Now()})
-	return reg, nil
+		c.regCache.Store(p.CouncilPermitID, cachedReg{reg: reg, at: time.Now()})
+	}()
 }
 
 // SetVehicle reallocates the permit to the given registration, the core action.

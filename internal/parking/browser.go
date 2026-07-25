@@ -3,7 +3,9 @@ package parking
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,7 +34,10 @@ const (
 // Note: we deliberately do NOT set Accept-Encoding. Go's transport adds "gzip"
 // and transparently decompresses; overriding it (e.g. to add br) would disable
 // that automatic decompression and break response parsing.
-type browserTransport struct{ base http.RoundTripper }
+type browserTransport struct {
+	base    http.RoundTripper
+	traffic *trafficCounters // nil-safe: counting is skipped when absent (tests)
+}
 
 func (t browserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	setIfAbsent(req.Header, "User-Agent", chromeUA)
@@ -40,7 +45,51 @@ func (t browserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	setIfAbsent(req.Header, "sec-ch-ua", chromeSecUA)
 	setIfAbsent(req.Header, "sec-ch-ua-mobile", chromeSecMobile)
 	setIfAbsent(req.Header, "sec-ch-ua-platform", chromePlatform)
+	if t.traffic != nil {
+		t.traffic.count(req.URL.Path)
+	}
 	return t.base.RoundTrip(req)
+}
+
+// trafficCounters tallies every outbound council request by kind, so the
+// operator can see how often the app actually touches the portal (main logs an
+// hourly summary). Counted at the transport so no call path can be missed.
+type trafficCounters struct {
+	login, auth, api, other atomic.Uint64
+}
+
+func (t *trafficCounters) count(path string) {
+	switch classifyCouncilPath(path) {
+	case "login":
+		t.login.Add(1)
+	case "auth":
+		t.auth.Add(1)
+	case "api":
+		t.api.Add(1)
+	default:
+		t.other.Add(1)
+	}
+}
+
+// classifyCouncilPath buckets a council request path: "login" = the credential
+// form flow (interactive link or saved-password reconnect), "auth" = OIDC
+// authorize/token (silent renews), "api" = permit reads/writes.
+func classifyCouncilPath(p string) string {
+	switch {
+	case strings.Contains(p, "/Account/") || p == "/idm" || p == "/idm/":
+		return "login" // login form GET + credential POST (posts to /idm?returnurl=…)
+	case strings.Contains(p, "/connect/"):
+		return "auth"
+	case strings.HasPrefix(p, "/ssp-svc/"):
+		return "api"
+	default:
+		return "other"
+	}
+}
+
+// Traffic returns cumulative council request counts since process start.
+func (c *Client) Traffic() (login, auth, api, other uint64) {
+	return c.traffic.login.Load(), c.traffic.auth.Load(), c.traffic.api.Load(), c.traffic.other.Load()
 }
 
 func setIfAbsent(h http.Header, key, val string) {

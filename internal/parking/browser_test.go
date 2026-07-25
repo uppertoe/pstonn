@@ -1,11 +1,17 @@
 package parking
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // TestBrowserTransportSetsUA confirms every outbound request carries a browser
@@ -60,6 +66,57 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 	if d := parseRetryAfter(mk("garbage")); d != 0 {
 		t.Fatalf("garbage: got %v, want 0", d)
+	}
+}
+
+func TestClassifyCouncilPath(t *testing.T) {
+	cases := []struct{ path, want string }{
+		{"/idm/Account/Login", "login"},
+		{"/idm", "login"}, // the credential POST goes to /idm?returnurl=…
+		{"/idm/", "login"},
+		{"/idm/connect/authorize", "auth"},
+		{"/idm/connect/authorize/callback", "auth"},
+		{"/idm/connect/token", "auth"},
+		{"/ssp-svc/api/Index/grid", "api"},
+		{"/ssp-svc/api/permits/manageVehicle", "api"},
+		{"/ssp/callback", "other"},
+	}
+	for _, c := range cases {
+		if got := classifyCouncilPath(c.path); got != c.want {
+			t.Errorf("classifyCouncilPath(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
+
+// TestCurrentVehicleCachedNeverBlocks locks in the stale-while-revalidate
+// contract: the call must answer from cache (fresh or stale) or report a miss —
+// never a synchronous council round trip, which would let a slow portal stall a
+// page render past the HTTP server's WriteTimeout (a 502 at the proxy).
+func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c := &Client{store: st} // no session stored: any background refresh fails fast
+	ctx := context.Background()
+	p := model.Permit{CouncilPermitID: "14576"}
+
+	// Nothing cached yet: a miss, not a blocking fetch.
+	if _, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) {
+		t.Fatalf("empty cache: want ErrNoCachedPlate, got %v", err)
+	}
+
+	// Fresh cache is served.
+	c.regCache.Store("14576", cachedReg{reg: "ABC123", at: time.Now()})
+	if got, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); err != nil || got != "ABC123" {
+		t.Fatalf("fresh cache: got %q, %v", got, err)
+	}
+
+	// A stale value is still served (revalidation happens in the background).
+	c.regCache.Store("14576", cachedReg{reg: "ABC123", at: time.Now().Add(-time.Hour)})
+	if got, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); err != nil || got != "ABC123" {
+		t.Fatalf("stale cache: got %q, %v", got, err)
 	}
 }
 
