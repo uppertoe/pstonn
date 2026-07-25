@@ -48,6 +48,9 @@ service before it continues.
 
 ## How it works
 
+*This section is the technical detail for developers and the curious — if you
+just want to use the site, the summary above is all you need.*
+
 **App sign-in** goes through a forward-auth layer (or the app's own OIDC): a
 one-time code sent to your email, so every account is tied to a verified
 address. There is no app password to store. See `internal/server` and
@@ -78,11 +81,12 @@ ntfy topic) with quiet hours, durable retry through an outbox, and operator
 escalation when a user can't be reached. A lapsed council session proactively
 prompts a re-link rather than failing silently.
 
-**Being a good citizen of the council's infrastructure.** Council traffic
-presents normal browser headers, spaces and jitters its requests, serialises
-per-user renews, backs off exponentially when the portal pushes back, and
-stretches retries for anything persistently failing — one household's scheduler
-should be indistinguishable from that household using the portal by hand.
+**Light on the council's systems.** The app talks to the council portal
+sparingly and politely: it only makes a change when something actually needs to
+change, spaces its requests out, and if the portal is slow or busy it waits and
+tries again later rather than retrying in a tight loop. The load one household
+puts on the portal is about the same as that household logging in and updating
+the permit themselves.
 
 **Terms and consent.** Sign-up records which version of the terms each user
 accepted (by content hash, append-only). Editing the terms re-prompts everyone;
