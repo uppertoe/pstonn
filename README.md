@@ -151,3 +151,7 @@ affiliated with the City of Stonnington; use at your own risk — the app can
 only ever do what your own council login can do, but it is your council login.
 Questions or problems: use the [contact form](https://p.stonn.org/contact) or
 open an issue.
+
+## License
+
+[MIT](LICENSE).
