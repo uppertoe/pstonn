@@ -1,12 +1,15 @@
 package server
 
 import (
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/uppertoe/pstonn/internal/identity"
 )
 
 // isStateChanging reports whether the request mutates state (so it needs a CSRF
@@ -127,4 +130,85 @@ func looksLikeEmail(s string) bool {
 		return false
 	}
 	return true
+}
+
+// contactPage renders the PUBLIC contact form. When contact is not configured it
+// redirects home rather than showing a dead form.
+func (s *Server) contactPage(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.ContactEnabled() {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	_, signedIn := identity.FromContext(r.Context())
+	s.render(w, dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation})
+}
+
+// submitContact validates and delivers a contact-form message to the operator
+// (CONTACT_TO) over the existing SMTP mailer. It is public and unauthenticated,
+// so it is rate-limited per IP and carries a honeypot field; the submitter's
+// address, if given, becomes the Reply-To. No user address is ever exposed.
+func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.ContactEnabled() {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	if !sameOrigin(r) {
+		s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
+		return
+	}
+	_, signedIn := identity.FromContext(r.Context())
+	base := dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation}
+
+	if err := r.ParseForm(); err != nil {
+		base.Warn = "Could not read the form. Please try again."
+		s.render(w, base)
+		return
+	}
+	// Honeypot: a hidden field real users leave blank. Pretend success on a hit.
+	if strings.TrimSpace(r.PostForm.Get("website")) != "" {
+		base.Flash = "Thanks. Your message has been sent."
+		s.render(w, base)
+		return
+	}
+
+	message := strings.TrimSpace(r.PostForm.Get("message"))
+	replyTo := strings.TrimSpace(r.PostForm.Get("email"))
+	base.ContactVal, base.ContactFrom = message, replyTo
+
+	if len(message) < 10 {
+		base.Warn = "Please enter a message of at least a few words."
+		s.render(w, base)
+		return
+	}
+	if len(message) > 4000 {
+		base.Warn = "That message is too long. Please shorten it to under 4000 characters."
+		s.render(w, base)
+		return
+	}
+	if replyTo != "" && !looksLikeEmail(replyTo) {
+		base.Warn = "That doesn't look like a valid email address. Leave it blank or correct it."
+		s.render(w, base)
+		return
+	}
+	if !s.contact.allow(clientIP(r)) {
+		base.Warn = "You've sent a few messages already. Please wait a little while before sending another."
+		s.render(w, base)
+		return
+	}
+
+	body := message
+	if replyTo != "" {
+		body += "\n\nReply-to: " + replyTo
+	} else {
+		body += "\n\n(No reply address given.)"
+	}
+	if err := s.mail.SendWithReplyTo(s.cfg.ContactTo, replyTo, "p.stonn contact form", body); err != nil {
+		log.Printf("contact form send failed: %v", err)
+		base.Warn = "Sorry, the message could not be sent right now. Please try again later."
+		s.render(w, base)
+		return
+	}
+	base.ContactVal, base.ContactFrom = "", "" // clear on success
+	base.Flash = "Thanks. Your message has been sent."
+	s.render(w, base)
 }

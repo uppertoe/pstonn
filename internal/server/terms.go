@@ -1,11 +1,18 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"fmt"
+	"log"
+	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/uppertoe/pstonn/internal/identity"
 )
 
 // defaultTermsMD is the built-in agreement, editable as markdown. Operators can
@@ -65,4 +72,82 @@ func parseTerms(content string) Terms {
 	sum := sha256.Sum256([]byte(content))
 	t.hash = hex.EncodeToString(sum[:])
 	return t
+}
+
+// consentStatus reports whether the user has accepted the CURRENT terms, and
+// whether they had accepted an earlier version (so the UI can say "terms
+// changed" rather than "welcome").
+func (s *Server) consentStatus(ctx context.Context, owner string) (accepted bool, hadPrevious bool) {
+	c, err := s.store.LatestConsent(ctx, owner)
+	if err != nil {
+		return false, false // never accepted
+	}
+	if c.Hash == s.terms.Hash() {
+		return true, false
+	}
+	return false, true // accepted an older version; terms have changed
+}
+
+// acceptTerms records the user's acceptance of the current terms (all clauses
+// must be ticked) and returns them to the app.
+func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
+	u, _ := identity.FromContext(r.Context())
+	for i := range s.terms.Clauses {
+		if r.FormValue(fmt.Sprintf("agree%d", i)) == "" {
+			s.formError(w, r, "Please tick all three boxes to continue.")
+			return
+		}
+	}
+	if err := s.store.RecordConsent(r.Context(), u.Email, s.terms.Version, s.terms.Hash()); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	redirectHome(w, r)
+}
+
+// declineTerms handles a user declining updated terms. A primary has their
+// council account disconnected (so the app stops acting without consent) and is
+// notified. A secondary simply leaves the shared account (they never held the
+// council connection), leaving the primary's account untouched.
+func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
+	user, _, isPrimary := s.resolveAccount(r.Context())
+	ctx := r.Context()
+
+	if !isPrimary {
+		if err := s.store.RemoveMembership(ctx, user); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		log.Printf("secondary %s declined updated terms, left the shared account", user)
+		msg := "You declined the updated terms, so your shared access has been removed. The account owner's data is unaffected."
+		if s.logoutURL() != "" {
+			s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ".")
+			return
+		}
+		s.message(w, http.StatusOK, msg)
+		return
+	}
+
+	_, err := s.store.GetCouncilSession(ctx, user)
+	wasLinked := err == nil
+	if derr := s.store.DeleteCouncilSession(ctx, user); derr != nil {
+		s.serverError(w, derr)
+		return
+	}
+	if wasLinked {
+		log.Printf("user %s declined updated terms, council account disconnected", user)
+		go func() {
+			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if e := s.notify.NotifyDisconnected(nctx, user); e != nil {
+				log.Printf("notify disconnect %s: %v", user, e)
+			}
+		}()
+	}
+	msg := "You declined the updated terms, so your council account has been disconnected and p.stonn is no longer managing your permit. Please check your visitor permit with the council."
+	if s.logoutURL() != "" {
+		s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ", or accept the terms below to reconnect.")
+		return
+	}
+	s.message(w, http.StatusOK, msg)
 }
