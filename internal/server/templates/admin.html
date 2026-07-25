@@ -1,0 +1,44 @@
+{{define "page-admin"}}
+{{/* ================= ADMIN (operators only) ================= */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1" class="adminwrap">
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Admin</div>
+  <div class="adm-health {{if .Admin.SchedulerStale}}bad{{else}}ok{{end}}">
+    <div><strong>Scheduler</strong> {{if .Admin.SchedulerStale}}looks stalled &mdash; last clean pass {{.Admin.SchedulerLast}}{{else}}healthy &mdash; last pass {{.Admin.SchedulerLast}}{{end}}</div>
+    <div class="adm-stats">
+      <span>{{.Admin.Total}} accounts</span>
+      <span>{{.Admin.Linked}} linked</span>
+      <span class="good">{{.Admin.WarmOK}} warm</span>
+      <span class="{{if .Admin.Failing}}bad{{end}}">{{.Admin.Failing}} need attention</span>
+      <span class="muted">status API {{if .Admin.StatusEnabled}}on{{else}}off{{end}}</span>
+    </div>
+  </div>
+  <div class="adm-tablewrap">
+    <table class="adm">
+      <thead><tr>
+        <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
+        <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+      </tr></thead>
+      <tbody>
+      {{range .Admin.Rows}}
+      <tr>
+        <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{end}}</td>
+        <td><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
+        <td>{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{.Permits}}</td>
+        <td>{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td class="adm-notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
+        <td>{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td>{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</main>
+
+{{end}}

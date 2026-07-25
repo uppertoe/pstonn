@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// One file per feature: layout.html holds the "dashboard" skeleton and
+// dispatches on .State to a page-* template (and, inside the signed-in app,
+// on .Page); htmx fragments live next to the page that swaps them.
+//
 //go:embed templates/*.html
 var templateFS embed.FS
 

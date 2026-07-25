@@ -1,0 +1,173 @@
+{{define "dashboard"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="htmx-config" content='{"globalViewTransitions":true}'>
+<title>p.stonn Visitor Permit Scheduler</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="{{asset "icon-180.png"}}">
+<meta name="theme-color" content="#0d9488">
+{{if eq .State "guest"}}{{/* Make a bookmarked/installed guest link feel like an app on the home screen (PNG icons + per-recipient manifest so it opens straight to their menu). */}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/{{.Guest.Token}}">{{end}}
+<script>
+  // Apply the saved theme before first paint (no flash), and expose the toggle.
+  (function () {
+    var KEY = 'pstonn-theme', saved = localStorage.getItem(KEY);
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    window.toggleTheme = function () {
+      var cur = document.documentElement.getAttribute('data-theme');
+      var sysDark = matchMedia('(prefers-color-scheme:dark)').matches;
+      var isDark = cur ? cur === 'dark' : sysDark;
+      var next = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem(KEY, next);
+    };
+  })();
+</script>
+<script src="{{asset "htmx.min.js"}}"></script>
+<script defer src="{{asset "alpine.min.js"}}"></script>
+{{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
+<script defer src="{{asset "demos.js"}}"></script>{{end}}
+{{template "styles" .}}
+</head>
+<body hx-boost="true">
+<a href="#main" class="skip-link">Skip to content</a>
+<div id="htmx-bar" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+  // Show the top loading bar during any htmx request (incl. boosted navigation).
+  addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
+  addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
+  // When a session lapses, forward-auth answers a boosted request with a 302 to
+  // the cross-origin login page. htmx (an XHR) can't follow that redirect under
+  // connect-src 'self', so it errors out and nothing happens. Fall back to a real
+  // browser navigation, which follows the redirect natively and lands on login:
+  // a GET re-navigates to the same path; anything else reloads the current page.
+  // ONLY for boosted requests: a fragment/poll request (e.g. the guest wait
+  // page's status poll) points at a fragment endpoint, and navigating there on a
+  // flaky connection would strand the visitor on a bare unstyled fragment with
+  // no htmx — the poll's own next tick is the correct retry.
+  addEventListener('htmx:sendError', function (e) {
+    var cfg = e.detail && e.detail.requestConfig;
+    if (!cfg || !cfg.boosted) return;
+    if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
+    else { window.location.reload(); }
+  });
+  // Surface server-side validation errors. The server returns 422 with a plain
+  // message for these; htmx does NOT swap non-2xx bodies, so without this the
+  // form would appear to do nothing. Show the message as a toast and don't swap.
+  addEventListener('htmx:beforeSwap', function (e) {
+    var x = e.detail && e.detail.xhr;
+    if (x && x.status === 422) {
+      e.detail.shouldSwap = false;
+      e.detail.isError = false;
+      showToast((x.responseText || 'Something needs your attention.').trim());
+    }
+  });
+  var toastTimer;
+  function showToast(msg) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
+  }
+</script>
+
+{{if eq .State "landing"}}{{template "page-landing" .}}
+{{- else if eq .State "about"}}{{template "page-about" .}}
+{{- else if eq .State "why"}}{{template "page-why" .}}
+{{- else if eq .State "contact"}}{{template "page-contact" .}}
+{{- else if eq .State "guest"}}{{template "page-guest" .}}
+{{- else if eq .State "guest-wait"}}{{template "page-guest-wait" .}}
+{{- else if eq .State "guest-result"}}{{template "page-guest-result" .}}
+{{- else if eq .State "terms"}}{{template "page-terms" .}}
+{{- else if eq .State "onboarding"}}{{template "page-onboarding" .}}
+{{- else if eq .State "picker"}}{{template "page-picker" .}}
+{{- else if eq .State "doorqr"}}{{template "page-doorqr" .}}
+{{- else if eq .State "admin"}}{{template "page-admin" .}}
+{{- else}}{{template "page-app" .}}
+{{- end}}
+
+{{/* Shared confirm dialog. appConfirm() drives it for both data-confirm forms
+     and hx-confirm requests; falls back to native confirm() where <dialog>
+     is unsupported. data-confirm-ok customises the confirm button label. */}}
+<dialog id="confirm-dlg" class="confirm">
+  <div class="dlg-box">
+    <p class="dlg-msg"></p>
+    <div class="dlg-actions">
+      <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
+      <button type="button" class="danger dlg-ok">Confirm</button>
+    </div>
+  </div>
+</dialog>
+<script>
+{{/* Keep a schedule popover on-screen: it opens centred on its cell, so ones
+     anchored near a viewport edge overhang it and get clipped (overflow-x is
+     hidden). Measure after open and pull it back via --pop-shift, then scroll
+     it fully into view for bottom-row cells. Re-measure from zero each open so
+     a stale shift from a previous open/rotation doesn't stick. */}}
+window.popClamp = window.popClamp || function (el) {
+  el.style.removeProperty('--pop-shift');
+  var pad = 12, vw = document.documentElement.clientWidth;
+  var r = el.getBoundingClientRect(), dx = 0;
+  if (r.left < pad) dx = pad - r.left;
+  else if (r.right > vw - pad) dx = vw - pad - r.right;
+  if (dx) el.style.setProperty('--pop-shift', dx + 'px');
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
+(function () {
+  if (window.appConfirm) return; // boosted navigations re-run body scripts
+  var pending = null;
+  function dlg() { return document.getElementById('confirm-dlg'); }
+  function settle(ok) {
+    var d = dlg(), res = pending;
+    pending = null;
+    if (d && d.open) d.close();
+    if (res) res(ok);
+  }
+  window.appConfirm = function (message, okLabel) {
+    var d = dlg();
+    if (!d || typeof d.showModal !== 'function') return Promise.resolve(window.confirm(message));
+    if (pending) pending(false);
+    d.querySelector('.dlg-msg').textContent = message;
+    d.querySelector('.dlg-ok').textContent = okLabel || 'Confirm';
+    d.showModal();
+    return new Promise(function (res) { pending = res; });
+  };
+  document.addEventListener('click', function (e) {
+    var d = dlg();
+    if (!d || !d.open) return;
+    if (e.target.closest('.dlg-ok')) settle(true);
+    else if (e.target.closest('.dlg-cancel') || e.target === d) settle(false); // bare-dialog click = backdrop
+  });
+  document.addEventListener('cancel', function (e) { // Esc: dialog closes itself
+    if (e.target === dlg() && pending) { var res = pending; pending = null; res(false); }
+  }, true);
+  {{/* Capture phase so this runs (and stops htmx's own element handler) before
+       any boosted submit; the __confirmed pass-through lets the re-submit
+       continue down the normal path. */}}
+  document.addEventListener('submit', function (e) {
+    var f = e.target, msg = f.dataset && f.dataset.confirm;
+    if (!msg) return;
+    if (f.__confirmed) { f.__confirmed = false; return; }
+    e.preventDefault();
+    e.stopPropagation();
+    appConfirm(msg, f.dataset.confirmOk).then(function (ok) {
+      if (!ok) return;
+      f.__confirmed = true;
+      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+    });
+  }, true);
+  document.addEventListener('htmx:confirm', function (e) {
+    if (!e.detail.question) return; // only intercept explicit hx-confirm
+    e.preventDefault();
+    var elt = e.detail.elt;
+    appConfirm(e.detail.question, elt && elt.dataset ? elt.dataset.confirmOk : null)
+      .then(function (ok) { if (ok) e.detail.issueRequest(true); });
+  });
+})();
+</script>
+</body>
+</html>{{end}}

@@ -1,0 +1,260 @@
+{{define "page-guests"}}
+  {{/* ---------- GUEST PASSES ---------- */}}
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
+  <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
+  {{if .QR}}
+  {{/* ---- ON-SCREEN VISITOR QR (instant, expires) ---- */}}
+  <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
+    <div class="editbar" style="text-align:left">
+      <span class="eyebrow">{{template "ic-qr"}} Visitor QR</span>
+      <a href="/guests"><button type="button" class="ghost sm">&larr; Done</button></a>
+    </div>
+    <h2 style="justify-content:center">{{.QR.PermitLabel}}</h2>
+    <p class="subtitle" style="text-align:center;max-width:360px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
+    <div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
+      <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
+    </div>
+    <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.ExpiresAt}}</strong>. Generate a fresh one each time.</p>
+    <p class="empty-note" style="word-break:break-all;margin-top:10px">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
+  </section>
+
+  {{else if .Edit}}
+  {{/* ---- EDIT MODE: one focused pass, including who has a link ---- */}}
+  <section class="card editing" id="passform" style="--hue:var(--sec-vehicles)">
+    <div class="editbar">
+      <span class="eyebrow">{{template "ic-edit"}} Editing pass</span>
+      <a href="/guests"><button type="button" class="ghost sm">&larr; All passes</button></a>
+    </div>
+    <form method="post" action="/guests/{{.Edit.ID}}" class="stack" x-data="{recips:''}">
+      <div class="fld"><span>Permit</span><div class="ro">{{.Edit.PermitLabel}}</div></div>
+      <label class="fld"><span>Label (optional)</span><input name="label" value="{{.Edit.Label}}" placeholder="e.g. Friday helpers"></label>
+      <div class="fld"><span>Cars this pass may activate</span>
+        <div class="checks">
+          {{range .Vehicles}}
+          <label class="check">
+            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if index $.Edit.Selected .ID}} checked{{end}}{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
+            <span class="dot" style="background:{{.Color}}"></span>
+            <span>{{.Label}}</span>
+            <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+          </label>
+          {{end}}
+        </div>
+        <p class="empty-note" style="margin-top:8px">Need another car? <a href="/vehicles">Add it on the Vehicles page</a> and it appears here.</p>
+      </div>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight"{{if .Edit.AllowOvernight}} checked{{end}} style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="fld"><span>Add more people (optional)</span>
+        <textarea name="recipients" rows="2" x-model="recips" placeholder="grandma@example.com"></textarea>
+        <span class="empty-note" style="margin-top:6px">Each new person gets their own link by email. Ticking a car with a saved driver email adds it here automatically.</span>
+      </label>
+      <div class="row" style="gap:10px">
+        <button type="submit">{{template "ic-check"}} Save changes</button>
+        <a href="/guests"><button type="button" class="ghost">Cancel</button></a>
+      </div>
+    </form>
+    <p class="sub" style="margin-top:22px">People with a link</p>
+    {{range .Edit.Recipients}}
+    <div class="grecip">
+      <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
+      {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<form method="post" action="/guests/tokens/{{.TokenID}}/revoke"><button class="ghost sm" type="submit">Revoke link</button></form>{{end}}
+    </div>
+    {{else}}
+    <p class="empty-note">No one has a link yet. Add someone above.</p>
+    {{end}}
+  </section>
+
+  {{else}}
+  {{/* ---- LIST MODE: all passes + create a new one ---- */}}
+  {{if .NewGuestLinks}}
+  <section class="card" style="--hue:var(--sec-schedule)">
+    <h2><span class="ic">{{template "ic-link"}}</span> New links</h2>
+    <p class="empty-note" style="margin-bottom:4px">Copy these now. For security they are not shown again; to replace one, revoke it and add the person again.</p>
+    {{range .NewGuestLinks}}
+    <div class="glink"><span class="muted">{{.Email}}</span><code>{{.URL}}</code></div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .PendingRequests}}
+  <section class="card" style="--hue:var(--danger)">
+    <h2><span class="ic">{{template "ic-bell"}}</span> Waiting for you</h2>
+    <p class="subtitle">Someone scanned a printed code and wants to use a permit. Approve to put their plate on until the end of today.</p>
+    {{range .PendingRequests}}
+    <div class="req">
+      <div class="req-main">
+        <span class="plate" style="--plate:var(--sec-vehicles)">{{.Plate}}</span>
+        <div class="req-meta"><strong>{{.PermitLabel}}</strong><span class="empty-note">asked {{.Ago}}</span></div>
+      </div>
+      <div class="row" style="gap:8px">
+        <form method="post" action="/guests/requests/{{.ID}}/approve"><button type="submit">{{template "ic-check"}} Allow</button></form>
+        <form method="post" action="/guests/requests/{{.ID}}/deny"><button type="submit" class="ghost">Deny</button></form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
+      <div>
+        <strong>Guest passes are {{if .GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
+        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once, without deleting anything.</div>
+      </div>
+      <form method="post" action="/guests/toggle">
+        <input type="hidden" name="enabled" value="{{if .GuestsEnabled}}{{else}}1{{end}}">
+        <button type="submit" class="{{if .GuestsEnabled}}danger{{end}}">{{if .GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
+      </form>
+    </div>
+  </section>
+
+  {{if .PermitOpts}}
+  <section class="card" style="--hue:var(--sec-schedule)">
+    <h2><span class="ic">{{template "ic-qr"}}</span> Visitor at the door?</h2>
+    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; you stay in control: the on-screen code is momentary (expires in 15&nbsp;min), and a printed code only ever <em>asks</em> you to approve each scan. No one can use the permit on their own.</p>
+    <div class="qropts">
+      <form method="post" action="/guests/qr" class="qropt">
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. Expires 15&nbsp;min after you show it.</span></div>
+        {{if gt (len .PermitOpts) 1}}
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
+      </form>
+      <form method="post" action="/guests/printed" class="qropt">
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Leave it out (door, fridge, counter). A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
+        {{if gt (len .PermitOpts) 1}}
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        <button type="submit" class="ghost">{{template "ic-qr"}} Print a QR</button>
+      </form>
+    </div>
+  </section>
+  {{end}}
+
+  {{if .DoorGrants}}
+  <section class="card" style="--hue:var(--sec-vehicles)">
+    <h2><span class="ic">{{template "ic-qr"}}</span> Your printed QRs</h2>
+    <p class="subtitle">Durable codes to print, laminate, and leave up. Reopen any time to reprint the <em>same</em> one &mdash; the code keeps working. To change the code (say a sheet went missing), remove it and print a new one.</p>
+    {{range .DoorGrants}}
+    <div class="doorrow">
+      <div class="doorrow-main">
+        <span class="doorrow-ic">{{template "ic-qr"}}</span>
+        <div class="doorrow-meta"><strong>{{.PermitLabel}}</strong><span class="empty-note">created {{.CreatedAt}}</span></div>
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <a href="/guests/door/{{.GrantID}}/view" hx-boost="false"><button type="button">{{template "ic-qr"}} View &amp; print</button></a>
+        <form method="post" action="/guests/door/{{.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button class="ghost icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button></form>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .Guests}}
+  <div class="grants">
+    {{range .Guests}}
+    <section class="card">
+      <div class="permit-head" style="margin-bottom:10px">
+        <h2 style="margin:0">{{if .Label}}{{.Label}}{{else}}{{.PermitLabel}}{{end}}</h2>
+        <div class="row" style="gap:6px">
+          <a href="/guests/{{.ID}}/edit"><button type="button" class="ghost sm">{{template "ic-edit"}} Edit</button></a>
+          <form method="post" action="/guests/{{.ID}}/delete" data-confirm="Delete this guest pass? All its links stop working." data-confirm-ok="Delete pass">
+            <button class="ghost icon" type="submit" title="Delete pass" aria-label="Delete pass">{{template "ic-trash"}}</button>
+          </form>
+        </div>
+      </div>
+      <p class="empty-note" style="margin-top:0">{{.PermitLabel}}{{if .AllowOvernight}} &middot; overnight allowed{{end}}</p>
+      <p class="sub">Cars</p>
+      <div class="legend" style="gap:8px">{{range .Cars}}<span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>{{end}}</div>
+      <p class="sub" style="margin-top:16px">People</p>
+      {{$gid := .ID}}
+      {{range .Recipients}}
+      <div class="grecip">
+        <span>
+          <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
+          {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
+        </span>
+        {{if not .Revoked}}
+        <form method="post" action="/guests/{{$gid}}/resend" data-confirm="Re-send a fresh link to {{.Email}}? Their previous link stops working." data-confirm-ok="Re-send">
+          <input type="hidden" name="recipient" value="{{.Email}}">
+          <button type="submit" class="ghost sm">{{template "ic-link"}} Re-send</button>
+        </form>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="empty-note" style="margin-top:0">No one added yet &mdash; open <strong>Edit</strong> to send a link.</p>
+      {{end}}
+    </section>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if and .PermitOpts .Vehicles}}
+  <section class="card" style="--hue:var(--sec-vehicles)" id="new">
+    <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
+    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
+    <form method="post" action="/guests" class="stack" x-data="{recips:''}">
+      <label class="fld"><span>Permit</span>
+        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+      </label>
+      <label class="fld"><span>Label (optional)</span><input name="label" placeholder="e.g. Friday helpers"></label>
+      <div class="fld"><span>Cars this pass may activate</span>
+        <div class="checks">
+          {{range .Vehicles}}
+          <label class="check">
+            <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
+            <span class="dot" style="background:{{.Color}}"></span>
+            <span>{{.Label}}</span>
+            <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+          </label>
+          {{end}}
+        </div>
+        <p class="empty-note" style="margin-top:8px">Need another car? <a href="/vehicles">Add it on the Vehicles page</a> and it appears here.</p>
+      </div>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="fld"><span>People to send the link to</span>
+        <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
+        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+      </label>
+      <button type="submit">{{template "ic-link"}} Create pass and send links</button>
+    </form>
+  </section>
+  {{else}}
+  <section class="card"><p class="empty-note">Add at least one <a href="/vehicles">vehicle</a> and manage a permit on the <a href="/schedule">Schedule</a> first, then you can create a guest pass.</p></section>
+  {{end}}
+  {{end}}{{/* mode */}}
+{{end}}
+
+{{define "page-doorqr"}}
+{{/* ============ PRINTABLE DOOR-QR POSTER (laminate & leave up) ============ */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1" class="posterwrap">
+  <div class="posteractions noprint">
+    <a href="/guests" hx-boost="false"><button type="button" class="ghost sm">&larr; Guests</button></a>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button type="button" onclick="window.print()">{{template "ic-qr"}} Print</button>
+      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
+    </div>
+  </div>
+
+  <article class="poster">
+    <div class="poster-band">
+      <span class="poster-brand"><span class="poster-mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></span>
+      <span class="poster-kicker">Visitor parking</span>
+    </div>
+    <div class="poster-body">
+      <h1 class="poster-title">{{.DoorQR.PermitLabel}}</h1>
+      <p class="poster-lead">Scan to ask to use this parking permit</p>
+      <div class="poster-qbox"><img src="{{.DoorQR.ImageURI}}" alt="Scan to request the visitor parking permit" width="240" height="240"></div>
+      <ol class="poster-steps">
+        <li>Point your phone camera at the code</li>
+        <li>Enter your number plate</li>
+        <li>The resident gets a notification and approves it &mdash; then your plate is on the permit</li>
+      </ol>
+      <p class="poster-note">Nothing goes on the permit until the resident approves. Managed by {{.DoorQR.OwnerEmail}}.</p>
+    </div>
+    <div class="poster-foot">Set up with p.stonn &middot; an unofficial City of Stonnington permit helper</div>
+  </article>
+  <p class="posterhint noprint">Print it, laminate it, leave it up. This code doesn't expire &mdash; reopen this page any time to reprint the very same one.</p>
+</main>
+
+{{end}}

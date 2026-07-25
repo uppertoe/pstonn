@@ -1,0 +1,25 @@
+{{define "page-app"}}
+{{/* ================= APP (nav + pages) ================= */}}
+{{template "appbar" .}}
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item {{if eq .Page "schedule"}}active{{end}}" style="--hue:var(--sec-schedule)">{{template "ic-calendar"}}<span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item {{if eq .Page "vehicles"}}active{{end}}" style="--hue:var(--sec-vehicles)">{{template "ic-cars"}}<span>Vehicles</span></a>
+    <a href="/guests" class="nav-item {{if eq .Page "guests"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-users"}}<span>Guests</span></a>
+    <a href="/activity" class="nav-item {{if eq .Page "activity"}}active{{end}}" style="--hue:var(--sec-activity)">{{template "ic-activity"}}<span>Activity</span></a>
+    <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-gear"}}<span>Settings</span></a>
+  </nav>
+</div>
+<main id="main" tabindex="-1">
+  {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
+  {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+
+  {{if eq .Page "schedule"}}{{template "page-schedule" .}}
+  {{- else if eq .Page "vehicles"}}{{template "page-vehicles" .}}
+  {{- else if eq .Page "activity"}}{{template "page-activity" .}}
+  {{- else if eq .Page "settings"}}{{template "page-settings" .}}
+  {{- else if eq .Page "guests"}}{{template "page-guests" .}}
+  {{- end}}
+
+</main>
+{{end}}

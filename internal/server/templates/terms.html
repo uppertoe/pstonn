@@ -1,0 +1,27 @@
+{{define "page-terms"}}
+{{/* ================= TERMS GATE ================= */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1">
+  <section class="card" style="max-width:560px;margin:26px auto">
+    <div style="text-align:center"><div class="ring" style="margin-bottom:14px">{{template "ic-ticket"}}</div></div>
+    <h2 style="text-align:center;margin:0 0 6px;font-size:20px;letter-spacing:-.02em">{{if .Terms.Updated}}The terms have changed{{else}}Welcome &mdash; a few things first{{end}}</h2>
+    <p class="subtitle" style="text-align:center">{{if .Terms.Updated}}Please review and accept the updated terms to keep using p.stonn.{{else if .Terms.Intro}}{{.Terms.Intro}}{{else}}Please read and tick each point to start using p.stonn.{{end}}</p>
+    <form method="post" action="/terms/accept" class="stack" style="max-width:none;gap:16px;margin-top:16px">
+      {{range $i, $c := .Terms.Clauses}}
+      <label class="toggle" style="align-items:flex-start;gap:12px"><input type="checkbox" name="agree{{$i}}" required style="margin-top:2px"> <span>{{$c}}</span></label>
+      {{end}}
+      <button type="submit" style="justify-content:center;margin-top:2px">{{template "ic-check"}} I agree, continue</button>
+    </form>
+    {{if .Terms.Updated}}
+    <form method="post" action="/terms/decline" style="text-align:center;margin-top:16px"
+          data-confirm="Decline the updated terms? This disconnects your council account and stops p.stonn managing your permit. You will be notified." data-confirm-ok="Decline &amp; disconnect">
+      <button type="submit" class="danger">Decline &amp; disconnect my account</button>
+    </form>
+    <p class="empty-note" style="text-align:center;margin-top:12px">Terms version {{.Terms.Version}}.</p>
+    {{else}}
+    <p class="empty-note" style="text-align:center;margin-top:16px">Terms version {{.Terms.Version}}.{{if .LogoutURL}} Prefer not to? <a href="{{.LogoutURL}}">Sign out</a>.{{end}}</p>
+    {{end}}
+  </section>
+</main>
+
+{{end}}

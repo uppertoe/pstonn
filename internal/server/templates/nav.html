@@ -1,0 +1,42 @@
+{{/* =================== PUBLIC HEADER (landing / about) =================== */}}
+{{define "publicheader"}}
+<header class="appbar pubbar">
+  {{/* Landing and /why need their head-only demo assets (demos.css/js), which a
+       boosted body-swap never evaluates — entering /why from /about via boost
+       would render the gallery unstyled and inert. Full navigations only. */}}
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
+  <nav class="pubnav">
+    <a href="/why" hx-boost="false" class="link-quiet{{if eq .State "why"}} active{{end}}"{{if eq .State "why"}} aria-current="page"{{end}}>How it works</a>
+    <a href="/about" class="link-quiet{{if eq .State "about"}} active{{end}}"{{if eq .State "about"}} aria-current="page"{{end}}>About</a>
+    {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
+  </nav>
+  <div class="appbar-r">
+    <button class="icon-btn" type="button" onclick="toggleTheme()" aria-label="Toggle light / dark"><span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span></button>
+    <a href="/schedule" hx-boost="false"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
+  </div>
+</header>
+{{end}}
+
+{{/* =================== APP BAR (shared) =================== */}}
+{{define "appbar"}}
+<header class="appbar">
+  {{/* Full navigation: the landing page's demo assets live in its head, which a
+       boosted body-swap would skip (see publicheader). */}}
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
+  <div class="appbar-r">
+    <button class="icon-btn" type="button" onclick="toggleTheme()" title="Toggle light / dark" aria-label="Toggle theme">
+      <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>
+    </button>
+    <div class="usermenu" x-data="{open:false}" @click.outside="open=false" @keydown.escape.window="open=false">
+      <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu">{{template "ic-user"}}</button>
+      <div class="menu" x-show="open" x-cloak>
+        <div class="menu-email">{{.User.Email}}</div>
+        {{if .Contact}}<a href="/contact" class="menu-item">{{template "ic-mail"}} Contact</a>{{end}}
+        {{if .User.IsAdmin}}<a href="/admin" class="menu-item">{{template "ic-gear"}} Admin</a>{{end}}
+        {{if .LogoutURL}}<a href="{{.LogoutURL}}" class="menu-item">{{template "ic-logout"}} Sign out</a>
+        {{else}}<span class="menu-note">Session handled by your login provider</span>{{end}}
+      </div>
+    </div>
+  </div>
+</header>
+{{end}}

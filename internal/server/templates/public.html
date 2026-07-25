@@ -1,0 +1,207 @@
+{{define "page-landing"}}
+{{/* ================= PUBLIC LANDING ================= */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="landing">
+  <section class="lhero">
+    <h1>Schedule your City of Stonnington visitor parking permit.</h1>
+    <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
+    <a href="/schedule" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
+    <p class="lnote">A free service. Sign in with a one-time code sent to your email.</p>
+  </section>
+  <div class="demos">
+    <div class="dm-mini" data-demo="mini">
+      <div class="dm-phone">
+        <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample</span></div>
+        <div class="dm-week" data-week></div>
+        <div class="dm-permit">
+          <div><div class="plab">Visitor permit</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+          <div class="dm-sync">{{template "ic-check"}}</div>
+        </div>
+      </div>
+      <p class="dm-foot"><a href="/why">See how it works &rarr;</a></p>
+    </div>
+  </div>
+  <section class="lsteps">
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>Sign in to ePermits with your council password.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
+  </section>
+  {{if .Contact}}
+  <section class="paper" style="max-width:640px;margin:48px auto 0;padding:30px 34px">
+    <h2 class="about-h2" style="margin-top:0">Get in touch</h2>
+    <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">Questions, problems, or feedback? Send me a message. Your email is optional, but it's the only way to get a reply.</p>
+    <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:0">
+      <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+      <label class="fld"><span>Your email (optional, for a reply)</span><input type="email" name="email" placeholder="you@example.com" autocomplete="email"></label>
+      <label class="fld"><span>Message</span><textarea name="message" rows="6" required minlength="10" maxlength="4000" placeholder="Your question, problem, or feedback…"></textarea></label>
+      <button type="submit" style="justify-content:center">{{template "ic-bell"}} Send message</button>
+    </form>
+  </section>
+  {{end}}
+  <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/about">Security &amp; the fine print</a></p>
+</main>
+
+{{end}}
+
+{{define "page-about"}}
+{{/* ================= PUBLIC ABOUT ================= */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="landing about">
+  <section class="paper">
+    <h1 class="about-h1">About p.stonn</h1>
+    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/why">How it works</a>.</p>
+
+    <h2 class="about-h2">The security model</h2>
+    <ul>
+      <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held on this server.</li>
+      <li>This is necessary to reliably connect to your Stonnington ePermit account.</li>
+      <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
+      <li>You may choose to not store your council password &mdash; instead just your email, your schedule, and the encrypted session. Without your password, this app may get disconnected from your Stonnington ePermit account and lose the ability to modify your permit. If you opt in to auto-reconnect, your password is also kept, sealed with the same encryption, so the app can sign back in on its own; you can remove it any time in Settings.</li>
+      <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
+      <li>Please ensure that your Stonnington ePermit password is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
+      <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
+      <li>Before using this service, you should consider whether you are comfortable with a third party holding access to your council account. Do not rely on it for anything you can't afford to have go wrong.</li>
+    </ul>
+
+    <h2 class="about-h2">Notifications</h2>
+    <ul>
+      <li>p.stonn attempts to notify you (by email and/or push) each time it changes your permit or fails to. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Delivery is not guaranteed.</li>
+      <li>You remain responsible for checking your permit and for any fines. Treat notifications as a convenience rather than a guarantee.</li>
+    </ul>
+
+    <h2 class="about-h2">No promises</h2>
+    <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
+  </section>
+
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/">← Back</a></p>
+</main>
+
+{{end}}
+
+{{define "page-why"}}
+{{/* ================= PUBLIC: WHY / HOW IT WORKS ================= */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="landing about">
+  <section class="paper">
+    <h1 class="about-h1">Why this exists</h1>
+    <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
+    <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
+    <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
+    <p>I built it to take a chore off my household's plate. I hope it does the same for yours.</p>
+  </section>
+
+  <p class="whyhead">How it works</p>
+  <div class="demos">
+    <div class="dm-grid">
+
+      <figure class="dm" data-demo="connect">
+        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">p.stonn keeps an encrypted session</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Connect council account</h2></div>
+          <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
+          <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
+          <div class="dm-btn">{{template "ic-link"}} Link account</div>
+          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> p.stonn keeps an encrypted session so it can act for you.</div></div>
+        </div>
+      </figure>
+
+      <figure class="dm" data-demo="roster">
+        <figcaption class="dm-label"><span class="t">Set a weekly schedule</span><span class="s">a car for each day</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-week" data-week></div>
+          <div class="dm-picker">
+            <div class="ph">Which car?</div>
+            <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
+            <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
+            <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+          <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+      </figure>
+
+      <figure class="dm" data-demo="oneoff">
+        <figcaption class="dm-label"><span class="t">Book a one-off</span><span class="s">for a visit that breaks the routine</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
+          <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
+          <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
+          <div class="dm-btn">{{template "ic-plus"}} Book</div>
+          <div class="dm-uph">Upcoming</div>
+          <div class="dm-booking"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span> <span class="when">Sat 12 &ndash; Sun 13 Jul</span></div>
+          <div class="dm-cal"></div>
+        </div>
+      </figure>
+
+      <figure class="dm" data-demo="notify">
+        <figcaption class="dm-label"><span class="t">Know it happened</span><span class="s">every change, or if one fails</span></figcaption>
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-bell"}}</span> Notifications</h2></div>
+          <div class="dm-toggles">
+            <div class="dm-toggle">Email <span class="dm-swi"></span></div>
+            <div class="dm-toggle">Phone <span class="dm-swi"></span></div>
+          </div>
+          <div class="dm-push"><span class="badge" style="background:var(--ok)">{{template "ic-check"}}</span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg">Your visitor permit is now <b>ABC123</b> (Nan's car).</div></div></div>
+          <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>Still trying</b> &mdash; you'll hear when it's done.</div></div></div>
+        </div>
+      </figure>
+
+    </div>
+    <p class="dm-foot">A demonstration with made-up plates and names. Not a real permit.</p>
+  </div>
+
+  <section class="paper">
+    <h2 class="about-h2" style="margin-top:0">Before you start: get a Stonnington ePermit</h2>
+    <p>p.stonn does not replace the council's system. It works on top of a permit you already hold, so you need a City of Stonnington ePermits account with at least one visitor permit first.</p>
+    <p>If you are not set up yet:</p>
+    <ul>
+      <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
+      <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
+      <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
+      <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
+    </ul>
+    <p>The council's own pages have the current fees, forms and details:</p>
+    <ul>
+      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits" rel="noopener noreferrer">Parking permits</a></li>
+      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
+      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
+    </ul>
+    <p>Once your council account has a visitor permit, <a href="/schedule" hx-boost="false">sign in to p.stonn</a> and connect it.</p>
+  </section>
+
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/">&larr; Back</a></p>
+</main>
+
+{{end}}
+
+{{define "page-contact"}}
+{{/* ================= PUBLIC CONTACT ================= */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="landing about">
+  <h1 class="about-h1">Contact</h1>
+  <p>Questions, problems, or feedback about p.stonn? Send a message and it reaches the person running this server. Leaving your email is optional, but it's the only way to get a reply.</p>
+  {{if .Flash}}<div class="banner ok" style="margin:16px 0">{{template "ic-check"}} <span>{{.Flash}}</span></div>{{end}}
+  {{if .Warn}}<div class="banner warn" style="margin:16px 0">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
+  <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:14px 0 0">
+    {{/* Honeypot: hidden from people, tempting to bots. Real submissions leave it blank. */}}
+    <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
+    <label class="fld">
+      <span>Your email (optional, for a reply)</span>
+      <input type="email" name="email" value="{{.ContactFrom}}" placeholder="you@example.com" autocomplete="email">
+    </label>
+    <label class="fld">
+      <span>Message</span>
+      <textarea name="message" rows="7" required minlength="10" maxlength="4000" placeholder="Your question, problem, or feedback…">{{.ContactVal}}</textarea>
+    </label>
+    <button type="submit" style="justify-content:center">{{template "ic-link"}} Send message</button>
+  </form>
+  <p class="ldisclaimer" style="margin-top:32px"><a href="/">← Back</a></p>
+</main>
+
+{{end}}

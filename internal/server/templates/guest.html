@@ -1,0 +1,135 @@
+{{define "page-guest"}}
+{{/* ================= PUBLIC GUEST ACTIVATION (token link) ================= */}}
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    <div class="gbrand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
+    <h1>{{.Guest.PermitLabel}}</h1>
+    <div id="gbody">{{template "guest-body" .}}</div>
+  </section>
+</main>
+
+{{end}}
+
+{{define "page-guest-wait"}}
+{{/* ============ PRINTED-QR: WAITING FOR APPROVAL (polls) ============ */}}
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard" style="text-align:center">
+    <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    {{if .Wait.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>{{end}}
+    <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">{{.Wait.Plate}}</span> on the permit.</p>
+    {{/* Stable live region: the poll swaps #reqstatus inside it, so a screen
+         reader announces approved / denied / on-the-permit as it changes. */}}
+    <div aria-live="polite">{{template "guest-req-status" .Wait}}</div>
+  </section>
+</main>
+
+{{end}}
+
+{{define "page-guest-result"}}
+{{/* ================= GUEST ACTIVATION RESULT ================= */}}
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard" style="text-align:center">
+    <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    {{if .Flash}}
+    <div class="gring ok">{{template "ic-check"}}</div>
+    <p class="gresult">{{.Flash}}</p>
+    {{else}}
+    <div class="gring warn">{{template "ic-alert"}}</div>
+    <p class="gresult">{{.Warn}}</p>
+    {{end}}
+    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
+  </section>
+</main>
+
+{{end}}
+
+{{define "guest-body"}}
+{{/* The live part of the guest activation card: status, feedback, car buttons,
+     revert. Activations swap just this fragment (hx-target #gbody), so a guest
+     can tap one car, then another, then put the original plate back — all
+     without leaving the page. Printed-QR (request-only) forms post normally:
+     their reply is the approval-wait page, a real navigation. */}}
+{{if not .Guest.RequestOnly}}
+{{/* Fixed two-line status slot: line 1 is always the council's ACTUAL record;
+     line 2 holds the applying/settled/stalled note. Constant height, so the
+     pending lifecycle never reflows the car list below. */}}
+<div class="gstat">
+  <p class="gnow">On the permit now: {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="muted">unknown</span>{{end}}{{if and .Guest.UntilText (not .Guest.PendingReg)}} <span class="gnuntil">&middot; {{.Guest.UntilText}}</span>{{end}}</p>
+  <p class="gsub">{{if .Guest.PendingReg}}{{if .Guest.Stalled}}<span class="gstall">{{template "ic-alert"}} Changing to {{.Guest.PendingReg}} is taking longer than usual &mdash; check back shortly, or ask the account holder.</span>{{else}}<span class="gspin"></span> <span>Changing to <span class="plate">{{.Guest.PendingReg}}</span>{{if .Guest.UntilText}} ({{.Guest.UntilText}}){{end}}&hellip;</span>{{end}}{{else if .Flash}}<span class="gok">{{template "ic-check"}} {{.Flash}}</span>{{end}}</p>
+</div>
+{{if and .Guest.PendingReg (not .Guest.Stalled)}}<div hx-get="/g/live/{{.Guest.Token}}?fp={{.Guest.FP}}" hx-trigger="every 2500ms" hx-target="#gbody" hx-swap="innerHTML"></div>{{end}}
+{{end}}
+{{if .Warn}}<div class="banner warn" style="margin-top:14px">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
+{{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">Enter your plate to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.</p>{{end}}
+<form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px"{{if not .Guest.RequestOnly}} hx-post="/g/{{.Guest.Token}}" hx-target="#gbody" hx-swap="innerHTML"{{end}}>
+  {{if .Guest.Cars}}
+  <p class="sub">Tap your car to put it on the permit</p>
+  <div class="gcars">
+    {{range .Guest.Cars}}
+    <button class="gcar{{if eq .Registration $.Guest.SelectedReg}} on{{end}}" style="--plate:{{.Color}}" type="submit" name="vehicle_id" value="{{.ID}}">
+      <span class="dot" style="background:{{.Color}}"></span>
+      <span class="glabel">{{.Label}}</span>
+      <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+      {{if eq .Registration $.Guest.CurrentReg}}<span class="gtag">on now</span>{{else if eq .Registration $.Guest.PendingReg}}<span class="gtag pend">applying&hellip;</span>{{end}}
+    </button>
+    {{end}}
+  </div>
+  {{end}}
+  {{/* hx-preserve only on POLL responses (KeepForm): a half-filled form survives
+       the swap. Activation responses omit it, so the inputs reset — overnight is
+       a deliberate per-booking choice, never sticky from the last booking. */}}
+  {{if .Guest.AllowPlate}}
+  <label class="fld"><span>Your number plate</span>
+    <input type="text" id="g-plate" {{if .Guest.KeepForm}}hx-preserve {{end}}name="plate" placeholder="e.g. ABC123" maxlength="10" autocapitalize="characters" required style="text-transform:uppercase;font-size:17px;letter-spacing:1px;text-align:center">
+  </label>
+  {{end}}
+  {{if .Guest.AllowOvernight}}
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" {{if .Guest.KeepForm}}hx-preserve {{end}}name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps the car on until the end of tomorrow instead of the end of today.</span></span></label>
+  {{end}}
+  {{if .Guest.AllowPlate}}
+  <button type="submit" style="justify-content:center;margin-top:4px">{{if .Guest.RequestOnly}}{{template "ic-bell"}} Ask to use the permit{{else}}{{template "ic-check"}} Put my car on the permit{{end}}</button>
+  {{end}}
+</form>
+{{if .Guest.RevertPlate}}
+<form method="post" action="/g/{{.Guest.Token}}/revert" hx-post="/g/{{.Guest.Token}}/revert" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px">
+  <button type="submit" class="ghost" style="justify-content:center;width:100%">&#8617; Put <span class="plate" style="margin:0 4px">{{.Guest.RevertPlate}}</span> back on the permit</button>
+</form>
+<p class="empty-note" style="margin-top:8px">Made a mistake? This restores the plate that was on the permit before you used this link.</p>
+{{end}}
+{{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes.</p>{{end}}
+{{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>{{end}}
+{{end}}
+
+{{/* Printed-QR request status (htmx-polled). Pending re-polls; a decision stops. */}}
+{{define "guest-req-status"}}
+{{if eq .Status "applied"}}
+{{/* council-confirmed: the permit's own record now shows the plate. Terminal. */}}
+<div id="reqstatus">
+  <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
+  <p class="gresult"><span class="plate">{{.Plate}}</span> is on the permit until {{.Until}}.</p>
+</div>
+{{else if eq .Status "denied"}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-x"}}</div>
+  <p class="gresult">Not approved. Ask the resident, or try again.</p>
+</div>
+{{else if eq .Status "stalled"}}
+{{/* approved, but the council hasn't confirmed after a while — stop spinning */}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
+  <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
+</div>
+{{else if eq .Status "approved"}}
+{{/* the resident said yes; keep polling until the council confirms the plate is on */}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="gspin"></div>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">Approved &mdash; putting <span class="plate">{{.Plate}}</span> on the permit&hellip;</p>
+</div>
+{{else}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+  <div class="gspin"></div>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
+</div>
+{{end}}
+{{end}}

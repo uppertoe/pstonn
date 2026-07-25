@@ -1,0 +1,79 @@
+{{define "page-onboarding"}}
+{{/* ================= ONBOARDING ================= */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1">
+  {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+  <section class="card hero">
+    <div class="ring">{{template "ic-link"}}</div>
+    {{if .IsPrimary}}
+    <h2>{{if .Relink}}Re-link your council account{{else}}Link your council account{{end}}</h2>
+    <p>
+      {{if .Relink}}Your council sign-in expired. Enter your details again to reconnect. p.stonn keeps an encrypted session so it can update your permit for you.
+      {{else}}Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.{{end}}
+    </p>
+    <form class="stack" method="post" action="/council/link">
+      <label class="fld">Council email (your verified sign-in)
+        <input type="email" value="{{.User.Email}}" autocomplete="username" disabled>
+      </label>
+      <label class="fld">Council password
+        <input name="council_password" type="password" autocomplete="current-password" required autofocus>
+      </label>
+      <label class="optin">
+        <input type="checkbox" name="save_password" value="1"{{if or (not .Relink) .AutoReconnect}} checked{{end}}>
+        <span>
+          <strong>Save my password so p.stonn can reconnect on its own.</strong>
+          It's sealed with encryption only this app can open, and used only to sign back in if the council ends your session.
+          <br>Without it, if you ever sign in to the Stonnington ePermits site yourself, that logs p.stonn out — you'll need to come back here and re-link before your schedule runs again.
+        </span>
+      </label>
+      <button type="submit">{{template "ic-link"}} Link account</button>
+    </form>
+    <p class="empty-note" style="margin-top:12px">Your council account must use <strong>{{.User.Email}}</strong>, the email you signed in with.</p>
+    <p class="empty-note" style="margin-top:6px">Tip: use a password unique to your council account. You can disconnect or stop saving your password any time in Settings, and changing your council password also revokes access. <a href="/about">How it works &amp; security</a></p>
+    {{else}}
+    <h2>Waiting for the account owner</h2>
+    <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>
+    <p class="empty-note" style="margin-top:12px">Not what you expected? You can leave this shared account in <a href="/settings">Settings</a>.</p>
+    {{end}}
+  </section>
+</main>
+
+{{end}}
+
+{{define "page-picker"}}
+{{/* ================= PERMIT PICKER ================= */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1">
+  {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+  <section class="card">
+    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to manage</div>
+    <p class="subtitle">Pick the permit whose plate you want to schedule. This is usually your visitor permit.</p>
+    {{if .Pick}}
+    <div class="pick">
+      {{range .Pick}}
+      <div class="pick-item {{if not .Addable}}disabled{{end}}">
+        <div>
+          <div style="font-weight:650">{{.PermitNumber}}</div>
+          <div class="muted" style="font-size:13px;margin-top:2px">{{.PermitType}}{{if .CurrentRego}} · currently <span class="reg">{{.CurrentRego}}</span>{{end}}</div>
+        </div>
+        {{if .Addable}}
+        <form method="post" action="/permits">
+          <input type="hidden" name="council_permit_id" value="{{.CouncilPermitID}}">
+          <input type="hidden" name="permit_type_id" value="{{.PermitTypeID}}">
+          <input type="hidden" name="label" value="{{.PermitNumber}}">
+          <input type="hidden" name="current_rego" value="{{.CurrentRego}}">
+          <button type="submit">{{template "ic-plus"}} Manage</button>
+        </form>
+        {{else}}
+        <span class="pick-reason">{{.Reason}}</span>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="empty-note">No permits available to manage. Only permits you're allowed to change the vehicle on can be scheduled (usually your visitor permit). <a href="/schedule">Back to schedule</a></p>
+    {{end}}
+  </section>
+</main>
+
+{{end}}
