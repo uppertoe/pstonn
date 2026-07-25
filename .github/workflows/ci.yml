@@ -37,6 +37,30 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
+      # Push a high-priority ntfy alert to the operator channel if anything above
+      # failed — most importantly a govulncheck finding on the weekly scheduled
+      # run, so a newly-disclosed vuln reaches the same place as the app's own
+      # operator alerts, independent of GitHub email settings. Soft-skips when the
+      # secret is unset (e.g. fork PRs, which can't read secrets anyway).
+      - name: Alert on failure (ntfy)
+        if: failure() && github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          CI_NTFY_URL: ${{ secrets.CI_NTFY_URL }}
+          CI_NTFY_TOKEN: ${{ secrets.CI_NTFY_TOKEN }}
+        run: |
+          if [ -z "$CI_NTFY_URL" ]; then
+            echo "CI_NTFY_URL not set; skipping failure alert."
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $CI_NTFY_TOKEN" \
+            -H "Title: pstonn CI failed (${{ github.ref_name }})" \
+            -H "Priority: high" \
+            -H "Tags: rotating_light" \
+            -d "A pstonn CI run failed: vet / race tests / build / gofmt / govulncheck. Commit ${{ github.sha }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "$CI_NTFY_URL" || echo "ntfy alert send failed"
+
   publish:
     # Build and push the image on pushes to main and on version tags.
     needs: test
