@@ -1,0 +1,791 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/uppertoe/pstonn/internal/model"
+)
+
+// ---- Guest passes ----
+
+// GuestGrant is a link-based permission the account holder creates: it lets a
+// non-account recipient put one of a permitted set of the account's cars onto a
+// permit. Tokens (one per recipient) live in guest_token.
+type GuestGrant struct {
+	ID             int64
+	Owner          string
+	PermitID       int64
+	Label          string
+	AllowOvernight bool
+	AllowPlate     bool // visitor may type an arbitrary plate (tradie / on-screen QR)
+	RequestOnly    bool // printed QR: a scan only requests; the holder approves live
+	Enabled        bool
+	CreatedAt      time.Time
+}
+
+// GuestRequest is a visitor's pending/approved/denied request to use a
+// printed-QR permit.
+type GuestRequest struct {
+	ID          int64
+	GrantID     int64
+	Owner       string
+	PermitID    int64
+	Plate       string
+	Status      string // pending | approved | denied
+	RequestedAt time.Time
+	DecidedAt   time.Time // when the holder approved/denied ("" while pending)
+	Until       string    // human "until …" text, set on approval
+}
+
+// GuestToken is one recipient's link to a grant; the raw token is never stored,
+// only its hash.
+type GuestToken struct {
+	ID             int64
+	GrantID        int64
+	RecipientEmail string
+	Revoked        bool
+	CreatedAt      time.Time
+}
+
+// GuestRecipient is a (recipient, token-hash) pair passed to CreateGuestGrant;
+// the caller generates the raw token, keeps it to build the link, and hands the
+// store only the hash.
+type GuestRecipient struct {
+	Email     string
+	TokenHash string
+}
+
+// GuestContext is everything the public activation page needs, resolved from a
+// presented token hash. It is only returned when the token is live (not revoked),
+// its grant enabled, and the owner's kill-switch on — otherwise ErrNotFound.
+type GuestContext struct {
+	Grant     GuestGrant
+	TokenID   int64
+	Recipient string
+	Vehicles  []model.Vehicle
+	// BaselinePlate is what was on the permit before this link's current run of
+	// activations began ('' = unknown), and BaselineUntil is when that run's
+	// window ends (zero = no run captured). Together they let the guest revert
+	// their changes back to the pre-existing plate.
+	BaselinePlate string
+	BaselineUntil time.Time
+}
+
+// GuestGrantDetail is a grant with its allowed cars and recipient links, for the
+// account holder's management UI.
+type GuestGrantDetail struct {
+	Grant    GuestGrant
+	Vehicles []model.Vehicle
+	Tokens   []GuestToken
+}
+
+// CreateGuestGrant creates a grant, its allowed-vehicle set, and one token per
+// recipient, all in a transaction. Every vehicle must belong to owner (IDOR
+// guard). Returns the new grant id.
+func (s *Store) CreateGuestGrant(ctx context.Context, owner string, permitID int64, label string, allowOvernight bool, vehicleIDs []int64, recipients []GuestRecipient) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// The permit must belong to the owner.
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
+		owner, permitID, label, boolInt(allowOvernight), nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	for _, vid := range vehicleIDs {
+		// Insert only if the vehicle belongs to the owner; a foreign id inserts
+		// nothing rather than binding a stranger's car into the grant.
+		r, err := tx.ExecContext(ctx,
+			`INSERT INTO guest_grant_vehicle (grant_id, vehicle_id)
+			 SELECT ?, ? WHERE EXISTS(SELECT 1 FROM vehicle WHERE id = ? AND owner = ?)`,
+			grantID, vid, vid, owner)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := r.RowsAffected(); n == 0 {
+			return 0, ErrNotFound
+		}
+	}
+	for _, rc := range recipients {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+			grantID, rc.Email, rc.TokenHash, nowUTC()); err != nil {
+			return 0, err
+		}
+	}
+	return grantID, tx.Commit()
+}
+
+// UpdateGuestGrant changes a grant's label, overnight policy, and allowed-vehicle
+// set (replacing it wholesale), scoped to owner. The permit is not changed — its
+// tokens are bound to it. Every vehicle must belong to owner.
+func (s *Store) UpdateGuestGrant(ctx context.Context, owner string, grantID int64, label string, allowOvernight bool, vehicleIDs []int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE guest_grant SET label = ?, allow_overnight = ? WHERE id = ? AND owner = ?`,
+		label, boolInt(allowOvernight), grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_grant_vehicle WHERE grant_id = ?`, grantID); err != nil {
+		return err
+	}
+	for _, vid := range vehicleIDs {
+		r, err := tx.ExecContext(ctx,
+			`INSERT INTO guest_grant_vehicle (grant_id, vehicle_id)
+			 SELECT ?, ? WHERE EXISTS(SELECT 1 FROM vehicle WHERE id = ? AND owner = ?)`,
+			grantID, vid, vid, owner)
+		if err != nil {
+			return err
+		}
+		if n, _ := r.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+	}
+	return tx.Commit()
+}
+
+// AddGuestTokens adds recipient tokens to an existing grant (scoped to owner),
+// skipping any email that already has a live token on it. Returns the emails
+// actually added, so the caller can email and display just those links.
+func (s *Store) AddGuestTokens(ctx context.Context, owner string, grantID int64, recipients []GuestRecipient) ([]string, error) {
+	var ok int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM guest_grant WHERE id = ? AND owner = ?)`, grantID, owner).Scan(&ok); err != nil {
+		return nil, err
+	}
+	if ok == 0 {
+		return nil, ErrNotFound
+	}
+	var added []string
+	for _, rc := range recipients {
+		var live int
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM guest_token WHERE grant_id = ? AND recipient_email = ? AND revoked_at = '')`,
+			grantID, rc.Email).Scan(&live); err != nil {
+			return added, err
+		}
+		if live == 1 {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+			grantID, rc.Email, rc.TokenHash, nowUTC()); err != nil {
+			return added, err
+		}
+		added = append(added, rc.Email)
+	}
+	return added, nil
+}
+
+// ResetGuestToken issues a fresh link for one existing recipient of an emailed
+// grant: it revokes their current token(s) and inserts a new one with newHash, so
+// exactly one link is live per recipient. Used by the "re-send" action — the
+// original link can't be re-sent (only its hash is stored), so re-sending
+// necessarily supersedes it. Owner-scoped; ErrNotFound if the grant isn't the
+// owner's or the recipient was never on it.
+func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64, recipientEmail, newHash string) (permitID int64, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	err = tx.QueryRowContext(ctx,
+		`SELECT permit_id FROM guest_grant WHERE id = ? AND owner = ? AND on_screen = 0 AND request_only = 0`,
+		grantID, owner).Scan(&permitID)
+	if err == sql.ErrNoRows {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	var wasRecipient int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM guest_token WHERE grant_id = ? AND recipient_email = ?)`,
+		grantID, recipientEmail).Scan(&wasRecipient); err != nil {
+		return 0, err
+	}
+	if wasRecipient == 0 {
+		return 0, ErrNotFound
+	}
+	// Drop the recipient's old token(s) and issue one fresh link, so the old link
+	// dies and the recipient still shows exactly once in the management list. The
+	// old link genuinely stops working — it can't be re-sent (hash-only storage).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_token WHERE grant_id = ? AND recipient_email = ?`,
+		grantID, recipientEmail); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+		grantID, recipientEmail, newHash, nowUTC()); err != nil {
+		return 0, err
+	}
+	return permitID, tx.Commit()
+}
+
+// CreateQRGrant creates an ephemeral "on-screen QR" grant for a permit: it allows
+// a visitor to type an arbitrary plate, has no saved cars or email recipients,
+// and its single token expires after ttl. It is hidden from the pass list. Expired
+// on-screen grants for the owner are pruned first so they do not accumulate.
+// Returns the token hash to store (caller keeps the raw token for the QR URL).
+func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64, tokenHash string, ttl time.Duration) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+	// Prune the owner's already-expired on-screen grants (cascades their tokens).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND on_screen = 1
+		 AND id IN (SELECT grant_id FROM guest_token WHERE expires_at != '' AND expires_at <= ?)`,
+		owner, nowUTC()); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, enabled, created_at)
+		 VALUES (?, ?, 'Visitor QR', 0, 1, 1, 1, ?)`,
+		owner, permitID, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	expires := time.Now().UTC().Add(ttl).Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, expires_at, created_at) VALUES (?, '', ?, ?, ?)`,
+		grantID, tokenHash, expires, nowUTC()); err != nil {
+		return 0, err
+	}
+	return grantID, tx.Commit()
+}
+
+// PrintedGrant is a durable door-QR pass: one per permit, reprintable because its
+// token is kept (sealed) so the SAME code can be shown again. TokenSealed is the
+// raw token encrypted at rest; the caller opens it to rebuild the activation URL.
+type PrintedGrant struct {
+	GrantID     int64
+	PermitID    int64
+	PermitLabel string
+	TokenSealed string
+	CreatedAt   time.Time
+}
+
+// CreatePrintedGrant mints (or replaces) the printed door QR for a permit: it drops
+// any existing printed grant for that permit and inserts a fresh one. tokenSealed is
+// the raw token encrypted at rest so the same code can be reprinted later; tokenHash
+// is the lookup key used when a visitor scans.
+func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID int64, tokenHash, tokenSealed string) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var permitOK int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&permitOK); err != nil {
+		return 0, err
+	}
+	if permitOK == 0 {
+		return 0, ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`, owner, permitID); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, request_only, enabled, created_at)
+		 VALUES (?, ?, 'Printed QR', 0, 1, 0, 1, 1, ?)`, owner, permitID, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	grantID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, token_sealed, created_at) VALUES (?, '', ?, ?, ?)`,
+		grantID, tokenHash, tokenSealed, nowUTC()); err != nil {
+		return 0, err
+	}
+	return grantID, tx.Commit()
+}
+
+// PrintedGrantByID returns a single owner-scoped printed grant (for the reprint /
+// poster view), including its sealed token so the URL can be rebuilt.
+func (s *Store) PrintedGrantByID(ctx context.Context, owner string, grantID int64) (PrintedGrant, error) {
+	var g PrintedGrant
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.id = ? AND g.owner = ? AND g.request_only = 1`, grantID, owner).
+		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
+	if err == sql.ErrNoRows {
+		return PrintedGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return PrintedGrant{}, err
+	}
+	g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return g, nil
+}
+
+// PrintedGrantForPermit returns the existing door QR for a permit, or ErrNotFound —
+// so creating one can be idempotent (reuse rather than rotate the token).
+func (s *Store) PrintedGrantForPermit(ctx context.Context, owner string, permitID int64) (PrintedGrant, error) {
+	var g PrintedGrant
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1`, owner, permitID).
+		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
+	if err == sql.ErrNoRows {
+		return PrintedGrant{}, ErrNotFound
+	}
+	if err != nil {
+		return PrintedGrant{}, err
+	}
+	g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	return g, nil
+}
+
+// ListPrintedGrants returns an owner's durable door QRs, newest first, for the
+// management list on the Guests page.
+func (s *Store) ListPrintedGrants(ctx context.Context, owner string) ([]PrintedGrant, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.request_only = 1
+ORDER BY g.id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PrintedGrant
+	for rows.Next() {
+		var g PrintedGrant
+		var created string
+		if err := rows.Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created); err != nil {
+			return nil, err
+		}
+		g.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+// RevokePrintedGrant deletes an owner's door QR (cascading its token and any pending
+// requests), retiring the printed code for good.
+func (s *Store) RevokePrintedGrant(ctx context.Context, owner string, grantID int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE id = ? AND owner = ? AND request_only = 1`, grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CreateGuestRequest records a pending request from a printed-QR scan. nonce is a
+// per-request secret the visitor keeps, so they can poll its status without being
+// able to read other requests.
+// CreateGuestRequest records a pending printed-QR request, or reuses an existing
+// still-pending one for the same grant+plate so a double-scan/submit doesn't stack
+// duplicate requests (and duplicate approval nudges). Returns the request id, the
+// effective nonce (the reused row's, so its status page keeps working), and
+// whether a NEW request was created (the caller only notifies when it did).
+// ErrGuestRequestLimit means the grant already has the maximum number of open
+// pending requests. The door QR is deliberately public, so without a cap anyone
+// who has seen the poster could flood the holder's approval queue (and their
+// notification channels) with junk plates.
+var ErrGuestRequestLimit = errors.New("store: too many pending requests for this grant")
+
+// maxPendingGuestRequests bounds open pending rows per grant.
+const maxPendingGuestRequests = 5
+
+func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (id int64, effNonce string, created bool, err error) {
+	// Dedup (same plate re-scan reuses the pending request), the pending cap, and
+	// the insert are ONE guarded statement: a separate check-then-insert lets two
+	// simultaneous scans both pass the check and double-insert/over-fill.
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at)
+		 SELECT ?1, ?2, ?3, ?4, ?5, 'pending', ?6
+		 WHERE NOT EXISTS (SELECT 1 FROM guest_request WHERE grant_id = ?1 AND plate = ?4 AND status = 'pending')
+		   AND (SELECT COUNT(*) FROM guest_request WHERE grant_id = ?1 AND status = 'pending') < ?7`,
+		grantID, owner, permitID, plate, nonce, nowUTC(), maxPendingGuestRequests)
+	if err != nil {
+		return 0, "", false, err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		id, err = res.LastInsertId()
+		return id, nonce, true, err
+	}
+	// The guarded insert declined: either this plate already has a pending
+	// request (reuse it) or the grant is at its pending cap.
+	var existingID int64
+	var existingNonce string
+	e := s.db.QueryRowContext(ctx,
+		`SELECT id, nonce FROM guest_request WHERE grant_id = ? AND plate = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+		grantID, plate).Scan(&existingID, &existingNonce)
+	if e == nil {
+		return existingID, existingNonce, false, nil
+	}
+	if e != sql.ErrNoRows {
+		return 0, "", false, e
+	}
+	return 0, "", false, ErrGuestRequestLimit
+}
+
+// ExpireGuestRequests marks pending requests older than before as expired, so a
+// stale "approve this plate?" can't be actioned days later (approving an old row
+// would silently put an unknown plate on today's permit) and abandoned scans
+// drain out of the holder's queue. Expired rows read as denied to the visitor.
+func (s *Store) ExpireGuestRequests(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE guest_request SET status = 'expired', decided_at = ? WHERE status = 'pending' AND requested_at < ?`,
+		nowUTC(), before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// PurgeDecidedGuestRequests deletes non-pending requests older than before.
+// Visitor plates are PII; once a request is decided (or expired) there is no
+// reason to keep it beyond a short audit window.
+func (s *Store) PurgeDecidedGuestRequests(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM guest_request WHERE status != 'pending' AND requested_at < ?`,
+		before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// GuestRequestForPoll returns a request only if the nonce matches — the visitor's
+// status check, safe against request-id enumeration.
+func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string) (GuestRequest, error) {
+	var r GuestRequest
+	var requested, decided string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, until_at FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &decided, &r.Until)
+	if err == sql.ErrNoRows {
+		return GuestRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	r.DecidedAt, _ = time.Parse(time.RFC3339, decided)
+	return r, nil
+}
+
+// GuestRequestByID returns a request (used by the visitor's polling status page).
+func (s *Store) GuestRequestByID(ctx context.Context, id int64) (GuestRequest, error) {
+	var r GuestRequest
+	var requested string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request WHERE id = ?`, id).
+		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until)
+	if err == sql.ErrNoRows {
+		return GuestRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+	return r, nil
+}
+
+// ListPendingRequests returns an owner's still-pending printed-QR requests, newest
+// first (the approvals queue).
+func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestRequest, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request
+		 WHERE owner = ? AND status = 'pending' ORDER BY id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestRequest
+	for rows.Next() {
+		var r GuestRequest
+		var requested string
+		if err := rows.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until); err != nil {
+			return nil, err
+		}
+		r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DecideGuestRequest approves or denies a pending request, scoped to owner. It
+// returns the request (so the caller can apply the plate on approval) or
+// ErrNotFound if it is not the owner's or no longer pending.
+func (s *Store) DecideGuestRequest(ctx context.Context, owner string, id int64, approve bool, until string) (GuestRequest, error) {
+	status := "denied"
+	if approve {
+		status = "approved"
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE guest_request SET status = ?, decided_at = ?, until_at = ?
+		 WHERE id = ? AND owner = ? AND status = 'pending'`,
+		status, nowUTC(), until, id, owner)
+	if err != nil {
+		return GuestRequest{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return GuestRequest{}, ErrNotFound
+	}
+	return s.GuestRequestByID(ctx, id)
+}
+
+// GuestContextByTokenHash resolves a presented token hash to the grant, recipient
+// and allowed vehicles — only if the token is live, its grant enabled, and the
+// owner's guest passes are not globally paused. Any failed gate returns
+// ErrNotFound so the caller can show one neutral "no longer active" page.
+func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
+	var gc GuestContext
+	var created, blUntil string
+	var overnight, plate, reqOnly, enabled int
+	err := s.db.QueryRowContext(ctx, `
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.enabled, g.created_at, t.baseline_plate, t.baseline_until
+FROM guest_token t
+JOIN guest_grant g ON g.id = t.grant_id
+WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
+  AND (t.expires_at = '' OR t.expires_at > ?)
+  AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
+		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
+		&gc.Grant.Label, &overnight, &plate, &reqOnly, &enabled, &created, &gc.BaselinePlate, &blUntil)
+	if err == sql.ErrNoRows {
+		return GuestContext{}, ErrNotFound
+	}
+	if err != nil {
+		return GuestContext{}, err
+	}
+	gc.Grant.AllowOvernight = overnight == 1
+	gc.Grant.AllowPlate = plate == 1
+	gc.Grant.RequestOnly = reqOnly == 1
+	gc.Grant.Enabled = enabled == 1
+	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+		return GuestContext{}, err
+	}
+	if blUntil != "" {
+		// A malformed timestamp reads as "no baseline" rather than failing the link.
+		gc.BaselineUntil, _ = time.Parse(time.RFC3339, blUntil)
+	}
+	gc.Vehicles, err = s.queryVehicles(ctx, `
+SELECT v.id, v.registration, v.label, v.email, v.color FROM vehicle v
+JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
+WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
+	return gc, err
+}
+
+// ListGuestGrants returns the owner's grants with their cars and recipient tokens.
+func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrantDetail, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 AND request_only = 0 ORDER BY id DESC`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestGrantDetail
+	for rows.Next() {
+		var d GuestGrantDetail
+		var overnight, enabled int
+		var created string
+		if err := rows.Scan(&d.Grant.ID, &d.Grant.PermitID, &d.Grant.Label, &overnight, &enabled, &created); err != nil {
+			return nil, err
+		}
+		d.Grant.Owner = owner
+		d.Grant.AllowOvernight = overnight == 1
+		d.Grant.Enabled = enabled == 1
+		if d.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		g := &out[i]
+		g.Vehicles, err = s.queryVehicles(ctx, `
+SELECT v.id, v.registration, v.label, v.email, v.color FROM vehicle v
+JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
+WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, g.Grant.ID)
+		if err != nil {
+			return nil, err
+		}
+		g.Tokens, err = s.listGuestTokens(ctx, g.Grant.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) listGuestTokens(ctx context.Context, grantID int64) ([]GuestToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, grant_id, recipient_email, revoked_at, created_at FROM guest_token WHERE grant_id = ? ORDER BY id`, grantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestToken
+	for rows.Next() {
+		var t GuestToken
+		var revoked, created string
+		if err := rows.Scan(&t.ID, &t.GrantID, &t.RecipientEmail, &revoked, &created); err != nil {
+			return nil, err
+		}
+		t.Revoked = revoked != ""
+		if t.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// RevokeGuestToken revokes one recipient's link, scoped to the grant's owner.
+func (s *Store) RevokeGuestToken(ctx context.Context, owner string, tokenID int64) error {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE guest_token SET revoked_at = ?
+WHERE id = ? AND revoked_at = '' AND grant_id IN (SELECT id FROM guest_grant WHERE owner = ?)`,
+		nowUTC(), tokenID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteGuestGrant removes a grant (its vehicles and tokens cascade), scoped to
+// owner.
+func (s *Store) DeleteGuestGrant(ctx context.Context, owner string, grantID int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM guest_grant WHERE id = ? AND owner = ?`, grantID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// TouchGuestTokenUsed records the last time a token successfully activated a car.
+func (s *Store) TouchGuestTokenUsed(ctx context.Context, tokenID int64) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE guest_token SET last_used_at = ? WHERE id = ?`, nowUTC(), tokenID)
+	return err
+}
+
+// SetGuestBaseline remembers what was on the permit before a guest link's run of
+// activations (and how long that run's window lasts), so the guest can revert.
+func (s *Store) SetGuestBaseline(ctx context.Context, tokenID int64, plate string, until time.Time) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE guest_token SET baseline_plate = ?, baseline_until = ? WHERE id = ?`,
+		plate, until.UTC().Format(time.RFC3339), tokenID)
+	return err
+}
+
+// CaptureOrExtendGuestBaseline atomically records the revert baseline for one
+// activation: when no window is active (empty or expired) it captures plate +
+// until; when a window is active it only extends the end if the new end is
+// later — never the plate, so two near-simultaneous activations can't record
+// the guest's own first pick as the "pre-existing" plate (the race a separate
+// read-modify-write through SetGuestBaseline allows). Returns the effective
+// baseline after the update. Timestamps are RFC3339 UTC, so the lexicographic
+// SQL comparisons are chronologically correct.
+func (s *Store) CaptureOrExtendGuestBaseline(ctx context.Context, tokenID int64, plate string, until, now time.Time) (string, time.Time, error) {
+	var p, u string
+	err := s.db.QueryRowContext(ctx, `
+UPDATE guest_token SET
+  baseline_plate = CASE WHEN baseline_until = '' OR baseline_until < ?3 THEN ?1 ELSE baseline_plate END,
+  baseline_until = CASE
+      WHEN baseline_until = '' OR baseline_until < ?3 THEN ?2
+      WHEN ?2 > baseline_until THEN ?2
+      ELSE baseline_until END
+WHERE id = ?4
+RETURNING baseline_plate, baseline_until`,
+		plate, until.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339), tokenID).
+		Scan(&p, &u)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	ut, _ := time.Parse(time.RFC3339, u)
+	return p, ut, nil
+}
+
+// ClearGuestBaseline forgets a link's captured baseline (after a revert), so the
+// next activation captures a fresh one.
+func (s *Store) ClearGuestBaseline(ctx context.Context, tokenID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE guest_token SET baseline_plate = '', baseline_until = '' WHERE id = ?`, tokenID)
+	return err
+}
+
+// GuestsEnabled reports the owner's global kill-switch (default on).
+func (s *Store) GuestsEnabled(ctx context.Context, owner string) (bool, error) {
+	var v int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = ?), 1)`, owner).Scan(&v)
+	return v == 1, err
+}
+
+// SetGuestsEnabled flips the owner's global kill-switch for guest passes.
+func (s *Store) SetGuestsEnabled(ctx context.Context, owner string, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO account_flags (owner, guests_enabled) VALUES (?, ?)
+ON CONFLICT(owner) DO UPDATE SET guests_enabled = excluded.guests_enabled`, owner, boolInt(enabled))
+	return err
+}
