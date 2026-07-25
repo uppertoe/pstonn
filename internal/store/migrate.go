@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS council_session (
     linked_at            TEXT NOT NULL DEFAULT '',   -- last interactive link; the re-authorise clock
     reminder_sent_at     TEXT NOT NULL DEFAULT '',   -- when the approaching-expiry email was sent
     confirm_token        TEXT NOT NULL DEFAULT '',   -- single-use token for the email confirm link
-    password_sealed      TEXT NOT NULL DEFAULT ''    -- opt-in sealed council password for auto-reconnect (empty = not saved)
+    password_sealed      TEXT NOT NULL DEFAULT '',   -- opt-in sealed council password for auto-reconnect (empty = not saved)
+    reconnected_at       TEXT NOT NULL DEFAULT ''    -- last saved-password auto-reconnect; shown to the user in Settings
 );
 
 CREATE TABLE IF NOT EXISTS vehicle (
@@ -241,6 +242,7 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE override ADD COLUMN guest_token_id INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_token ADD COLUMN baseline_plate TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_token ADD COLUMN baseline_until TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE council_session ADD COLUMN reconnected_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

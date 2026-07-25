@@ -14,6 +14,7 @@
         <strong>Auto-reconnect</strong>
         {{if .AutoReconnect}}<span class="pill ok">On</span>
         <p class="empty-note" style="margin-top:4px">Your password is saved (encrypted) so p.stonn can sign back in on its own if the council ends your session. Note: signing in to the Stonnington ePermits site yourself still logs p.stonn out until the next reconnect.</p>
+        <p class="empty-note" style="margin-top:4px">{{if .LastReconnect}}Last used to sign back in: <strong>{{.LastReconnect}}</strong>. This updates every time p.stonn uses your saved password, so you can always see when it was needed.{{else}}Your saved password hasn't been needed yet &mdash; this line will show when it was last used to sign back in.{{end}}</p>
         {{else}}<span class="pill">Off</span>
         <p class="empty-note" style="margin-top:4px">Your password isn't saved. If the council ends your session &mdash; including when you sign in to the ePermits site yourself &mdash; you'll need to re-link by hand. To turn this on, unlink and link again with &ldquo;Save my password&rdquo; ticked.</p>
         {{end}}

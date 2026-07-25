@@ -25,6 +25,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		if !cs.LinkedAt.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
 			base.RelinkBy = cs.LinkedAt.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
 		}
+		if base.AutoReconnect && !cs.ReconnectedAt.IsZero() {
+			base.LastReconnect = cs.ReconnectedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006, 3:04pm")
+		}
 	}
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."

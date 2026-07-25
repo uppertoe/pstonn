@@ -49,6 +49,7 @@ type dashboardData struct {
 	RelinkBy       string     // human date the session must be re-authorised by ("" if unknown)
 	CouncilLinked  bool       // settings: an active council session exists
 	AutoReconnect  bool       // settings: a saved password lets p.stonn auto-reconnect
+	LastReconnect  string     // settings: when the saved password last signed back in ("" = never)
 	Notify         notifyView // settings: notification channels
 	Terms          termsView  // terms state + settings display
 	// picker state

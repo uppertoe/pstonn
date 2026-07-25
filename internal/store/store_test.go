@@ -495,6 +495,9 @@ func TestSaveReconnectedSessionPreservesLinkedAt(t *testing.T) {
 	if orig.LinkedAt.IsZero() {
 		t.Fatal("interactive link should stamp linked_at")
 	}
+	if !orig.ReconnectedAt.IsZero() {
+		t.Fatal("reconnected_at should be zero before any password reconnect")
+	}
 	if err := s.SaveReconnectedSession(ctx, CouncilSession{Owner: owner, Cookie: "c2", Password: "pw2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -504,6 +507,10 @@ func TestSaveReconnectedSessionPreservesLinkedAt(t *testing.T) {
 	}
 	if got.Cookie != "c2" || got.Password != "pw2" {
 		t.Fatalf("reconnect didn't refresh cookie/password: %q / %q", got.Cookie, got.Password)
+	}
+	// The password replay must be visible to the user: reconnected_at stamps.
+	if got.ReconnectedAt.IsZero() {
+		t.Fatal("reconnect should stamp reconnected_at")
 	}
 }
 

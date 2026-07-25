@@ -23,6 +23,10 @@ type CouncilSession struct {
 	ReminderSent time.Time // when the approaching-expiry email was sent (zero = not this cycle)
 	ConfirmToken string    // single-use token for the email confirm link (empty = none outstanding)
 	Password     string    // sealed council password for opt-in auto-reconnect (empty = not saved)
+	// ReconnectedAt is when the saved password was last replayed to sign back in
+	// (zero = never). Surfaced in Settings so credential use is visible to the
+	// user, not just the operator's server log.
+	ReconnectedAt time.Time
 }
 
 // ---- Council session (per app user) ----
@@ -31,11 +35,11 @@ type CouncilSession struct {
 // ErrNotFound.
 func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSession, error) {
 	var cs CouncilSession
-	var expiry, updated, linked, reminded string
+	var expiry, updated, linked, reminded, reconnected string
 	err := s.db.QueryRowContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at
 FROM council_session WHERE owner = ?`, owner).
-		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password)
+		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
 	}
@@ -46,6 +50,7 @@ FROM council_session WHERE owner = ?`, owner).
 	cs.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
 	cs.LinkedAt, _ = time.Parse(time.RFC3339, linked)
 	cs.ReminderSent, _ = time.Parse(time.RFC3339, reminded)
+	cs.ReconnectedAt, _ = time.Parse(time.RFC3339, reconnected)
 	return cs, nil
 }
 
@@ -148,13 +153,17 @@ ON CONFLICT(owner) DO UPDATE SET
 
 // SaveReconnectedSession writes the fresh cookie + (re-sealed) saved password
 // after a silent auto-reconnect, WITHOUT advancing linked_at — the re-authorise
-// clock only moves on an interactive re-link. A no-op if the row is gone.
+// clock only moves on an interactive re-link. It stamps reconnected_at: this is
+// the only path that replays the saved password (silent cookie renews go through
+// UpdateCouncilToken), so the stamp is exactly "your password was used". A no-op
+// if the row is gone.
 func (s *Store) SaveReconnectedSession(ctx context.Context, cs CouncilSession) error {
+	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
 UPDATE council_session
-SET cookie_sealed = ?, password_sealed = ?, updated_at = ?
+SET cookie_sealed = ?, password_sealed = ?, updated_at = ?, reconnected_at = ?
 WHERE owner = ?`,
-		cs.Cookie, cs.Password, nowUTC(), cs.Owner)
+		cs.Cookie, cs.Password, now, now, cs.Owner)
 	return err
 }
 
