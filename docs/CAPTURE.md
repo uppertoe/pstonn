@@ -1,7 +1,9 @@
 # What to capture from the council portal
 
-Two council API calls remain to be reverse-engineered. Capture them from a real,
-logged-in session and the app can be wired up.
+All of the council calls the app makes are wired up and working; this doc is the
+re-capture guide for when the council changes its portal (an API-shape change
+shows up as `FailUnexpected` operator alerts). Capture the calls below from a
+real, logged-in browser session to compare against `internal/parking`.
 
 ## Easiest: one HAR file
 
