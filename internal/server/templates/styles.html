@@ -222,7 +222,7 @@
      swapping the heading for this input doesn't shift the text or the row height. */
   .pname-edit input { flex:1; min-width:150px; font-size:17px; font-weight:600; letter-spacing:-.01em; padding:1px 2px; border:0; border-bottom:2px solid var(--primary); border-radius:0; background:transparent; color:var(--ink); }
   .pname-edit input:focus { outline:none; }
-  .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
+  .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; position:relative; }
   .permit-expiry { display:flex; align-items:center; gap:7px; margin:2px 0 0; font-size:12.5px; color:var(--muted); }
   .permit-expiry svg { width:15px; height:15px; flex:0 0 auto; }
   .permit-expiry.warn { color:var(--warn); font-weight:500; }
@@ -549,8 +549,9 @@
   .gresult { font-size:16px; font-weight:600; line-height:1.5; margin:0 0 6px; }
   .gspin { width:34px; height:34px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--primary); margin:20px auto 14px; animation:spin .8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
-  /* Subtle "checking the council record" spinner beside the on-permit-now plate. */
-  .pchk { display:inline-block; width:11px; height:11px; border-radius:50%; border:2px solid var(--line); border-top-color:var(--muted); animation:spin .8s linear infinite; vertical-align:middle; }
+  /* Subtle "checking the council record" spinner: pinned to the nowbadge corner
+     (absolute, out of flow) so appearing/disappearing never reflows the pill. */
+  .pchk { position:absolute; top:-5px; right:-5px; width:11px; height:11px; border-radius:50%; border:2px solid var(--line); border-top-color:var(--muted); background:var(--surface); animation:spin .8s linear infinite; }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
   .link-quiet:hover { color:var(--primary); }
