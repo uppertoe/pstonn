@@ -62,11 +62,19 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// Refresh "on permit now" from the council (cached ≤5 min, refreshed in the
 	// background — never a synchronous council call), so the display is truthful
 	// and external portal changes are caught. With nothing cached yet, keep the
-	// stored belief; drift shows up on the next render.
-	if actual, err := s.council.CurrentVehicleCached(ctx, p.Owner,
-		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, 5*time.Minute); err == nil && actual != p.ActiveRegistration {
-		p.ActiveRegistration = actual
-		_ = s.store.SetPermitActive(ctx, p.ID, actual)
+	// stored belief. A non-fresh value marks the view PlateRefreshing, which
+	// renders a one-shot htmx follow-up so the refreshed plate swaps in without
+	// a manual reload.
+	plateRefreshing := false
+	if actual, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
+		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, 5*time.Minute); err == nil {
+		plateRefreshing = !fresh
+		if actual != p.ActiveRegistration {
+			p.ActiveRegistration = actual
+			_ = s.store.SetPermitActive(ctx, p.ID, actual)
+		}
+	} else {
+		plateRefreshing = true // nothing cached yet; a background fetch is running
 	}
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
@@ -154,8 +162,9 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
-		RosterEmpty: len(rules) == 0,
-		Detail:      permitDetail(p),
+		RosterEmpty:     len(rules) == 0,
+		Detail:          permitDetail(p),
+		PlateRefreshing: plateRefreshing,
 	}
 	fillExpiry(&pv, now)
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
@@ -391,8 +400,24 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 		s.serverError(w, err)
 		return
 	}
+	// Fragments are one-shot: never embed another follow-up fetch, so a council
+	// outage can't turn the page into a persistent polling loop.
+	pv.PlateRefreshing = false
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "permit-body", pv); err != nil {
 		log.Printf("render permit-body: %v", err)
 	}
+}
+
+// permitCard re-renders one permit's card fragment. It is the target of the
+// one-shot follow-up fetch a page render emits when it served a stale plate:
+// by the time this fires the background council refresh has usually landed, so
+// the swap shows the verified plate without a manual reload.
+func (s *Server) permitCard(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	s.respondPermit(w, r, owner, p)
 }

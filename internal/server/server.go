@@ -117,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin", s.requireAdmin(s.adminPage))
 	mux.HandleFunc("GET /status", s.statusJSON) // machine watchdog; bearer-token gated
 	mux.HandleFunc("GET /permits/new", s.withUser(s.pickerPage))
+	mux.HandleFunc("GET /permits/{id}/card", s.withUser(s.permitCard))
 	mux.HandleFunc("GET /guests", s.withUser(s.guestsPage))
 	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
 	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))

@@ -68,6 +68,12 @@
   <div class="nowbadge">
     <span class="muted" style="font-size:12.5px">on permit now</span>
     {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
+    {{if .PlateRefreshing}}{{/* The value above came from a stale (or empty) cache while a
+         background council check runs; the follow-up fetch below swaps in the checked
+         value. One-shot: the fragment response never re-emits it (see respondPermit). */}}
+    <span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>
+    <div hx-get="/permits/{{.Permit.ID}}/card" hx-trigger="load delay:5s" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"></div>
+    {{end}}
   </div>
 </div>
 

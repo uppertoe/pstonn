@@ -218,7 +218,7 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 	}
 	current := permit.ActiveRegistration
 	if s.council != nil { // a council hiccup (or, in tests, no client at all) must not fail the page
-		if actual, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+		if actual, _, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
 			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
 			current = actual
 		}

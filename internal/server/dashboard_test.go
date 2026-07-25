@@ -241,6 +241,11 @@ func TestTemplatesRender(t *testing.T) {
 			p.Detail = "VPP24714 · (A) 1st Visitor Permit"
 			return p
 		}, "VPP24714 · (A) 1st Visitor Permit"},
+		{"plate-refreshing-follow-up", func() permitView {
+			p := samplePermitView(loc)
+			p.PlateRefreshing = true
+			return p
+		}, `hx-get="/permits/7/card"`},
 	} {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {

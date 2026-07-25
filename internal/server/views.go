@@ -134,6 +134,11 @@ type permitView struct {
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool        // no weekly rules yet — a fresh permit
 	CopyFrom    []permitOpt // this owner's OTHER permits, to copy a schedule from
+	// PlateRefreshing: "on permit now" was served from a stale (or absent) cache
+	// while a background council refresh runs; the card renders a subtle spinner
+	// and a one-shot htmx follow-up that swaps in the refreshed value. Full page
+	// renders only — fragment responses clear it so polling can't loop.
+	PlateRefreshing bool
 }
 
 // expiredPermitView is the compact row shown for a permit p.stonn no longer acts

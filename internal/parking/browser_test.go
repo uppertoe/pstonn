@@ -103,20 +103,21 @@ func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
 	p := model.Permit{CouncilPermitID: "14576"}
 
 	// Nothing cached yet: a miss, not a blocking fetch.
-	if _, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) {
-		t.Fatalf("empty cache: want ErrNoCachedPlate, got %v", err)
+	if _, fresh, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) || fresh {
+		t.Fatalf("empty cache: want ErrNoCachedPlate and not fresh, got fresh=%v, %v", fresh, err)
 	}
 
-	// Fresh cache is served.
+	// Fresh cache is served and reported fresh.
 	c.regCache.Store("14576", cachedReg{reg: "ABC123", at: time.Now()})
-	if got, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); err != nil || got != "ABC123" {
-		t.Fatalf("fresh cache: got %q, %v", got, err)
+	if got, fresh, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); err != nil || got != "ABC123" || !fresh {
+		t.Fatalf("fresh cache: got %q fresh=%v, %v", got, fresh, err)
 	}
 
-	// A stale value is still served (revalidation happens in the background).
+	// A stale value is still served (revalidation happens in the background),
+	// reported non-fresh so the UI can offer a follow-up fetch.
 	c.regCache.Store("14576", cachedReg{reg: "ABC123", at: time.Now().Add(-time.Hour)})
-	if got, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); err != nil || got != "ABC123" {
-		t.Fatalf("stale cache: got %q, %v", got, err)
+	if got, fresh, err := c.CurrentVehicleCached(ctx, "o@example.com", p, 5*time.Minute); err != nil || got != "ABC123" || fresh {
+		t.Fatalf("stale cache: got %q fresh=%v, %v", got, fresh, err)
 	}
 }
 

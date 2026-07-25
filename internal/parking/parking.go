@@ -512,21 +512,24 @@ var ErrNoCachedPlate = errors.New("parking: no cached plate yet")
 // slow portal (the council client's 30s timeout outlives the HTTP server's 20s
 // WriteTimeout, so a sync call here turns a slow council into a dropped
 // connection — a 502 at the proxy). A stale value is served while one refresh
-// per permit runs; drift shows up on the next render. Keeps the dashboard's
-// "on permit now" truthful and catches plates changed directly in the portal.
-func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (string, error) {
+// per permit runs; fresh reports whether the value is within maxAge, so a
+// caller can offer a follow-up fetch once the refresh lands. Keeps the
+// dashboard's "on permit now" truthful and catches plates changed directly in
+// the portal.
+func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, fresh bool, err error) {
 	if c.sandbox != nil {
-		return c.sandboxCurrentVehicle(p) // in-memory: no cache needed
+		reg, err = c.sandboxCurrentVehicle(p) // in-memory: no cache needed
+		return reg, true, err
 	}
 	v, ok := c.regCache.Load(p.CouncilPermitID)
 	if ok && time.Since(v.(cachedReg).at) < maxAge {
-		return v.(cachedReg).reg, nil
+		return v.(cachedReg).reg, true, nil
 	}
 	c.refreshCurrentVehicle(owner, p)
 	if ok {
-		return v.(cachedReg).reg, nil // stale but real; the refresh catches drift
+		return v.(cachedReg).reg, false, nil // stale but real; the refresh catches drift
 	}
-	return "", ErrNoCachedPlate
+	return "", false, ErrNoCachedPlate
 }
 
 // refreshCurrentVehicle fetches the permit's plate in the background, detached
