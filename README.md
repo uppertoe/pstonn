@@ -156,6 +156,14 @@ only ever do what your own council login can do, but it is your council login.
 Questions or problems: use the [contact form](https://p.stonn.org/contact) or
 open an issue.
 
+**If you're from the City of Stonnington** and have questions or concerns
+about this service, please get in touch the same way — happy to talk. The app
+acts only with each resident's own login, at their request, on their own
+permit, and is rate-limited to stay well below what a person clicking through
+ePermits would generate. If the council ever offers permit scheduling
+natively, or an official way for residents to delegate access, this app will
+adopt it or retire.
+
 ## License
 
 [MIT](LICENSE).
