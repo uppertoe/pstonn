@@ -1,6 +1,7 @@
 package mailer
 
 import (
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,49 @@ func TestHeaderValueStripsCRLF(t *testing.T) {
 		if strings.ContainsAny(got, "\r\n") {
 			t.Errorf("headerValue(%q) = %q still contains CR/LF", in, got)
 		}
+	}
+}
+
+// A server that accepts the connection and then goes silent must not wedge the
+// caller: keep-warm and the outbox worker send synchronously, so an unbounded
+// hang there stalls session renewal for every user.
+func TestSendTimesOutOnStalledServer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close() // hold open, send nothing
+		}
+	}()
+
+	old := smtpExchangeTimeout
+	smtpExchangeTimeout = 300 * time.Millisecond
+	defer func() { smtpExchangeTimeout = old }()
+
+	m := &Mailer{host: "127.0.0.1", addr: ln.Addr().String(), from: "a@b"}
+	done := make(chan error, 1)
+	go func() { done <- m.Send("to@example.com", "subj", "body") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected an error from the stalled server")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Send did not return: no deadline applied to the SMTP exchange")
+	}
+}
+
+func TestSendRejectsCRLFRecipient(t *testing.T) {
+	m := &Mailer{host: "smtp.example", addr: "smtp.example:587", from: "a@b"}
+	if err := m.Send("victim@example.com\r\nRCPT TO:<x@y>", "s", "b"); err == nil {
+		t.Fatal("expected CR/LF recipient to be rejected before dialing")
 	}
 }
 

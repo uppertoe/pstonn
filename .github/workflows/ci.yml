@@ -30,8 +30,11 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l internal/ main.go)"
       - name: Vulnerability scan
+        # Pinned like everything else in this workflow (the one @latest would be
+        # the sole unpinned tool in the pipeline). The vuln DB itself is fetched
+        # fresh at run time regardless of the tool version.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
   publish:

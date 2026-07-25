@@ -656,9 +656,14 @@
   // connect-src 'self', so it errors out and nothing happens. Fall back to a real
   // browser navigation, which follows the redirect natively and lands on login:
   // a GET re-navigates to the same path; anything else reloads the current page.
+  // ONLY for boosted requests: a fragment/poll request (e.g. the guest wait
+  // page's status poll) points at a fragment endpoint, and navigating there on a
+  // flaky connection would strand the visitor on a bare unstyled fragment with
+  // no htmx — the poll's own next tick is the correct retry.
   addEventListener('htmx:sendError', function (e) {
     var cfg = e.detail && e.detail.requestConfig;
-    if (cfg && cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
+    if (!cfg || !cfg.boosted) return;
+    if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
   });
   // Surface server-side validation errors. The server returns 422 with a plain
@@ -1630,9 +1635,12 @@ window.popClamp = window.popClamp || function (el) {
 {{/* =================== PUBLIC HEADER (landing / about) =================== */}}
 {{define "publicheader"}}
 <header class="appbar pubbar">
-  <a href="/" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
+  {{/* Landing and /why need their head-only demo assets (demos.css/js), which a
+       boosted body-swap never evaluates — entering /why from /about via boost
+       would render the gallery unstyled and inert. Full navigations only. */}}
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/why" class="link-quiet{{if eq .State "why"}} active{{end}}"{{if eq .State "why"}} aria-current="page"{{end}}>How it works</a>
+    <a href="/why" hx-boost="false" class="link-quiet{{if eq .State "why"}} active{{end}}"{{if eq .State "why"}} aria-current="page"{{end}}>How it works</a>
     <a href="/about" class="link-quiet{{if eq .State "about"}} active{{end}}"{{if eq .State "about"}} aria-current="page"{{end}}>About</a>
     {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
   </nav>
@@ -1646,7 +1654,9 @@ window.popClamp = window.popClamp || function (el) {
 {{/* =================== APP BAR (shared) =================== */}}
 {{define "appbar"}}
 <header class="appbar">
-  <a href="/" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
+  {{/* Full navigation: the landing page's demo assets live in its head, which a
+       boosted body-swap would skip (see publicheader). */}}
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
   <div class="appbar-r">
     <button class="icon-btn" type="button" onclick="toggleTheme()" title="Toggle light / dark" aria-label="Toggle theme">
       <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>

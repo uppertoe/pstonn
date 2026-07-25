@@ -168,6 +168,39 @@ type CouncilConfig struct {
 
 // Load reads and validates configuration from the environment.
 func Load() (*Config, error) {
+	// Set-but-invalid numeric/duration values are an error, not a silent
+	// fallback: these tune session-survival behavior (warm interval, max age),
+	// where running with an unintended default misbehaves subtly. The closures
+	// shadow the lenient package helpers and collect the first parse error.
+	var envErr error
+	envInt := func(key string, def int) int {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			return def
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			if envErr == nil {
+				envErr = fmt.Errorf("%s: need a non-negative integer, got %q", key, v)
+			}
+			return def
+		}
+		return n
+	}
+	envDuration := func(key string, def time.Duration) time.Duration {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			return def
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			if envErr == nil {
+				envErr = fmt.Errorf("%s: need a positive Go duration (e.g. \"75m\"), got %q", key, v)
+			}
+			return def
+		}
+		return d
+	}
 	cfg := &Config{
 		ListenAddr:       env("LISTEN_ADDR", ":8080"),
 		SQLitePath:       env("SQLITE_PATH", "/data/pstonn.db"),
@@ -212,6 +245,10 @@ func Load() (*Config, error) {
 			Scopes:       strings.Fields(env("APP_OIDC_SCOPES", "openid profile email groups")),
 			AdminGroups:  splitCSV(env("APP_ADMIN_GROUPS", "")),
 		},
+	}
+
+	if envErr != nil {
+		return nil, envErr
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("SESSION_SECRET")); raw != "" {
@@ -269,6 +306,20 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// COUNCIL_SANDBOX fakes the council in memory: logins "link" and plate
+	// changes "land" without anything reaching Stonnington. If it leaked into a
+	// production deployment users would see confirmations for changes that never
+	// happened, so refuse to start when it coexists with any production signal
+	// (same shape as the DEV_IDENTITY_EMAIL guard above).
+	if cfg.Council.Sandbox {
+		if len(cfg.DataEncryptionKey) == 32 {
+			return nil, fmt.Errorf("COUNCIL_SANDBOX must not be set together with DATA_ENCRYPTION_KEY: it fakes the council, so no plate change would reach Stonnington. Unset it for production")
+		}
+		if cfg.AppOIDC.Enabled() {
+			return nil, fmt.Errorf("COUNCIL_SANDBOX must not be set together with APP_OIDC_ISSUER: it fakes the council, so no plate change would reach Stonnington. Unset it for production")
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -285,27 +336,6 @@ func splitCSV(raw string) []string {
 func env(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
-	}
-	return def
-}
-
-// envInt reads a non-negative integer env var, falling back to def when unset or
-// unparseable.
-func envInt(key string, def int) int {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			return n
-		}
-	}
-	return def
-}
-
-// envDuration reads a Go duration env var (e.g. "45m"), falling back to def.
-func envDuration(key string, def time.Duration) time.Duration {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
 	}
 	return def
 }

@@ -5,6 +5,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -48,6 +49,7 @@ type Server struct {
 	inviteFanout *rateLimiter
 	inviteTarget *rateLimiter
 	guest        *rateLimiter // per-IP throttle on the public guest-activation link
+	councilTry   *rateLimiter // per-user throttle on council password attempts (councilLink)
 }
 
 // New constructs a Server.
@@ -59,6 +61,7 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		inviteFanout: newRateLimiter(6, time.Hour),       // <=6 invite emails / hour per owner
 		inviteTarget: newRateLimiter(1, 24*time.Hour),    // <=1 invite email / day per recipient
 		guest:        newRateLimiter(20, 10*time.Minute), // 20 activation attempts / 10 min per IP
+		councilTry:   newRateLimiter(5, 15*time.Minute),  // 5 council password attempts / 15 min per user
 	}
 }
 
@@ -71,7 +74,17 @@ func (s *Server) Handler() http.Handler {
 	if s.auth != nil {
 		mux.HandleFunc("GET /auth/login", s.auth.Login)
 		mux.HandleFunc("GET /auth/callback", s.auth.Callback)
-		mux.HandleFunc("GET /auth/logout", s.auth.Logout)
+		// Logout stays a GET (it is linked, not a form) but requires a same-origin
+		// Origin/Referer: without it any third-party page (or a link prefetcher)
+		// could embed /auth/logout and forcibly sign users out. App pages send a
+		// Referer under our same-origin Referrer-Policy, so real clicks pass.
+		mux.HandleFunc("GET /auth/logout", func(w http.ResponseWriter, r *http.Request) {
+			if !sameOrigin(r) {
+				s.message(w, http.StatusForbidden, "Sign out using the link inside the app.")
+				return
+			}
+			s.auth.Logout(w, r)
+		})
 	}
 
 	mux.HandleFunc("POST /terms/accept", s.withUser(s.acceptTerms))
@@ -103,12 +116,12 @@ func (s *Server) Handler() http.Handler {
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
 	mux.HandleFunc("GET /g/req/{id}", s.guestRequestStatus)
 
-	mux.HandleFunc("GET /{$}", s.landing)            // public, not behind forward-auth
-	mux.HandleFunc("GET /about", s.about)            // public
-	mux.HandleFunc("GET /why", s.why)                // public
-	mux.HandleFunc("GET /contact", s.contactPage)    // public
-	mux.HandleFunc("POST /contact", s.submitContact) // public, rate-limited
-	mux.HandleFunc("GET /schedule", s.schedule)
+	mux.HandleFunc("GET /{$}", s.landing)                   // public, not behind forward-auth
+	mux.HandleFunc("GET /about", s.about)                   // public
+	mux.HandleFunc("GET /why", s.why)                       // public
+	mux.HandleFunc("GET /contact", s.contactPage)           // public
+	mux.HandleFunc("POST /contact", s.submitContact)        // public, rate-limited
+	mux.HandleFunc("GET /schedule", s.withUser(s.schedule)) // appShell gates internally too; wrapped for uniformity with the other app pages
 	mux.HandleFunc("GET /vehicles", s.withUser(s.vehiclesPage))
 	mux.HandleFunc("GET /activity", s.withUser(s.activityPage))
 	mux.HandleFunc("GET /settings", s.withUser(s.settingsPage))
@@ -343,7 +356,15 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrimary bool) {
 	u, _ := identity.FromContext(ctx)
 	user = u.Email
-	if primary, ok, err := s.store.MemberAccount(ctx, user); err == nil && ok && primary != "" {
+	primary, ok, err := s.store.MemberAccount(ctx, user)
+	if err != nil {
+		// Fails toward "own account": all data access is scoped by the resolved
+		// owner, so this can't read anyone else's data — but a secondary briefly
+		// classified as primary could pass an owner-only gate, so make the blip
+		// visible in the logs.
+		log.Printf("resolveAccount %s: membership lookup failed (treating as own account): %v", user, err)
+	}
+	if err == nil && ok && primary != "" {
 		return user, primary, false
 	}
 	return user, user, true
@@ -426,7 +447,8 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 		log.Printf("secondary %s declined updated terms, left the shared account", user)
 		msg := "You declined the updated terms, so your shared access has been removed. The account owner's data is unaffected."
 		if s.logoutURL() != "" {
-			msg += ` <a href="` + s.logoutURL() + `">Sign out</a>.`
+			s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ".")
+			return
 		}
 		s.message(w, http.StatusOK, msg)
 		return
@@ -450,7 +472,8 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := "You declined the updated terms, so your council account has been disconnected and p.stonn is no longer managing your permit. Please check your visitor permit with the council."
 	if s.logoutURL() != "" {
-		msg += ` <a href="` + s.logoutURL() + `">Sign out</a>, or accept the terms below to reconnect.`
+		s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ", or accept the terms below to reconnect.")
+		return
 	}
 	s.message(w, http.StatusOK, msg)
 }
@@ -689,10 +712,17 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 }
 
 func (s *Server) render(w http.ResponseWriter, data dashboardData) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := templates.ExecuteTemplate(w, "dashboard", data); err != nil {
+	// Execute into a buffer first: writing straight to w means a mid-render
+	// failure (a nil pointer in a view model) ships a truncated page with a 200
+	// that looks like success. Pages are small; the copy is negligible.
+	var buf bytes.Buffer
+	if err := templates.ExecuteTemplate(&buf, "dashboard", data); err != nil {
 		log.Printf("render dashboard: %v", err)
+		s.message(w, http.StatusInternalServerError, "Something went wrong rendering this page. Please try again.")
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 // appShell resolves the signed-in user and the pre-app gating (must be linked,
@@ -949,8 +979,10 @@ func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	user, _, _ := s.resolveAccount(r.Context())
 	if err := s.notify.SendTest(r.Context(), user); err != nil {
+		// Details (SMTP hosts, dial errors, ntfy URLs) go to the log, not the
+		// browser.
 		log.Printf("test notify %s: %v", user, err)
-		s.message(w, http.StatusBadGateway, "Couldn't send the test notification: "+err.Error())
+		s.message(w, http.StatusBadGateway, "Couldn't send the test notification. Check your channels in Settings, and ask the operator to check the logs if it keeps failing.")
 		return
 	}
 	http.Redirect(w, r, "/settings?tested=1", http.StatusSeeOther)
@@ -1284,8 +1316,13 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pid, err := s.store.UpsertPermit(ctx, owner, cpid, match.PermitTypeID,
-		strings.TrimSpace(r.FormValue("label")))
+		cleanLabel(r.FormValue("label")))
 	if err != nil {
+		if errors.Is(err, store.ErrDuplicate) {
+			// Raced the pre-check above: another account claimed it in between.
+			s.message(w, http.StatusConflict, "That permit is already being managed by another account.")
+			return
+		}
 		s.serverError(w, err)
 		return
 	}
@@ -1410,9 +1447,21 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Enter your council password.")
 		return
 	}
+	// Throttle password attempts per user: every submit forwards the password to
+	// the council's own login, and hammering it could trip the council's lockout
+	// on the user's real account (the username is pinned to their email, so this
+	// is no oracle against anyone else's).
+	if !s.councilTry.allow(user) {
+		s.message(w, http.StatusTooManyRequests, "Too many attempts in a short time. Please wait 15 minutes and try again.")
+		return
+	}
 	savePassword := r.FormValue("save_password") != ""
 	if err := s.council.Link(r.Context(), user, user, password, savePassword, true); err != nil {
 		log.Printf("council link for %s: %v", user, err)
+		if errors.Is(err, parking.ErrCouncilBusy) {
+			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
+			return
+		}
 		s.message(w, http.StatusBadGateway, "Couldn't link your council account. Check that your password is correct and that your council account uses this email address.")
 		return
 	}
@@ -1599,7 +1648,15 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	weekday := time.Weekday(atoi(r.FormValue("weekday")))
+	// Strict parse: atoi would map garbage to 0 (= Sunday), silently setting the
+	// wrong day; an out-of-range value would persist as an invisible row Resolve
+	// never matches.
+	wd, werr := strconv.Atoi(strings.TrimSpace(r.FormValue("weekday")))
+	if werr != nil || wd < 0 || wd > 6 {
+		s.formError(w, r, "That day isn't valid. Please reload the page and try again.")
+		return
+	}
+	weekday := time.Weekday(wd)
 	vehicleID := atoi64(r.FormValue("vehicle_id"))
 	var err error
 	if vehicleID == 0 {
@@ -1789,6 +1846,19 @@ func (s *Server) message(w http.ResponseWriter, code int, msg string) {
 	// user input into this sink.
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#1a2233">`+
 		`<p>%s</p><p><a href="/">&larr; Back</a></p>`, template.HTMLEscapeString(msg))
+}
+
+// messageWithLink is message with an inline action link rendered as real
+// markup. Callers must never concatenate HTML into msg — message() escapes it,
+// which is exactly right for text and turns embedded tags into literal angle
+// brackets. after is escaped text following the link (e.g. a trailing clause).
+func (s *Server) messageWithLink(w http.ResponseWriter, code int, msg, label, href, after string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
+	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#1a2233">`+
+		`<p>%s <a href="%s">%s</a>%s</p><p><a href="/">&larr; Back</a></p>`,
+		template.HTMLEscapeString(msg), template.HTMLEscapeString(href),
+		template.HTMLEscapeString(label), template.HTMLEscapeString(after))
 }
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {

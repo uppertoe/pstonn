@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -155,9 +156,11 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	if _, err := s.UpsertPermit(ctx, alice, "14576", "14", "Alice permit"); err != nil {
 		t.Fatal(err)
 	}
-	// Bob tries to claim Alice's permit id.
-	if _, err := s.UpsertPermit(ctx, bob, "14576", "14", "Bob steal"); err != nil {
-		t.Fatal(err)
+	// Bob tries to claim Alice's permit id: no takeover, and no silent success —
+	// returning Alice's row id as if it were Bob's would hand a foreign id to
+	// any caller that then writes through it.
+	if _, err := s.UpsertPermit(ctx, bob, "14576", "14", "Bob steal"); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("foreign upsert = %v, want ErrDuplicate", err)
 	}
 	p, err := s.PermitByCouncilID(ctx, "14576")
 	if err != nil {
@@ -1504,5 +1507,219 @@ func TestActiveGuestOverridePlate(t *testing.T) {
 	}
 	if _, ok := s.ActiveGuestOverridePlate(ctx, pid, 42, now); ok {
 		t.Fatal("a swept override must not be reported")
+	}
+}
+
+// Regression: AdminAccounts used to hold pointers into the result slice while
+// still appending to it; once append reallocated, the plate fold-in wrote into
+// the abandoned backing array and most accounts came back with no plates.
+func TestAdminAccountsPlatesSurviveSliceGrowth(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	owners := []string{"a@x.com", "b@x.com", "c@x.com", "d@x.com", "e@x.com"}
+	for i, owner := range owners {
+		pid, err := s.UpsertPermit(ctx, owner, "CP-"+owner, "type", "Permit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg := []string{"AAA000", "BBB111", "CCC222", "DDD333", "EEE444"}[i]
+		if err := s.SetPermitActive(ctx, pid, reg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accounts, err := s.AdminAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != len(owners) {
+		t.Fatalf("got %d accounts, want %d", len(accounts), len(owners))
+	}
+	for _, a := range accounts {
+		if len(a.Plates) != 1 {
+			t.Errorf("account %s has plates %v, want exactly one", a.Owner, a.Plates)
+		}
+	}
+}
+
+// Regression: for a database old enough to lack override.registration, the
+// table rebuild ran AFTER the ALTER loop had added guest_token_id but recreated
+// the table without it — every guest-override insert then failed with "no such
+// column" until the next restart re-added it. Start from the true legacy schema
+// and assert the migrated table accepts a guest override.
+func TestMigrateLegacyOverrideTableKeepsGuestTokenID(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy.db")
+
+	// Hand-build the legacy override table (NOT NULL vehicle_id, no
+	// registration, no guest_token_id) plus the tables it references, so
+	// migrate()'s CREATE IF NOT EXISTS keeps them and the rebuild path runs.
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE permit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner TEXT NOT NULL,
+    council_permit_id TEXT NOT NULL UNIQUE,
+    permit_type_id TEXT NOT NULL DEFAULT '',
+    label TEXT NOT NULL DEFAULT '',
+    active_registration TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+)`,
+		`CREATE TABLE vehicle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner TEXT NOT NULL,
+    registration TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
+)`,
+		`CREATE TABLE override (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+)`,
+		`INSERT INTO permit (owner, council_permit_id) VALUES ('a@x.com', 'CP-1')`,
+		`INSERT INTO vehicle (owner, registration) VALUES ('a@x.com', 'AAA111')`,
+		`INSERT INTO override (permit_id, vehicle_id, starts_at, created_at)
+    VALUES (1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("legacy setup %q: %v", stmt, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("migrate legacy db: %v", err)
+	}
+	defer s.Close()
+
+	// The pre-existing row must survive the rebuild.
+	if has, err := s.columnExists("override", "guest_token_id"); err != nil || !has {
+		t.Fatalf("guest_token_id missing after migration (err=%v)", err)
+	}
+	// And a guest override must be insertable in THIS process, not just after
+	// another restart.
+	end := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	if _, err := s.CreateGuestPlateOverride(ctx, 1, "BBB222", time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), &end, "guest", 7); err != nil {
+		t.Fatalf("guest override insert after legacy migration: %v", err)
+	}
+}
+
+// oauth_state rows are written by unauthenticated visitors: they must be
+// single-use (atomic take), expire, and get swept rather than accumulate.
+func TestOAuthStateLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	if err := s.PutOAuthState(ctx, "st1", "ver", "non", "app"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.TakeOAuthState(ctx, "st1")
+	if err != nil || got.Verifier != "ver" || got.Nonce != "non" || got.Kind != "app" {
+		t.Fatalf("take = %+v, %v", got, err)
+	}
+	// Single use: the second take must miss.
+	if _, err := s.TakeOAuthState(ctx, "st1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second take err = %v, want ErrNotFound", err)
+	}
+
+	// Expired: backdate a row past the TTL; it must not be redeemable and the
+	// next Put must sweep it.
+	if err := s.PutOAuthState(ctx, "old", "v", "n", "app"); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().UTC().Add(-oauthStateTTL - time.Minute).Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `UPDATE oauth_state SET created_at = ? WHERE state = 'old'`, stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TakeOAuthState(ctx, "old"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired take err = %v, want ErrNotFound", err)
+	}
+	if err := s.PutOAuthState(ctx, "fresh", "v", "n", "app"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_state WHERE state = 'old'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("expired oauth_state row was not swept by Put")
+	}
+}
+
+// The door QR is public: pending requests must dedup per plate, cap per grant,
+// expire when unanswered, and purge (visitor plates are PII) once decided.
+func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "alice@example.com"
+	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum")
+	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
+	gid, err := s.CreateGuestGrant(ctx, owner, p, "door", false, []int64{v},
+		[]GuestRecipient{{Email: "door@example.com", TokenHash: "hashD"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same plate re-scan reuses the pending request.
+	id1, n1, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "nonce1")
+	if err != nil || !created {
+		t.Fatalf("first request: id=%d created=%v err=%v", id1, created, err)
+	}
+	id2, n2, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "nonce2")
+	if err != nil || created || id2 != id1 || n2 != n1 {
+		t.Fatalf("re-scan should reuse: id=%d created=%v err=%v", id2, created, err)
+	}
+
+	// Distinct plates fill the cap; one more is refused.
+	for i := 0; i < maxPendingGuestRequests-1; i++ {
+		plate := "BBB10" + string(rune('0'+i))
+		if _, _, _, err := s.CreateGuestRequest(ctx, gid, p, owner, plate, "n"); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if _, _, _, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "n"); !errors.Is(err, ErrGuestRequestLimit) {
+		t.Fatalf("over-cap err = %v, want ErrGuestRequestLimit", err)
+	}
+	// But an existing plate still resolves to its pending row at the cap.
+	if id, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "n"); err != nil || created || id != id1 {
+		t.Fatalf("dup at cap: id=%d created=%v err=%v", id, created, err)
+	}
+
+	// Expiry: age everything past the TTL; pending rows become expired (which a
+	// decide can no longer touch) and the cap frees up.
+	if _, err := s.db.ExecContext(ctx, `UPDATE guest_request SET requested_at = '2020-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.ExpireGuestRequests(ctx, time.Now().Add(-time.Hour))
+	if err != nil || n != int64(maxPendingGuestRequests) {
+		t.Fatalf("expired %d, err=%v; want %d", n, err, maxPendingGuestRequests)
+	}
+	if _, err := s.DecideGuestRequest(ctx, owner, id1, true, "today"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deciding an expired request must fail, got %v", err)
+	}
+	if _, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "n"); err != nil || !created {
+		t.Fatalf("cap should free after expiry: created=%v err=%v", created, err)
+	}
+
+	// Purge: decided/expired rows older than the window are deleted.
+	if _, err := s.PurgeDecidedGuestRequests(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM guest_request`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 1 { // only the fresh ZZZ999 pending row remains
+		t.Fatalf("rows after purge = %d, want 1", left)
 	}
 }

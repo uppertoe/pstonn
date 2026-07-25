@@ -8,16 +8,27 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("not found")
+
+// sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE. Matching the numeric
+// result code (rather than the error string) means a driver upgrade that
+// rewords its messages can't break duplicate detection.
+const sqliteConstraintUnique = 2067
+
+func isUniqueViolation(err error) bool {
+	var se *sqlite.Error
+	return errors.As(err, &se) && se.Code() == sqliteConstraintUnique
+}
 
 // ErrDuplicate is returned when an insert violates a uniqueness constraint.
 var ErrDuplicate = errors.New("already exists")
@@ -67,7 +78,14 @@ func OpenSQLite(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1) // SQLite writer is single; avoids "database is locked".
+	// SQLite writer is single; avoids "database is locked".
+	//
+	// INVARIANT this creates: with one pooled connection, any db.Query/Exec
+	// issued while a rows cursor is still open BLOCKS FOREVER waiting for the
+	// connection (a hang, not an error). Never nest a query inside rows
+	// iteration — materialise the rows into a slice first, then issue follow-up
+	// queries (see ListGuestGrants, CreateVehicle for the pattern).
+	db.SetMaxOpenConns(1)
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
@@ -88,6 +106,28 @@ func OpenSQLite(path string) (*Store, error) {
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
+
+// Snapshot writes a consistent point-in-time copy of the database to path via
+// VACUUM INTO. File-level backup tools (restic on the volume) can read the live
+// db and WAL at different instants and produce a backup that doesn't restore;
+// this snapshot file is always a coherent database, so back THAT up.
+func (s *Store) Snapshot(ctx context.Context, path string) error {
+	_ = os.Remove(path) // VACUUM INTO refuses to overwrite an existing file
+	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	return err
+}
+
+// PruneApplyLog deletes apply-log rows older than before. The log otherwise
+// grows by one row per apply event forever. Losing an idle permit's very last
+// row only means one duplicate log entry on its next apply — harmless.
+func (s *Store) PruneApplyLog(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM apply_log WHERE at < ?`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
 
 func (s *Store) migrate() error {
 	const schema = `
@@ -326,6 +366,9 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE guest_token ADD COLUMN baseline_plate TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_token ADD COLUMN baseline_until TEXT NOT NULL DEFAULT ''`,
 	} {
+		// String match is unavoidable here: SQLite reports a duplicate column as a
+		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
+		// The message text comes from SQLite core itself and is stable.
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
@@ -382,18 +425,23 @@ func (s *Store) rebuildOverrideTable() error {
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
+		// Must mirror the base schema exactly: the ALTER loop has already run, so
+		// omitting a column it added (guest_token_id, once) would silently drop it
+		// from the rebuilt table and break every guest-override insert until the
+		// next restart re-added it.
 		`CREATE TABLE override_new (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    permit_id    INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
-    vehicle_id   INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,
-    registration TEXT NOT NULL DEFAULT '',
-    starts_at    TEXT NOT NULL,
-    ends_at      TEXT,
-    created_by   TEXT NOT NULL DEFAULT '',
-    created_at   TEXT NOT NULL
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id      INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    vehicle_id     INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,
+    registration   TEXT NOT NULL DEFAULT '',
+    starts_at      TEXT NOT NULL,
+    ends_at        TEXT,
+    created_by     TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    guest_token_id INTEGER NOT NULL DEFAULT 0
 )`,
-		`INSERT INTO override_new (id, permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
-    SELECT id, permit_id, vehicle_id, '', starts_at, ends_at, created_by, created_at FROM override`,
+		`INSERT INTO override_new (id, permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
+    SELECT id, permit_id, vehicle_id, '', starts_at, ends_at, created_by, created_at, guest_token_id FROM override`,
 		`DROP TABLE override`,
 		`ALTER TABLE override_new RENAME TO override`,
 		`CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id)`,
@@ -527,7 +575,7 @@ func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label st
 		`INSERT INTO vehicle (owner, registration, label, color, created_at) VALUES (?, ?, ?, ?, ?)`,
 		owner, registration, label, pickVehicleColor(used), nowUTC())
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint") {
+		if isUniqueViolation(err) {
 			return 0, ErrDuplicate
 		}
 		return 0, err
@@ -692,8 +740,16 @@ WHERE permit.owner = excluded.owner`,
 	if err != nil {
 		return 0, err
 	}
+	// Owner-scoped follow-up: when the guarded upsert no-ops because ANOTHER
+	// account holds this council permit, the unscoped select would hand back the
+	// foreign row id as a success — a landmine for any caller that then writes
+	// through it (the handler pre-checks, but a check/upsert race gets here).
 	var id int64
-	err = s.db.QueryRowContext(ctx, `SELECT id FROM permit WHERE council_permit_id = ?`, councilPermitID).Scan(&id)
+	err = s.db.QueryRowContext(ctx,
+		`SELECT id FROM permit WHERE council_permit_id = ? AND owner = ?`, councilPermitID, owner).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrDuplicate // held by another account
+	}
 	return id, err
 }
 
@@ -1331,7 +1387,9 @@ ORDER BY o.owner`)
 	}
 	defer rows.Close()
 	var out []AdminAccount
-	byOwner := map[string]*AdminAccount{}
+	// Indexes into out, not pointers: append may reallocate the backing array,
+	// which would leave earlier pointers writing into the abandoned copy.
+	byOwner := map[string]int{}
 	for rows.Next() {
 		var a AdminAccount
 		var cookie, linked, warmed, expiry, lastAt string
@@ -1349,7 +1407,7 @@ ORDER BY o.owner`)
 		a.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
 		a.LastApplyAt, _ = time.Parse(time.RFC3339, lastAt)
 		out = append(out, a)
-		byOwner[a.Owner] = &out[len(out)-1]
+		byOwner[a.Owner] = len(out) - 1
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1366,8 +1424,8 @@ ORDER BY o.owner`)
 		if err := prows.Scan(&owner, &reg); err != nil {
 			return nil, err
 		}
-		if a := byOwner[owner]; a != nil {
-			a.Plates = append(a.Plates, reg)
+		if i, ok := byOwner[owner]; ok {
+			out[i].Plates = append(out[i].Plates, reg)
 		}
 	}
 	return out, prows.Err()
@@ -1439,6 +1497,9 @@ func (s *Store) AddMember(ctx context.Context, owner, memberEmail string) error 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO account_member (member_email, owner, added_at) VALUES (?, ?, ?)`,
 		memberEmail, owner, nowUTC())
+	if isUniqueViolation(err) {
+		return ErrDuplicate
+	}
 	return err
 }
 
@@ -1617,20 +1678,6 @@ const outboxDedupWindow = 15 * time.Minute
 // equivalent row is still pending, or was delivered within outboxDedupWindow, the
 // enqueue is a no-op (idempotency) so a repeated trigger can't double-send.
 func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
-	if it.DedupKey != "" {
-		var exists int
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM outbox
-			  WHERE dedup_key = ?
-			    AND (status = 'pending' OR (status = 'sent' AND sent_at > ?)))`,
-			it.DedupKey, time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339)).
-			Scan(&exists); err != nil {
-			return err
-		}
-		if exists == 1 {
-			return nil
-		}
-	}
 	now := nowUTC()
 	// next_attempt defaults to now, or NotBefore when the caller defers delivery
 	// (quiet hours). created_at stays "now" so ordering/purge use the real time.
@@ -1638,11 +1685,19 @@ func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 	if !it.NotBefore.IsZero() && it.NotBefore.After(time.Now()) {
 		nextAttempt = it.NotBefore.UTC().Format(time.RFC3339)
 	}
+	// Dedup guard and insert are ONE statement: a separate check-then-insert lets
+	// two concurrent triggers (web handler + scheduler both enqueueing the same
+	// outcome) each pass the check and double-insert — defeating the dedup this
+	// exists for.
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10
+WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
+  WHERE dedup_key = ?2
+    AND (status = 'pending' OR (status = 'sent' AND sent_at > ?11)))`,
 		it.Account, it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
-		it.Subject, it.Body, nextAttempt, now)
+		it.Subject, it.Body, nextAttempt, now,
+		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -1807,27 +1862,38 @@ type OAuthState struct {
 	Kind     string
 }
 
+// oauthStateTTL bounds how long an authorization request stays redeemable. A
+// login round-trip takes seconds; anything older is an abandoned attempt or a
+// captured state being replayed.
+const oauthStateTTL = 15 * time.Minute
+
 func (s *Store) PutOAuthState(ctx context.Context, state, verifier, nonce, kind string) error {
+	// Rows are written by unauthenticated visitors and only deleted on a
+	// completed login, so sweep expired ones here or the table grows without
+	// bound under bot traffic. Best-effort: a sweep failure must not block login.
+	cutoff := time.Now().UTC().Add(-oauthStateTTL).Format(time.RFC3339)
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM oauth_state WHERE created_at < ?`, cutoff)
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO oauth_state (state, verifier, nonce, kind, created_at) VALUES (?, ?, ?, ?, ?)`,
 		state, verifier, nonce, kind, nowUTC())
 	return err
 }
 
-// TakeOAuthState returns and deletes the stored state (single use).
+// TakeOAuthState returns and deletes the stored state (single use). The delete
+// and read are one atomic statement so two concurrent presentations of the same
+// state cannot both succeed, and a state older than oauthStateTTL is treated as
+// never stored.
 func (s *Store) TakeOAuthState(ctx context.Context, state string) (OAuthState, error) {
 	var os OAuthState
+	cutoff := time.Now().UTC().Add(-oauthStateTTL).Format(time.RFC3339)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT verifier, nonce, kind FROM oauth_state WHERE state = ?`, state).
+		`DELETE FROM oauth_state WHERE state = ? AND created_at >= ? RETURNING verifier, nonce, kind`,
+		state, cutoff).
 		Scan(&os.Verifier, &os.Nonce, &os.Kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return os, ErrNotFound
 	}
-	if err != nil {
-		return os, err
-	}
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM oauth_state WHERE state = ?`, state)
-	return os, nil
+	return os, err
 }
 
 // ---- Guest passes ----
@@ -2259,7 +2325,34 @@ func (s *Store) RevokePrintedGrant(ctx context.Context, owner string, grantID in
 // duplicate requests (and duplicate approval nudges). Returns the request id, the
 // effective nonce (the reused row's, so its status page keeps working), and
 // whether a NEW request was created (the caller only notifies when it did).
+// ErrGuestRequestLimit means the grant already has the maximum number of open
+// pending requests. The door QR is deliberately public, so without a cap anyone
+// who has seen the poster could flood the holder's approval queue (and their
+// notification channels) with junk plates.
+var ErrGuestRequestLimit = errors.New("store: too many pending requests for this grant")
+
+// maxPendingGuestRequests bounds open pending rows per grant.
+const maxPendingGuestRequests = 5
+
 func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (id int64, effNonce string, created bool, err error) {
+	// Dedup (same plate re-scan reuses the pending request), the pending cap, and
+	// the insert are ONE guarded statement: a separate check-then-insert lets two
+	// simultaneous scans both pass the check and double-insert/over-fill.
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at)
+		 SELECT ?1, ?2, ?3, ?4, ?5, 'pending', ?6
+		 WHERE NOT EXISTS (SELECT 1 FROM guest_request WHERE grant_id = ?1 AND plate = ?4 AND status = 'pending')
+		   AND (SELECT COUNT(*) FROM guest_request WHERE grant_id = ?1 AND status = 'pending') < ?7`,
+		grantID, owner, permitID, plate, nonce, nowUTC(), maxPendingGuestRequests)
+	if err != nil {
+		return 0, "", false, err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		id, err = res.LastInsertId()
+		return id, nonce, true, err
+	}
+	// The guarded insert declined: either this plate already has a pending
+	// request (reuse it) or the grant is at its pending cap.
 	var existingID int64
 	var existingNonce string
 	e := s.db.QueryRowContext(ctx,
@@ -2271,14 +2364,34 @@ func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64,
 	if e != sql.ErrNoRows {
 		return 0, "", false, e
 	}
+	return 0, "", false, ErrGuestRequestLimit
+}
+
+// ExpireGuestRequests marks pending requests older than before as expired, so a
+// stale "approve this plate?" can't be actioned days later (approving an old row
+// would silently put an unknown plate on today's permit) and abandoned scans
+// drain out of the holder's queue. Expired rows read as denied to the visitor.
+func (s *Store) ExpireGuestRequests(ctx context.Context, before time.Time) (int64, error) {
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-		grantID, owner, permitID, plate, nonce, nowUTC())
+		`UPDATE guest_request SET status = 'expired', decided_at = ? WHERE status = 'pending' AND requested_at < ?`,
+		nowUTC(), before.UTC().Format(time.RFC3339))
 	if err != nil {
-		return 0, "", false, err
+		return 0, err
 	}
-	id, err = res.LastInsertId()
-	return id, nonce, true, err
+	return res.RowsAffected()
+}
+
+// PurgeDecidedGuestRequests deletes non-pending requests older than before.
+// Visitor plates are PII; once a request is decided (or expired) there is no
+// reason to keep it beyond a short audit window.
+func (s *Store) PurgeDecidedGuestRequests(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM guest_request WHERE status != 'pending' AND requested_at < ?`,
+		before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // GuestRequestForPoll returns a request only if the nonce matches — the visitor's
@@ -2510,6 +2623,34 @@ func (s *Store) SetGuestBaseline(ctx context.Context, tokenID int64, plate strin
 		`UPDATE guest_token SET baseline_plate = ?, baseline_until = ? WHERE id = ?`,
 		plate, until.UTC().Format(time.RFC3339), tokenID)
 	return err
+}
+
+// CaptureOrExtendGuestBaseline atomically records the revert baseline for one
+// activation: when no window is active (empty or expired) it captures plate +
+// until; when a window is active it only extends the end if the new end is
+// later — never the plate, so two near-simultaneous activations can't record
+// the guest's own first pick as the "pre-existing" plate (the race a separate
+// read-modify-write through SetGuestBaseline allows). Returns the effective
+// baseline after the update. Timestamps are RFC3339 UTC, so the lexicographic
+// SQL comparisons are chronologically correct.
+func (s *Store) CaptureOrExtendGuestBaseline(ctx context.Context, tokenID int64, plate string, until, now time.Time) (string, time.Time, error) {
+	var p, u string
+	err := s.db.QueryRowContext(ctx, `
+UPDATE guest_token SET
+  baseline_plate = CASE WHEN baseline_until = '' OR baseline_until < ?3 THEN ?1 ELSE baseline_plate END,
+  baseline_until = CASE
+      WHEN baseline_until = '' OR baseline_until < ?3 THEN ?2
+      WHEN ?2 > baseline_until THEN ?2
+      ELSE baseline_until END
+WHERE id = ?4
+RETURNING baseline_plate, baseline_until`,
+		plate, until.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339), tokenID).
+		Scan(&p, &u)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	ut, _ := time.Parse(time.RFC3339, u)
+	return p, ut, nil
 }
 
 // ClearGuestBaseline forgets a link's captured baseline (after a revert), so the

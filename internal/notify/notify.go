@@ -11,6 +11,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -176,16 +177,44 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 		return 0
 	}
 	delivered := 0
+	now := time.Now()
 	for _, d := range dels {
+		wantEmail := d.pref.EmailEnabled && s.mail.Enabled()
+		wantNtfy := d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != ""
+		if !wantEmail && !wantNtfy {
+			continue
+		}
+		// This is a routine reminder (its own wording says so), not an emergency:
+		// honour the member's quiet hours by holding it in the outbox — the
+		// expiry-sync runs on the keep-warm cadence at arbitrary times, and a
+		// 14-days-ahead warning must not ping anyone at 3am. Queuing counts as
+		// reached (the outbox retries it from here).
+		if nb := s.quietDefer(d.pref, now); !nb.IsZero() {
+			m := outMessage{
+				Account: owner, Subject: subject, Body: body,
+				NtfyPriority: "default", NtfyTag: "calendar", NotBefore: nb,
+				DedupKey: fmt.Sprintf("expiry|%s|%s|%s", owner, permitLabel, date),
+			}
+			if wantEmail {
+				m.Recipients = []string{d.email}
+			}
+			if wantNtfy {
+				m.NtfyTopic = d.pref.NtfyTopic
+			}
+			if s.enqueueSplit(ctx, m) == nil {
+				delivered++
+			}
+			continue
+		}
 		reached := false
-		if d.pref.EmailEnabled && s.mail.Enabled() {
+		if wantEmail {
 			if e := s.mail.Send(d.email, subject, body); e != nil {
 				log.Printf("notify permit-expiry email %s: %v", d.email, e)
 			} else {
 				reached = true
 			}
 		}
-		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+		if wantNtfy {
 			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, "default", "calendar"); e != nil {
 				log.Printf("notify permit-expiry ntfy %s: %v", d.email, e)
 			} else {
@@ -386,7 +415,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
 			continue // this member has no reachable channel
 		}
-		if err := s.enqueue(ctx, m); err != nil {
+		if err := s.enqueueSplit(ctx, m); err != nil {
 			return err
 		}
 	}
@@ -438,7 +467,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			if wantNtfy {
 				m.NtfyTopic = d.pref.NtfyTopic
 			}
-			if e := s.enqueue(ctx, m); e != nil {
+			if e := s.enqueueSplit(ctx, m); e != nil {
 				errs = append(errs, "queue "+d.email+": "+e.Error())
 			} else {
 				delivered++
@@ -605,7 +634,13 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 	if url != "" {
 		lines = append(lines, "", url)
 	}
-	m := outMessage{Account: owner, Subject: subject, Body: strings.Join(lines, "\n"), NtfyPriority: "high", NtfyTag: "bell"}
+	m := outMessage{
+		Account: owner, Subject: subject, Body: strings.Join(lines, "\n"),
+		NtfyPriority: "high", NtfyTag: "bell",
+		// Per-target dedup (suffixed in enqueueSplit): a re-scan of the same
+		// plate while the first nudge is still pending doesn't re-notify anyone.
+		DedupKey: fmt.Sprintf("guestreq|%s|%s|%s", owner, permitLabel, plate),
+	}
 	if s.mail.Enabled() {
 		m.Recipients, _ = s.store.AccountEmails(ctx, owner)
 	}
@@ -614,7 +649,7 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 			m.NtfyTopic = pref.NtfyTopic
 		}
 	}
-	return s.enqueue(ctx, m)
+	return s.enqueueSplit(ctx, m)
 }
 
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
@@ -633,6 +668,8 @@ func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, ta
 		return err
 	}
 	defer resp.Body.Close()
+	// Drain so the keep-alive connection is reusable.
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("ntfy returned status %d", resp.StatusCode)
 	}
@@ -698,6 +735,42 @@ func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
 		NotBefore: m.NotBefore,
 	})
+}
+
+// enqueueSplit stores one outbox row per recipient per channel. A combined row
+// has two failure modes the outbox cannot express: deliver() treats one accepted
+// email as row success (silently dropping the other recipients forever), and a
+// retry of a failed channel re-sends the channel that already succeeded
+// (duplicate ntfy pushes on every attempt). One target per row makes success,
+// retry, and dead-lettering exact. Dedup keys are suffixed per target so
+// deduplication stays per-recipient.
+func (s *Service) enqueueSplit(ctx context.Context, m outMessage) error {
+	var errs []string
+	for _, r := range m.Recipients {
+		row := m
+		row.Recipients = []string{r}
+		row.NtfyTopic = ""
+		if row.DedupKey != "" {
+			row.DedupKey += "|email|" + r
+		}
+		if err := s.enqueue(ctx, row); err != nil {
+			errs = append(errs, "queue email "+r+": "+err.Error())
+		}
+	}
+	if m.NtfyTopic != "" {
+		row := m
+		row.Recipients = nil
+		if row.DedupKey != "" {
+			row.DedupKey += "|ntfy"
+		}
+		if err := s.enqueue(ctx, row); err != nil {
+			errs = append(errs, "queue ntfy: "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // RunOutbox drains the outbox until ctx is cancelled, retrying failed sends with

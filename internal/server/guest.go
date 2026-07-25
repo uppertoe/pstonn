@@ -542,30 +542,36 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// re-capture — that would make "revert" restore the guest's own earlier pick
 	// instead of the true pre-existing plate. The window is marked even when the
 	// pre-existing plate is unknown ('' baseline: no revert offered), so a mid-run
-	// tap can't mistake the guest's own plate for the baseline.
-	if gc.BaselineUntil.IsZero() || now.After(gc.BaselineUntil) {
-		gc.BaselinePlate, gc.BaselineUntil = current, end
-	} else if end.After(gc.BaselineUntil) {
-		gc.BaselineUntil = end
+	// tap can't mistake the guest's own plate for the baseline. Done atomically
+	// in SQL: two near-simultaneous activations (a double-tap, or two family
+	// members on one shared link) must not both "capture" and record the first
+	// activation's own plate as the pre-existing one.
+	if bp, bu, err := s.store.CaptureOrExtendGuestBaseline(r.Context(), gc.TokenID, current, end, now); err == nil {
+		gc.BaselinePlate, gc.BaselineUntil = bp, bu
 	}
-	_ = s.store.SetGuestBaseline(r.Context(), gc.TokenID, gc.BaselinePlate, gc.BaselineUntil)
 
 	until := untilPhrase(now, overnight)
 	// Best-effort synchronous apply so the visitor gets a real result; the
 	// scheduler (kicked below) owns retries and eventual consistency regardless.
-	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Detached from the request context: a closed tab mid-apply must not cancel
+	// the council write halfway, nor silently drop the audit row and the
+	// displaced-driver notice after the change has already landed. Capped below
+	// the server's 20s WriteTimeout so a slow apply still leaves room to write
+	// the response.
+	bg := context.WithoutCancel(r.Context())
+	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	defer cancel()
 	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, reg)
 	s.sched.Kick()
 	if err == nil {
-		_ = s.store.SetPermitActive(r.Context(), permit.ID, reg)
-		_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "success", "activated by "+createdBy)
-		d := s.displacedDriver(r.Context(), permit, current, reg, gc.Recipient)
-		s.notifyGuestApply(r.Context(), permit, reg, name, createdBy, d)
+		_ = s.store.SetPermitActive(bg, permit.ID, reg)
+		_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "success", "activated by "+createdBy)
+		d := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
+		s.notifyGuestApply(bg, permit, reg, name, createdBy, d)
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
-	_ = s.store.RecordApply(r.Context(), permit.ID, reg, "guest", "error", err.Error())
+	_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "error", err.Error())
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The override is saved and the scheduler will apply it shortly; the pending
 		// banner + poller (from renderGuestMenu) track the ACTUAL result — no claim.
@@ -635,21 +641,24 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.ClearGuestBaseline(r.Context(), gc.TokenID)
 	gc.BaselinePlate, gc.BaselineUntil = "", time.Time{}
 
-	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Detached from the request (see guestActivate): a disconnect mid-apply must
+	// not drop the bookkeeping, and the budget stays under the WriteTimeout.
+	bg := context.WithoutCancel(r.Context())
+	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	defer cancel()
 	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, target)
 	s.sched.Kick()
 	if err == nil {
-		_ = s.store.SetPermitActive(r.Context(), permit.ID, target)
-		_ = s.store.RecordApply(r.Context(), permit.ID, target, "guest", "success", "put back by "+createdBy)
+		_ = s.store.SetPermitActive(bg, permit.ID, target)
+		_ = s.store.RecordApply(bg, permit.ID, target, "guest", "success", "put back by "+createdBy)
 		// A revert can't displace a third party: the guest's own overrides were
 		// just swept, and the baseline is only re-pinned when nothing else covers
 		// now — so there is no displaced booking to chase.
-		s.notifyGuestApply(r.Context(), permit, target, "", createdBy+" (undo)", model.DisplacedBooking{})
+		s.notifyGuestApply(bg, permit, target, "", createdBy+" (undo)", model.DisplacedBooking{})
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
-	_ = s.store.RecordApply(r.Context(), permit.ID, target, "guest", "error", err.Error())
+	_ = s.store.RecordApply(bg, permit.ID, target, "guest", "error", err.Error())
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The restore is saved; the pending banner + poller track the actual result.
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
@@ -658,11 +667,14 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
 }
 
-// guestFail reports a pre-resolution failure (bad origin, rate limit). For an
-// htmx request the whole body is swapped for the notice — the page's reload link
-// restores the menu; for a plain post it falls back to the result page.
+// guestFail reports a pre-resolution failure (bad origin, rate limit). For a
+// true htmx fragment request the whole body is swapped for the notice — the
+// page's reload link restores the menu; for a boosted (plain-form) post or a
+// non-htmx post it falls back to the full result page, since swapping a bare
+// fragment into a boosted <body> loses the card wrapper (the same bug class
+// renderGuestMenuOpts/renderGuestGone already guard against).
 func (s *Server) guestFail(w http.ResponseWriter, r *http.Request, msg string) {
-	if isHX(r) {
+	if isHX(r) && !isBoosted(r) {
 		noStore(w)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<div class="banner warn" style="margin-top:14px"><span>%s</span></div><p class="empty-note" style="margin-top:12px"><a href="">Reload this page</a> to try again.</p>`,
@@ -1006,7 +1018,25 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permit, _ := s.store.GetPermit(r.Context(), permitID)
-	s.emailLinks(owner, permitLabel(permit), []guestLinkView{{Email: recipient, URL: s.guestLink(raw)}})
+	links := []guestLinkView{{Email: recipient, URL: s.guestLink(raw)}}
+	if s.emailLinks(owner, permitLabel(permit), links) == 0 {
+		// The send failed at runtime (SMTP up-check passed, delivery didn't). The
+		// old token is already superseded, so claiming success would leave the
+		// recipient with a dead link and nothing delivered. Show the fresh link
+		// once on-page instead, like create/update do, so the owner can pass it on.
+		base, ok := s.appShell(w, r, "guests")
+		if !ok {
+			return
+		}
+		if err := s.loadGuests(r.Context(), &base, 0); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		base.NewGuestLinks = links
+		base.Flash = "The email could not be sent. Copy the fresh link below and share it yourself — the old link no longer works."
+		s.render(w, base)
+		return
+	}
 	http.Redirect(w, r, "/guests?resent="+url.QueryEscape(recipient), http.StatusSeeOther)
 }
 
@@ -1241,6 +1271,10 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		return
 	}
 	reqID, nonce, created, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, randNonce())
+	if errors.Is(err, store.ErrGuestRequestLimit) {
+		s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please knock or contact them directly.")
+		return
+	}
 	if err != nil {
 		s.renderGuestResult(w, "", false, "Something went wrong sending your request. Please try again.")
 		return
@@ -1264,6 +1298,10 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
+		if req.Status == "expired" {
+			// Aged out unanswered; to the visitor that is a "not approved".
+			v.Status = "denied"
+		}
 		// "approved" means the resident said yes; only report it as ON the permit
 		// once the council's own record (active_registration, set from a confirmed
 		// read-back by the apply or the scheduler) actually shows the plate. Until
@@ -1285,6 +1323,13 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		// keep polling.
 		log.Printf("guest poll %d: %v", id, err)
 		v = guestWaitView{ReqID: id, Nonce: nonce, Status: "pending"}
+	}
+	if !isHX(r) {
+		// A direct navigation (bookmark, or a browser that landed here after a
+		// network hiccup) gets the full wait page — with styling and the poller —
+		// not the bare fragment.
+		s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation, Wait: &v})
+		return
 	}
 	if e := templates.ExecuteTemplate(w, "guest-req-status", v); e != nil {
 		log.Printf("render guest-req-status: %v", e)
@@ -1450,15 +1495,18 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	// otherwise. SetVehicle returns nil only once the council confirms the plate.
 	confirmed := false
 	prev := permit.ActiveRegistration
-	applyCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Detached from the request (see guestActivate): a disconnect mid-apply must
+	// not drop the bookkeeping, and the budget stays under the WriteTimeout.
+	bg := context.WithoutCancel(r.Context())
+	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
-		_ = s.store.SetPermitActive(r.Context(), permit.ID, req.Plate)
-		_ = s.store.RecordApply(r.Context(), permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
+		_ = s.store.SetPermitActive(bg, permit.ID, req.Plate)
+		_ = s.store.RecordApply(bg, permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
 		confirmed = true
 		// The approved plate may have bumped a still-live booking's car off the
 		// permit; warn that driver if they're reachable. The approving member saw
 		// the change happen, so no account annotation is needed here.
-		s.displacedDriver(r.Context(), permit, prev, req.Plate, user)
+		s.displacedDriver(bg, permit, prev, req.Plate, user)
 	}
 	cancel()
 	s.sched.Kick()

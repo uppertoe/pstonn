@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -28,8 +29,11 @@ type tokenResponse struct {
 // silentRenew performs a prompt=none Authorization-Code + PKCE flow using the
 // stored session cookie, returning a fresh access token, its expiry, and the
 // (possibly rotated) cookie header. It returns ErrSessionExpired when the cookie
-// is no longer accepted (login_required), which signals the user must re-link.
-func (c *Client) silentRenew(ctx context.Context, cookie string) (string, time.Time, string, error) {
+// is no longer accepted (login_required), which signals the user must re-link,
+// and ErrCouncilBusy (recording a per-owner penalty) when the IDM endpoint
+// itself pushes back — the /idm path is the most bot-sensitive surface, so it
+// gets the same backoff discipline as the permit API.
+func (c *Client) silentRenew(ctx context.Context, owner, cookie string) (string, time.Time, string, error) {
 	verifier, err := randToken()
 	if err != nil {
 		return "", time.Time{}, "", err
@@ -55,6 +59,9 @@ func (c *Client) silentRenew(ctx context.Context, cookie string) (string, time.T
 
 	newCookie := mergeSetCookie(cookie, resp.Cookies())
 
+	if busy := c.classifyPushback(owner, resp); busy != nil {
+		return "", time.Time{}, "", busy
+	}
 	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		return "", time.Time{}, "", fmt.Errorf("parking: silent-renew authorize: unexpected status %d", resp.StatusCode)
 	}
@@ -70,11 +77,22 @@ func (c *Client) silentRenew(ctx context.Context, cookie string) (string, time.T
 		return "", time.Time{}, "", ErrSessionExpired
 	}
 
-	tok, err := c.exchangeCode(ctx, code, verifier)
+	tok, err := c.exchangeCode(ctx, owner, code, verifier)
 	if err != nil {
 		return "", time.Time{}, "", err
 	}
 	return tok.AccessToken, time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second), newCookie, nil
+}
+
+// classifyPushback records a per-owner penalty and returns ErrCouncilBusy when
+// the response is Akamai/rate-limit push-back (429/403/503); nil otherwise.
+func (c *Client) classifyPushback(owner string, resp *http.Response) error {
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests, http.StatusForbidden, http.StatusServiceUnavailable:
+		c.penalize(owner, parseRetryAfter(resp))
+		return fmt.Errorf("%w: council returned %d", ErrCouncilBusy, resp.StatusCode)
+	}
+	return nil
 }
 
 // authorizeQuery builds the common authorize parameters for a PKCE code flow.
@@ -100,7 +118,7 @@ func (c *Client) authorizeQuery(verifier string) (url.Values, error) {
 }
 
 // exchangeCode swaps an authorization code for tokens at the token endpoint.
-func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*tokenResponse, error) {
+func (c *Client) exchangeCode(ctx context.Context, owner, code, verifier string) (*tokenResponse, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -120,6 +138,9 @@ func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*toke
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if busy := c.classifyPushback(owner, resp); busy != nil {
+		return nil, busy
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("parking: token endpoint status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -147,6 +168,11 @@ func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*toke
 func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword, interactive bool) error {
 	if c.sandbox != nil {
 		return c.sandboxLink(ctx, owner, username) // any credentials link in sandbox mode
+	}
+	// Honour an existing push-back cooldown: retrying the login while Akamai is
+	// already refusing this owner is how a soft block escalates to a hard one.
+	if d, blocked := c.cooldownFor(owner); blocked {
+		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -185,6 +211,9 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	resp.Body.Close()
 	if err != nil {
 		return err
+	}
+	if busy := c.classifyPushback(owner, resp); busy != nil {
+		return busy
 	}
 	loginURL := resp.Request.URL // final URL after redirects = the login form
 
@@ -226,6 +255,9 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	}
 	io.Copy(io.Discard, presp.Body)
 	presp.Body.Close()
+	if busy := c.classifyPushback(owner, presp); busy != nil {
+		return busy
+	}
 
 	// 4. Extract the council session cookie (scoped to /idm) from the jar.
 	authURLParsed, err := url.Parse(c.authURL)
@@ -275,7 +307,13 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	}
 	password, err := c.box.Open(cs.Password)
 	if err != nil {
-		return err
+		// A decrypt failure (e.g. DATA_ENCRYPTION_KEY rotated) is deterministic:
+		// retrying it every scheduler pass never heals and never tells the user.
+		// Map it to ErrNoSavedPassword so the retire-and-notify path fires and the
+		// dashboard prompts a manual re-link — the same mapping openCookie applies
+		// to the identical failure on the session cookie.
+		log.Printf("parking: unseal saved password for %s failed (%v); treating as no saved password (manual re-link required)", owner, err)
+		return ErrNoSavedPassword
 	}
 	// The council username is pinned to the owner's verified email at link time,
 	// so the owner doubles as the username here. interactive=false keeps the saved
@@ -358,6 +396,13 @@ func mergeSetCookie(existing string, set []*http.Cookie) string {
 		vals[name] = val
 	}
 	for _, ck := range set {
+		// A deletion (Max-Age<=0 or an Expires in the past) means the server wants
+		// the cookie GONE; keeping "name=" would re-send a credential the IDM
+		// meant to clear.
+		if ck.MaxAge < 0 || (!ck.Expires.IsZero() && ck.Expires.Before(time.Now())) {
+			delete(vals, ck.Name)
+			continue
+		}
 		if _, seen := vals[ck.Name]; !seen {
 			order = append(order, ck.Name)
 		}
@@ -365,7 +410,9 @@ func mergeSetCookie(existing string, set []*http.Cookie) string {
 	}
 	parts := make([]string, 0, len(order))
 	for _, name := range order {
-		parts = append(parts, name+"="+vals[name])
+		if v, ok := vals[name]; ok {
+			parts = append(parts, name+"="+v)
+		}
 	}
 	return strings.Join(parts, "; ")
 }

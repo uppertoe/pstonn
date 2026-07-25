@@ -33,7 +33,7 @@ func TestLiveCheckSession(t *testing.T) {
 	ctx := context.Background()
 	c, _, _ := liveClient(t)
 
-	at, exp, next, err := c.silentRenew(ctx, cookie)
+	at, exp, next, err := c.silentRenew(ctx, "live-test", cookie)
 	switch {
 	case err == nil:
 		t.Logf("ALIVE ✓ the session still stands, silent-renew minted a fresh token (expires %s, %s from now).",

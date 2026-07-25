@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -103,11 +105,19 @@ func run() error {
 		PublicBaseURL: cfg.PublicBaseURL,
 		Notifier:      notifier,
 		RateDelay:     3 * time.Second,
+		// A daily consistent snapshot next to the live DB: the restic files-only
+		// backup of the volume can catch the live db + WAL mid-write, but this
+		// file is always a coherent database to restore from.
+		SnapshotPath: filepath.Join(filepath.Dir(cfg.SQLitePath), "backup-snapshot.db"),
 	})
 	srv := server.New(cfg, st, sessions, auth, council, sched, notifier, mail, box)
 
-	go sched.Run(ctx)
-	go notifier.RunOutbox(ctx) // drain the durable notification queue with retry/backoff
+	// Track the worker loops so shutdown can join them: st.Close() runs on
+	// return from this function, and closing the store under a loop that is
+	// mid-DB-call (or mid-council-write) could truncate an in-flight apply.
+	loopsDone := make(chan struct{}, 2)
+	go func() { sched.Run(ctx); loopsDone <- struct{}{} }()
+	go func() { notifier.RunOutbox(ctx); loopsDone <- struct{}{} }() // drain the durable notification queue with retry/backoff
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -133,7 +143,18 @@ func run() error {
 		log.Print("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return httpServer.Shutdown(shutdownCtx)
+		err := httpServer.Shutdown(shutdownCtx)
+		// Join the scheduler and outbox loops (bounded by the same deadline)
+		// before the deferred st.Close() runs.
+		for i := 0; i < cap(loopsDone); i++ {
+			select {
+			case <-loopsDone:
+			case <-shutdownCtx.Done():
+				log.Print("shutdown: worker loops did not stop in time")
+				return err
+			}
+		}
+		return err
 	}
 }
 
@@ -168,7 +189,14 @@ func runHealthcheck() int {
 	if addr == "" {
 		addr = ":8080"
 	}
-	url := "http://127.0.0.1" + addr + "/healthz"
+	// Extract just the port: LISTEN_ADDR may include a host (e.g. 0.0.0.0:8080),
+	// and naive concatenation would build a garbage URL — a healthcheck that can
+	// never pass means a permanent container restart loop.
+	port := "8080"
+	if _, p, err := net.SplitHostPort(addr); err == nil && p != "" {
+		port = p
+	}
+	url := "http://127.0.0.1:" + port + "/healthz"
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {

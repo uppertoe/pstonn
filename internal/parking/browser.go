@@ -105,9 +105,13 @@ func (c *Client) cooldownFor(owner string) (time.Duration, bool) {
 // penalize records a soft block for the owner and sets an exponential cooldown
 // (2, 4, 8, … minutes, capped), honouring a Retry-After hint when present.
 func (c *Client) penalize(owner string, retryAfter time.Duration) {
+	// Serialised so concurrent penalties can't lose a strike (LoadOrStore+Store
+	// alone is a read-modify-write race).
+	c.strikeMu.Lock()
 	n, _ := c.strikes.LoadOrStore(owner, 0)
 	strikes := n.(int) + 1
 	c.strikes.Store(owner, strikes)
+	c.strikeMu.Unlock()
 
 	backoff := retryAfter
 	if backoff <= 0 {

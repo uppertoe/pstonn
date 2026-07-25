@@ -74,6 +74,7 @@ type Options struct {
 	Notifier      Notifier      // nil/disabled = no emails
 	RateDelay     time.Duration // minimum pause between council calls within a warm pass (anti-burst)
 	JitterFrac    float64       // ± fraction to randomise thresholds/delays (default 0.2)
+	SnapshotPath  string        // where to write the daily consistent DB backup snapshot ("" disables)
 }
 
 // Scheduler reconciles permits on an interval and keeps linked council sessions
@@ -103,6 +104,20 @@ type Scheduler struct {
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
 	lastAlert map[string]time.Time
+
+	// retryMu guards nextTry: per-permit earliest-next-council-attempt deadlines.
+	// A persistently failing SetVehicle would otherwise issue a real council
+	// write per permit per MINUTE forever (~1,440/day from one IP) — exactly the
+	// burst profile the jitter/rate-spacing works to avoid. In-memory only: a
+	// restart retries immediately, which is fine (the streak itself is persisted
+	// for notification thresholds).
+	retryMu sync.Mutex
+	nextTry map[int64]time.Time
+
+	// snapshotPath/lastSnapshot drive the daily VACUUM INTO backup snapshot
+	// (only touched from the warm loop, so no lock needed).
+	snapshotPath string
+	lastSnapshot time.Time
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -140,16 +155,51 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		jitterFrac:    jf,
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
+		nextTry:       make(map[int64]time.Time),
+		snapshotPath:  opts.SnapshotPath,
 	}
 }
 
 // Kick requests an immediate reconcile (e.g. after a roster/override edit).
-// Non-blocking: a pending kick is coalesced.
+// Non-blocking: a pending kick is coalesced. A kick follows a user action (a
+// schedule edit, a re-link), which may well have fixed whatever was failing, so
+// it also clears the per-permit retry backoffs — the user should not wait out a
+// stretched retry window they just made obsolete.
 func (s *Scheduler) Kick() {
+	s.retryMu.Lock()
+	clear(s.nextTry)
+	s.retryMu.Unlock()
 	select {
 	case s.trigger <- struct{}{}:
 	default:
 	}
+}
+
+// deferRetry stretches the permit's next council attempt exponentially in its
+// consecutive-failure streak (2, 4, 8, 16, 32 min from a 1-minute interval),
+// capped at 30 minutes and jittered.
+func (s *Scheduler) deferRetry(permitID int64, streak int) {
+	b := s.interval << min(streak, 5)
+	if b > 30*time.Minute {
+		b = 30 * time.Minute
+	}
+	s.retryMu.Lock()
+	s.nextTry[permitID] = time.Now().Add(s.jittered(b))
+	s.retryMu.Unlock()
+}
+
+// retryDeferred reports whether the permit is inside a failure-backoff window.
+func (s *Scheduler) retryDeferred(permitID int64, now time.Time) bool {
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	t, ok := s.nextTry[permitID]
+	return ok && now.Before(t)
+}
+
+func (s *Scheduler) clearRetry(permitID int64) {
+	s.retryMu.Lock()
+	delete(s.nextTry, permitID)
+	s.retryMu.Unlock()
 }
 
 // LastReconcile is the time the scheduler last completed a clean reconcile pass
@@ -176,9 +226,20 @@ func (s *Scheduler) Run(ctx context.Context) {
 	// — exactly the boot-time hang the dead-man's switch exists to catch.
 	s.lastReconcile.CompareAndSwap(0, time.Now().UnixNano())
 
-	go s.warmLoop(ctx) // keep-warm + reminders on their own cadence, so their
-	// rate-limit pauses never stall reconcile
-	go s.watchdog(ctx) // alert the operator if reconcile goes stale
+	// Join the helper loops before returning, so a caller that waits on Run can
+	// safely close the store afterwards (nothing is left mid-DB-call).
+	var wg sync.WaitGroup
+	wg.Add(2)
+	defer wg.Wait()
+	go func() { // keep-warm + reminders on their own cadence, so their
+		// rate-limit pauses never stall reconcile
+		defer wg.Done()
+		s.warmLoop(ctx)
+	}()
+	go func() { // alert the operator if reconcile goes stale
+		defer wg.Done()
+		s.watchdog(ctx)
+	}()
 
 	s.safeReconcile(ctx) // reconcile once at startup
 	for {
@@ -292,6 +353,34 @@ func (s *Scheduler) safeKeepWarm(ctx context.Context) {
 	s.keepWarm(ctx)
 }
 
+// sweepGuestRequests runs periodic housekeeping on the keep-warm cadence:
+// pending printed-QR requests expire after an hour (a stale "approve this
+// plate?" must not be actionable days later, and abandoned scans drain out of
+// the holder's queue), decided rows — visitor plates are PII — are purged after
+// 30 days, the apply log is pruned to a 90-day window, and a daily consistent
+// DB snapshot is written for file-level backup tools.
+func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
+	if n, err := s.store.ExpireGuestRequests(ctx, time.Now().Add(-time.Hour)); err != nil {
+		log.Printf("scheduler: expire guest requests: %v", err)
+	} else if n > 0 {
+		log.Printf("scheduler: expired %d stale guest request(s)", n)
+	}
+	if _, err := s.store.PurgeDecidedGuestRequests(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
+		log.Printf("scheduler: purge guest requests: %v", err)
+	}
+	if _, err := s.store.PruneApplyLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
+		log.Printf("scheduler: prune apply log: %v", err)
+	}
+	if s.snapshotPath != "" && time.Since(s.lastSnapshot) > 24*time.Hour {
+		if err := s.store.Snapshot(ctx, s.snapshotPath); err != nil {
+			log.Printf("scheduler: backup snapshot: %v", err)
+		} else {
+			s.lastSnapshot = time.Now()
+			log.Printf("scheduler: wrote backup snapshot %s", s.snapshotPath)
+		}
+	}
+}
+
 // warmAction is what keep-warm should do with one session this pass.
 type warmAction int
 
@@ -322,6 +411,7 @@ func decideWarm(now, linkedAt, updatedAt time.Time, maxAge, warmInterval time.Du
 // sessions whose owner has no schedule to act on (their dashboard use keeps them
 // warm), and spaces the council calls it does make within a pass (anti-burst).
 func (s *Scheduler) keepWarm(ctx context.Context) {
+	s.sweepGuestRequests(ctx)
 	sessions, err := s.store.ListCouncilSessions(ctx)
 	if err != nil {
 		log.Printf("scheduler: list council sessions: %v", err)
@@ -502,7 +592,10 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	}
 
 	// Transient/unexpected problems get a grace period; a refusal alarms at once.
+	// Either way the next attempt is deferred exponentially in the streak, so a
+	// permit that keeps failing doesn't hit the council every minute forever.
 	n := s.bumpFailStreak(ctx, p.ID)
+	s.deferRetry(p.ID, n)
 	threshold := failNotifyThreshold
 	if kind == parking.FailRejected {
 		threshold = 1
@@ -868,6 +961,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	if want == "" || want == p.ActiveRegistration {
 		return false // already correct (or unknown/foreign vehicle)
 	}
+	if s.retryDeferred(p.ID, time.Now()) {
+		return false // failing lately; inside its stretched retry window
+	}
 
 	prev := p.ActiveRegistration // the plate we're changing away from
 	err = s.council.SetVehicle(ctx, p.Owner, p, want)
@@ -875,6 +971,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	case err == nil:
 		_ = s.store.SetPermitActive(ctx, p.ID, want)
 		s.clearFailStreak(ctx, p.ID)
+		s.clearRetry(p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")
 		// If the plate we just removed had been put on by a still-live booking,
 		// warn its driver (email only) so they aren't caught out — and tell the
@@ -890,7 +987,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
 		}, "success|"+prev+">"+want)
-		if d.Contact != "" {
+		if d.Contact != "" && s.notifier != nil && s.notifier.Enabled() {
 			if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, want); err != nil {
 				log.Printf("scheduler: enqueue driver-displaced for %s: %v", d.Contact, err)
 			}
@@ -922,8 +1019,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// The cookie died between keep-warm passes. Try a saved-password
 		// auto-reconnect; failing that, retire the session once (so we stop
 		// retrying every minute) and prompt a re-link. A transient reconnect
-		// failure preserves the session for a later retry (see recoverOrRetire).
-		s.recoverOrRetire(ctx, p.Owner)
+		// failure preserves the session for a later retry (see recoverOrRetire) —
+		// spaced out, so a lingering outage isn't probed with a login per minute.
+		if !s.recoverOrRetire(ctx, p.Owner) {
+			s.deferRetry(p.ID, 3) // ~8 min between attempts while the session is unusable
+		}
 		return true
 	default:
 		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)

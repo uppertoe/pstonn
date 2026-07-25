@@ -736,3 +736,38 @@ func TestDetectSystemicOwnerCounting(t *testing.T) {
 		t.Fatalf("a single busy owner should not self-alert, got %v", got)
 	}
 }
+
+// A persistently failing permit must not hit the council every tick: after each
+// failure the next attempt is deferred exponentially, success clears the
+// deferral, and a user action (Kick) clears all deferrals immediately.
+func TestRetryBackoff(t *testing.T) {
+	s := New(nil, nil, time.UTC, Options{JitterFrac: 0.0001})
+	now := time.Now()
+
+	s.deferRetry(7, 1) // ~2 min
+	if !s.retryDeferred(7, now) {
+		t.Fatal("permit should be deferred right after a failure")
+	}
+	if s.retryDeferred(7, now.Add(3*time.Minute)) {
+		t.Fatal("a streak-1 deferral should be about 2 minutes")
+	}
+
+	s.deferRetry(7, 10) // capped at 30 min
+	if s.retryDeferred(7, now.Add(31*time.Minute)) {
+		t.Fatal("deferral must be capped at 30 minutes")
+	}
+	if !s.retryDeferred(7, now.Add(20*time.Minute)) {
+		t.Fatal("a long streak should defer well past 20 minutes")
+	}
+
+	s.clearRetry(7)
+	if s.retryDeferred(7, now) {
+		t.Fatal("success must clear the deferral")
+	}
+
+	s.deferRetry(7, 5)
+	s.Kick()
+	if s.retryDeferred(7, now) {
+		t.Fatal("Kick must clear deferrals: the user may have just fixed the cause")
+	}
+}

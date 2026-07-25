@@ -121,9 +121,10 @@ type Client struct {
 	http        *http.Client // redirects handled manually; cookies passed per-user
 	regCache    sync.Map     // councilPermitID -> cachedReg, to bound council reads
 
-	renewLocks    sync.Map // owner -> *sync.Mutex, serialises silent-renew per owner
-	cooldownUntil sync.Map // owner -> time.Time, soft-block backoff deadline
-	strikes       sync.Map // owner -> int, consecutive soft blocks (backoff growth)
+	renewLocks    sync.Map   // owner -> *sync.Mutex, serialises silent-renew per owner
+	cooldownUntil sync.Map   // owner -> time.Time, soft-block backoff deadline
+	strikes       sync.Map   // owner -> int, consecutive soft blocks (backoff growth)
+	strikeMu      sync.Mutex // serialises the strike read-modify-write in penalize
 
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
@@ -226,12 +227,23 @@ func (c *Client) accessToken(ctx context.Context, owner string) (string, error) 
 			return at, nil
 		}
 	}
+	return c.renewLocked(ctx, owner, cs)
+}
 
+// renewLocked silent-renews the owner's session and persists the fresh token
+// (and any rotated cookie). The caller must hold ownerLock(owner). The IDM
+// endpoints sit behind the same per-owner cooldown as the API: they are the
+// path most likely to attract Akamai push-back, so hammering them while blocked
+// is exactly the soft-block → hard-block escalation the backoff exists to stop.
+func (c *Client) renewLocked(ctx context.Context, owner string, cs store.CouncilSession) (string, error) {
+	if d, blocked := c.cooldownFor(owner); blocked {
+		return "", fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
+	}
 	cookie, err := c.openCookie(owner, cs.Cookie)
 	if err != nil {
 		return "", err
 	}
-	at, expiry, newCookie, err := c.silentRenew(ctx, cookie)
+	at, expiry, newCookie, err := c.silentRenew(ctx, owner, cookie)
 	if err != nil {
 		return "", err
 	}
@@ -241,14 +253,33 @@ func (c *Client) accessToken(ctx context.Context, owner string) (string, error) 
 	}
 	sealedCookie := cs.Cookie
 	if newCookie != "" && newCookie != cookie {
-		if sc, err := c.box.Seal(newCookie); err == nil {
-			sealedCookie = sc
+		// A Seal failure must not silently keep the OLD cookie: the rotation may
+		// have invalidated it, and the next renew would then look like an expiry.
+		sc, err := c.box.Seal(newCookie)
+		if err != nil {
+			return "", err
 		}
+		sealedCookie = sc
 	}
 	if err := c.store.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAccess, expiry); err != nil {
 		return "", err
 	}
 	return at, nil
+}
+
+// renewedToken force-renews after the council rejected a token mid-life (401):
+// the cached token is ignored and a fresh silent-renew runs under the owner
+// lock, so a session kicked server-side (e.g. the user logged into the portal
+// in a browser) recovers immediately instead of failing until natural expiry.
+func (c *Client) renewedToken(ctx context.Context, owner string) (string, error) {
+	lock := c.ownerLock(owner)
+	lock.Lock()
+	defer lock.Unlock()
+	cs, err := c.store.GetCouncilSession(ctx, owner)
+	if err != nil || cs.Cookie == "" {
+		return "", ErrNotLinked
+	}
+	return c.renewLocked(ctx, owner, cs)
 }
 
 // Refresh forces a silent-renew against the stored cookie even when the cached
@@ -269,25 +300,8 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 	if err != nil || cs.Cookie == "" {
 		return ErrNotLinked
 	}
-	cookie, err := c.openCookie(owner, cs.Cookie)
-	if err != nil {
-		return err
-	}
-	at, expiry, newCookie, err := c.silentRenew(ctx, cookie)
-	if err != nil {
-		return err
-	}
-	sealedAccess, err := c.box.Seal(at)
-	if err != nil {
-		return err
-	}
-	sealedCookie := cs.Cookie
-	if newCookie != "" && newCookie != cookie {
-		if sc, err := c.box.Seal(newCookie); err == nil {
-			sealedCookie = sc
-		}
-	}
-	return c.store.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAccess, expiry)
+	_, err = c.renewLocked(ctx, owner, cs)
+	return err
 }
 
 // apiRequest issues an authenticated request to the permit API as the app user.
@@ -298,7 +312,7 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 // human notifications when it fails. On any non-2xx (other than the busy codes)
 // or a transport error, apiRequest returns a classified CouncilError and no
 // response; a 2xx returns the response for the caller to decode.
-func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string, query url.Values, body io.Reader) (*http.Response, error) {
+func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string, query url.Values, body []byte) (*http.Response, error) {
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return nil, fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
@@ -306,27 +320,47 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 	if err != nil {
 		return nil, err
 	}
-	u := c.apiBase + path
-	if len(query) > 0 {
-		u += "?" + query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, method, u, body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+at)
-	req.Header.Set("Content-Type", "application/json")
-	c.xhrHeaders(req)
-	resp, err := c.http.Do(req)
+	resp, err := c.doAPI(ctx, at, method, path, query, body)
 	if err != nil {
 		// Transport error (DNS, dial, timeout, reset): transient by nature.
 		return nil, councilErr(FailTransient, op, err)
 	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		// The cached token was rejected mid-life (the council can kick a session
+		// server-side, e.g. when the user logs into the portal in a browser).
+		// Force one silent-renew and retry; if the renew itself fails the error
+		// (ErrSessionExpired, ErrCouncilBusy, …) flows out and the retire/
+		// reconnect machinery engages instead of the user seeing a false alarm.
+		drainClose(resp)
+		at, err = c.renewedToken(ctx, owner)
+		if err != nil {
+			return nil, err
+		}
+		resp, err = c.doAPI(ctx, at, method, path, query, body)
+		if err != nil {
+			return nil, councilErr(FailTransient, op, err)
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			// A freshly-minted token is still refused: not a stale-token blip.
+			drainClose(resp)
+			return nil, councilErr(FailRejected, op, errors.New("council rejected a fresh access token (401)"))
+		}
+	}
 	switch resp.StatusCode {
-	case http.StatusTooManyRequests, http.StatusForbidden, http.StatusServiceUnavailable:
+	case http.StatusForbidden:
+		// Two very different things arrive as 403: Akamai push-back (an HTML
+		// challenge page — transient, back off) and a genuine API refusal (JSON,
+		// e.g. permit access revoked — durable, will never self-heal). Treating
+		// the latter as "busy" would cooldown-loop the owner forever with a
+		// soothing "temporarily unavailable" message.
+		if isJSONResponse(resp) {
+			drainClose(resp)
+			return nil, councilErr(FailRejected, op, errors.New("the council refused access (403)"))
+		}
+		fallthrough
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
 		ra := parseRetryAfter(resp)
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-		resp.Body.Close()
+		drainClose(resp)
 		c.penalize(owner, ra)
 		return nil, fmt.Errorf("%w: council returned %d", ErrCouncilBusy, resp.StatusCode)
 	}
@@ -335,13 +369,47 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 		return resp, nil
 	}
 	// Other non-2xx: 5xx is a server-side blip (transient); 4xx is a refusal.
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-	resp.Body.Close()
+	drainClose(resp)
 	kind := FailRejected
 	if resp.StatusCode >= 500 {
 		kind = FailTransient
 	}
 	return nil, councilErr(kind, op, fmt.Errorf("council returned %d", resp.StatusCode))
+}
+
+// doAPI issues one authenticated permit-API request. Body is bytes (not a
+// Reader) so the 401 path can replay it.
+func (c *Client) doAPI(ctx context.Context, at, method, path string, query url.Values, body []byte) (*http.Response, error) {
+	u := c.apiBase + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, rd)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+at)
+	req.Header.Set("Content-Type", "application/json")
+	c.xhrHeaders(req)
+	return c.http.Do(req)
+}
+
+// drainClose discards (a bounded amount of) the body and closes it, so the
+// keep-alive connection is reusable.
+func drainClose(resp *http.Response) {
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	resp.Body.Close()
+}
+
+// isJSONResponse reports whether the response declares a JSON body — the shape
+// the council API itself speaks, as opposed to an Akamai HTML challenge page.
+func isJSONResponse(resp *http.Response) bool {
+	ct := resp.Header.Get("Content-Type")
+	return strings.Contains(ct, "json")
 }
 
 // managedVehicleResp is the response of GET /ssp-svc/api/permits/managedVehicle.
@@ -504,7 +572,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if err != nil {
 		return err
 	}
-	resp, err := c.apiRequest(ctx, owner, http.MethodPost, "/api/permits/manageVehicle", op, nil, bytes.NewReader(buf))
+	resp, err := c.apiRequest(ctx, owner, http.MethodPost, "/api/permits/manageVehicle", op, nil, buf)
 	if err != nil {
 		return err // classified (non-2xx / transport) or a busy/auth sentinel
 	}

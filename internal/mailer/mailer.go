@@ -4,7 +4,11 @@
 package mailer
 
 import (
+	"crypto/tls"
+	"errors"
 	"fmt"
+	"mime"
+	"net"
 	"net/smtp"
 	"strings"
 	"time"
@@ -98,7 +102,10 @@ func (m *Mailer) send(to, replyTo, subject, body string) error {
 		headers = append(headers, "Reply-To: "+headerValue(replyTo))
 	}
 	headers = append(headers,
-		"Subject: "+headerValue(subject),
+		// Q-encode the subject when it contains non-ASCII (RFC 2047): permit and
+		// vehicle names flow in here, and a raw 8-bit header mojibakes in some
+		// clients. ASCII subjects pass through unchanged.
+		"Subject: "+mime.QEncoding.Encode("utf-8", headerValue(subject)),
 		"MIME-Version: 1.0",
 		`Content-Type: multipart/alternative; boundary="`+emailBoundary+`"`,
 	)
@@ -117,7 +124,72 @@ func (m *Mailer) send(to, replyTo, subject, body string) error {
 	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
 	b.WriteString(b64Wrap(htmlDocument(subject, body)) + "\r\n")
 	b.WriteString("--" + emailBoundary + "--\r\n")
-	return smtp.SendMail(m.addr, m.auth, senderAddress(m.from), []string{to}, []byte(b.String()))
+	return m.deliver(to, []byte(b.String()))
+}
+
+// How long one complete SMTP exchange (dial through QUIT) may take. Sends run
+// synchronously inside the scheduler's keep-warm pass and the outbox worker, so
+// a server that accepts the connection and then stalls must not be able to hold
+// those loops hostage — net/smtp.SendMail sets no deadlines at all.
+// A var so tests can shorten it.
+var smtpExchangeTimeout = 30 * time.Second
+
+// deliver speaks SMTP with an overall wall-clock deadline covering every read
+// and write. Semantics mirror smtp.SendMail: EHLO, STARTTLS when offered, auth
+// when configured and offered, then MAIL/RCPT/DATA/QUIT. PLAIN auth still
+// refuses to run over plaintext (smtp.PlainAuth enforces TLS-or-localhost).
+func (m *Mailer) deliver(to string, msg []byte) error {
+	// smtp.SendMail validates these to block SMTP command injection; keep that.
+	if strings.ContainsAny(to, "\r\n") {
+		return errors.New("mailer: recipient contains CR/LF")
+	}
+	from := senderAddress(m.from)
+	if strings.ContainsAny(from, "\r\n") {
+		return errors.New("mailer: sender contains CR/LF")
+	}
+	conn, err := net.DialTimeout("tcp", m.addr, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := conn.SetDeadline(time.Now().Add(smtpExchangeTimeout)); err != nil {
+		conn.Close()
+		return err
+	}
+	c, err := smtp.NewClient(conn, m.host)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	defer c.Close()
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: m.host}); err != nil {
+			return err
+		}
+	}
+	if m.auth != nil {
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err := c.Auth(m.auth); err != nil {
+				return err
+			}
+		}
+	}
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	if err := c.Rcpt(to); err != nil {
+		return err
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
 }
 
 // headerValue neutralises CR/LF in a value destined for an email header, so

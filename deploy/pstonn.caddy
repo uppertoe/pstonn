@@ -67,8 +67,10 @@ p.{$DOMAIN} {
 	}
 	# The admin dashboard is limited to the admin group (the app double-checks the
 	# Remote-Groups header too). Keep it above the catch-all so it is not treated as
-	# a plain signed-in-user route.
-	handle /admin* {
+	# a plain signed-in-user route. Exact + subtree, NOT /admin* — the bare prefix
+	# would also route /adminfoo through the admin gate.
+	@admin path /admin /admin/*
+	handle @admin {
 		import protected_admin pstonn:8080
 	}
 	# Everything else requires a signed-in user (forward-auth via vps-scaffold-auth).
