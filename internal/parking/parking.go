@@ -9,9 +9,10 @@
 // council credentials to obtain that cookie, then discards the password, we
 // never store it. The cookie itself may rotate on renew and is re-persisted.
 //
-// The access token is a Bearer credential for the /ssp-svc/api permit endpoints;
-// all request/response shapes are reverse-engineered from captured portal
-// traffic (see docs/CAPTURE.md).
+// The access token is a Bearer credential for the /ssp-svc/api permit endpoints.
+// The request/response shapes mirror the portal's own SPA; an unexpected shape
+// surfaces as a FailUnexpected operator alert (the signal that the council has
+// changed its API and this client needs updating).
 package parking
 
 import (

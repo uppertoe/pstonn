@@ -158,9 +158,10 @@ func (c *Client) exchangeCode(ctx context.Context, owner, code, verifier string)
 // obtains and stores their (sealed) session cookie, and discards the password.
 // It is the per-user onboarding step; the credentials are used only here.
 //
-// NOTE: this replays the SPA's own login form. It is not yet validated against
-// the live site from a server IP (see the Akamai spike in docs/CAPTURE.md); the
-// form-field harvesting is deliberately lenient in case the page shifts.
+// NOTE: this replays the SPA's own login form; the form-field harvesting is
+// deliberately lenient in case the page shifts. The IDM endpoints are the most
+// bot-sensitive surface, so this path shares the per-owner backoff cooldown
+// (classifyPushback / cooldownFor).
 // interactive=true is a user-initiated link/re-link that advances the
 // re-authorise clock (linked_at); a non-interactive call (auto-reconnect) keeps
 // the clock anchored to the last real interactive link, so the periodic
