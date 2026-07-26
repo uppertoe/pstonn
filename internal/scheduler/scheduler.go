@@ -506,7 +506,14 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 // must not permanently disable auto-reconnect. Returns true only when the session
 // is usable now.
 func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
-	switch rerr := s.council.Reconnect(ctx, owner); {
+	// A reconnect is a full headless login (several sequential round trips), so
+	// bound it well under one loop pass: a slow portal must not stall keep-warm or
+	// reconcile. A timeout surfaces as a non-terminal error and falls through to
+	// the transient branch below — session and saved password are kept, and a
+	// later pass retries — exactly as a network blip would.
+	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	switch rerr := s.council.Reconnect(rctx, owner); {
 	case rerr == nil:
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", owner)
 		return true

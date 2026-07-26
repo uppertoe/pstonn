@@ -18,15 +18,16 @@ import (
 // fakeCouncil records calls and returns configured errors, standing in for the
 // real HTTP client.
 type fakeCouncil struct {
-	refreshed    []string
-	refreshErr   error
-	reconnected  []string
-	reconnectErr error // defaults to ErrNoSavedPassword via reconnectSet
-	reconnectSet bool
-	permits      []parking.PermitInfo
-	permitsErr   error
-	setCalls     []string // council_permit_id per SetVehicle call
-	setErr       error
+	refreshed            []string
+	refreshErr           error
+	reconnected          []string
+	reconnectErr         error // defaults to ErrNoSavedPassword via reconnectSet
+	reconnectSet         bool
+	reconnectHadDeadline bool // recoverOrRetire must pass a bounded context
+	permits              []parking.PermitInfo
+	permitsErr           error
+	setCalls             []string // council_permit_id per SetVehicle call
+	setErr               error
 }
 
 func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, _ string) error {
@@ -40,8 +41,9 @@ func (f *fakeCouncil) Refresh(_ context.Context, owner string) error {
 	f.refreshed = append(f.refreshed, owner)
 	return f.refreshErr
 }
-func (f *fakeCouncil) Reconnect(_ context.Context, owner string) error {
+func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 	f.reconnected = append(f.reconnected, owner)
+	_, f.reconnectHadDeadline = ctx.Deadline() // recoverOrRetire must bound this
 	if !f.reconnectSet {
 		return parking.ErrNoSavedPassword // no saved password by default
 	}
@@ -449,6 +451,9 @@ func TestKeepWarmAutoReconnects(t *testing.T) {
 
 	if len(fc.reconnected) != 1 {
 		t.Fatalf("expected one reconnect attempt, got %v", fc.reconnected)
+	}
+	if !fc.reconnectHadDeadline {
+		t.Fatal("reconnect must run under a bounded context so a slow login can't stall the loop")
 	}
 	if _, err := st.GetCouncilSession(context.Background(), "saved@example.com"); err != nil {
 		t.Fatalf("auto-reconnected session should be kept, got err=%v", err)
