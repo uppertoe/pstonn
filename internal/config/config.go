@@ -147,9 +147,13 @@ type CouncilConfig struct {
 
 	// WarmInterval is how stale a still-valid session may get before keep-warm
 	// silent-renews it (sliding the council cookie so an idle, set-and-forget
-	// user's session does not lapse). COUNCIL_WARM_INTERVAL, default 1h15m: half
-	// the measured proven-safe idle window of ~2h32m (session dies by ~3h48m),
-	// so there is a comfortable margin.
+	// user's session does not lapse). COUNCIL_WARM_INTERVAL, default 1h45m ≈ 0.7×
+	// the measured proven-safe idle window of ~2h32m (session dies by ~3h48m).
+	// The 0.7 ratio (vs a more cautious 0.5) trades ~30% fewer council touches for
+	// less headroom; the keep-warm loop compensates by retrying a failed or
+	// pushback-deferred renew every few minutes rather than once per interval, so
+	// the narrower margin to the ~3h48m cliff is never exposed to a single missed
+	// pass. See scheduler.warmLoop.
 	WarmInterval time.Duration
 
 	// ReminderLead is how far before the SessionMaxAge deadline to email the user
@@ -214,7 +218,7 @@ func Load() (*Config, error) {
 			Scopes:        strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
 			APIBase:       env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
 			SessionMaxAge: time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
-			WarmInterval:  envDuration("COUNCIL_WARM_INTERVAL", 75*time.Minute),
+			WarmInterval:  envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
 			Sandbox:       env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
 			ReminderLead:  time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
 			ExpiryLead:    time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,

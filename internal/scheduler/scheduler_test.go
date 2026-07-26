@@ -200,6 +200,42 @@ func TestDecideWarm(t *testing.T) {
 	}
 }
 
+// TestWarmThresholdFor: the per-session renew threshold is deterministic (stable
+// within a warm cycle so the fast recovery tick can't bias renewals to the low
+// end of the jitter band), stays inside warmInterval×(1±jitterFrac), and varies
+// by owner so touches desync.
+func TestWarmThresholdFor(t *testing.T) {
+	const warm = 105 * time.Minute
+	s := New(nil, nil, time.UTC, Options{WarmInterval: warm, JitterFrac: 0.2})
+	up := time.Date(2026, 7, 26, 9, 0, 0, 0, time.UTC)
+
+	// Deterministic: same (owner, updatedAt) → identical threshold across calls.
+	a1 := s.warmThresholdFor("a@example.com", up)
+	a2 := s.warmThresholdFor("a@example.com", up)
+	if a1 != a2 {
+		t.Fatalf("threshold not deterministic: %v vs %v", a1, a2)
+	}
+	// Within the ±20% band.
+	lo, hi := time.Duration(float64(warm)*0.8), time.Duration(float64(warm)*1.2)
+	if a1 < lo || a1 > hi {
+		t.Fatalf("threshold %v outside [%v,%v]", a1, lo, hi)
+	}
+	// A different owner (very likely) lands on a different phase.
+	if b := s.warmThresholdFor("b@example.com", up); b == a1 {
+		t.Fatalf("distinct owners share a threshold (%v); desync lost", a1)
+	}
+	// A new cycle (updatedAt slid) re-derives the offset.
+	if c := s.warmThresholdFor("a@example.com", up.Add(time.Hour)); c == a1 {
+		t.Fatalf("threshold did not re-derive across cycles")
+	}
+	// jitterFrac 0 → exactly warmInterval (no jitter). Built directly: New() clamps
+	// a non-positive JitterFrac up to its 0.2 default.
+	s0 := &Scheduler{warmInterval: warm, jitterFrac: 0}
+	if got := s0.warmThresholdFor("a@example.com", up); got != warm {
+		t.Fatalf("jitterFrac 0: got %v, want %v", got, warm)
+	}
+}
+
 func newStore(t *testing.T) *store.Store {
 	t.Helper()
 	s, err := store.OpenSQLite(filepath.Join(t.TempDir(), "t.db"))

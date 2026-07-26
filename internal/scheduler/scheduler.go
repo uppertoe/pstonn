@@ -8,9 +8,11 @@ package scheduler
 import (
 	"context"
 	crand "crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math/rand"
 	"strings"
@@ -67,7 +69,7 @@ type Notifier interface {
 // Options configures the Scheduler's session-lifecycle behaviour.
 type Options struct {
 	SessionMaxAge time.Duration // re-authorise bound from last link (0 disables)
-	WarmInterval  time.Duration // how stale a session may get before renewal (default 45m)
+	WarmInterval  time.Duration // how stale a session may get before renewal (default 1h45m ≈ 0.7× the safe idle window)
 	ReminderLead  time.Duration // how far before the bound to email the confirm link (0 = no reminder)
 	ExpiryLead    time.Duration // how far before a permit's expiry to warn the account (0 = no reminder)
 	PublicBaseURL string        // absolute base for the email confirm link
@@ -130,7 +132,7 @@ const systemAlertThrottle = 30 * time.Minute
 func New(st *store.Store, council Council, loc *time.Location, opts Options) *Scheduler {
 	warm := opts.WarmInterval
 	if warm <= 0 {
-		warm = 75 * time.Minute
+		warm = 105 * time.Minute
 	}
 	jf := opts.JitterFrac
 	if jf <= 0 {
@@ -321,23 +323,52 @@ func (s *Scheduler) systemAlert(ctx context.Context, key, subject, body string) 
 // session crossing the (jittered) warm threshold, but far cheaper than the
 // per-minute reconcile.
 func (s *Scheduler) warmLoop(ctx context.Context) {
-	warmEvery := s.warmInterval / 3
-	if warmEvery < time.Minute {
-		warmEvery = time.Minute
-	} else if warmEvery > 15*time.Minute {
-		warmEvery = 15 * time.Minute
+	// Recovery cadence. A renewal itself still fires only when a session passes its
+	// (per-session, stably-jittered) warmInterval, and a success slides the clock —
+	// so healthy sessions cost no extra council calls no matter how fast we tick.
+	// Ticking fast only shortens how long a FAILED or pushback-deferred renew waits
+	// before its next attempt. That is what lets warmInterval sit at ~0.7× the safe
+	// idle window instead of ~0.5× without exposing the narrower margin to a single
+	// missed pass. A renew attempted during a council-pushback cooldown is a cheap
+	// local no-op (renewLocked short-circuits before any network call), so fast
+	// ticks never hammer a portal that is already refusing us.
+	const recoveryTick = 3 * time.Minute
+	warmEvery := recoveryTick
+	if warmEvery > s.warmInterval {
+		warmEvery = s.warmInterval // tiny (test) intervals: never tick slower than the interval
 	}
-	t := time.NewTicker(warmEvery)
-	defer t.Stop()
-	s.safeKeepWarm(ctx) // prime immediately
+	// Housekeeping (guest-request expiry, PII purges, apply-log prune, daily
+	// snapshot) is cadence-insensitive; run it far less often than the recovery tick
+	// so a fast tick doesn't multiply those queries.
+	const houseEvery = 15 * time.Minute
+
+	warmT := time.NewTicker(warmEvery)
+	defer warmT.Stop()
+	houseT := time.NewTicker(houseEvery)
+	defer houseT.Stop()
+	s.safeKeepWarm(ctx) // prime renewals
+	s.safeSweep(ctx)    // prime housekeeping
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-warmT.C:
 			s.safeKeepWarm(ctx)
+		case <-houseT.C:
+			s.safeSweep(ctx)
 		}
 	}
+}
+
+// safeSweep runs one housekeeping pass under panic recovery, so a bug in a purge
+// query can't kill the warm-loop goroutine and silently let every session lapse.
+func (s *Scheduler) safeSweep(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("scheduler: housekeeping panicked (recovered): %v", r)
+		}
+	}()
+	s.sweepGuestRequests(ctx)
 }
 
 // safeKeepWarm runs one keep-warm pass, recovering from a panic so the keep-warm
@@ -411,7 +442,6 @@ func decideWarm(now, linkedAt, updatedAt time.Time, maxAge, warmInterval time.Du
 // sessions whose owner has no schedule to act on (their dashboard use keeps them
 // warm), and spaces the council calls it does make within a pass (anti-burst).
 func (s *Scheduler) keepWarm(ctx context.Context) {
-	s.sweepGuestRequests(ctx)
 	sessions, err := s.store.ListCouncilSessions(ctx)
 	if err != nil {
 		log.Printf("scheduler: list council sessions: %v", err)
@@ -423,7 +453,7 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		if cs.Cookie == "" {
 			continue
 		}
-		action := decideWarm(now, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.jittered(s.warmInterval))
+		action := decideWarm(now, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.warmThresholdFor(cs.Owner, cs.UpdatedAt))
 		if action == warmRetire {
 			// Past the re-authorise bound (or an unknown link time): stop renewing,
 			// drop the session, and let the dashboard prompt a re-link.
@@ -824,6 +854,28 @@ func (s *Scheduler) jittered(d time.Duration) time.Duration {
 		return 0
 	}
 	return j
+}
+
+// warmThresholdFor is the renew threshold for one session: warmInterval nudged by
+// a small per-session offset that is STABLE within a warm cycle (deterministic in
+// owner + updatedAt) but re-derives each cycle (updatedAt slides on every renew).
+// Deterministic-not-random matters under the fast recovery tick: a fresh random
+// draw every pass would let a session renew on whichever pass happened to roll the
+// low end of the band, biasing every renewal toward warmInterval×(1-jitterFrac)
+// and quietly raising traffic. A stable per-owner offset also gives better
+// desync — each session keeps its own consistent phase — which is the anti-mechanical
+// point of the jitter in the first place.
+func (s *Scheduler) warmThresholdFor(owner string, updatedAt time.Time) time.Duration {
+	if s.jitterFrac <= 0 {
+		return s.warmInterval
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(owner))
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], uint64(updatedAt.Unix()))
+	_, _ = h.Write(b[:])
+	u := float64(h.Sum64()>>11) / float64(uint64(1)<<53) // uniform in [0,1)
+	return time.Duration(float64(s.warmInterval) * (1 + (u*2-1)*s.jitterFrac))
 }
 
 // randToken returns a 256-bit URL-safe random token for the confirm link.
