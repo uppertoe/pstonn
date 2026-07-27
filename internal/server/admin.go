@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -26,6 +27,19 @@ type adminView struct {
 	SchedulerLast  string
 	SchedulerStale bool
 	StatusEnabled  bool // whether the machine /status endpoint is configured
+	SESHook        bool // whether the SES bounce/complaint webhook is wired up
+	// Suppressed lists addresses the mail provider rejected. Operator-facing: a
+	// growing list is the early warning that the sending domain's reputation is
+	// being damaged, which on SES ends in a sending pause.
+	Suppressed []suppressionRow
+}
+
+type suppressionRow struct {
+	Address string
+	Reason  string
+	Detail  string
+	Ago     string
+	Hits    int
 }
 
 type adminRow struct {
@@ -116,6 +130,17 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			v.Failing++
 		}
 		v.Rows = append(v.Rows, row)
+	}
+	v.SESHook = s.cfg.SESHookEnabled()
+	if sups, err := s.store.ListSuppressions(r.Context()); err == nil {
+		for _, sp := range sups {
+			v.Suppressed = append(v.Suppressed, suppressionRow{
+				Address: sp.Address, Reason: sp.Reason, Detail: sp.Detail,
+				Ago: agoText(now, sp.LastSeen), Hits: sp.Hits,
+			})
+		}
+	} else {
+		log.Printf("admin: list suppressions: %v", err)
 	}
 	s.render(w, dashboardData{
 		State: "admin", User: u, LogoutURL: s.logoutURL(), Loc: loc, Admin: v,

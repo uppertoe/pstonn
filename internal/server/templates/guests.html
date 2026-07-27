@@ -190,7 +190,9 @@
       <div class="grecip">
         <span>
           <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
-          {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
+          {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>
+          {{else if .Undeliverable}}<span style="font-size:12px;color:var(--warn-ink,#8a5300)">{{.Undeliverable}}</span>
+          {{else}}<span class="muted" style="font-size:12px">has a link</span>{{end}}
         </span>
         {{if not .Revoked}}
         <form method="post" action="/guests/{{$gid}}/resend" data-confirm="Re-send a fresh link to {{.Email}}? Their previous link stops working." data-confirm-ok="Re-send">

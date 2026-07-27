@@ -48,7 +48,7 @@ type Council interface {
 type Notifier interface {
 	Enabled() bool
 	AdminConfigured() bool
-	SendRenewalReminder(to string, deadline time.Time, confirmURL string) error
+	SendRenewalReminder(ctx context.Context, to string, deadline time.Time, confirmURL string) error
 	// NotifyApply returns how many channels accepted the message (0 = the user was
 	// NOT reached; -1 = intentionally suppressed, e.g. failures-only success).
 	NotifyApply(ctx context.Context, o notify.ApplyOutcome) (int, error)
@@ -850,7 +850,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		return
 	}
 	url := s.publicBaseURL + "/council/confirm?token=" + token
-	if err := s.notifier.SendRenewalReminder(cs.Owner, deadline.In(s.loc), url); err != nil {
+	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.loc), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", cs.Owner, err)
 		// The reminder is email-only. If it keeps failing through the window the
 		// session lapses silently, so alert the operator (throttled).

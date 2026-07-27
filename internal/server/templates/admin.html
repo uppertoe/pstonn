@@ -39,6 +39,37 @@
       </tbody>
     </table>
   </div>
+
+  {{/* Undeliverable addresses. A growing list is the early warning that the
+       sending domain's reputation is being damaged — on SES that ends in a
+       sending pause, which would silence every user's permit notifications. */}}
+  <div class="card" style="margin-top:18px">
+    <div class="sectitle"><span class="ic">{{template "ic-alert"}}</span> Undeliverable addresses</div>
+    <p class="subtitle">
+      Bounces and spam complaints reported by the mail provider. These addresses are skipped when sending.
+      Bounce feedback is {{if .Admin.SESHook}}<strong>wired up</strong>{{else}}<strong>not configured</strong> (set SES_SNS_TOPIC_ARN){{end}}.
+    </p>
+    {{if .Admin.Suppressed}}
+    <div class="adm-tablewrap">
+      <table class="adm">
+        <thead><tr><th>Address</th><th>Reason</th><th>Last reported</th><th>Times</th><th>Detail</th></tr></thead>
+        <tbody>
+        {{range .Admin.Suppressed}}
+        <tr>
+          <td class="adm-acct">{{.Address}}</td>
+          <td><span class="adm-pill {{if eq .Reason "complaint"}}relink{{else}}stale{{end}}">{{.Reason}}</span></td>
+          <td>{{.Ago}}</td>
+          <td>{{.Hits}}</td>
+          <td class="adm-sub">{{.Detail}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="empty-note">No undeliverable addresses.</p>
+    {{end}}
+  </div>
 </main>
 
 {{end}}

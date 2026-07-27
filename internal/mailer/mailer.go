@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -184,22 +185,49 @@ func (m *Mailer) deliver(to string, msg []byte) error {
 		}
 	}
 	if err := c.Mail(from); err != nil {
-		return err
+		return classify(err)
 	}
+	// The recipient is rejected here for a bad/unknown mailbox, which is the
+	// failure worth classifying: a 5xx means retrying can never help, and
+	// hammering a dead address is what damages a sending domain's reputation.
 	if err := c.Rcpt(to); err != nil {
-		return err
+		return classify(err)
 	}
 	w, err := c.Data()
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	if _, err := w.Write(msg); err != nil {
 		return err
 	}
 	if err := w.Close(); err != nil {
-		return err
+		return classify(err)
 	}
 	return c.Quit()
+}
+
+// ErrPermanent marks a send that must never be retried: the server refused it
+// with a 5xx, so the address (or the message) is rejected outright. Callers use
+// errors.Is to decide between "back off and try again" and "stop, and remember
+// this address is undeliverable".
+var ErrPermanent = errors.New("permanent SMTP failure")
+
+// classify inspects an SMTP reply and wraps permanent (5xx) refusals with
+// ErrPermanent. Transient replies (4xx) and connection-level errors pass through
+// unchanged so the existing retry/backoff applies.
+//
+// 421 is a 4xx and already transient. Note that a 5xx at RCPT is the classic
+// "user unknown"; a 5xx at DATA/close is usually the message being refused
+// (size, content) rather than the address, but both are futile to retry.
+func classify(err error) error {
+	if err == nil {
+		return nil
+	}
+	var te *textproto.Error
+	if errors.As(err, &te) && te.Code >= 500 && te.Code < 600 {
+		return fmt.Errorf("%w: %d %s", ErrPermanent, te.Code, te.Msg)
+	}
+	return err
 }
 
 // headerValue neutralises CR/LF in a value destined for an email header, so

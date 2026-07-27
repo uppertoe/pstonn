@@ -144,6 +144,11 @@ type guestRecipientView struct {
 	TokenID int64
 	Email   string
 	Revoked bool
+	// Undeliverable explains why mail to this address is being skipped (a bounce
+	// or a spam complaint reported by the mail provider). Without surfacing it,
+	// the owner sees "has a link" for someone who never received one and never
+	// will — the typo'd-address case that is otherwise completely invisible.
+	Undeliverable string
 }
 
 type permitOpt struct {
@@ -749,6 +754,22 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
 }
 
+// undeliverableText turns a suppression reason into something an account holder
+// can act on. A bounce is usually a typo they can fix; a complaint means the
+// person marked our mail as spam, which is theirs to undo, not the owner's.
+func undeliverableText(reason string) string {
+	switch reason {
+	case store.SuppressBounce:
+		return "email bounced — check the address, or share the link another way"
+	case store.SuppressComplaint:
+		return "they marked our email as spam, so we've stopped emailing them"
+	case store.SuppressManual:
+		return "email disabled for this address"
+	default:
+		return ""
+	}
+}
+
 // guestApplyDetail is the user-facing activity-log detail for a failed guest
 // apply: the Activity page renders it verbatim, so it must be a plain sentence,
 // not a raw council error (which goes to the server log instead).
@@ -906,11 +927,28 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 	if err != nil {
 		return err
 	}
+	// Annotate recipients whose address the mail provider has told us is dead.
+	// One query for the whole page rather than one per recipient.
+	var allRecipients []string
+	for _, d := range details {
+		for _, t := range d.Tokens {
+			allRecipients = append(allRecipients, t.RecipientEmail)
+		}
+	}
+	undeliverable, err := s.store.SuppressedAmong(ctx, allRecipients)
+	if err != nil {
+		// Best-effort annotation: never fail the page over it.
+		log.Printf("guests: suppression lookup for %s: %v", owner, err)
+		undeliverable = map[string]string{}
+	}
 	for _, d := range details {
 		cars, _, _, _ := vehicleViews(d.Vehicles)
 		var recips []guestRecipientView
 		for _, t := range d.Tokens {
-			recips = append(recips, guestRecipientView{TokenID: t.ID, Email: t.RecipientEmail, Revoked: t.Revoked})
+			recips = append(recips, guestRecipientView{
+				TokenID: t.ID, Email: t.RecipientEmail, Revoked: t.Revoked,
+				Undeliverable: undeliverableText(undeliverable[t.RecipientEmail]),
+			})
 		}
 		base.Guests = append(base.Guests, guestGrantView{
 			ID: d.Grant.ID, Label: d.Grant.Label, PermitLabel: labelByPermit[d.Grant.PermitID],
@@ -1046,7 +1084,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permit, _ := s.store.GetPermit(r.Context(), permitID)
-	sent := s.emailLinks(owner, permitLabel(permit), links)
+	sent := s.emailLinks(r.Context(), owner, permitLabel(permit), links)
 
 	base, ok := s.appShell(w, r, "guests")
 	if !ok {
@@ -1122,7 +1160,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 	}
 	permit, _ := s.store.GetPermit(r.Context(), permitID)
 	links := []guestLinkView{{Email: recipient, URL: s.guestLink(raw)}}
-	if s.emailLinks(owner, permitLabel(permit), links) == 0 {
+	if s.emailLinks(r.Context(), owner, permitLabel(permit), links) == 0 {
 		// The send failed at runtime (SMTP up-check passed, delivery didn't). The
 		// old token is already superseded, so claiming success would leave the
 		// recipient with a dead link and nothing delivered. Show the fresh link
@@ -1209,7 +1247,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 				plabel = g.PermitLabel
 			}
 		}
-		sent := s.emailLinks(owner, plabel, newLinks)
+		sent := s.emailLinks(r.Context(), owner, plabel, newLinks)
 		base.NewGuestLinks = newLinks
 		switch {
 		case sent == len(newLinks):
@@ -1249,14 +1287,14 @@ func (s *Server) mintLinks(emails []string) ([]store.GuestRecipient, []guestLink
 // permit — so an account must not be able to mail-bomb a stranger (per-recipient)
 // or burn the SMTP reputation everyone shares (per-owner). A throttled link is
 // not lost: the caller always shows it on screen to copy.
-func (s *Server) emailLinks(owner, permitLabel string, links []guestLinkView) int {
+func (s *Server) emailLinks(ctx context.Context, owner, permitLabel string, links []guestLinkView) int {
 	sent := 0
 	for _, l := range links {
 		if !s.guestLinkOut.allow("o:"+owner) || !s.guestLinkTo.allow("t:"+l.Email) {
 			log.Printf("guest link email to %s for %s throttled", l.Email, owner)
 			continue
 		}
-		if err := s.notify.SendGuestLink(l.Email, owner, permitLabel, l.URL); err == nil {
+		if err := s.notify.SendGuestLink(ctx, l.Email, owner, permitLabel, l.URL); err == nil {
 			sent++
 		} else {
 			log.Printf("guest link email to %s for %s: %v", l.Email, owner, err)

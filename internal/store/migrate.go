@@ -213,6 +213,20 @@ CREATE TABLE IF NOT EXISTS outbox (
     sent_at       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
+
+-- Addresses we must stop emailing: hard bounces and spam complaints, learned
+-- either from the SMTP conversation (a 5xx at send time) or asynchronously from
+-- the provider's bounce/complaint feed. Consulted before every send. Sending to
+-- a known-dead address repeatedly is what gets a sending domain suspended, and
+-- a complaint means the recipient asked us to stop.
+CREATE TABLE IF NOT EXISTS mail_suppression (
+    address    TEXT PRIMARY KEY,                -- lower-cased
+    reason     TEXT NOT NULL,                   -- bounce | complaint | manual
+    detail     TEXT NOT NULL DEFAULT '',        -- provider diagnostic, for support
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    hits       INTEGER NOT NULL DEFAULT 1       -- times we've been told
+);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

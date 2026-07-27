@@ -1767,3 +1767,67 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 		t.Fatalf("rows after purge = %d, want 1", left)
 	}
 }
+
+// TestSuppression covers the mail suppression list: a complaint outranks a
+// bounce (it is the signal with legal weight and the recipient's own request),
+// lookups and annotation are case-insensitive, and clearing works.
+func TestSuppression(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if bad, _, err := s.IsSuppressed(ctx, "nobody@example.com"); err != nil || bad {
+		t.Fatalf("unknown address suppressed=%v err=%v", bad, err)
+	}
+
+	if err := s.SuppressAddress(ctx, "Dead@Example.com", SuppressBounce, "550 user unknown"); err != nil {
+		t.Fatal(err)
+	}
+	// Stored and matched lower-cased, so the same mailbox typed differently hits.
+	bad, reason, err := s.IsSuppressed(ctx, "dead@example.com")
+	if err != nil || !bad || reason != SuppressBounce {
+		t.Fatalf("IsSuppressed = %v/%q, err=%v", bad, reason, err)
+	}
+
+	// A repeat report bumps the counter rather than duplicating the row.
+	if err := s.SuppressAddress(ctx, "dead@example.com", SuppressBounce, "again"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListSuppressions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Hits != 2 {
+		t.Fatalf("expected one row with 2 hits, got %+v", list)
+	}
+
+	// A complaint upgrades a bounce...
+	if err := s.SuppressAddress(ctx, "dead@example.com", SuppressComplaint, "abuse"); err != nil {
+		t.Fatal(err)
+	}
+	if _, reason, _ := s.IsSuppressed(ctx, "dead@example.com"); reason != SuppressComplaint {
+		t.Fatalf("complaint should outrank bounce, got %q", reason)
+	}
+	// ...and a later bounce must NOT downgrade it back.
+	if err := s.SuppressAddress(ctx, "dead@example.com", SuppressBounce, "550"); err != nil {
+		t.Fatal(err)
+	}
+	if _, reason, _ := s.IsSuppressed(ctx, "dead@example.com"); reason != SuppressComplaint {
+		t.Fatalf("bounce must not downgrade a complaint, got %q", reason)
+	}
+
+	// SuppressedAmong annotates a list in one query, keyed by the caller's spelling.
+	got, err := s.SuppressedAmong(ctx, []string{"DEAD@example.com", "fine@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got["DEAD@example.com"] != SuppressComplaint {
+		t.Fatalf("SuppressedAmong = %+v", got)
+	}
+
+	if err := s.Unsuppress(ctx, "dead@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if bad, _, _ := s.IsSuppressed(ctx, "dead@example.com"); bad {
+		t.Fatal("Unsuppress did not clear the address")
+	}
+}

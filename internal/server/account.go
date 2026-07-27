@@ -203,7 +203,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	if s.notify.EmailAvailable() && s.inviteFanout.allow("o:"+owner) && s.inviteTarget.allow("t:"+email) {
 		mailed = true
 		go func(to, from string) {
-			if e := s.notify.SendInvite(to, from); e != nil {
+			// Detached from the request: the handler returns immediately, so use a
+			// fresh bounded context rather than r.Context() (already cancelled).
+			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if e := s.notify.SendInvite(nctx, to, from); e != nil {
 				log.Printf("invite email to %s: %v", to, e)
 			}
 		}(email, owner)

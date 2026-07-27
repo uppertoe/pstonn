@@ -82,7 +82,7 @@ type fakeNotifier struct {
 
 func (f *fakeNotifier) Enabled() bool         { return f.on }
 func (f *fakeNotifier) AdminConfigured() bool { return f.admin }
-func (f *fakeNotifier) SendRenewalReminder(to string, deadline time.Time, url string) error {
+func (f *fakeNotifier) SendRenewalReminder(ctx context.Context, to string, deadline time.Time, url string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, sentMail{to, url, deadline})

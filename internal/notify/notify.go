@@ -10,6 +10,7 @@ package notify
 import (
 	"context"
 	crand "crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -94,6 +95,42 @@ func (s *Service) AdminConfigured() bool {
 	return (s.adminEmail != "" && s.mail.Enabled()) || (s.adminTopic != "" && s.ntfyBase != "")
 }
 
+// ErrSuppressed reports that an address is on the suppression list, so nothing
+// was sent. It is a permanent condition, not a delivery failure: callers must
+// not retry, and the outbox treats it as terminal.
+var ErrSuppressed = errors.New("address is suppressed (previous bounce or complaint)")
+
+// sendEmail is the single choke point for user-facing email. It refuses to send
+// to an address the provider has told us is dead or that complained, and it
+// records a permanent SMTP refusal as a new suppression so the next send skips
+// it rather than repeating the damage.
+//
+// Operator alerts deliberately do NOT go through here: if the operator's own
+// address bounces we still want every future attempt made (and the failure
+// logged), rather than the app quietly muting its own alarm channel.
+func (s *Service) sendEmail(ctx context.Context, to, subject, body string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	if s.store != nil {
+		if bad, reason, err := s.store.IsSuppressed(ctx, to); err != nil {
+			// Fail OPEN: a lookup error must not stop a permit notification going out.
+			log.Printf("notify: suppression lookup for %s: %v", to, err)
+		} else if bad {
+			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
+		}
+	}
+	err := s.mail.Send(to, subject, body)
+	if err != nil && errors.Is(err, mailer.ErrPermanent) && s.store != nil {
+		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
+			log.Printf("notify: suppress %s: %v", to, serr)
+		} else {
+			log.Printf("notify: suppressing %s after a permanent SMTP refusal: %v", to, err)
+		}
+	}
+	return err
+}
+
 // NotifyAdmin sends an operator alert to every configured admin channel (email
 // AND ntfy), so one channel being down does not blind the operator. Best-effort:
 // errors are returned joined but callers typically just log them.
@@ -141,7 +178,7 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	for _, m := range members {
 		mpref, _ := s.store.GetNotifyPref(ctx, m)
 		if s.mail.Enabled() {
-			if e := s.mail.Send(m, subject, body); e != nil {
+			if e := s.sendEmail(ctx, m, subject, body); e != nil {
 				log.Printf("notify relink email %s: %v", m, e)
 			} else {
 				delivered++
@@ -208,7 +245,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 		}
 		reached := false
 		if wantEmail {
-			if e := s.mail.Send(d.email, subject, body); e != nil {
+			if e := s.sendEmail(ctx, d.email, subject, body); e != nil {
 				log.Printf("notify permit-expiry email %s: %v", d.email, e)
 			} else {
 				reached = true
@@ -240,8 +277,26 @@ func (s *Service) NtfyAvailable() bool  { return s.ntfyBase != "" }
 func (s *Service) NtfyBase() string { return s.ntfyBase }
 
 // SendRenewalReminder is the scheduler's re-authorise reminder (email only).
-func (s *Service) SendRenewalReminder(to string, deadline time.Time, confirmURL string) error {
-	return s.mail.SendRenewalReminder(to, deadline, confirmURL)
+// It builds its own body in the mailer, so the suppression check is inline here
+// rather than via sendEmail.
+func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline time.Time, confirmURL string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	if s.store != nil {
+		if bad, reason, err := s.store.IsSuppressed(ctx, to); err != nil {
+			log.Printf("notify: suppression lookup for %s: %v", to, err)
+		} else if bad {
+			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
+		}
+	}
+	err := s.mail.SendRenewalReminder(to, deadline, confirmURL)
+	if err != nil && errors.Is(err, mailer.ErrPermanent) && s.store != nil {
+		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
+			log.Printf("notify: suppress %s: %v", to, serr)
+		}
+	}
+	return err
 }
 
 // ApplyOutcome is what NotifyApply describes to the user: a successful change,
@@ -480,7 +535,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 
 		reached := false
 		if wantEmail {
-			if e := s.mail.Send(d.email, subject, emailBody); e != nil {
+			if e := s.sendEmail(ctx, d.email, subject, emailBody); e != nil {
 				errs = append(errs, "email "+d.email+": "+e.Error())
 			} else {
 				reached = true
@@ -518,7 +573,7 @@ func (s *Service) SendTest(ctx context.Context, user string) error {
 	const body = "This is a test. Your permit-change notifications are set up correctly."
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
-		if e := s.mail.Send(user, subject, body); e != nil {
+		if e := s.sendEmail(ctx, user, subject, body); e != nil {
 			errs = append(errs, "email "+user+": "+e.Error())
 		}
 	}
@@ -545,7 +600,7 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 	const body = "You declined p.stonn's updated terms, so your council account has been disconnected and your permit is no longer being managed.\n\nPlease check your visitor permit with the council. To reconnect, sign in again and accept the terms."
 	var errs []string
 	if s.mail.Enabled() {
-		if e := s.mail.Send(owner, subject, body); e != nil {
+		if e := s.sendEmail(ctx, owner, subject, body); e != nil {
 			errs = append(errs, "email: "+e.Error())
 		}
 	}
@@ -565,7 +620,7 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 // access still only takes effect when they sign in with this email and get the
 // normal one-time login code. Email only (they may have no push set up yet), and
 // a no-op when SMTP is unconfigured.
-func (s *Service) SendInvite(to, ownerEmail string) error {
+func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -581,13 +636,13 @@ func (s *Service) SendInvite(to, ownerEmail string) error {
 	lines = append(lines,
 		"",
 		"If you were not expecting this, you can ignore this email. You can also remove your access from Settings after signing in.")
-	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"))
 }
 
 // SendGuestLink emails a recipient their personal guest-pass link (email only,
 // no-op without SMTP). The link lets them set one of the account's cars on the
 // visitor permit without an account of their own.
-func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
+func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel, url string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -603,7 +658,7 @@ func (s *Service) SendGuestLink(to, ownerEmail, permitLabel, url string) error {
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
 	}
-	return s.mail.Send(to, subject, strings.Join(lines, "\n"))
+	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"))
 }
 
 // NotifyDriverDisplaced warns whoever is responsible for a displaced car (the
@@ -835,21 +890,25 @@ func (s *Service) drainOutbox(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		lastErr := s.deliver(ctx, it)
+		lastErr, permanent := s.deliver(ctx, it)
 		if lastErr == "" {
 			_ = s.store.MarkOutboxSent(ctx, it.ID)
 			continue
 		}
 		attempts := it.Attempts + 1
-		if attempts >= outboxMaxAttempts {
+		if permanent || attempts >= outboxMaxAttempts {
 			_ = s.store.MarkOutboxDead(ctx, it.ID, lastErr)
 			// Always log the drop (the DB 'dead' row is otherwise unsurfaced), and
 			// log if the escalation itself fails — it uses NotifyAdmin, which may
 			// share the very channel that's failing.
-			log.Printf("notify: DROPPED after %d attempts: %q to %v: %s", attempts, it.Subject, it.Recipients, lastErr)
+			why := fmt.Sprintf("after %d attempts", attempts)
+			if permanent {
+				why = "permanently refused"
+			}
+			log.Printf("notify: DROPPED (%s): %q to %v: %s", why, it.Subject, it.Recipients, lastErr)
 			if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
-				fmt.Sprintf("A notification could not be delivered after %d attempts and was dropped.\nSubject: %s\nTo: %s\nLast error: %s",
-					attempts, it.Subject, strings.Join(it.Recipients, ", "), lastErr)); ae != nil {
+				fmt.Sprintf("A notification could not be delivered (%s) and was dropped.\nSubject: %s\nTo: %s\nLast error: %s",
+					why, it.Subject, strings.Join(it.Recipients, ", "), lastErr)); ae != nil {
 				log.Printf("notify: dead-letter admin alert also failed: %v", ae)
 			}
 			continue
@@ -859,9 +918,13 @@ func (s *Service) drainOutbox(ctx context.Context) {
 }
 
 // deliver attempts every channel and returns "" if at least one accepted (or there
-// was nothing addressable), else a joined error so the item is retried.
-func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
+// was nothing addressable), else a joined error so the item is retried. permanent
+// reports that every failure was a hard refusal (a 5xx), so retrying is futile
+// and the caller should dead-letter immediately instead of burning eight attempts
+// against an address the server has already rejected.
+func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr string, permanent bool) {
 	var errs []string
+	allPermanent := true
 	// Email is the reliable channel. When the message HAS email recipients, success
 	// requires at least one email to be accepted — an ntfy 200 (which the server
 	// returns even with no subscriber) must not mask a total email failure and
@@ -869,9 +932,21 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
 	emailTargets, emailOK := 0, false
 	if s.mail.Enabled() {
 		for _, addr := range it.Recipients {
+			// A suppressed address is not a target at all: it must not count toward
+			// emailTargets, or a row addressed ONLY to a dead address would retry
+			// eight times and then dead-letter, which is exactly the reputation
+			// damage the suppression list exists to prevent.
+			e := s.sendEmail(ctx, addr, it.Subject, it.Body)
+			if errors.Is(e, ErrSuppressed) {
+				log.Printf("notify: skipping suppressed recipient %s for %q", addr, it.Subject)
+				continue
+			}
 			emailTargets++
-			if e := s.mail.Send(addr, it.Subject, it.Body); e != nil {
+			if e != nil {
 				errs = append(errs, "email "+addr+": "+e.Error())
+				if !errors.Is(e, mailer.ErrPermanent) {
+					allPermanent = false
+				}
 			} else {
 				emailOK = true
 			}
@@ -886,6 +961,7 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
 		}
 		if e := s.sendNtfy(ctx, it.NtfyTopic, it.Subject, it.Body, pr, it.NtfyTag); e != nil {
 			errs = append(errs, "ntfy: "+e.Error())
+			allPermanent = false // an ntfy failure is always worth retrying
 		} else {
 			ntfyOK = true
 		}
@@ -893,16 +969,18 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) string {
 	switch {
 	case emailTargets > 0:
 		if emailOK {
-			return "" // reached via the reliable channel (ntfy is a bonus on top)
+			return "", false // reached via the reliable channel (ntfy is a bonus on top)
 		}
 	case ntfyTargets > 0:
 		if ntfyOK {
-			return "" // no email configured; ntfy was all we had and it worked
+			return "", false // no email configured; ntfy was all we had and it worked
 		}
 	default:
-		return "" // nothing addressable (all channels off) — nothing to retry
+		// Nothing addressable: every channel is off, or every recipient is
+		// suppressed. Nothing to retry.
+		return "", false
 	}
-	return strings.Join(errs, "; ")
+	return strings.Join(errs, "; "), allPermanent && len(errs) > 0
 }
 
 // outboxBackoff spaces retries: ~1m, 3m, 9m, 27m, ... capped at 3h.

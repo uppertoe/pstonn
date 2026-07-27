@@ -81,6 +81,16 @@ ntfy topic) with quiet hours, durable retry through an outbox, and operator
 escalation when a user can't be reached. A lapsed council session proactively
 prompts a re-link rather than failing silently.
 
+**Undeliverable email** is learned, not ignored. A hard SMTP rejection (5xx) at
+send time is classified as permanent, so the outbox stops retrying it instead of
+hammering a dead mailbox; on AWS SES, bounce and complaint events also arrive
+asynchronously at `/hooks/ses` (SNS-signature verified, topic-pinned) and land on
+a suppression list consulted before every send. The account holder sees
+"email bounced" next to that guest instead of a link that silently never arrived,
+and the operator sees the whole list on `/admin`. Set up with
+[`deploy/aws-ses-hook-setup.py`](deploy/aws-ses-hook-setup.py); without it the
+app still classifies rejections at send time.
+
 **Light on the council's systems.** The app talks to the council portal
 sparingly and politely: it only makes a change when something actually needs to
 change, spaces its requests out, and if the portal is slow or busy it waits and
@@ -134,6 +144,12 @@ The `deploy/` directory contains a complete example for the
    SMTP and ntfy settings, `ADMIN_EMAIL` / `ADMIN_NTFY_TOPIC` for operator
    alerts, and `CONTACT_TO` if you want the public contact form.
 4. Add DNS for `p.<domain>` and deploy. Pin the image by `@sha256` digest.
+5. On SES, wire up bounce/complaint feedback so the app stops emailing dead
+   addresses (see above): `python3 deploy/aws-ses-hook-setup.py --domain
+   <sending-domain> --app-url https://p.<domain>`. Run it twice — the first pass
+   prints `SES_SNS_TOPIC_ARN` for the `.env`, the second creates the subscription
+   the running app confirms. It is additive: an existing SES bounce→Lambda alert
+   keeps working alongside it.
 
 On any other Docker host the same image works with any proxy: the compose
 fragment shows the hardening flags (read-only FS, no capabilities, non-root)

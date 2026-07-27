@@ -65,6 +65,14 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM outbox WHERE account = ?`, owner); err != nil {
 		return err
 	}
+	// The owner's own address on the suppression list: it is their personal data,
+	// and a returning user must not inherit a stale "we don't email you" flag.
+	// Guest/driver addresses are deliberately KEPT: they belong to third parties,
+	// and a bounce or complaint is a fact about that mailbox, not about this
+	// account — forgetting it would resume mailing someone who asked us to stop.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM mail_suppression WHERE address = ?`, owner); err != nil {
+		return err
+	}
 	// Remove this account's secondary members, and any membership this user held.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE owner = ? OR member_email = ?`, owner, owner); err != nil {
 		return err

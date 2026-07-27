@@ -48,7 +48,12 @@ p.{$DOMAIN} {
 	# /status is the machine-readable status the outage watchdog polls. It carries
 	# its own bearer token (the app checks STATUS_TOKEN), so it bypasses login like
 	# the other token-only routes; forward-auth identity is stripped as usual.
-	@public path /about /why /contact /healthz /council/confirm /g/* /status
+	#
+	# /hooks/ses receives SES bounce/complaint events from Amazon SNS, which cannot
+	# present a bearer token — the app instead verifies the SNS message signature
+	# and the topic ARN, and refuses anything else. It only exists when
+	# SES_SNS_TOPIC_ARN is set (otherwise the app 404s the path).
+	@public path /about /why /contact /healthz /council/confirm /g/* /status /hooks/ses
 	handle @public {
 		route {
 			import strip_client_identity

@@ -88,7 +88,17 @@ type Config struct {
 	// StatusToken gates the machine-readable /status endpoint the external outage
 	// watchdog polls (bearer token). Empty disables the endpoint. STATUS_TOKEN.
 	StatusToken string
+
+	// SESTopicARN is the SNS topic that carries this domain's SES bounce and
+	// complaint events. Set it to enable POST /hooks/ses, which records dead
+	// addresses so the app stops mailing them. Empty disables the endpoint
+	// entirely (no route, 404), so a deployment that hasn't wired SES up is not
+	// exposing an unused public handler. SES_SNS_TOPIC_ARN.
+	SESTopicARN string
 }
+
+// SESHookEnabled reports whether the SES bounce/complaint webhook is configured.
+func (c *Config) SESHookEnabled() bool { return c.SESTopicARN != "" }
 
 // ContactEnabled reports whether the public contact form should be offered: a
 // destination address plus a working outbound mailer.
@@ -241,6 +251,7 @@ func Load() (*Config, error) {
 		AdminEmail:     strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
 		AdminNtfyTopic: strings.TrimSpace(os.Getenv("ADMIN_NTFY_TOPIC")),
 		StatusToken:    strings.TrimSpace(os.Getenv("STATUS_TOKEN")),
+		SESTopicARN:    strings.TrimSpace(os.Getenv("SES_SNS_TOPIC_ARN")),
 		AppOIDC: AppOIDCConfig{
 			Issuer:       strings.TrimRight(os.Getenv("APP_OIDC_ISSUER"), "/"),
 			ClientID:     os.Getenv("APP_OIDC_CLIENT_ID"),

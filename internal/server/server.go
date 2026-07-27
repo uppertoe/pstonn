@@ -49,6 +49,8 @@ type Server struct {
 	// public by design (it's printed on a poster), so possession of a valid token
 	// cannot be the only limit.
 	guestSlots chan struct{}
+	// snsCert caches SES/SNS signing certificates for the bounce webhook.
+	snsCert *certCache
 }
 
 // maxConcurrentGuest is how many public guest requests may be in flight at once.
@@ -74,6 +76,7 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		guestLinkTo:  newRateLimiter(5, 24*time.Hour),   // <=5 guest-link emails / day per recipient
 		councilTry:   newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
 		guestSlots:   make(chan struct{}, maxConcurrentGuest),
+		snsCert:      newCertCache(),
 	}
 }
 
@@ -141,6 +144,14 @@ func (s *Server) Handler() http.Handler {
 	// Public, token-only: the renewal-confirm link from the reminder email. It
 	// carries a single-use token and requires no login (so it stays one click).
 	mux.HandleFunc("GET /council/confirm", s.councilConfirm)
+
+	// Public, signature-verified: SES bounce/complaint events via SNS. Registered
+	// only when a topic ARN is configured, so an unwired deployment 404s rather
+	// than exposing an idle handler. SNS cannot send a bearer token, so trust
+	// comes from the message signature + topic ARN (see sesHook).
+	if s.cfg.SESHookEnabled() {
+		mux.HandleFunc("POST /hooks/ses", s.sesHook)
+	}
 
 	// Public, token-only: the guest-pass activation link. GET renders a menu with
 	// NO side effects (scanner/prefetch-safe); POST performs the activation.
