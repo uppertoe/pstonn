@@ -23,7 +23,7 @@
         <input type="checkbox" name="save_password" value="1"{{if or (not .Relink) .AutoReconnect}} checked{{end}}>
         <span>
           <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It's sealed with encryption only this app can open, and used only to sign back in if the council ends your session.
+          It's encrypted with a key held on this server, and used only to sign back in if the council ends your session. The person running the server could technically read it &mdash; see <a href="/about">security</a>.
           <br>Without it, if you ever sign in to the Stonnington ePermits site yourself, that logs p.stonn out — you'll need to come back here and re-link before your schedule runs again.
         </span>
       </label>

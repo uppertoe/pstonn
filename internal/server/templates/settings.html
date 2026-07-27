@@ -37,7 +37,7 @@
         <button type="submit" class="danger">Confirm</button>
       </form>
     </div>
-    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything for good.</p>
+    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything from the live database straight away; backup copies age out afterwards.</p>
     {{else}}
     <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
     {{end}}
@@ -81,7 +81,7 @@
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-bell"}}</span> Notifications</h2>
-    <p class="subtitle">Get told about every plate change and any failure. Changes save as you toggle them.</p>
+    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
     {{if or .Notify.EmailAvailable .Notify.NtfyAvailable}}
     <div id="notify-body">{{template "notify-body" .Notify}}</div>
     <form method="post" action="/notifications/test" class="notify-test"><button type="submit" class="ghost">{{template "ic-bell"}} Send a test notification</button></form>
@@ -157,7 +157,7 @@
       </select>
       <span>&mdash; then they're delivered.</span>
     </div>
-    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen on time (your permit is always correct) &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. A failure is held too, but arrives early enough to act on.</p>
+    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. A failure is held too, but arrives early enough to act on.</p>
   </div>
 </form>
 {{end}}

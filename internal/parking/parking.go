@@ -6,8 +6,10 @@
 // mechanism: it holds each user's IdentityServer SESSION COOKIE and silent-renews
 // (a prompt=none Authorization-Code + PKCE flow) to mint short-lived (~1h) access
 // tokens on demand. Onboarding (Link) does a headless login with the user's
-// council credentials to obtain that cookie, then discards the password, we
-// never store it. The cookie itself may rotate on renew and is re-persisted.
+// council credentials to obtain that cookie. The password is discarded unless the
+// user opted in to auto-reconnect (the default in the UI), in which case it is
+// sealed at rest alongside the cookie so a lapsed session can be re-established
+// without them. The cookie itself may rotate on renew and is re-persisted.
 //
 // The access token is a Bearer credential for the /ssp-svc/api permit endpoints.
 // The request/response shapes mirror the portal's own SPA; an unexpected shape

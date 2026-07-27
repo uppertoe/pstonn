@@ -23,9 +23,12 @@ the council's own system for you and confirms when it's done.
   on the permit when they arrive, without an account. There's also a printable
   door QR: a visitor scans it and *requests* a plate, and nothing changes until
   you approve it from your phone.
-- **Notifications** — every plate change and every failure is reported to you by
-  email and/or push, so a missed change never silently costs someone a fine. The
-  app confirms changes against the council's own record before claiming success.
+- **Notifications** — the app tries to tell you by email and/or push whenever it
+  changes your permit, or can't. Brief hiccups it expects to resolve are retried
+  before you're bothered, and delivery is never guaranteed, so treat notifications
+  as a convenience rather than a guarantee — you remain responsible for your
+  permit. Success is only reported after the council's own record confirms the
+  change.
 - **Shared access** — household members can manage the same schedule.
 
 It's free, has no ads, collects nothing it doesn't need, and doesn't sell
@@ -34,17 +37,33 @@ problem worth solving once, properly, for everyone. Use the hosted site at
 [p.stonn.org](https://p.stonn.org) or self-host it (below).
 
 **Is this official?** No. p.stonn is an independent community tool and is not
-affiliated with or endorsed by the City of Stonnington. It automates exactly the
-actions you could do yourself in the council portal, on your own account, at
-your instruction — nothing more.
+affiliated with or endorsed by the City of Stonnington. It only ever acts on your
+own council account, doing things you could do yourself in the portal: it changes
+which of your vehicles is on your own visitor permit. Two things worth knowing
+because they aren't literally "only when you ask": it holds a continuously-renewed
+session so it can act on your schedule while you're not there, and if you create a
+guest link, the person holding it can change your permit at a time of their
+choosing.
 
-**Is my council password safe?** The app signs in once to obtain the council's
-session cookie and then **discards your password**. The cookie (and everything
-else sensitive) is encrypted at rest with AES-256-GCM. If you opt in to
-auto-reconnect, the password is stored encrypted the same way — and you can
-withdraw that at any time in Settings. Sessions are only kept alive for 90 days
-from your last sign-in; after that you're asked to confirm you still want the
-service before it continues.
+**Is my council password safe?** The app signs in to the council with your
+password to obtain a session cookie. **By default it also keeps the password**,
+encrypted, so it can sign back in on its own when the council ends the session —
+untick "Save my password" when you link, or turn it off later in Settings, and
+the password is erased and never stored again. Either way the session cookie is
+encrypted at rest with AES-256-GCM.
+
+**What else is encrypted?** Your council session cookie, its access token, and
+(if you saved it) your council password. The rest of your data — number plates,
+your schedule, permit details, email addresses, the activity log — is stored
+unencrypted in the app's SQLite database on the server. Anyone with the server or
+its database can read it. See [/about](https://p.stonn.org/about) for what that
+means and what is stored.
+
+**How long does a link last?** A linked session stops after 90 days unless you
+confirm it. About a week before that, the app emails you a one-click link;
+clicking it extends the session another 90 days without signing in again. Ignore
+the email and the session lapses, the app stops managing your permit, and you
+re-link in the app (which also resets the clock).
 
 ## How it works
 
@@ -64,11 +83,12 @@ pinned to your own verified email, so you can only ever link your own account.
 See `internal/parking`.
 
 **Keeping the session alive.** A keep-warm loop silently renews idle-but-valid
-sessions before they lapse, on a measured interval well inside the observed idle
-window, with jitter and rate limiting. Each linked session is kept warm for at
-most 90 days from the last interactive link; a one-click confirm email goes out
-before the deadline, and if you stop confirming, renewal stops. See
-`internal/scheduler`.
+sessions before they lapse, on a measured interval inside the observed idle window
+(~0.7x), with jitter and per-account spacing. A session is kept warm for at most
+90 days from the last time its clock was reset — either an interactive re-link OR
+a click on the one-click confirm email, which extends it without signing in. The
+confirm email goes out ~7 days before the deadline; ignore it and renewal stops,
+the session lapses, and the user is told to re-link. See `internal/scheduler`.
 
 **Scheduling** is a reconcile loop: every minute (and immediately after any
 edit) it computes the target plate for each permit from the roster and active
@@ -91,12 +111,20 @@ and the operator sees the whole list on `/admin`. Set up with
 [`deploy/aws-ses-hook-setup.py`](deploy/aws-ses-hook-setup.py); without it the
 app still classifies rejections at send time.
 
-**Light on the council's systems.** The app talks to the council portal
-sparingly and politely: it only makes a change when something actually needs to
-change, spaces its requests out, and if the portal is slow or busy it waits and
-tries again later rather than retrying in a tight loop. The load one household
-puts on the portal is about the same as that household logging in and updating
-the permit themselves.
+**Light on the council's systems.** The app only makes a change when something
+actually needs to change, spaces and jitters its requests, and backs off (per
+account, exponentially) when the portal pushes back. In practice one household's
+schedule costs the portal roughly 50–70 requests a day — comparable to a resident
+who logs in and edits their permit daily, though it continues on days they would
+not have logged in at all, because keeping the session alive is most of that
+traffic.
+
+To reach the portal at all it replays the ePermits web app's own login form and
+sends browser request headers, because the portal's protection layer refuses
+non-browser clients. That is stated plainly here rather than buried: it is the
+part of this project most worth a conversation with the council, and if there were
+a supported way in — an API, or an official delegated-access mechanism — this app
+would use it instead.
 
 **Terms and consent.** Sign-up records which version of the terms each user
 accepted (by content hash, append-only). Editing the terms re-prompts everyone;

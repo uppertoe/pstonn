@@ -57,22 +57,25 @@
 
     <h2 class="about-h2">The security model</h2>
     <ul>
-      <li>p.stonn holds a live, encrypted session to your council account. That session can view and change your permit. It is encrypted at rest with a key held on this server.</li>
+      <li>p.stonn holds a live session to your council account, continuously renewed so it can act on your schedule while you're not here. That session can view and change your permit. It is encrypted at rest with a key held on this server.</li>
+      <li><strong>What is and isn't encrypted:</strong> your council session, its access token, and your council password (if you saved it) are encrypted with AES-256-GCM. Everything else &mdash; your number plates, your schedule, your permit details, email addresses, and the activity and change logs &mdash; is stored unencrypted in the database on this server.</li>
       <li>This is necessary to reliably connect to your Stonnington ePermit account.</li>
       <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
-      <li>You may choose to not store your council password &mdash; instead just your email, your schedule, and the encrypted session. Without your password, this app may get disconnected from your Stonnington ePermit account and lose the ability to modify your permit. If you opt in to auto-reconnect, your password is also kept, sealed with the same encryption, so the app can sign back in on its own; you can remove it any time in Settings.</li>
-      <li>Your p.stonn login email is verified by a one-time code, and you can only link the council account whose email matches it.</li>
+      <li><strong>Your council password is saved by default</strong>, encrypted, so the app can sign back in on its own when the council ends the session &mdash; without it, a lapsed session stops the app updating your permit until you re-link. Untick &ldquo;Save my password&rdquo; when you link, or turn it off later in Settings, and it is erased and never stored again.</li>
+      <li>On p.stonn.org your login email is verified by a one-time code, and you can only ever link the council account whose email matches it. (Self-hosters: the app trusts whatever verified email its sign-in layer supplies.)</li>
       <li>Please ensure that your Stonnington ePermit password is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
-      <li>You can revoke p.stonn's access at any time: disconnect in Settings, or change your council password (which ends the stored session, usually within about half an hour).</li>
+      <li>You can revoke p.stonn's access at any time by disconnecting in Settings, which takes effect immediately. Changing your council password also ends the stored session, though an access token already issued may keep working for up to about an hour.</li>
       <li>Before using this service, you should consider whether you are comfortable with a third party holding access to your council account. Do not rely on it for anything you can't afford to have go wrong.</li>
     </ul>
 
     <h2 class="about-h2">Your data</h2>
     <ul>
-      <li>p.stonn stores what it needs to run and nothing more: your email, your vehicles and their plates, your schedule, your permit details, an activity log of changes it made, and the encrypted council session (plus your password, only if you opted in).</li>
-      <li>Your data is used only to operate this service for you. It is never sold, never shared with anyone, and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser.</li>
+      <li>About you: your email, your vehicles and their plates, your schedule, your permit details, a log of the changes it applied, a log of who on your account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</li>
+      <li>About other people, where you've used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the number plates visitors typed in at a printed door QR (kept 30 days). If we ever can't deliver mail to an address, we keep that address on a do-not-email list so we stop trying.</li>
+      <li>The logs above are kept for 90 days. The server also writes operational logs that contain email addresses, plates and permit identifiers.</li>
+      <li>Your data is used only to operate this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where the feature requires it: with the email provider that delivers your notifications, with the push server if you turn push on, and with the council itself when it changes your permit.</li>
       <li>Honesty requires saying: the person running this server could technically read what the server can read. What you get is their commitment not to, this page saying so publicly, and the small, personal scale of the service.</li>
-      <li>&ldquo;Delete all my data&rdquo; in Settings does what it says, immediately and permanently: your session, schedule, vehicles, guest passes, and history are all removed.</li>
+      <li>&ldquo;Delete all my data&rdquo; in Settings removes everything from the live database straight away: your session, saved password, schedule, vehicles, guest passes, and logs. Copies in the server's backups age out afterwards rather than vanishing at the same moment.</li>
     </ul>
 
     <h2 class="about-h2">Notifications</h2>
@@ -82,7 +85,7 @@
     </ul>
 
     <h2 class="about-h2">For the City of Stonnington</h2>
-    <p>If you work for the council and have questions or concerns about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident's own login, at their request, on their own permit, and is rate-limited to stay well below what a person clicking through ePermits would generate. If the council ever offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
+    <p>If you work for the council and have questions or concerns about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident's own login, on their own permit. It changes a permit only when that resident's own schedule requires it, spaces and jitters its requests, and backs off when the portal pushes back &mdash; roughly 50&ndash;70 requests a day for one household. To reach the portal it replays the ePermits web app's own login form and sends browser request headers, because the protection layer in front of it refuses non-browser clients; we'd much rather use a supported route. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
 
     <h2 class="about-h2">No promises</h2>
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
