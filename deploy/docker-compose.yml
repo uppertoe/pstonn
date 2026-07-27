@@ -18,6 +18,15 @@ services:
       - AUTH_LOGOUT_URL=https://auth.${DOMAIN}/logout # vps-scaffold-auth sign-out
     volumes:
       - pstonn_data:/data
+    # Bound the log. The app logs email addresses, plates and permit identifiers
+    # while running, and Docker's default json-file driver keeps them forever —
+    # so without this the container log is an unbounded, un-retained store of
+    # personal data that no "delete my data" path can reach.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # --- CIS Docker Benchmark §5 hardening (CI-enforced) ---
     user: "65532:65532"
     cap_drop:

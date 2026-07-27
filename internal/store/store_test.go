@@ -1991,3 +1991,126 @@ func TestTouchAccountActive(t *testing.T) {
 		t.Fatalf("a confirm click should reset the idle clock: %v", cs3.LastActive)
 	}
 }
+
+// TestRetention covers the data-minimisation sweeps: a sent notification keeps
+// only what dedup needs, a dead guest link stops naming its recipient, a settled
+// visitor request drops its poll secret, and the do-not-email list is bounded
+// EXCEPT for complaints.
+func TestRetention(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "owner@example.com"
+
+	// --- outbox: content stripped at send, dedup metadata kept ---
+	if err := s.EnqueueOutbox(ctx, OutboxItem{
+		Account: owner, DedupKey: "k1", Recipients: []string{"guest@example.com"},
+		Subject: "Permit updated: 12 Smith St now shows ABC123",
+		Body:    "plates and an address in here", Reason: "because",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.DueOutbox(ctx, time.Now(), 10)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("DueOutbox = %d rows, %v", len(due), err)
+	}
+	if err := s.MarkOutboxSent(ctx, due[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	var subject, body, recips string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT subject, body, recipients FROM outbox WHERE id = ?`, due[0].ID).
+		Scan(&subject, &body, &recips); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "" || body != "" || recips != "" {
+		t.Fatalf("sent row still holds content: subject=%q body=%q recipients=%q", subject, body, recips)
+	}
+	// Dedup must still work off the stripped row.
+	if err := s.EnqueueOutbox(ctx, OutboxItem{Account: owner, DedupKey: "k1", Subject: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM outbox WHERE dedup_key = 'k1'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("dedup broke after stripping: %d rows", n)
+	}
+
+	// --- revoked guest links stop naming the recipient ---
+	veh, err := s.CreateVehicle(ctx, owner, "CAR1", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := s.UpsertPermit(ctx, owner, "VPP-RET", "1", "P")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gid, err := s.CreateGuestGrant(ctx, owner, owner, pid, "Pass", false,
+		[]int64{veh}, []GuestRecipient{{Email: "gone@example.com", TokenHash: "h-ret"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	details, err := s.ListGuestGrants(ctx, owner)
+	if err != nil || len(details) != 1 {
+		t.Fatalf("grants = %d, %v", len(details), err)
+	}
+	if err := s.RevokeGuestToken(ctx, owner, details[0].Tokens[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate the revocation past the cutoff.
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE guest_token SET revoked_at = ? WHERE grant_id = ?`,
+		time.Now().Add(-40*24*time.Hour).UTC().Format(time.RFC3339), gid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ForgetRevokedRecipients(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var kept string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT recipient_email FROM guest_token WHERE grant_id = ?`, gid).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != "" {
+		t.Fatalf("a long-revoked link still names %q", kept)
+	}
+
+	// --- settled visitor requests drop the poll nonce ---
+	reqID, _, _, err := s.CreateGuestRequest(ctx, gid, pid, owner, "VIS123", "nonce-ret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecideGuestRequest(ctx, owner, reqID, false, "", owner, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClearSettledRequestNonces(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GuestRequestForPoll(ctx, reqID, "nonce-ret"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("a settled request should no longer be pollable with its old nonce")
+	}
+
+	// --- suppression list is bounded, but a complaint is not forgotten ---
+	if err := s.SuppressAddress(ctx, "bounced@example.com", SuppressBounce, "550"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SuppressAddress(ctx, "complained@example.com", SuppressComplaint, "abuse"); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * 365 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `UPDATE mail_suppression SET last_seen = ?`, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PruneSuppressions(ctx,
+		time.Now().Add(-2*365*24*time.Hour), time.Now().Add(-90*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if bad, _, _ := s.IsSuppressed(ctx, "bounced@example.com"); bad {
+		t.Fatal("an ancient bounce should age out")
+	}
+	if bad, _, _ := s.IsSuppressed(ctx, "complained@example.com"); !bad {
+		t.Fatal("a complaint must NEVER age out — they asked us to stop")
+	}
+}

@@ -969,7 +969,9 @@ func (s *Service) RunOutbox(ctx context.Context) {
 		case <-t.C:
 			s.drainOutbox(ctx)
 		case <-purge.C:
-			if _, err := s.store.PurgeSentOutbox(ctx, time.Now().Add(-7*24*time.Hour)); err != nil {
+			// 24h, not 7 days: a sent row is stripped of its content at send and is
+			// only needed for the 15-minute dedup window, so a day is generous.
+			if _, err := s.store.PurgeSentOutbox(ctx, time.Now().Add(-24*time.Hour)); err != nil {
 				log.Printf("notify: purge outbox: %v", err)
 			}
 		}

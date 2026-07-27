@@ -137,6 +137,21 @@ func (s *Store) ConfirmSession(ctx context.Context, token string, maxAge time.Du
 	return owner, err
 }
 
+// ClearStaleConfirmTokens drops confirm tokens whose reminder went out before the
+// cutoff. Consuming one is what normally clears it, so a token nobody ever
+// clicked otherwise sits in the row as a live "keep managing my permit" capability
+// until something happens to probe it.
+func (s *Store) ClearStaleConfirmTokens(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE council_session SET confirm_token = ''
+WHERE confirm_token != '' AND reminder_sent_at != '' AND reminder_sent_at < ?`,
+		before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // TouchAccountActive records that someone on the account used the app, resetting
 // the idle clock the re-authorise bound is measured against. Any member counts:
 // the bound exists to stop serving households that have left, and a secondary

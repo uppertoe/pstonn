@@ -144,6 +144,32 @@ func (s *Store) Unsuppress(ctx context.Context, address string) error {
 	return err
 }
 
+// PruneSuppressions bounds the do-not-email list. Suppression is genuinely
+// needed — re-sending to a dead address damages the sending domain for everyone,
+// and someone who asked us to stop must stay stopped — but "we keep your address
+// forever because you once unsubscribed" is not a defensible permanent record.
+//
+// Bounces and unsubscribes age out after bounceAge (an address that has been dead
+// for two years is not evidence about the address that replaces it). COMPLAINTS
+// ARE KEPT: someone who reported us as spam must never start receiving mail again
+// through mere expiry. Provider diagnostics are cleared earlier, since their only
+// use is short-term support.
+func (s *Store) PruneSuppressions(ctx context.Context, bounceBefore, detailBefore time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM mail_suppression WHERE reason IN (?, ?) AND last_seen < ?`,
+		SuppressBounce, SuppressUnsubscribed, bounceBefore.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE mail_suppression SET detail = '' WHERE detail != '' AND last_seen < ?`,
+		detailBefore.UTC().Format(time.RFC3339)); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
 // UnsuppressIfUnsubscribed clears ONLY a self-service unsubscribe, so a user who
 // changes their mind can resubscribe by re-enabling email in Settings. It
 // deliberately will not clear a bounce (the address is broken — sending again

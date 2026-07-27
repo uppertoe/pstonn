@@ -81,6 +81,36 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE owner = ? OR member_email = ?`, owner, owner); err != nil {
 		return err
 	}
+	// Their traces on OTHER people's accounts. Everything above is scoped to rows
+	// this account owns, but a user who was a secondary elsewhere also left their
+	// email address in that household's records — deleting "everything" has to mean
+	// that too, not just their own side.
+	//
+	// Guest passes they minted as a secondary are the security-relevant one: those
+	// are bearer links over someone else's permit, and after this delete the primary
+	// could no longer see them in Settings to revoke. Mirrors revokeGrantsBy.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE created_by = ? AND owner != ?`, owner, owner); err != nil {
+		return err
+	}
+	// Their change-log entries elsewhere (as the actor, or named as the target of a
+	// member add/remove).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM account_log WHERE actor = ? OR target = ?`, owner, owner); err != nil {
+		return err
+	}
+	// De-identify bookings they made on another household's permits. The booking
+	// itself is that household's live schedule state and must stay.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE override SET created_by = 'a former member' WHERE created_by = ? OR created_by = ?`,
+		owner, owner+" (undo)"); err != nil {
+		return err
+	}
+	// Anything still queued to them anywhere.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM outbox WHERE status = 'pending' AND recipients = ?`, owner); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -386,7 +416,18 @@ func revokeGrantsBy(ctx context.Context, tx *sql.Tx, owner, memberEmail string) 
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	// Anything still queued to them goes too. A quiet-hours-deferred notice can sit
+	// for hours, so without this someone who just lost access still receives the
+	// household's plates and permit label (often their address) by email.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM outbox WHERE status = 'pending' AND recipients = ?`, memberEmail); err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
 // IsPrimary reports whether owner is a primary of any shared account (has at

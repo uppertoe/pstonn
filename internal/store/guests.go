@@ -496,6 +496,37 @@ func (s *Store) ExpireGuestRequests(ctx context.Context, before time.Time) (int6
 	return res.RowsAffected()
 }
 
+// ForgetRevokedRecipients clears the email address on guest links that were
+// revoked before the cutoff. Once a link is dead the address serves no purpose —
+// it cannot be re-sent to and nothing reads it — so holding a third party's
+// contact details indefinitely is not justifiable. The row itself stays, so the
+// owner can still see that a recipient existed and was revoked.
+func (s *Store) ForgetRevokedRecipients(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE guest_token SET recipient_email = ''
+WHERE recipient_email != '' AND revoked_at != '' AND revoked_at < ?`,
+		before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ClearSettledRequestNonces drops the poll secret from printed-QR requests that
+// are decided AND past their window, so a visitor's live capability does not sit
+// in the table for the rest of its retention. Pending and still-active approved
+// requests keep theirs — the visitor is still polling those.
+func (s *Store) ClearSettledRequestNonces(ctx context.Context, now time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+UPDATE guest_request SET nonce = ''
+WHERE nonce != '' AND status != 'pending'
+  AND (until_ts = '' OR until_ts < ?)`, now.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // PurgeDecidedGuestRequests deletes non-pending requests older than before.
 // Visitor plates are PII; once a request is decided (or expired) there is no
 // reason to keep it beyond a short audit window.
@@ -754,12 +785,6 @@ func (s *Store) DeleteGuestGrant(ctx context.Context, owner string, grantID int6
 		return ErrNotFound
 	}
 	return nil
-}
-
-// TouchGuestTokenUsed records the last time a token successfully activated a car.
-func (s *Store) TouchGuestTokenUsed(ctx context.Context, tokenID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE guest_token SET last_used_at = ? WHERE id = ?`, nowUTC(), tokenID)
-	return err
 }
 
 // SetGuestBaseline remembers what was on the permit before a guest link's run of

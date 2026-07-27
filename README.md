@@ -139,6 +139,14 @@ declining disconnects the council account rather than just logging out.
 with a daily consistent snapshot for file-level backups. **UI** is
 server-rendered `html/template` with htmx and Alpine.js.
 
+**Retention** is enforced in code, on the housekeeping pass: activity and change
+logs 90 days; a decided door-QR request 7 days (and its poll secret dropped once
+settled); a revoked guest link's recipient address 30 days; sent notifications
+stripped of their content at send and purged after 24h; bounce/unsubscribe
+suppressions 2 years, complaints kept. Container logs are size-capped in the
+compose fragment, and `deploy/backup-service.env.example` carries a restic
+retention policy — without one, "deleted" has no upper bound.
+
 ## Run locally
 
 ```bash

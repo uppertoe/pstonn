@@ -135,8 +135,14 @@ FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 
 // MarkOutboxSent records a delivered notification.
 func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE outbox SET status = 'sent', sent_at = ?, last_error = '' WHERE id = ?`, nowUTC(), id)
+	// Strip the content as well as marking it sent. A delivered row is only ever
+	// consulted for dedup (dedup_key + status + sent_at, a 15-minute window), so
+	// keeping the composed message — plates, the permit label, guest addresses —
+	// for days afterwards is pure surplus personal data.
+	_, err := s.db.ExecContext(ctx, `
+UPDATE outbox SET status = 'sent', sent_at = ?, last_error = '',
+  recipients = '', subject = '', body = '', ntfy_topic = '', reason = ''
+WHERE id = ?`, nowUTC(), id)
 	return err
 }
 

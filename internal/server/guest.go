@@ -575,7 +575,6 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_ = s.store.TouchGuestTokenUsed(r.Context(), gc.TokenID)
 
 	// Capture (or extend) the revert baseline: the plate that was on the permit
 	// when this run of activations began. A later tap within the window must NOT
@@ -1394,7 +1393,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	if email != "" && !looksLikeEmail(email) {
 		s.formError(w, r, "Enter a valid email address, or leave it blank.")
@@ -1404,6 +1403,15 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Worth logging precisely because of what it is: the one action that adds
+	// ANOTHER PERSON's email address to the account. It was the only change
+	// missing from the Activity page.
+	detail := "removed"
+	if email != "" {
+		detail = "set"
+	}
+	s.logChange(r.Context(), owner, user, store.ActionVehicleEmail,
+		s.plateOf(r.Context(), owner, pathInt(r, "id")), detail)
 	http.Redirect(w, r, "/vehicles?saved=1", http.StatusSeeOther)
 }
 

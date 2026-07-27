@@ -424,8 +424,30 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	} else if n > 0 {
 		log.Printf("scheduler: expired %d stale guest request(s)", n)
 	}
-	if _, err := s.store.PurgeDecidedGuestRequests(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
+	// 7 days, not 30: the only reader (the holder's "recently decided" list) looks
+	// back 48 hours, so the rest was a visitor's number plate kept for nothing.
+	if _, err := s.store.PurgeDecidedGuestRequests(ctx, time.Now().Add(-7*24*time.Hour)); err != nil {
 		log.Printf("scheduler: purge guest requests: %v", err)
+	}
+	// A decided request past its window no longer needs its poll secret.
+	if _, err := s.store.ClearSettledRequestNonces(ctx, time.Now()); err != nil {
+		log.Printf("scheduler: clear settled request nonces: %v", err)
+	}
+	// A revoked guest link's recipient address is no longer needed to run anything.
+	if _, err := s.store.ForgetRevokedRecipients(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
+		log.Printf("scheduler: forget revoked recipients: %v", err)
+	}
+	// Bound the do-not-email list: bounces/unsubscribes age out after 2 years,
+	// complaints are kept (see PruneSuppressions), diagnostics cleared at 90 days.
+	if _, err := s.store.PruneSuppressions(ctx,
+		time.Now().Add(-2*365*24*time.Hour), time.Now().Add(-90*24*time.Hour)); err != nil {
+		log.Printf("scheduler: prune suppressions: %v", err)
+	}
+	// An unclicked confirm token is a live capability; don't leave it lying about
+	// once its own TTL has passed. Generous cutoff: the handler enforces the real
+	// TTL, this is just housekeeping.
+	if _, err := s.store.ClearStaleConfirmTokens(ctx, time.Now().Add(-60*24*time.Hour)); err != nil {
+		log.Printf("scheduler: clear stale confirm tokens: %v", err)
 	}
 	if _, err := s.store.PruneApplyLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
 		log.Printf("scheduler: prune apply log: %v", err)
