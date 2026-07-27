@@ -45,6 +45,11 @@ type Server struct {
 	// testNotifyLimit throttles the on-demand "send test" button (per user): the
 	// only authenticated control that sends mail whenever it is pressed.
 	testNotifyLimit *rateLimiter
+	// councilRead throttles the two routes that make an UNCACHED, synchronous
+	// council read (the permit picker and adding a permit). Every other council
+	// read path has a cache and in-flight dedup; these did not, so one signed-in
+	// user could turn HTTP requests into council requests one-for-one.
+	councilRead *rateLimiter
 	// guestSlots bounds CONCURRENT public guest requests. The store runs on a
 	// single SQLite connection shared with the scheduler, so unbounded anonymous
 	// reads don't merely slow pages down — they starve the reconcile loop, and a
@@ -81,6 +86,7 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		guestLinkTo:     newRateLimiter(5, 24*time.Hour),   // <=5 guest-link emails / day per recipient
 		councilTry:      newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
 		testNotifyLimit: newRateLimiter(5, time.Hour),      // 5 test notifications / hour per user
+		councilRead:     newRateLimiter(12, 5*time.Minute), // 12 uncached council reads / 5 min per user
 		guestSlots:      make(chan struct{}, maxConcurrentGuest),
 		snsCert:         newCertCache(),
 		unsubKey:        notify.DeriveUnsubKey(cfg.DataEncryptionKey),

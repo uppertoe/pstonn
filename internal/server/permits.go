@@ -23,6 +23,15 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// This page makes an uncached, synchronous council read, so one HTTP request
+	// is one council request. Throttled per user: opening the picker a few times
+	// is normal, hammering it is not, and the council's opinion of us is the
+	// scarcest resource the app has.
+	if !s.councilRead.allow("cr:" + base.Owner) {
+		s.message(w, http.StatusTooManyRequests,
+			"You've refreshed the permit list a lot in the last few minutes. Please wait a moment before trying again — p.stonn keeps its requests to the council deliberately light.")
+		return
+	}
 	s.renderPicker(w, r, base)
 }
 
@@ -116,7 +125,7 @@ func isVisitorPermit(permitType string) bool {
 }
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	// Bounded well inside the server's 20s WriteTimeout: the council authorization
 	// read below must fail with a rendered error, not a dropped connection.
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
@@ -132,6 +141,11 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// returns permits the account actually holds; a forged council_permit_id (not
 	// from the picker) is rejected here. We take the permit type and current plate
 	// from the authoritative council record, never from the form.
+	if !s.councilRead.allow("cr:" + owner) {
+		s.message(w, http.StatusTooManyRequests,
+			"Too many council lookups in a short time. Please wait a moment and try again.")
+		return
+	}
 	permits, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) || errors.Is(err, parking.ErrNotLinked) {
@@ -191,6 +205,11 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// Seed expiry + status + identifiers so the schedule shows them straight away;
 	// the scheduler keeps them fresh on the keep-warm cadence thereafter.
 	_ = s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate)
+	target := match.PermitNumber
+	if target == "" {
+		target = cpid
+	}
+	s.logChange(ctx, owner, user, store.ActionPermitAdd, target, "")
 	redirectHome(w, r)
 }
 
@@ -207,7 +226,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 // household member legitimately needs (roster, one-offs, guest passes, vehicles)
 // stays open to them; retiring a permit is account-structural, like unlinking.
 func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
-	_, owner, isPrimary := s.resolveAccount(r.Context())
+	user, owner, isPrimary := s.resolveAccount(r.Context())
 	if !isPrimary {
 		s.message(w, http.StatusForbidden,
 			"Only the account owner can stop managing a permit. Ask them if this permit should be removed.")
@@ -221,6 +240,10 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	label := permitLabel(p)
+	s.logChange(r.Context(), owner, user, store.ActionPermitRemove, label, "")
+	s.notifyDestructive(r.Context(), owner, user,
+		user+" stopped managing the permit \""+label+"\". Its weekly roster, one-off bookings and change history were deleted, and p.stonn will no longer update that permit.")
 	// Re-evaluate so the scheduler drops the now-removed permit promptly.
 	s.sched.Kick()
 	redirectHome(w, r)
@@ -230,7 +253,7 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 // of the account's permits onto this one — the "I renewed my permit, put my
 // schedule back" flow. Any account member may do it (it's schedule management).
 func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	dst, ok := s.ownedPermit(w, r, owner) // target = permit in the path
 	if !ok {
 		return
@@ -255,7 +278,11 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "That permit has no schedule to copy.")
 		return
 	}
-	s.sched.Kick()
+	label := permitLabel(dst)
+	s.logChange(r.Context(), owner, user, store.ActionScheduleCopy, label, "")
+	s.notifyDestructive(r.Context(), owner, user,
+		user+" copied another permit's schedule onto \""+label+"\". That replaced its weekly roster and any upcoming one-off bookings.")
+	s.sched.KickPermit(dst.ID)
 	s.respondPermit(w, r, owner, dst)
 }
 
@@ -276,7 +303,7 @@ func cleanLabel(s string) string {
 // shown everywhere it appears — schedule, guest passes, door QRs. It's purely a
 // display label; the council record is untouched.
 func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
@@ -293,5 +320,6 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionPermitRename, label, "")
 	redirectHome(w, r)
 }

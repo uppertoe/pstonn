@@ -806,9 +806,24 @@ func TestRetryBackoff(t *testing.T) {
 		t.Fatal("success must clear the deferral")
 	}
 
+	// Kick asks for an immediate pass but must NOT clear failure backoffs. It used
+	// to clear every permit's, and it is reachable from unauthenticated guest
+	// activations — so one actor could hold the whole fleet at the 1-minute
+	// reconcile rate instead of its 2–30 minute backoff, which is the exact
+	// hammering nextTry exists to prevent.
 	s.deferRetry(7, 5)
+	s.deferRetry(8, 5)
 	s.Kick()
+	if !s.retryDeferred(7, now) || !s.retryDeferred(8, now) {
+		t.Fatal("Kick must NOT clear failure backoffs (it is reachable unauthenticated)")
+	}
+
+	// KickPermit clears exactly the permit the user acted on, and nothing else.
+	s.KickPermit(7)
 	if s.retryDeferred(7, now) {
-		t.Fatal("Kick must clear deferrals: the user may have just fixed the cause")
+		t.Fatal("KickPermit must clear that permit's deferral: the user may have just fixed the cause")
+	}
+	if !s.retryDeferred(8, now) {
+		t.Fatal("KickPermit must not clear another permit's deferral")
 	}
 }

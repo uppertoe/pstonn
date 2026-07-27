@@ -51,7 +51,7 @@ func (m *Mailer) Enabled() bool { return m != nil }
 
 // SendRenewalReminder emails one user the "confirm you're still using this" note
 // with a single-click link. deadline is when the session would otherwise stop.
-func (m *Mailer) SendRenewalReminder(to string, deadline time.Time, confirmURL string) error {
+func (m *Mailer) SendRenewalReminder(to string, deadline time.Time, confirmURL string, o Options) error {
 	if m == nil {
 		return nil
 	}
@@ -71,7 +71,7 @@ func (m *Mailer) SendRenewalReminder(to string, deadline time.Time, confirmURL s
 		"",
 		"-- p.stonn",
 	}, "\r\n")
-	return m.send(to, subject, body, Options{})
+	return m.send(to, subject, body, o)
 }
 
 // Options carries the per-message extras. Zero value = a plain notice.

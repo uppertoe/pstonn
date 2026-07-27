@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -69,6 +70,11 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusBadGateway, "Couldn't link your council account. This looks like a problem at our end or on the council's site rather than your password — please try again shortly.")
 		return
 	}
+	s.logChange(r.Context(), user, user, store.ActionCouncilLink, "", "")
+	// A fresh link plausibly fixes every permit on this account, so clear their
+	// failure backoffs and reconcile now rather than making the user wait out a
+	// stretched retry window they just made obsolete. Scoped to this owner.
+	s.sched.KickOwner(r.Context(), user)
 	// ?linked=1 turns into the "Council account linked." flash — after a first
 	// link the user lands on the permit picker, so this is the only confirmation
 	// the sign-in worked.
@@ -88,6 +94,7 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), user, user, store.ActionCouncilUnlink, "", "")
 	redirectHome(w, r)
 }
 
@@ -125,6 +132,7 @@ func (s *Server) councilForgetPassword(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), user, user, store.ActionCouncilForget, "", "")
 	if r.Header.Get("HX-Request") != "" {
 		s.settingsPage(w, r)
 		return
@@ -214,6 +222,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("invite email to %s skipped (throttled or email not configured)", email)
 	}
+	s.logChange(ctx, owner, user, store.ActionMemberAdd, email, "")
 	q := url.Values{"shared": {email}}
 	if mailed {
 		q.Set("mailed", "1")
@@ -223,7 +232,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 
 // removeMember (owner only) revokes a secondary's shared access.
 func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
-	_, owner, isPrimary := s.resolveAccount(r.Context())
+	user, owner, isPrimary := s.resolveAccount(r.Context())
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can change shared access.")
 		return
@@ -237,6 +246,11 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	detail := ""
+	if revoked > 0 {
+		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
+	}
+	s.logChange(r.Context(), owner, user, store.ActionMemberRemove, email, detail)
 	q := url.Values{"removed": {email}}
 	if revoked > 0 {
 		q.Set("revoked", strconv.FormatInt(revoked, 10))
@@ -252,10 +266,14 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "You own this account, so there is nothing to leave.")
 		return
 	}
+	// Log against the account they are leaving (resolved before the membership
+	// row goes), so the primary can see it happened.
+	_, leftOwner, _ := s.resolveAccount(r.Context())
 	if _, err := s.store.RemoveMembership(r.Context(), user); err != nil {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), leftOwner, user, store.ActionMemberLeave, "", "")
 	redirectHome(w, r)
 }
 

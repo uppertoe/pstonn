@@ -602,6 +602,9 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	defer cancel()
 	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, reg)
+	// Plain Kick, deliberately: this handler already attempted the council write
+	// itself, so clearing the permit's failure backoff would add council pressure
+	// without adding a chance of success — and this path is unauthenticated.
 	s.sched.Kick()
 	if err == nil {
 		_ = s.store.SetPermitActive(bg, permit.ID, reg)
@@ -1104,6 +1107,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Guest pass created. Copy the links below to share them."
 	}
 	base.Flash += skippedNote(droppedEmails)
+	s.logChange(r.Context(), owner, user, store.ActionGuestCreate, strings.Join(recipients, ", "), label)
 	s.render(w, base)
 }
 
@@ -1184,7 +1188,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 // updateGuestGrant edits a grant's label, cars, and overnight option, and adds
 // any new recipients (each getting a fresh emailed link). The permit is fixed.
 func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	id := pathInt(r, "id")
 	if err := r.ParseForm(); err != nil {
 		s.formError(w, r, "Could not read the form. Please try again.")
@@ -1261,6 +1265,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Guest pass updated."
 	}
 	base.Flash += skippedNote(droppedEmails)
+	s.logChange(r.Context(), owner, user, store.ActionGuestUpdate, label, "")
 	s.render(w, base)
 }
 
@@ -1344,29 +1349,46 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
+	// Name it before deleting, so the log and the notice can say which pass died.
+	label := s.grantLabel(r.Context(), owner, pathInt(r, "id"))
 	if err := s.store.DeleteGuestGrant(r.Context(), owner, pathInt(r, "id")); err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionGuestDelete, label, "")
+	s.notifyDestructive(r.Context(), owner, user,
+		user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit.")
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
 func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	if err := s.store.RevokeGuestToken(r.Context(), owner, pathInt(r, "tid")); err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionGuestRevoke, "", "")
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
 func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	enabled := r.FormValue("enabled") != ""
 	if err := s.store.SetGuestsEnabled(r.Context(), owner, enabled); err != nil {
 		s.serverError(w, err)
 		return
+	}
+	state := "on"
+	if !enabled {
+		state = "off"
+	}
+	s.logChange(r.Context(), owner, user, store.ActionGuestToggle, "", state)
+	if !enabled {
+		// Pausing kills every guest link at once — a visitor at the kerb just sees
+		// "no longer active", so the household should know it was deliberate.
+		s.notifyDestructive(r.Context(), owner, user,
+			user+" paused all guest passes on your p.stonn account. Existing guest links and printed door QRs will not work until they are resumed.")
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
@@ -1654,6 +1676,7 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionDoorQRCreate, s.permitLabelByID(r.Context(), owner, permitID), "")
 	http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", grantID), http.StatusSeeOther)
 }
 
@@ -1699,11 +1722,15 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 
 // revokeDoorQR retires a door QR for good (its code stops working).
 func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
+	label := s.grantLabel(r.Context(), owner, atoi64(r.PathValue("id")))
 	if err := s.store.RevokePrintedGrant(r.Context(), owner, atoi64(r.PathValue("id"))); err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
+	s.notifyDestructive(r.Context(), owner, user,
+		user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working.")
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
@@ -1726,6 +1753,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 			s.serverError(w, err)
 			return
 		}
+		s.logChange(r.Context(), owner, user, store.ActionRequestNo, "", "")
 		http.Redirect(w, r, "/guests?declined=1", http.StatusSeeOther)
 		return
 	}
@@ -1790,6 +1818,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	cancel()
 	s.sched.Kick()
 
+	s.logChange(bg, owner, user, store.ActionRequestOK, req.Plate, "")
 	q := url.Values{}
 	if confirmed {
 		q.Set("applied", req.Plate)

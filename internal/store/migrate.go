@@ -216,6 +216,23 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 
+-- Who changed what, for the account holder to read. The apply log records what
+-- p.stonn DID to a permit; this records what PEOPLE did to the setup — and those
+-- are invisible otherwise, because notifications only fire on council apply
+-- outcomes. Clearing a roster day produces no apply at all, so without this a
+-- shared-account change (a housemate, or someone who should no longer have
+-- access) leaves no trace the owner can find.
+CREATE TABLE IF NOT EXISTS account_log (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner  TEXT NOT NULL,             -- account the change belongs to
+    actor  TEXT NOT NULL DEFAULT '',  -- signed-in person who made it ('' = the system)
+    action TEXT NOT NULL,             -- stable slug, e.g. "roster.set" (see store/changelog.go)
+    target TEXT NOT NULL DEFAULT '',  -- what it applied to (a plate, a permit name, an email)
+    detail TEXT NOT NULL DEFAULT '',  -- extra context, already human-readable
+    at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_account_log_owner ON account_log(owner, id);
+
 -- Addresses we must stop emailing: hard bounces and spam complaints, learned
 -- either from the SMTP conversation (a 5xx at send time) or asynchronously from
 -- the provider's bounce/complaint feed. Consulted before every send. Sending to

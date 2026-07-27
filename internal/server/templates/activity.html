@@ -1,6 +1,6 @@
 {{define "page-activity"}}
   {{/* ---------- ACTIVITY ---------- */}}
-  <div class="sectitle" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Activity</div>
+  <div class="sectitle" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Plate changes</div>
   <p class="subtitle">Every plate change the scheduler has applied on your behalf.</p>
   <section class="card" style="--hue:var(--sec-activity)">
     <table class="mtable">
@@ -13,6 +13,29 @@
         </tr>
       {{else}}
         <tr><td colspan="3" class="empty-note">No changes applied yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </section>
+
+  {{/* Who changed the SETUP, as opposed to what the scheduler did to the permit.
+       A separate section because it answers a different question — and it is the
+       only place a shared household can see who edited the roster, deleted a car
+       or revoked a pass. Those changes produce no council apply, so they appear
+       nowhere above. */}}
+  <div class="sectitle" style="--hue:var(--sec-settings);margin-top:26px"><span class="ic">{{template "ic-activity"}}</span> Account changes</div>
+  <p class="subtitle">Who changed the schedule, cars, guest passes or shared access &mdash; including you. Kept for 90 days.</p>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <table class="mtable">
+      <tbody>
+      {{range .Changes}}
+        <tr>
+          <td class="muted" style="white-space:nowrap">{{localTime .At $.Loc}}</td>
+          <td>{{if .Actor}}<strong>{{.Actor}}</strong>{{else}}<span class="muted">p.stonn</span>{{end}}</td>
+          <td>{{.Text}}</td>
+        </tr>
+      {{else}}
+        <tr><td colspan="3" class="empty-note">No changes recorded yet.</td></tr>
       {{end}}
       </tbody>
     </table>

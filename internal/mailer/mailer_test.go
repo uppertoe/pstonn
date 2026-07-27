@@ -26,7 +26,7 @@ func TestNewDisabledWhenUnset(t *testing.T) {
 	if nilM.Enabled() {
 		t.Fatal("nil mailer must report disabled")
 	}
-	if err := nilM.SendRenewalReminder("a@b", time.Time{}, "url"); err != nil {
+	if err := nilM.SendRenewalReminder("a@b", time.Time{}, "url", Options{}); err != nil {
 		t.Fatalf("nil mailer send should be a no-op: %v", err)
 	}
 }

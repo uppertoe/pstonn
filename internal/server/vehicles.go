@@ -27,7 +27,7 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	reg := normalizeReg(r.FormValue("registration"))
 	label := cleanLabel(r.FormValue("label"))
 	if !validRego(reg) {
@@ -42,14 +42,24 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionVehicleAdd, reg, label)
 	http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
 }
 
 func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
+	// Name the car before it goes, and warn the household: deleting a vehicle
+	// cascade-deletes every roster day and booking that used it, which is silent
+	// otherwise (a cleared day produces no apply, so nothing is notified).
+	plate := s.plateOf(r.Context(), owner, pathInt(r, "id"))
 	if err := s.store.DeleteVehicle(r.Context(), owner, pathInt(r, "id")); err != nil {
 		s.serverError(w, err)
 		return
+	}
+	if plate != "" {
+		s.logChange(r.Context(), owner, user, store.ActionVehicleDelete, plate, "")
+		s.notifyDestructive(r.Context(), owner, user,
+			user+" deleted the car "+plate+" from your p.stonn account. Any weekly roster days and one-off bookings that used it were removed too, so those days now fall back to whatever else is scheduled.")
 	}
 	http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
 }

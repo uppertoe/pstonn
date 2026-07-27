@@ -46,12 +46,13 @@ type dashboardData struct {
 	Permits        []permitView
 	ExpiredPermits []expiredPermitView // collapsed: expired/cancelled permits kept as copy sources
 	Log            []store.ApplyRecord
-	RelinkBy       string     // human date the session must be re-authorised by ("" if unknown)
-	CouncilLinked  bool       // settings: an active council session exists
-	AutoReconnect  bool       // settings: a saved password lets p.stonn auto-reconnect
-	LastReconnect  string     // settings: when the saved password last signed back in ("" = never)
-	Notify         notifyView // settings: notification channels
-	Terms          termsView  // terms state + settings display
+	Changes        []changeView // who changed the setup (account_log), newest first
+	RelinkBy       string       // human date the session must be re-authorised by ("" if unknown)
+	CouncilLinked  bool         // settings: an active council session exists
+	AutoReconnect  bool         // settings: a saved password lets p.stonn auto-reconnect
+	LastReconnect  string       // settings: when the saved password last signed back in ("" = never)
+	Notify         notifyView   // settings: notification channels
+	Terms          termsView    // terms state + settings display
 	// picker state
 	Pick []pickView
 	// HasPermits distinguishes the two empty-picker cases: the council account
@@ -92,6 +93,13 @@ type confirmView struct {
 	Until string // when the session would otherwise lapse ("" if unknown)
 	Done  bool
 	Stale bool // token unknown/used/expired — reassure rather than alarm
+}
+
+// changeView is one row of the account change log, rendered on Activity.
+type changeView struct {
+	Actor string // who did it ("" = the system)
+	Text  string // already-rendered sentence (see changeText)
+	At    time.Time
 }
 
 type termsView struct {

@@ -182,7 +182,12 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	// A dedicated client that follows redirects and keeps a jar for this one
 	// login flow (c.http handles redirects manually and shares no cookies). The
 	// browser transport presents a real Chrome UA and client hints throughout.
-	lc := &http.Client{Timeout: 30 * time.Second, Jar: jar, Transport: browserTransport{base: http.DefaultTransport}}
+	// Count this client's traffic too. It was previously uncounted, which left the
+	// hourly traffic summary's "login" bucket permanently at zero and understated
+	// every link/reconnect by its 4–6 round trips — an undercount we would not
+	// want to be quoting to the council.
+	lc := &http.Client{Timeout: 30 * time.Second, Jar: jar,
+		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic}}
 
 	verifier, err := randToken()
 	if err != nil {

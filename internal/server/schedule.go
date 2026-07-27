@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // schedule is the primary day-to-day page: permit status, weekly roster, 14-day
@@ -230,7 +231,7 @@ func fillExpiry(pv *permitView, now time.Time) {
 }
 
 func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
@@ -246,6 +247,7 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	weekday := time.Weekday(wd)
 	vehicleID := atoi64(r.FormValue("vehicle_id"))
 	var err error
+	var plate string
 	if vehicleID == 0 {
 		err = s.store.ClearRule(r.Context(), p.ID, weekday)
 	} else {
@@ -253,12 +255,23 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err = s.store.SetRule(r.Context(), p.ID, weekday, vehicleID)
+		plate = s.plateOf(r.Context(), owner, vehicleID)
 	}
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.sched.Kick()
+	// Roster edits are the change most likely to matter and least likely to be
+	// noticed: clearing a day produces no apply at all, so the scheduler does
+	// nothing and says nothing.
+	if vehicleID == 0 {
+		s.logChange(r.Context(), owner, user, store.ActionRosterClear,
+			weekday.String()+" on "+permitLabel(p), "")
+	} else {
+		s.logChange(r.Context(), owner, user, store.ActionRosterSet,
+			weekday.String()+" on "+permitLabel(p), plate)
+	}
+	s.sched.KickPermit(p.ID)
 	s.respondPermit(w, r, owner, p)
 }
 
@@ -336,21 +349,48 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Choose a saved car or enter a one-off plate.")
 		return
 	}
-	s.sched.Kick()
+	// Record the window too: an open-ended booking beats the roster indefinitely,
+	// which is worth being able to see and attribute.
+	reg := plate
+	if reg == "" {
+		reg = s.plateOf(r.Context(), owner, vehicleID)
+	}
+	window := "from " + startsAt.In(s.cfg.DisplayLocation).Format("2 Jan 3:04pm")
+	if endsAt == nil {
+		window += ", open-ended"
+	} else {
+		window += " until " + endsAt.In(s.cfg.DisplayLocation).Format("2 Jan 3:04pm")
+	}
+	s.logChange(r.Context(), owner, user, store.ActionOverrideAdd, reg, window)
+	s.sched.KickPermit(p.ID)
 	s.respondPermit(w, r, owner, p)
 }
 
 func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
+	}
+	// Read the booking before deleting it, so the log can name what went.
+	var gone string
+	if ovs, err := s.store.ListOverrides(r.Context(), p.ID, time.Time{}); err == nil {
+		oid := pathInt(r, "oid")
+		for _, o := range ovs {
+			if o.ID == oid {
+				gone = o.Registration
+				if gone == "" {
+					gone = s.plateOf(r.Context(), owner, o.VehicleID)
+				}
+			}
+		}
 	}
 	if err := s.store.DeleteOverride(r.Context(), owner, pathInt(r, "oid")); err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.sched.Kick()
+	s.logChange(r.Context(), owner, user, store.ActionOverrideDelete, gone, "")
+	s.sched.KickPermit(p.ID)
 	s.respondPermit(w, r, owner, p)
 }
 

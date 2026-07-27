@@ -310,7 +310,13 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
 		}
 	}
-	err := s.mail.SendRenewalReminder(to, deadline, confirmURL)
+	// Same envelope obligations as every other person-facing mail: an unsubscribe
+	// and a "why you got this". This one composes its own body in the mailer, which
+	// is why the options are passed rather than going through sendEmail.
+	err := s.mail.SendRenewalReminder(to, deadline, confirmURL, mailer.Options{
+		UnsubscribeURL: s.UnsubscribeURL(to),
+		Provenance:     "You received this at " + to + " because " + reasonAccount + ". p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.",
+	})
 	if err != nil && errors.Is(err, mailer.ErrPermanent) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
 			log.Printf("notify: suppress %s: %v", to, serr)
@@ -763,6 +769,64 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("guest request notify: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// NotifyAccountChange tells an account's members that someone made an
+// irreversible change to the setup — a wiped roster, a deleted car, a retired
+// permit, a revoked pass. The person who made the change is skipped: they know.
+//
+// It exists because the notification design otherwise only fires on council
+// apply outcomes, so configuration changes were invisible by construction: an
+// emptied roster produces no apply at all, and the household would discover it
+// from a parking ranger. Quiet hours ARE honoured (this is information, not an
+// emergency) and failures-only is ignored, since an unexpected deletion is
+// exactly the kind of thing a failures-only subscriber still wants.
+func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary string) error {
+	subject := "A change was made to your p.stonn setup"
+	lines := []string{
+		summary,
+		"",
+		"If that was expected, nothing to do.",
+		"If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.",
+	}
+	if s.appURL != "" {
+		lines = append(lines, "", s.appURL+"/activity")
+	}
+	body := strings.Join(lines, "\n")
+	dels, err := s.accountDeliveries(ctx, owner)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	var errs []string
+	for _, d := range dels {
+		if strings.EqualFold(d.email, actor) {
+			continue // don't tell someone about their own action
+		}
+		m := outMessage{
+			Account: owner, Subject: subject, Body: body, Reason: reasonAccount,
+			NotBefore: s.quietDefer(d.pref, now),
+			// Per-member and per-summary, so two members each hear once and a repeated
+			// identical action inside the dedup window doesn't double up.
+			DedupKey: fmt.Sprintf("acctchange|%s|%s|%s", d.email, owner, summary),
+		}
+		if d.pref.EmailEnabled && s.mail.Enabled() {
+			m.Recipients = []string{d.email}
+		}
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			m.NtfyTopic = d.pref.NtfyTopic
+		}
+		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
+			continue
+		}
+		if e := s.enqueueSplit(ctx, m); e != nil {
+			errs = append(errs, d.email+": "+e.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("account change notify: %s", strings.Join(errs, "; "))
 	}
 	return nil
 }

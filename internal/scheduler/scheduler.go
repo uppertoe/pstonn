@@ -163,18 +163,46 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 }
 
 // Kick requests an immediate reconcile (e.g. after a roster/override edit).
-// Non-blocking: a pending kick is coalesced. A kick follows a user action (a
-// schedule edit, a re-link), which may well have fixed whatever was failing, so
-// it also clears the per-permit retry backoffs — the user should not wait out a
-// stretched retry window they just made obsolete.
+// Non-blocking: a pending kick is coalesced.
+//
+// It does NOT clear retry backoffs. It used to clear all of them, on the
+// reasoning that a user action may have fixed whatever was failing — but the
+// scope was wrong in two ways: it cleared every permit in the deployment, not
+// the one the user touched, and it is reachable from unauthenticated guest
+// activations. One actor kicking in a loop therefore held every failing permit
+// in the fleet at the 1-minute reconcile rate instead of its 2–30 minute
+// backoff, which is exactly the "a council write per permit per minute forever"
+// profile nextTry exists to prevent — during the outage it was designed for.
+//
+// Callers who genuinely invalidated a backoff (a re-link, an edit to that
+// permit) use KickPermit, which clears just that permit's window.
 func (s *Scheduler) Kick() {
-	s.retryMu.Lock()
-	clear(s.nextTry)
-	s.retryMu.Unlock()
 	select {
 	case s.trigger <- struct{}{}:
 	default:
 	}
+}
+
+// KickPermit clears ONE permit's failure backoff and then kicks. Use it after a
+// user action that plausibly fixed that permit (a schedule edit, a re-link), so
+// they don't wait out a stretched retry window they just made obsolete — without
+// disturbing anyone else's backoff.
+func (s *Scheduler) KickPermit(permitID int64) {
+	if permitID > 0 {
+		s.clearRetry(permitID)
+	}
+	s.Kick()
+}
+
+// KickOwner clears the backoffs for one owner's permits and then kicks. Used
+// after a re-link, which plausibly fixes every permit on that account.
+func (s *Scheduler) KickOwner(ctx context.Context, owner string) {
+	if permits, err := s.store.ListPermitsFor(ctx, owner); err == nil {
+		for _, p := range permits {
+			s.clearRetry(p.ID)
+		}
+	}
+	s.Kick()
 }
 
 // deferRetry stretches the permit's next council attempt exponentially in its
@@ -408,6 +436,11 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	// history for the dashboard's past-days rendering.
 	if _, err := s.store.PruneOverrides(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
 		log.Printf("scheduler: prune overrides: %v", err)
+	}
+	// The account change log names people and plates; keep it to the same 90-day
+	// window as the apply log rather than accumulating indefinitely.
+	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
+		log.Printf("scheduler: prune change log: %v", err)
 	}
 	if s.snapshotPath != "" && time.Since(s.lastSnapshot) > 24*time.Hour {
 		if err := s.store.Snapshot(ctx, s.snapshotPath); err != nil {
