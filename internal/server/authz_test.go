@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -418,5 +420,80 @@ func TestGuestPageBoostReturnsFullPage(t *testing.T) {
 	}
 	if body := get(map[string]string{"HX-Request": "true"}); strings.Contains(body, "guestwrap") {
 		t.Fatal("an in-page htmx swap should return just the #gbody fragment")
+	}
+}
+
+// TestStatusRosterSealed: the roster is the sensitive half of /status (every
+// user's email plus their push topic). With a key configured it must be
+// encrypted, and absent from the frequent health poll entirely.
+func TestStatusRosterSealed(t *testing.T) {
+	ctx := context.Background()
+	s := newAuthzServer(t)
+	const token = "status-token-long-enough-to-pass"
+	s.cfg.StatusToken = token
+	// The status payload reports scheduler health, so it needs a scheduler (a real
+	// one with no council client: LastReconcile only reads an atomic).
+	s.sched = scheduler.New(s.store, nil, time.UTC, scheduler.Options{})
+	s.cfg.RosterKey = bytes.Repeat([]byte{9}, 32)
+	if err := s.store.RecordConsent(ctx, "roster@example.com", "v1", "h1"); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func(target string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", target, nil)
+		r.Host = "app.example.com"
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+
+	// The health poll carries no roster at all, in any form.
+	body := get("/status").Body.String()
+	if strings.Contains(body, "roster@example.com") || strings.Contains(body, "roster_sealed") {
+		t.Fatalf("the plain health poll should carry no roster: %s", body)
+	}
+
+	// Asked for explicitly, it comes back encrypted — never in the clear.
+	body = get("/status?roster=1").Body.String()
+	if strings.Contains(body, "roster@example.com") {
+		t.Fatalf("the roster was served in plaintext despite a key being set: %s", body)
+	}
+	if !strings.Contains(body, "roster_sealed") {
+		t.Fatalf("expected a sealed roster: %s", body)
+	}
+	// And it really is our roster, recoverable only with the key.
+	var resp struct {
+		RosterSealed string `json:"roster_sealed"`
+	}
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatal(err)
+	}
+	box, err := secretbox.New(s.cfg.RosterKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := box.Open(resp.RosterSealed)
+	if err != nil {
+		t.Fatalf("watchdog could not decrypt the roster: %v", err)
+	}
+	if !strings.Contains(plain, "roster@example.com") {
+		t.Fatalf("decrypted roster missing the account: %s", plain)
+	}
+
+	// Without a key the historical plaintext shape is preserved, so an existing
+	// watchdog keeps working until it is updated.
+	s.cfg.RosterKey = nil
+	if body := get("/status").Body.String(); !strings.Contains(body, "roster@example.com") {
+		t.Fatalf("with no key configured the roster should still be served: %s", body)
+	}
+
+	// A wrong token is refused whether or not a key is set.
+	r := httptest.NewRequest("GET", "/status?roster=1", nil)
+	r.Header.Set("Authorization", "Bearer wrong")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("bad token = %d, want 401", w.Code)
 	}
 }

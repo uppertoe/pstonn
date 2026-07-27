@@ -126,6 +126,13 @@ type Scheduler struct {
 // must persist before the user is alarmed (rejections alarm on the first tick).
 const failNotifyThreshold = 3
 
+// busyNotifyThreshold is how many consecutive ticks the council must keep
+// refusing us before the user hears about it. Higher than failNotifyThreshold
+// because a short block is expected and self-healing, and these ticks are not
+// spaced by a backoff (see the ErrCouncilBusy branch), so this is ~15 minutes of
+// a permit we cannot update. Long enough not to cry wolf, short enough to act on.
+const busyNotifyThreshold = 15
+
 const systemAlertThrottle = 30 * time.Minute
 
 // New builds a Scheduler. loc is the timezone rosters are expressed in.
@@ -1151,15 +1158,33 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// Not linked yet, stay quiet; the dashboard prompts the user to link.
 		return false
 	case errors.Is(err, parking.ErrCouncilBusy):
-		// Portal is pushing back (Akamai) or we're in a backoff cooldown; the
-		// client is already spacing retries. Stay quiet at the USER level (it's
-		// expected to be transient), but record it so a FLEET-WIDE block — which
-		// would otherwise leave every permit stuck with no alert at all — surfaces
-		// to the operator via detectSystemic.
+		// Portal is pushing back (Akamai) or we're in a per-owner cooldown. Feed the
+		// fleet-wide detector so a systemic block reaches the operator...
 		if stats != nil {
 			stats.busyOwners[p.Owner] = true
 		}
 		log.Printf("scheduler: permit %s deferred: %v", p.CouncilPermitID, err)
+		// ...and tell the USER if it persists. A brief block is genuinely not worth
+		// mentioning, but this was previously silent FOREVER: no activity row, no
+		// notification, however long the permit sat showing the wrong plate. The
+		// operator alert needs several affected owners, so a single household being
+		// blocked reached nobody at all.
+		//
+		// Deliberately no deferRetry here: a busy attempt is short-circuited locally
+		// (no council traffic), so retrying each tick costs nothing and means we
+		// resume the moment the block lifts, rather than waiting out a backoff.
+		// fail_streak is shared with real failures — both mean "consecutive ticks we
+		// could not apply" — and a success clears it either way.
+		n := s.bumpFailStreak(ctx, p.ID)
+		reason, action := describeFailure(parking.FailTransient, "update your permit")
+		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
+		if n >= busyNotifyThreshold {
+			s.notifyUser(ctx, p, notify.ApplyOutcome{
+				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
+				OK: false, CurrentReg: p.ActiveRegistration,
+				Reason: reason, Action: action, Transient: true,
+			}, "busy|"+want)
+		}
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
 		// A council write endpoint returned "not captured": the API shape may have

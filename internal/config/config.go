@@ -91,6 +91,28 @@ type Config struct {
 	// watchdog polls (bearer token). Empty disables the endpoint. STATUS_TOKEN.
 	StatusToken string
 
+	// MaxAccounts caps how many accounts may hold a linked council session
+	// (MAX_ACCOUNTS, 0 = unlimited). Existing users are never affected; a new user
+	// who would exceed it is told the service is full rather than silently getting
+	// a degraded experience.
+	//
+	// This exists because convergence latency, not council capacity, is the limit:
+	// reconcile applies changes one permit at a time with a few seconds between
+	// them, and rosters roll at a common wall-clock boundary, so past roughly fifty
+	// households the last one's midnight change lands minutes late.
+	MaxAccounts int
+
+	// RosterKey seals the user roster in the /status payload (32 bytes, 64 hex, via
+	// ROSTER_KEY). The outage watchdog holds the same key and decrypts it.
+	//
+	// Without this the roster — every consented account's email plus their push
+	// topic — travels and sits in the response in the clear, so one leaked
+	// STATUS_TOKEN yields the entire user list and a live read capability on
+	// everyone's notifications. With it, a leaked token yields ciphertext.
+	// Empty keeps the old plaintext behaviour (so the app can be deployed before
+	// the watchdog is updated), with a startup warning.
+	RosterKey []byte
+
 	// SESTopicARN is the SNS topic that carries this domain's SES bounce and
 	// complaint events. Set it to enable POST /hooks/ses, which records dead
 	// addresses so the app stops mailing them. Empty disables the endpoint
@@ -253,6 +275,7 @@ func Load() (*Config, error) {
 		AdminEmail:     strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
 		AdminNtfyTopic: strings.TrimSpace(os.Getenv("ADMIN_NTFY_TOPIC")),
 		StatusToken:    strings.TrimSpace(os.Getenv("STATUS_TOKEN")),
+		MaxAccounts:    envInt("MAX_ACCOUNTS", 0),
 		SESTopicARN:    strings.TrimSpace(os.Getenv("SES_SNS_TOPIC_ARN")),
 		AppOIDC: AppOIDCConfig{
 			Issuer:       strings.TrimRight(os.Getenv("APP_OIDC_ISSUER"), "/"),
@@ -278,6 +301,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DISPLAY_TIMEZONE %q: %w", tzName, err)
 	}
 	cfg.DisplayLocation = loc
+
+	if raw := strings.TrimSpace(os.Getenv("ROSTER_KEY")); raw != "" {
+		key, err := hex.DecodeString(raw)
+		if err != nil {
+			return nil, fmt.Errorf("ROSTER_KEY: not valid hex: %w", err)
+		}
+		if len(key) != 32 {
+			return nil, fmt.Errorf("ROSTER_KEY: need 32 bytes (64 hex chars), got %d", len(key))
+		}
+		cfg.RosterKey = key
+	}
 
 	if raw := strings.TrimSpace(os.Getenv("DATA_ENCRYPTION_KEY")); raw != "" {
 		key, err := hex.DecodeString(raw)

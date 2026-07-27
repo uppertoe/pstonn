@@ -44,6 +44,23 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusTooManyRequests, "Too many attempts in a short time. Please wait 15 minutes and try again.")
 		return
 	}
+	// Capacity check, before we take their password anywhere near the council.
+	// Only a NEW household counts: anyone already linked (including a re-link after
+	// an expiry) must never be locked out of their own running service.
+	if s.cfg.MaxAccounts > 0 {
+		if _, err := s.store.GetCouncilSession(r.Context(), user); errors.Is(err, store.ErrNotFound) {
+			n, cerr := s.store.CountLinkedAccounts(r.Context())
+			if cerr != nil {
+				log.Printf("capacity check for %s: %v", user, cerr)
+			} else if n >= s.cfg.MaxAccounts {
+				log.Printf("capacity: refused a new link for %s (%d/%d accounts)", user, n, s.cfg.MaxAccounts)
+				s.message(w, http.StatusServiceUnavailable,
+					"p.stonn is full at the moment. It's run by one person for a small number of Stonnington households, and taking on more right now would make it slower and less reliable for everyone already using it. "+
+						"Please try again in a while, or get in touch and I'll let you know when there's room.")
+				return
+			}
+		}
+	}
 	savePassword := r.FormValue("save_password") != ""
 	// The headless council login is several round trips; cap it inside the
 	// server's 20s WriteTimeout so a slow portal yields the error message below

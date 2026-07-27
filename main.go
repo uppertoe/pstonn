@@ -104,6 +104,10 @@ func run() error {
 		log.Printf("WARNING: mail is sent from %q but the app is served at %q. Receivers judge DMARC alignment on the From domain, "+
 			"and mail whose sender is unrelated to the links inside it is scored as phishing. Prefer a From on %s, and publish SPF/DKIM/DMARC for the sending domain.", from, app, app)
 	}
+	if cfg.StatusToken != "" && len(cfg.RosterKey) == 0 {
+		log.Print("WARNING: STATUS_TOKEN is set but ROSTER_KEY is not, so /status returns every user's email and push topic in PLAINTEXT. " +
+			"Set ROSTER_KEY (64 hex chars) here and in the watchdog to encrypt it; the watchdog must then request the roster with ?roster=1.")
+	}
 	if !cfg.SESHookEnabled() && mail.Enabled() {
 		log.Print("NOTE: SES_SNS_TOPIC_ARN not set, so bounce/complaint feedback is not wired up. " +
 			"Hard SMTP rejections are still learned at send time, but provider-reported bounces are not. See deploy/aws-ses-hook-setup.py")

@@ -46,6 +46,9 @@ type Server struct {
 	// testNotifyLimit throttles the on-demand "send test" button (per user): the
 	// only authenticated control that sends mail whenever it is pressed.
 	testNotifyLimit *rateLimiter
+	// statusLimit throttles the machine status endpoint: its bearer token is the
+	// only thing standing between a caller and the user roster.
+	statusLimit *rateLimiter
 	// councilRead throttles the two routes that make an UNCACHED, synchronous
 	// council read (the permit picker and adding a permit). Every other council
 	// read path has a cache and in-flight dedup; these did not, so one signed-in

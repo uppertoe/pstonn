@@ -839,3 +839,91 @@ func TestRetryBackoff(t *testing.T) {
 		t.Fatal("KickPermit must not clear another permit's deferral")
 	}
 }
+
+// TestCouncilBusyTellsTheUserEventually: a council block used to be completely
+// silent to the user — no activity row, no notification, however long a permit
+// sat un-updatable. A brief block should still stay quiet (it self-heals), but a
+// sustained one has to reach the person whose permit is wrong.
+func TestCouncilBusyTellsTheUserEventually(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "busy@example.com"
+	seedSession(t, st, owner)
+	veh, err := st.CreateVehicle(ctx, owner, "AAA111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := st.UpsertPermit(ctx, owner, "busy-1", "14", "Busy permit")
+	if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), veh); err != nil {
+		t.Fatal(err)
+	}
+	// The permit currently shows something else, so there is a real change pending.
+	if err := st.SetPermitActive(ctx, pid, "OLD999"); err != nil {
+		t.Fatal(err)
+	}
+
+	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy}
+	nf := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, Notifier: nf})
+
+	// A few blocked ticks: the user is not bothered yet...
+	for i := 0; i < 3; i++ {
+		s.reconcileAll(ctx)
+	}
+	if n := len(nf.appliedSnap()); n != 0 {
+		t.Fatalf("a brief council block notified the user %d time(s); it should stay quiet", n)
+	}
+	// ...but it IS already visible in the activity log, so someone looking can see
+	// why their permit hasn't changed.
+	logs, err := st.ListApplyLogFor(ctx, owner, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) == 0 || logs[0].Status != "error" {
+		t.Fatalf("a blocked apply should be recorded in the activity log, got %+v", logs)
+	}
+
+	// Sustained: now they hear about it.
+	for i := 0; i < busyNotifyThreshold; i++ {
+		s.reconcileAll(ctx)
+	}
+	applied := nf.appliedSnap()
+	if len(applied) == 0 {
+		t.Fatal("a sustained council block never reached the user")
+	}
+	out := nf.outcomeSnap()[0]
+	if out.OK || !out.Transient {
+		t.Fatalf("a block should read as a transient failure, got OK=%v Transient=%v", out.OK, out.Transient)
+	}
+	if out.CurrentReg != "OLD999" {
+		t.Fatalf("the notice should say what is still on the permit, got %q", out.CurrentReg)
+	}
+
+	// A success clears the streak, so a later block starts counting from scratch
+	// rather than notifying immediately.
+	fc.setErr = nil
+	s.reconcileAll(ctx)
+	time.Sleep(20 * time.Millisecond) // notifications fire from goroutines
+	failuresBefore := countFailures(nf.outcomeSnap())
+
+	fc.setErr = parking.ErrCouncilBusy
+	if err := st.SetPermitActive(ctx, pid, "OLD999"); err != nil {
+		t.Fatal(err)
+	}
+	s.reconcileAll(ctx)
+	time.Sleep(20 * time.Millisecond)
+	if got := countFailures(nf.outcomeSnap()); got != failuresBefore {
+		t.Fatalf("after a success, one fresh blocked tick notified again (%d -> %d)", failuresBefore, got)
+	}
+}
+
+// countFailures counts failure notifications among recorded outcomes.
+func countFailures(os []notify.ApplyOutcome) int {
+	n := 0
+	for _, o := range os {
+		if !o.OK {
+			n++
+		}
+	}
+	return n
+}

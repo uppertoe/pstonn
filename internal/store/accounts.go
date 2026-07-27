@@ -114,6 +114,16 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	return tx.Commit()
 }
 
+// CountLinkedAccounts returns how many accounts currently hold a council session
+// cookie — the number of households the service is actively managing permits for.
+// Used to enforce the signup cap.
+func (s *Store) CountLinkedAccounts(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM council_session WHERE cookie_sealed != ''`).Scan(&n)
+	return n, err
+}
+
 // ---- Account members (shared access) ----
 
 // AccountMember is a secondary email with access to a primary's account.
