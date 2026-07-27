@@ -623,7 +623,12 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a
 // printed QR and is asking to put a plate on the permit, so they can approve or
-// decline it in the app. Goes to every enabled channel.
+// decline it in the app. Each member is nudged on the channels THEY chose (the
+// EnqueueApply pattern) — a push-only secondary gets the push on their own
+// topic, not silence. Two deliberate departures from the apply pattern:
+// failures-only does not apply (this is a question, not an outcome), and quiet
+// hours are NOT honoured — the visitor is standing at the door now, and the
+// request expires unanswered within the hour.
 func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string) error {
 	subject := fmt.Sprintf("Approve %s on your %s?", plate, permitLabel)
 	lines := []string{
@@ -634,22 +639,38 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 	if url != "" {
 		lines = append(lines, "", url)
 	}
-	m := outMessage{
-		Account: owner, Subject: subject, Body: strings.Join(lines, "\n"),
-		NtfyPriority: "high", NtfyTag: "bell",
-		// Per-target dedup (suffixed in enqueueSplit): a re-scan of the same
-		// plate while the first nudge is still pending doesn't re-notify anyone.
-		DedupKey: fmt.Sprintf("guestreq|%s|%s|%s", owner, permitLabel, plate),
+	body := strings.Join(lines, "\n")
+	dels, err := s.accountDeliveries(ctx, owner)
+	if err != nil {
+		return err
 	}
-	if s.mail.Enabled() {
-		m.Recipients, _ = s.store.AccountEmails(ctx, owner)
-	}
-	if s.ntfyBase != "" {
-		if pref, e := s.store.GetNotifyPref(ctx, owner); e == nil && pref.NtfyEnabled {
-			m.NtfyTopic = pref.NtfyTopic
+	var errs []string
+	for _, d := range dels {
+		m := outMessage{
+			Account: owner, Subject: subject, Body: body,
+			NtfyPriority: "high", NtfyTag: "bell",
+			// Per-member key (then per-target suffix in enqueueSplit): a re-scan of
+			// the same plate while the first nudge is still fresh doesn't re-notify
+			// anyone, and one member's rows never dedup away another member's.
+			DedupKey: fmt.Sprintf("guestreq|%s|%s|%s|%s", d.email, owner, permitLabel, plate),
+		}
+		if d.pref.EmailEnabled && s.mail.Enabled() {
+			m.Recipients = []string{d.email}
+		}
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			m.NtfyTopic = d.pref.NtfyTopic
+		}
+		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
+			continue // this member opted out of every channel
+		}
+		if e := s.enqueueSplit(ctx, m); e != nil {
+			errs = append(errs, d.email+": "+e.Error())
 		}
 	}
-	return s.enqueueSplit(ctx, m)
+	if len(errs) > 0 {
+		return fmt.Errorf("guest request notify: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
