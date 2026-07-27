@@ -664,7 +664,7 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	}
 	// Clicking the link clears the reminder cycle (deadline-extension precision is
 	// verified in the store test with a backdated link time).
-	owner, err := st.ConfirmSession(ctx, cs.ConfirmToken)
+	owner, err := st.ConfirmSession(ctx, cs.ConfirmToken, 0)
 	if err != nil || owner != "soon@example.com" {
 		t.Fatalf("ConfirmSession = %q, %v", owner, err)
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -52,6 +53,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		s.serverError(w, err)
 		return
 	}
+	base.HasPermits = len(permits) > 0
 	already := map[string]bool{}
 	for _, p := range managed {
 		already[p.CouncilPermitID] = true
@@ -73,15 +75,38 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		case !p.CanChangeVehicle:
 			reason = "Your council account can't change this permit's vehicle."
 		}
+		// An expired/cancelled permit is still listed and still addable (a user may
+		// be reconstructing a schedule to copy onto a renewal), but say so plainly:
+		// nothing will ever be applied to it, and silently accepting it looks to the
+		// user like the app is working when it can't be.
+		warn := ""
+		if addable {
+			meta := model.Permit{Status: p.Status, EndDate: p.EndDate}
+			if meta.Inactive(time.Now(), s.cfg.DisplayLocation) {
+				warn = "This permit is no longer active, so nothing will be applied to it."
+				if !p.EndDate.IsZero() {
+					warn = "This permit expired on " + p.EndDate.In(s.cfg.DisplayLocation).Format("2 Jan 2006") + ", so nothing will be applied to it."
+				}
+			}
+		}
 		base.Pick = append(base.Pick, pickView{
 			CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID,
 			PermitNumber: p.PermitNumber, PermitType: p.PermitType, CurrentRego: p.CurrentRego,
-			Addable: addable, Reason: reason,
+			Addable: addable, Reason: reason, Warn: warn,
 		})
 	}
 	base.State = "picker"
 	s.render(w, base)
 }
+
+// claimedByAnotherAccount explains the one picker outcome the user cannot fix
+// themselves. A household permit is often visible to two council logins (an
+// ex-housemate, a previous tenant, a partner), so "already managed" needs to say
+// who can release it and how — otherwise the button just keeps failing with no
+// route forward.
+const claimedByAnotherAccount = "That permit is already being scheduled through another p.stonn account — usually someone else at your address who set it up first. " +
+	"Only one account can manage a permit, so ask them to open p.stonn and choose \"Stop managing\" on it (or to share access with you from their Settings), and then you can add it here. " +
+	"If you think nobody else should have it, get in touch and we'll sort it out."
 
 // isVisitorPermit reports whether a council permit type is a visitor permit, the
 // only kind p.stonn schedules. The council names them like "(A) 1st Visitor
@@ -143,7 +168,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// Never take over a permit another account already manages (e.g. a shared
 	// household permit both council accounts can see).
 	if existing, err := s.store.PermitByCouncilID(ctx, cpid); err == nil && existing.Owner != owner {
-		s.message(w, http.StatusConflict, "That permit is already being managed by another account.")
+		s.message(w, http.StatusConflict, claimedByAnotherAccount)
 		return
 	}
 
@@ -152,7 +177,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
 			// Raced the pre-check above: another account claimed it in between.
-			s.message(w, http.StatusConflict, "That permit is already being managed by another account.")
+			s.message(w, http.StatusConflict, claimedByAnotherAccount)
 			return
 		}
 		s.serverError(w, err)

@@ -621,7 +621,12 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 		"",
 		fmt.Sprintf("If %s is still parked there, please move it — or put it back on the permit (with your link, or by asking the permit holder) so you stay covered.", oldReg),
 	}
-	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n")})
+	// Dedup key: this recipient has no account and no way to opt out, and a plate
+	// that flips back and forth (a guest double-tap, a schedule fighting an
+	// override) would otherwise mail a non-consenting stranger every transition.
+	// The 15-minute sent-window in the outbox is exactly the right granularity.
+	key := fmt.Sprintf("displaced|%s|%s|%s", to, permitLabel, oldReg)
+	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n"), DedupKey: key})
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a

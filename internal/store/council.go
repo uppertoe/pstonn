@@ -93,19 +93,34 @@ func (s *Store) MarkReminderSent(ctx context.Context, owner, token string) error
 // ConfirmSession consumes a confirm token: it resets the re-authorise clock
 // (linked_at = now), extending the session another full SessionMaxAge, and clears
 // the reminder state so the next cycle can fire. Returns the owner it belonged to,
-// or ErrNotFound if the token matches no session.
-func (s *Store) ConfirmSession(ctx context.Context, token string) (string, error) {
+// or ErrNotFound if the token matches no session or has aged out.
+//
+// maxAge bounds how long a token stays usable after its reminder was sent (0
+// disables the bound). Without it, a token minted for one reminder remains a
+// live "keep managing my permit for another SessionMaxAge" capability forever,
+// sitting in a mailbox — which is precisely the human-liveness check this flow
+// exists to make.
+func (s *Store) ConfirmSession(ctx context.Context, token string, maxAge time.Duration) (string, error) {
 	if token == "" {
 		return "", ErrNotFound
 	}
-	var owner string
+	var owner, sentAt string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT owner FROM council_session WHERE confirm_token = ?`, token).Scan(&owner)
+		`SELECT owner, reminder_sent_at FROM council_session WHERE confirm_token = ?`, token).Scan(&owner, &sentAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", err
+	}
+	if maxAge > 0 && sentAt != "" {
+		if sent, perr := time.Parse(time.RFC3339, sentAt); perr == nil && time.Since(sent) > maxAge {
+			// Aged out: clear it so the row can't be probed again, and report it as
+			// not-found (the caller's reassuring copy is correct either way).
+			_, _ = s.db.ExecContext(ctx,
+				`UPDATE council_session SET confirm_token = '' WHERE owner = ?`, owner)
+			return "", ErrNotFound
+		}
 	}
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE council_session SET linked_at = ?, reminder_sent_at = '', confirm_token = '' WHERE owner = ?`,

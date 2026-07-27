@@ -40,45 +40,75 @@ func sameOrigin(r *http.Request) bool {
 	return false
 }
 
-// rateLimiter is a small fixed-window per-key throttle used by the public
-// contact form: at most `limit` events per `window` for a given key (client IP).
-// It is intentionally simple and in-memory; the contact form is low-volume and a
-// process restart resetting the counters is acceptable.
+// rateLimiter is a small fixed-window per-key throttle: at most `limit` events
+// per `window` for a given key (a client IP, an owner, a recipient address). It
+// is intentionally simple and in-memory; a process restart resetting the
+// counters is acceptable for every current use.
+//
+// Pruning is AMORTISED rather than per-call. A full map scan on every allow()
+// turns the throttle itself into the bottleneck under exactly the traffic it
+// exists to shed (a flood from many addresses is a scan of every key, under one
+// mutex, per request). Instead: sweep every pruneEvery calls, and hard-cap the
+// number of tracked keys so an attacker rotating addresses — trivial with IPv6
+// — can't grow memory without bound.
 type rateLimiter struct {
 	limit  int
 	window time.Duration
 	mu     sync.Mutex
 	hits   map[string][]time.Time
+	calls  int // since the last sweep
 }
+
+// maxLimiterKeys bounds tracked keys. On overflow the map is cleared outright:
+// crude, but it fails toward "allow" only briefly and never toward unbounded
+// memory. Sized well above any legitimate concurrent-caller count.
+const (
+	maxLimiterKeys = 20000
+	pruneEvery     = 256
+)
 
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{limit: limit, window: window, hits: make(map[string][]time.Time)}
 }
 
 // allow records an event for key and reports whether it is within the limit.
+// A nil limiter allows everything: New always constructs them, so nil only
+// happens in tests that build a Server directly — a throttle must never be the
+// reason a handler panics on a public route.
 func (rl *rateLimiter) allow(key string) bool {
+	if rl == nil {
+		return true
+	}
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	// Drop stale timestamps for this key, and opportunistically prune others so
-	// the map can't grow without bound.
+	rl.calls++
+	if rl.calls >= pruneEvery {
+		rl.calls = 0
+		for k, ts := range rl.hits {
+			if k == key {
+				continue
+			}
+			if len(ts) == 0 || ts[len(ts)-1].Before(cutoff) {
+				delete(rl.hits, k)
+			}
+		}
+	}
+	// Still over the cap after a sweep (or between sweeps): drop everything
+	// rather than track an attacker-chosen key set forever.
+	if len(rl.hits) > maxLimiterKeys {
+		rl.hits = make(map[string][]time.Time)
+	}
+
+	// Drop this key's stale timestamps.
 	kept := rl.hits[key][:0]
 	for _, t := range rl.hits[key] {
 		if t.After(cutoff) {
 			kept = append(kept, t)
 		}
 	}
-	for k, ts := range rl.hits {
-		if k == key {
-			continue
-		}
-		if len(ts) == 0 || ts[len(ts)-1].Before(cutoff) {
-			delete(rl.hits, k)
-		}
-	}
-
 	if len(kept) >= rl.limit {
 		rl.hits[key] = kept
 		return false
@@ -159,6 +189,15 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
 	base := dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation}
 
+	// Throttle BEFORE parsing: the limiter has to gate the expensive work (the
+	// body parse), not just the send, or an unauthenticated flood still costs a
+	// full form parse per request.
+	if !s.contact.allow(clientIP(r)) {
+		base.Warn = "You've sent a few messages already. Please wait a little while before sending another."
+		s.render(w, base)
+		return
+	}
+	limitBody(r)
 	if err := r.ParseForm(); err != nil {
 		base.Warn = "Could not read the form. Please try again."
 		s.render(w, base)
@@ -190,12 +229,6 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		s.render(w, base)
 		return
 	}
-	if !s.contact.allow(clientIP(r)) {
-		base.Warn = "You've sent a few messages already. Please wait a little while before sending another."
-		s.render(w, base)
-		return
-	}
-
 	body := message
 	if replyTo != "" {
 		body += "\n\nReply-to: " + replyTo

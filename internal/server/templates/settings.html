@@ -143,6 +143,7 @@
   <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}" x-ref="status" role="status" aria-live="polite">
     {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
   </p>
+  <label class="toggle"><input type="checkbox" name="failures_only" {{if .FailuresOnly}}checked{{end}}> <span>Only tell me when something needs attention &mdash; skip the &ldquo;plate changed as scheduled&rdquo; confirmations</span></label>
   <div class="quiet" x-data="{quiet: {{if .QuietEnabled}}true{{else}}false{{end}}}">
     <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
     <div class="quiet-times" x-show="quiet" x-cloak>

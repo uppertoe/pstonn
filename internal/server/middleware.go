@@ -30,6 +30,23 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// maxFormBytes caps a request body before anything parses it. Every form in this
+// app is a handful of short fields (plates, emails, a contact message capped at
+// 4000 chars), so 64 KB is generous. Without a cap, r.FormValue on a
+// multipart/form-data body calls ParseMultipartForm, which buffers 32 MB in
+// memory AND spills the remainder to temp files — reachable on the public guest
+// endpoints, whose tokens are printed on posters in the street.
+const maxFormBytes = 64 << 10
+
+// limitBody caps the request body. On overflow the subsequent ParseForm fails
+// and the handler's own "could not read the form" path renders, so no caller
+// needs to change.
+func limitBody(r *http.Request) {
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(nil, r.Body, maxFormBytes)
+	}
+}
+
 // staticSub serves the embedded assets rooted at the static/ directory.
 var staticSub = mustSub(staticFS, "static")
 
@@ -75,13 +92,15 @@ func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrim
 	user = u.Email
 	primary, ok, err := s.store.MemberAccount(ctx, user)
 	if err != nil {
-		// Fails toward "own account": all data access is scoped by the resolved
-		// owner, so this can't read anyone else's data — but a secondary briefly
-		// classified as primary could pass an owner-only gate, so make the blip
-		// visible in the logs.
-		log.Printf("resolveAccount %s: membership lookup failed (treating as own account): %v", user, err)
+		// Data access still resolves to the caller's OWN account (so this can never
+		// read anyone else's data), but we no longer grant primary privilege on a
+		// failed lookup: if we can't prove they aren't a secondary, deny the
+		// owner-only gates (council link/unlink, account delete, member management)
+		// rather than fail open. A DB blip should cost a 403, not a privilege.
+		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", user, err)
+		return user, user, false
 	}
-	if err == nil && ok && primary != "" {
+	if ok && primary != "" {
 		return user, primary, false
 	}
 	return user, user, true
@@ -98,6 +117,9 @@ func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 		if isStateChanging(r) && !sameOrigin(r) {
 			s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
 			return
+		}
+		if isStateChanging(r) {
+			limitBody(r)
 		}
 		h(w, r)
 	}

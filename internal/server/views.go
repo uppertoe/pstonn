@@ -54,6 +54,10 @@ type dashboardData struct {
 	Terms          termsView  // terms state + settings display
 	// picker state
 	Pick []pickView
+	// HasPermits distinguishes the two empty-picker cases: the council account
+	// holds permits but none is schedulable (so explain why), versus it holds no
+	// permits at all (so explain that one must be applied for with the council).
+	HasPermits bool
 	// guest passes
 	Guests          []guestGrantView   // management page: existing grants
 	GuestsEnabled   bool               // kill-switch state (default on)
@@ -90,6 +94,7 @@ type notifyView struct {
 	QuietEnabled   bool   // hold overnight notices and deliver at QuietUntil
 	QuietFrom      int    // window start hour (local)
 	QuietUntil     int    // deliver-at hour (local)
+	FailuresOnly   bool   // only notify when something needs attention
 	Status         string // transient confirmation after auto-save
 	Error          string // transient error (e.g. tried to turn everything off)
 }
@@ -101,6 +106,7 @@ func (s *Server) notifyViewOf(user string, pref store.NotifyPref) notifyView {
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
 		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
 		QuietEnabled: pref.QuietFrom != pref.QuietUntil, QuietFrom: pref.QuietFrom, QuietUntil: pref.QuietUntil,
+		FailuresOnly: pref.FailuresOnly,
 	}
 }
 
@@ -222,6 +228,10 @@ type pickView struct {
 	CurrentRego     string
 	Addable         bool   // a visitor permit whose vehicle the holder can change
 	Reason          string // why it can't be added (shown greyed-out when !Addable)
+	// Warn flags a permit that is addable but already expired or cancelled, so the
+	// picker doesn't silently invite someone to schedule a permit that will never
+	// be reconciled. Text explains which.
+	Warn string
 }
 
 // vehicleViews builds the per-user vehicle view models plus id→colour and

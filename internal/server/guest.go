@@ -362,6 +362,14 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
 		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
 	}
+	// The label is the owner's own free text (or, failing that, the council permit
+	// id) and it headlines the page. On a printed door QR — left on a wall for
+	// anyone to scan — that leaks whatever the owner typed, typically an address
+	// or apartment number, so use a generic heading there. Completes the same
+	// redaction set as the owner email and current plate below.
+	if gc.Grant.RequestOnly {
+		view.PermitLabel = "Visitor parking permit"
+	}
 	// A door-QR re-scan should answer "what happened to my request?", not present
 	// a blank form as if nothing ever happened. The visitor's own request (and
 	// only theirs — the cookie carries the request's poll nonce) is shown with
@@ -503,6 +511,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
 		return
 	}
+	limitBody(r)
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
 		s.renderGuestGone(w, r)
@@ -624,6 +633,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
 		return
 	}
+	limitBody(r)
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
 		s.renderGuestGone(w, r)
@@ -1233,9 +1243,19 @@ func (s *Server) mintLinks(emails []string) ([]store.GuestRecipient, []guestLink
 // many were accepted. Failures are logged so a guest who never received their
 // link can be traced; the caller's flash + the shown-once links panel are the
 // user-facing fallback.
+//
+// Throttled two ways, like the member invite: these mails go to arbitrary
+// addresses the user types, and each one carries a live capability over their
+// permit — so an account must not be able to mail-bomb a stranger (per-recipient)
+// or burn the SMTP reputation everyone shares (per-owner). A throttled link is
+// not lost: the caller always shows it on screen to copy.
 func (s *Server) emailLinks(owner, permitLabel string, links []guestLinkView) int {
 	sent := 0
 	for _, l := range links {
+		if !s.guestLinkOut.allow("o:"+owner) || !s.guestLinkTo.allow("t:"+l.Email) {
+			log.Printf("guest link email to %s for %s throttled", l.Email, owner)
+			continue
+		}
 		if err := s.notify.SendGuestLink(l.Email, owner, permitLabel, l.URL); err == nil {
 			sent++
 		} else {

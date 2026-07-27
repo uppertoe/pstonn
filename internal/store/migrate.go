@@ -272,6 +272,22 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 			return fmt.Errorf("migrate override table: %w", err)
 		}
 	}
+	// Indexes that depend on ADD COLUMN-ed columns, or on the rebuilt override
+	// table, must come AFTER both: creating them in the schema block above would
+	// fail on a database predating the column.
+	for _, stmt := range []string{
+		// The confirm-link lookup is by token alone, on a public unauthenticated
+		// route: without this, every probe scans council_session on the single
+		// connection the scheduler shares. Partial, so consumed (empty) tokens
+		// cost nothing.
+		`CREATE INDEX IF NOT EXISTS idx_council_confirm ON council_session(confirm_token) WHERE confirm_token != ''`,
+		// Expired-override pruning scans by ends_at (see PruneOverrides).
+		`CREATE INDEX IF NOT EXISTS idx_override_ends ON override(ends_at)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate %q: %w", stmt, err)
+		}
+	}
 	return nil
 }
 

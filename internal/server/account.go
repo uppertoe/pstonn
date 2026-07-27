@@ -55,7 +55,18 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
 			return
 		}
-		s.message(w, http.StatusBadGateway, "Couldn't link your council account. Check that your password is correct and that your council account uses this email address.")
+		if errors.Is(err, parking.ErrLoginRejected) {
+			// The council tells us only that no session cookie came back, so we
+			// genuinely cannot distinguish a wrong password from "no ePermits account
+			// exists for this email". Name both, rather than blaming the password —
+			// for a curious first-time visitor the second is the likelier cause, and
+			// wrongly asserting the first sends them round a 5-attempt lockout.
+			s.message(w, http.StatusBadGateway,
+				"The council portal wouldn't accept that sign-in. Either the password is wrong, or there is no City of Stonnington ePermits account for "+user+
+					". p.stonn can only manage a permit you already hold: check you can sign in at the council's own ePermits site with this email address first. If your ePermits account uses a different email, sign out and sign back in to p.stonn with that address instead.")
+			return
+		}
+		s.message(w, http.StatusBadGateway, "Couldn't link your council account. This looks like a problem at our end or on the council's site rather than your password — please try again shortly.")
 		return
 	}
 	// ?linked=1 turns into the "Council account linked." flash — after a first
@@ -78,6 +89,18 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectHome(w, r)
+}
+
+// confirmTokenTTL is how long a renewal-confirm link stays usable after its
+// reminder email went out: the reminder lead itself (so it covers the whole
+// window the mail is about) plus a fortnight for someone who reads mail late.
+// After that the session lapses the normal way and they re-link in the app.
+func (s *Server) confirmTokenTTL() time.Duration {
+	lead := s.cfg.Council.ReminderLead
+	if lead <= 0 {
+		lead = 7 * 24 * time.Hour
+	}
+	return lead + 14*24*time.Hour
 }
 
 // hasSavedPassword reports whether the account currently has a saved council
@@ -231,7 +254,9 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 // reassures rather than alarms (covers email-scanner prefetch consuming it).
 func (s *Server) councilConfirm(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
-	owner, err := s.store.ConfirmSession(r.Context(), token)
+	// A confirm link is only good for the reminder window it was sent for (plus
+	// slack for a user who opens mail late), not forever.
+	owner, err := s.store.ConfirmSession(r.Context(), token, s.confirmTokenTTL())
 	if err != nil {
 		s.message(w, http.StatusOK,
 			"This confirmation link has already been used, so no further action is needed. Your permit scheduler will keep running. If it ever stops, just open the app to reconnect your council account.")

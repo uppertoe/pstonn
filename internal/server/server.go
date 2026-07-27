@@ -38,8 +38,23 @@ type Server struct {
 	inviteFanout *rateLimiter
 	inviteTarget *rateLimiter
 	guest        *rateLimiter // per-IP throttle on the public guest-activation link
+	guestRead    *rateLimiter // per-IP throttle on the public guest READ/poll endpoints
+	guestLinkOut *rateLimiter // per-owner throttle on guest-pass link emails
+	guestLinkTo  *rateLimiter // per-recipient throttle on guest-pass link emails
 	councilTry   *rateLimiter // per-user throttle on council password attempts (councilLink)
+	// guestSlots bounds CONCURRENT public guest requests. The store runs on a
+	// single SQLite connection shared with the scheduler, so unbounded anonymous
+	// reads don't merely slow pages down — they starve the reconcile loop, and a
+	// permit that stops being updated is a parking fine. A door-QR token is
+	// public by design (it's printed on a poster), so possession of a valid token
+	// cannot be the only limit.
+	guestSlots chan struct{}
 }
+
+// maxConcurrentGuest is how many public guest requests may be in flight at once.
+// Comfortably above real household use (a handful of visitors, each polling
+// every 2.5s) and far below what it takes to saturate the DB connection.
+const maxConcurrentGuest = 24
 
 // New constructs a Server.
 func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council *parking.Client, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
@@ -50,7 +65,42 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		inviteFanout: newRateLimiter(6, time.Hour),       // <=6 invite emails / hour per owner
 		inviteTarget: newRateLimiter(1, 24*time.Hour),    // <=1 invite email / day per recipient
 		guest:        newRateLimiter(20, 10*time.Minute), // 20 activation attempts / 10 min per IP
-		councilTry:   newRateLimiter(5, 15*time.Minute),  // 5 council password attempts / 15 min per user
+		// Reads/polls are legitimately frequent (the visitor page polls every
+		// 2.5s = ~240 hits/10 min, and several visitors can share one NAT address),
+		// so this is deliberately loose: it exists to stop a firehose from one
+		// source, not to police normal polling.
+		guestRead:    newRateLimiter(1200, 10*time.Minute),
+		guestLinkOut: newRateLimiter(20, time.Hour),     // <=20 guest-link emails / hour per owner
+		guestLinkTo:  newRateLimiter(5, 24*time.Hour),   // <=5 guest-link emails / day per recipient
+		councilTry:   newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
+		guestSlots:   make(chan struct{}, maxConcurrentGuest),
+	}
+}
+
+// publicGuest wraps a public /g/* handler with the global concurrency cap and a
+// loose per-IP read throttle. Shedding with 503 + Retry-After is the honest
+// answer under overload: the alternative is queueing on the single DB
+// connection, which stalls the scheduler for every user.
+// Tolerates a zero-valued Server (tests construct one directly): a nil limiter
+// or semaphore simply means "no shedding", never a panic on a public route.
+func (s *Server) publicGuest(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.guestRead.allow(clientIP(r)) {
+			w.Header().Set("Retry-After", "60")
+			s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and reload.")
+			return
+		}
+		if s.guestSlots != nil {
+			select {
+			case s.guestSlots <- struct{}{}:
+				defer func() { <-s.guestSlots }()
+			default:
+				w.Header().Set("Retry-After", "5")
+				s.message(w, http.StatusServiceUnavailable, "p.stonn is busy right now. Please reload in a few seconds.")
+				return
+			}
+		}
+		h(w, r)
 	}
 }
 
@@ -94,16 +144,16 @@ func (s *Server) Handler() http.Handler {
 
 	// Public, token-only: the guest-pass activation link. GET renders a menu with
 	// NO side effects (scanner/prefetch-safe); POST performs the activation.
-	mux.HandleFunc("GET /g/{token}", s.guestPage)
+	mux.HandleFunc("GET /g/{token}", s.publicGuest(s.guestPage))
 	// Literal "manifest" first segment so it can't clash with /g/req/{id} (a
 	// /g/{token}/manifest.webmanifest would overlap it and panic the mux). Stays
 	// under /g/* so the public Caddy matcher covers it.
-	mux.HandleFunc("GET /g/manifest/{token}", s.guestManifest)
-	mux.HandleFunc("POST /g/{token}", s.guestActivate)
-	mux.HandleFunc("POST /g/{token}/revert", s.guestRevert)
-	mux.HandleFunc("GET /g/live/{token}", s.guestLive)
+	mux.HandleFunc("GET /g/manifest/{token}", s.publicGuest(s.guestManifest))
+	mux.HandleFunc("POST /g/{token}", s.publicGuest(s.guestActivate))
+	mux.HandleFunc("POST /g/{token}/revert", s.publicGuest(s.guestRevert))
+	mux.HandleFunc("GET /g/live/{token}", s.publicGuest(s.guestLive))
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
-	mux.HandleFunc("GET /g/req/{id}", s.guestRequestStatus)
+	mux.HandleFunc("GET /g/req/{id}", s.publicGuest(s.guestRequestStatus))
 
 	mux.HandleFunc("GET /{$}", s.landing)                   // public, not behind forward-auth
 	mux.HandleFunc("GET /about", s.about)                   // public
@@ -117,7 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin", s.requireAdmin(s.adminPage))
 	mux.HandleFunc("GET /status", s.statusJSON) // machine watchdog; bearer-token gated
 	mux.HandleFunc("GET /permits/new", s.withUser(s.pickerPage))
-	mux.HandleFunc("GET /permits/{id}/card", s.withUser(s.permitCard))
+	mux.HandleFunc("GET /permits/{id}/card", s.withConsent(s.permitCard))
 	mux.HandleFunc("GET /guests", s.withUser(s.guestsPage))
 	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
 	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))

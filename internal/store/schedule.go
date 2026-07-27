@@ -229,6 +229,21 @@ ORDER BY created_at DESC, id DESC LIMIT 1`,
 	return reg, reg != ""
 }
 
+// PruneOverrides deletes overrides that ended before `before`. Every guest
+// activation writes one, and a printed door QR is public, so without a sweep the
+// table grows forever from anonymous traffic — and ListOverrides is on the hot
+// path of both every dashboard render and every scheduler pass. Open-ended rows
+// (ends_at IS NULL) are never pruned: they are still live schedule state.
+func (s *Store) PruneOverrides(ctx context.Context, before time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM override WHERE ends_at IS NOT NULL AND ends_at != '' AND ends_at < ?`,
+		before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // DeleteOverride removes an override, scoped to the owner of its permit (guards
 // against deleting another user's override by id).
 func (s *Store) DeleteOverride(ctx context.Context, owner string, id int64) error {

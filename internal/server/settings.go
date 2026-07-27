@@ -106,6 +106,9 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
+	// Failures-only: the sender has always honoured this, but nothing ever wrote
+	// it — so the "only tell me when something's wrong" preference was unreachable.
+	pref.FailuresOnly = r.FormValue("failures_only") != ""
 	// Quiet hours: hold overnight notices and deliver them at a chosen local hour.
 	nudged := false
 	if r.FormValue("quiet_enabled") != "" {

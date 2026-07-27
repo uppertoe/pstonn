@@ -587,11 +587,11 @@ func TestReminderAndConfirm(t *testing.T) {
 	}
 
 	// A bad token confirms nothing.
-	if _, err := s.ConfirmSession(ctx, "wrong"); err != ErrNotFound {
+	if _, err := s.ConfirmSession(ctx, "wrong", 0); err != ErrNotFound {
 		t.Fatalf("ConfirmSession(wrong) err = %v, want ErrNotFound", err)
 	}
 
-	got, err := s.ConfirmSession(ctx, "tok-123")
+	got, err := s.ConfirmSession(ctx, "tok-123", 0)
 	if err != nil || got != owner {
 		t.Fatalf("ConfirmSession = %q, %v", got, err)
 	}
@@ -603,8 +603,32 @@ func TestReminderAndConfirm(t *testing.T) {
 		t.Fatalf("confirm did not clear the cycle: %+v", cs2)
 	}
 	// Token is single-use.
-	if _, err := s.ConfirmSession(ctx, "tok-123"); err != ErrNotFound {
+	if _, err := s.ConfirmSession(ctx, "tok-123", 0); err != ErrNotFound {
 		t.Fatalf("token reuse should fail: %v", err)
+	}
+
+	// A token older than maxAge is refused (and cleared), so an unclicked confirm
+	// link can't sit in a mailbox as a permanent "keep managing my permit" grant.
+	if err := s.MarkReminderSent(ctx, owner, "tok-stale"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET reminder_sent_at = ? WHERE owner = ?`,
+		time.Now().Add(-30*24*time.Hour).UTC().Format(time.RFC3339), owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmSession(ctx, "tok-stale", 21*24*time.Hour); err != ErrNotFound {
+		t.Fatalf("stale token should be refused: %v", err)
+	}
+	if cs3, _ := s.GetCouncilSession(ctx, owner); cs3.ConfirmToken != "" {
+		t.Fatalf("stale token should be cleared, got %q", cs3.ConfirmToken)
+	}
+	// Within maxAge it still works.
+	if err := s.MarkReminderSent(ctx, owner, "tok-fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ConfirmSession(ctx, "tok-fresh", 21*24*time.Hour); err != nil || got != owner {
+		t.Fatalf("fresh token = %q, %v", got, err)
 	}
 }
 

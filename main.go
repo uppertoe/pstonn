@@ -148,6 +148,9 @@ func run() error {
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      20 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		// Default is 1 MB of headers; nothing here needs more than a few KB, and
+		// the public endpoints are reachable by anyone holding a printed poster.
+		MaxHeaderBytes: 32 << 10,
 	}
 
 	errCh := make(chan error, 1)

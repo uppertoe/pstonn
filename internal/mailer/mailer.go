@@ -4,7 +4,9 @@
 package mailer
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"mime"
@@ -97,6 +99,14 @@ func (m *Mailer) send(to, replyTo, subject, body string) error {
 	headers := []string{
 		"From: " + headerValue(m.from),
 		"To: " + headerValue(to),
+		// Date and Message-ID are mandatory (RFC 5322 §3.6). Not every relay
+		// backfills them, and spam filters score their absence — for a domain with
+		// no sending history that alone can land transactional mail in Junk.
+		"Date: " + time.Now().Format(time.RFC1123Z),
+		"Message-ID: " + messageID(m.from),
+		// These are machine-generated notices: tell mail systems so, so that
+		// auto-responders and vacation replies don't bounce back at us.
+		"Auto-Submitted: auto-generated",
 	}
 	if replyTo != "" {
 		headers = append(headers, "Reply-To: "+headerValue(replyTo))
@@ -208,4 +218,28 @@ func senderAddress(from string) string {
 		}
 	}
 	return strings.TrimSpace(from)
+}
+
+// messageID builds a globally unique RFC 5322 Message-ID, using the sender's
+// domain as the right-hand side so it stays consistent with the From header.
+func messageID(from string) string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Never fail a send over this: a time-based id is still unique enough to
+		// serve its purpose (deduplication and threading by receivers).
+		return fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), messageIDDomain(from))
+	}
+	return fmt.Sprintf("<%s@%s>", hex.EncodeToString(b[:]), messageIDDomain(from))
+}
+
+// messageIDDomain is the domain part of the sender address, falling back to a
+// literal when the configured From has no recognisable domain.
+func messageIDDomain(from string) string {
+	addr := senderAddress(from)
+	if i := strings.LastIndex(addr, "@"); i >= 0 && i+1 < len(addr) {
+		if d := strings.TrimSpace(addr[i+1:]); d != "" {
+			return d
+		}
+	}
+	return "pstonn.invalid"
 }

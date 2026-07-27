@@ -31,8 +31,18 @@ func (s *Server) message(w http.ResponseWriter, code int, msg string) {
 	// Escape msg: callers pass server-constructed strings today, but escaping
 	// here removes the reflected-XSS foot-gun if a future caller ever forwards
 	// user input into this sink.
+	//
+	// Always offer a way onward. This page is where most failures land (a refused
+	// council link, a permit another account already manages, a rejected form),
+	// and for several of them the only real recourse is a human — so when the
+	// contact form is configured, link it here rather than leaving "← Back" as the
+	// only affordance.
+	contact := ""
+	if s.cfg != nil && s.cfg.ContactEnabled() {
+		contact = ` &middot; <a href="/contact">Contact us</a>`
+	}
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#1a2233">`+
-		`<p>%s</p><p><a href="/">&larr; Back</a></p>`, template.HTMLEscapeString(msg))
+		`<p>%s</p><p><a href="/">&larr; Back</a>%s</p>`, template.HTMLEscapeString(msg), contact)
 }
 
 // messageWithLink is message with an inline action link rendered as real

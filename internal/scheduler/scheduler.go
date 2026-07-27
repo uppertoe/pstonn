@@ -402,6 +402,13 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if _, err := s.store.PruneApplyLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
 		log.Printf("scheduler: prune apply log: %v", err)
 	}
+	// Expired one-off/guest bookings: every guest activation writes one and a
+	// printed door QR is public, so this table would otherwise grow forever from
+	// anonymous traffic and slow every reconcile pass. 90 days keeps plenty of
+	// history for the dashboard's past-days rendering.
+	if _, err := s.store.PruneOverrides(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
+		log.Printf("scheduler: prune overrides: %v", err)
+	}
 	if s.snapshotPath != "" && time.Since(s.lastSnapshot) > 24*time.Hour {
 		if err := s.store.Snapshot(ctx, s.snapshotPath); err != nil {
 			log.Printf("scheduler: backup snapshot: %v", err)

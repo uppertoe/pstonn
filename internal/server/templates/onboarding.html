@@ -34,7 +34,16 @@
     {{else}}
     <h2>Waiting for the account owner</h2>
     <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>
-    <p class="empty-note" style="margin-top:12px">Not what you expected? You can leave this shared account in <a href="/settings">Settings</a>.</p>
+    {{/* The Settings page is gated on the owner being linked, so in exactly this
+         state it renders this very page — pointing there was a loop. Offer the
+         leave action inline instead: it is the one escape a mis-invited person
+         (wrong address typed by someone else) needs, and without it they cannot
+         start their own account either. */}}
+    <form method="post" action="/account/leave" style="margin-top:12px"
+          data-confirm="Leave {{.SharedWith}}'s account? You'll get your own empty p.stonn account back." data-confirm-ok="Leave">
+      <button type="submit" class="ghost sm">Leave this shared account</button>
+    </form>
+    <p class="empty-note" style="margin-top:8px">Not what you expected? Leaving gives you back your own account, and you can link your own council login.</p>
     {{end}}
   </section>
 </main>
@@ -69,11 +78,24 @@
         {{else}}
         <span class="pick-reason">{{.Reason}}</span>
         {{end}}
+        {{if .Warn}}<span class="pick-reason">{{.Warn}}</span>{{end}}
       </div>
       {{end}}
     </div>
     {{else}}
-    <p class="empty-note">No permits available to manage. Only permits you're allowed to change the vehicle on can be scheduled (usually your visitor permit). <a href="/schedule">Back to schedule</a></p>
+    {{/* Two different situations reach this empty state, and the difference is
+         what the person needs to hear. HasPermits means the council account holds
+         permits but none is a schedulable visitor permit; otherwise the account
+         holds no permits at all. Deliberately NOT linking "back to schedule":
+         with nothing managed, /schedule renders this very page, which read as a
+         broken loop. */}}
+    {{if .HasPermits}}
+    <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
+    <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. <a href="/why">What p.stonn can and can't do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    {{else}}
+    <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
+    <p class="empty-note" style="margin-top:8px">Apply for a visitor permit on the council's ePermits site first, then come back and it will appear here. <a href="/why">How this works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    {{end}}
     {{end}}
   </section>
 </main>

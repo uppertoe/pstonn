@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -26,9 +28,16 @@ func newAuthzServer(t *testing.T) *Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
+	// A real at-rest cipher: the printed-QR routes seal their token before any
+	// ownership check, so a nil box would panic instead of exercising the guard.
+	box, err := secretbox.New(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatalf("secretbox: %v", err)
+	}
 	return &Server{
 		cfg:   &config.Config{DisplayLocation: time.UTC},
 		store: st,
+		box:   box,
 		terms: loadTerms(""),
 	}
 }
@@ -152,6 +161,186 @@ func TestAuthorizationMatrix(t *testing.T) {
 		w := s.doReq("GET", "/admin", owner, goodOrigin, nil) // groups = "user" only
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("non-admin GET /admin = %d, want 403", w.Code)
+		}
+	})
+
+	// Every id-bearing route, driven through the router by an unrelated account.
+	// The store layer is unit-tested for owner scoping, but nothing previously
+	// asserted it end-to-end — and these are the routes where a future refactor
+	// could quietly drop the handler's ownership check.
+	t.Run("cross-owner IDOR is refused on every id-bearing route", func(t *testing.T) {
+		permitID, err := s.store.UpsertPermit(ctx, owner, "VPP-IDOR", "1", "Owner permit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid := strconv.FormatInt(permitID, 10)
+		end := time.Now().Add(2 * time.Hour)
+		ovID, err := s.store.CreateOverride(ctx, permitID, vehID, time.Now(), &end, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantID, err := s.store.CreateGuestGrant(ctx, owner, permitID, "Nanny", false,
+			[]int64{vehID}, []store.GuestRecipient{{Email: "guest@example.com", TokenHash: hashGuestToken("idor-token-aaaabbbbccccdddd")}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gid := strconv.FormatInt(grantID, 10)
+
+		// The permit-card fragment must not disclose another account's permit.
+		// (Pages that go through appShell need a live council client, so they are
+		// covered by the store-level owner scoping instead of here.)
+		if w := s.doReq("GET", "/permits/"+pid+"/card", other, goodOrigin, nil); w.Code == http.StatusOK &&
+			strings.Contains(w.Body.String(), "Owner permit") {
+			t.Fatal("GET /permits/{id}/card leaked the owner's permit to another account")
+		}
+
+		// Mutations must not touch it. A refusal may be 403/404/303 depending on the
+		// route's style; what matters is that the object is unchanged afterwards.
+		mutations := []struct {
+			path string
+			form url.Values
+		}{
+			{"/permits/" + pid + "/name", url.Values{"label": {"HIJACKED"}}},
+			{"/permits/" + pid + "/delete", url.Values{}},
+			{"/permits/" + pid + "/rules", url.Values{"weekday": {"1"}, "vehicle_id": {strconv.FormatInt(vehID, 10)}}},
+			{"/permits/" + pid + "/override", url.Values{"vehicle_id": {strconv.FormatInt(vehID, 10)}, "from_date": {"2030-01-01"}, "until_date": {"2030-01-02"}}},
+			{"/permits/" + pid + "/overrides/" + strconv.FormatInt(ovID, 10) + "/delete", url.Values{}},
+			{"/permits/" + pid + "/copy-schedule", url.Values{"source": {pid}}},
+			{"/guests/" + gid, url.Values{"label": {"HIJACKED"}, "vehicle_id": {strconv.FormatInt(vehID, 10)}}},
+			{"/guests/" + gid + "/delete", url.Values{}},
+			{"/guests/qr", url.Values{"permit_id": {pid}}},
+			{"/guests/printed", url.Values{"permit_id": {pid}}},
+			{"/vehicles/" + strconv.FormatInt(vehID, 10) + "/email", url.Values{"email": {"attacker@example.com"}}},
+		}
+		for _, m := range mutations {
+			if w := s.doReq("POST", m.path, other, goodOrigin, m.form); w.Code == http.StatusInternalServerError {
+				t.Fatalf("POST %s by a stranger returned 500 (want a clean refusal)", m.path)
+			}
+		}
+
+		// Nothing was renamed, deleted, or re-pointed.
+		p, err := s.store.GetPermit(ctx, permitID)
+		if err != nil {
+			t.Fatalf("owner's permit was deleted by a stranger: %v", err)
+		}
+		if p.Label != "Owner permit" || p.Owner != owner {
+			t.Fatalf("owner's permit was mutated by a stranger: %+v", p)
+		}
+		grants, err := s.store.ListGuestGrants(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(grants) != 1 || grants[0].Grant.Label != "Nanny" {
+			t.Fatalf("owner's grant was mutated or deleted by a stranger: %+v", grants)
+		}
+		vs, err := s.store.ListVehiclesFor(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range vs {
+			if v.ID == vehID && v.Email != "" {
+				t.Fatalf("a stranger set a driver email on the owner's vehicle: %q", v.Email)
+			}
+		}
+		// And the owner's own rules/overrides were not added to by the stranger.
+		if rules, err := s.store.ListRules(ctx, permitID); err == nil && len(rules) > 0 {
+			t.Fatalf("a stranger created a weekly rule on the owner's permit: %+v", rules)
+		}
+	})
+
+	// The consent gate is an invariant asserted all over the app ("nothing happens
+	// before the terms are accepted"), so it needs a test at the boundary — this is
+	// the gap that let GET /permits/{id}/card slip through on withUser.
+	t.Run("consent gate blocks a user who has not accepted the terms", func(t *testing.T) {
+		const fresh = "noconsent@example.com"
+		permitID, err := s.store.UpsertPermit(ctx, fresh, "VPP-NC", "1", "Fresh permit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid := strconv.FormatInt(permitID, 10)
+		for _, tc := range []struct{ method, path string }{
+			{"GET", "/permits/" + pid + "/card"},
+			{"POST", "/vehicles"},
+			{"POST", "/guests/qr"},
+		} {
+			w := s.doReq(tc.method, tc.path, fresh, goodOrigin, url.Values{"registration": {"NEW999"}, "permit_id": {pid}})
+			// withConsent redirects a non-consented user home (where the gate renders);
+			// what must never happen is the action going through.
+			if w.Code == http.StatusOK && strings.Contains(w.Body.String(), "Fresh permit") {
+				t.Fatalf("%s %s served app content before consent", tc.method, tc.path)
+			}
+		}
+		if vs, err := s.store.ListVehiclesFor(ctx, fresh); err == nil && len(vs) > 0 {
+			t.Fatalf("a vehicle was created before the terms were accepted: %+v", vs)
+		}
+	})
+
+	// A primary has nothing to leave; the inverse gate must hold (the secondary
+	// case is exercised by the onboarding escape hatch).
+	t.Run("primary cannot leave their own account", func(t *testing.T) {
+		w := s.doReq("POST", "/account/leave", owner, goodOrigin, url.Values{})
+		if w.Code == http.StatusSeeOther {
+			t.Fatal("primary POST /account/leave succeeded, want a refusal")
+		}
+	})
+}
+
+// TestGuestTokenAuthz covers the token roles: an unknown or revoked token gets the
+// same neutral answer as a valid-but-dead one, a request-only (printed door QR)
+// token cannot activate or revert, and a door-QR page discloses none of the
+// account's identifying details.
+func TestGuestTokenAuthz(t *testing.T) {
+	ctx := context.Background()
+	s := newAuthzServer(t)
+	const owner = "owner@example.com"
+	permitID, err := s.store.UpsertPermit(ctx, owner, "VPP-TOK", "1", "12 Smith St front")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetPermitActive(ctx, permitID, "SECRET1"); err != nil {
+		t.Fatal(err)
+	}
+	doorRaw := "door-token-aaaabbbbccccddddeeeeffff"
+	if _, err := s.store.CreatePrintedGrant(ctx, owner, permitID, hashGuestToken(doorRaw), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "app.example.com"
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+
+	t.Run("unknown token is refused", func(t *testing.T) {
+		for _, path := range []string{"/g/definitely-not-a-real-token", "/g/live/definitely-not-a-real-token"} {
+			if w := get(path); w.Code == http.StatusOK {
+				t.Fatalf("GET %s = 200, want a refusal", path)
+			}
+		}
+	})
+
+	t.Run("door QR discloses no owner email, plate, or label", func(t *testing.T) {
+		body := get("/g/" + doorRaw).Body.String()
+		for _, secret := range []string{owner, "SECRET1", "12 Smith St front"} {
+			if strings.Contains(body, secret) {
+				t.Fatalf("public door-QR page disclosed %q", secret)
+			}
+		}
+	})
+
+	t.Run("request-only token cannot revert or poll live", func(t *testing.T) {
+		if w := get("/g/live/" + doorRaw); w.Code == http.StatusOK {
+			t.Fatalf("GET /g/live for a door token = 200, want a refusal")
+		}
+		r := httptest.NewRequest("POST", "/g/"+doorRaw+"/revert", strings.NewReader(""))
+		r.Host = "app.example.com"
+		r.Header.Set("Origin", "http://app.example.com")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code == http.StatusOK && strings.Contains(w.Body.String(), "back on the permit") {
+			t.Fatal("a door-QR token performed a revert")
 		}
 	})
 }
