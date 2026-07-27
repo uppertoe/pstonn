@@ -180,7 +180,9 @@ CREATE TABLE IF NOT EXISTS guest_request (
     status       TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
     requested_at TEXT NOT NULL,
     decided_at   TEXT NOT NULL DEFAULT '',
-    until_at     TEXT NOT NULL DEFAULT ''   -- human when-it-ends, set on approval
+    decided_by   TEXT NOT NULL DEFAULT '',  -- which account member decided ('' = expired unanswered)
+    until_at     TEXT NOT NULL DEFAULT '',  -- human when-it-ends, set on approval
+    until_ts     TEXT NOT NULL DEFAULT ''   -- RFC3339 UTC end of the approved window; the source of truth for "has this pass lapsed" (until_at is only display text)
 );
 CREATE INDEX IF NOT EXISTS idx_guest_request_owner ON guest_request(owner, status);
 
@@ -243,6 +245,8 @@ CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 		`ALTER TABLE guest_token ADD COLUMN baseline_plate TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_token ADD COLUMN baseline_until TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN reconnected_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_request ADD COLUMN decided_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guest_request ADD COLUMN until_ts TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

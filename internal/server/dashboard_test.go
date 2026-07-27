@@ -182,6 +182,29 @@ func TestTemplatesRender(t *testing.T) {
 		{"guest-manifest-link", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "toktok", PermitLabel: "Visitor Permit",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok"},
+		{"guest-rescan-applied", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "applied", Until: "the end of today"}}},
+			"is on the permit until the end of today"},
+		{"guest-rescan-superseded", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "superseded"}}},
+			"it has since been changed"},
+		{"guest-rescan-ended", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "ended"}}},
+			"has ended"},
+		{"guest-rescan-pending-polls", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}}},
+			"/g/req/4?n=nn"},
+		{"guests-recent-activity", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			RecentRequests: []guestDecidedView{
+				{Plate: "GUEST1", PermitLabel: "Visitor Permit", Outcome: "Approved", DecidedBy: "mum@example.com", Ago: "2 hr ago",
+					Live: "No longer on the permit — since replaced by OWNER9.", Warn: true},
+				{Plate: "GUEST2", PermitLabel: "Visitor Permit", Outcome: "Not answered", Ago: "3 hr ago"}}},
+			"since replaced by OWNER9"},
 		{"guest-result-ok", dashboardData{State: "guest-result", Loc: loc,
 			Flash: "AAA111 is now on the permit until the end of today.", Guest: guestActView{OwnerEmail: "held@example.com"}}, "on the permit"},
 		{"guest-gone", dashboardData{State: "guest-result", Loc: loc,

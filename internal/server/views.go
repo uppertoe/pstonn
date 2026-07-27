@@ -55,18 +55,19 @@ type dashboardData struct {
 	// picker state
 	Pick []pickView
 	// guest passes
-	Guests          []guestGrantView // management page: existing grants
-	GuestsEnabled   bool             // kill-switch state (default on)
-	PermitOpts      []permitOpt      // create-grant permit choices
-	NewGuestLinks   []guestLinkView  // links shown once, right after a grant is created
-	Edit            *editGrantView   // non-nil puts the pass form in edit mode
-	QR              *qrShowView      // non-nil shows the on-screen visitor QR
-	DoorQR          *doorQRView      // non-nil renders the printable door-QR poster (State "doorqr")
-	DoorGrants      []doorGrantView  // durable door QRs in the management list
-	PendingRequests []guestReqView   // printed-QR requests awaiting the holder's decision
-	Guest           guestActView     // public activation menu (State "guest")
-	Wait            *guestWaitView   // public "waiting for approval" page (State "guest-wait")
-	Admin           *adminView       // admin dashboard (State "admin")
+	Guests          []guestGrantView   // management page: existing grants
+	GuestsEnabled   bool               // kill-switch state (default on)
+	PermitOpts      []permitOpt        // create-grant permit choices
+	NewGuestLinks   []guestLinkView    // links shown once, right after a grant is created
+	Edit            *editGrantView     // non-nil puts the pass form in edit mode
+	QR              *qrShowView        // non-nil shows the on-screen visitor QR
+	DoorQR          *doorQRView        // non-nil renders the printable door-QR poster (State "doorqr")
+	DoorGrants      []doorGrantView    // durable door QRs in the management list
+	PendingRequests []guestReqView     // printed-QR requests awaiting the holder's decision
+	RecentRequests  []guestDecidedView // recently decided printed-QR requests, so every member sees how they were resolved
+	Guest           guestActView       // public activation menu (State "guest")
+	Wait            *guestWaitView     // public "waiting for approval" page (State "guest-wait")
+	Admin           *adminView         // admin dashboard (State "admin")
 }
 
 type termsView struct {

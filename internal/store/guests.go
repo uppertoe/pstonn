@@ -37,7 +37,9 @@ type GuestRequest struct {
 	Status      string // pending | approved | denied
 	RequestedAt time.Time
 	DecidedAt   time.Time // when the holder approved/denied ("" while pending)
+	DecidedBy   string    // which account member decided ("" while pending / expired unanswered)
 	Until       string    // human "until …" text, set on approval
+	UntilTS     time.Time // when the approved window ends (zero while pending/denied)
 }
 
 // GuestToken is one recipient's link to a grant; the raw token is never stored,
@@ -510,11 +512,18 @@ func (s *Store) PurgeDecidedGuestRequests(ctx context.Context, before time.Time)
 // GuestRequestForPoll returns a request only if the nonce matches — the visitor's
 // status check, safe against request-id enumeration.
 func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string) (GuestRequest, error) {
+	return s.scanGuestRequest(s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, decided_by, until_at, until_ts
+		 FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce))
+}
+
+// rowScanner lets scanGuestRequest work over both QueryRow and Query results.
+type rowScanner interface{ Scan(dest ...any) error }
+
+func (s *Store) scanGuestRequest(row rowScanner) (GuestRequest, error) {
 	var r GuestRequest
-	var requested, decided string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, until_at FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce).
-		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &decided, &r.Until)
+	var requested, decided, untilTS string
+	err := row.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &decided, &r.DecidedBy, &r.Until, &untilTS)
 	if err == sql.ErrNoRows {
 		return GuestRequest{}, ErrNotFound
 	}
@@ -523,24 +532,15 @@ func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string)
 	}
 	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
 	r.DecidedAt, _ = time.Parse(time.RFC3339, decided)
+	r.UntilTS, _ = time.Parse(time.RFC3339, untilTS)
 	return r, nil
 }
 
 // GuestRequestByID returns a request (used by the visitor's polling status page).
 func (s *Store) GuestRequestByID(ctx context.Context, id int64) (GuestRequest, error) {
-	var r GuestRequest
-	var requested string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request WHERE id = ?`, id).
-		Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until)
-	if err == sql.ErrNoRows {
-		return GuestRequest{}, ErrNotFound
-	}
-	if err != nil {
-		return GuestRequest{}, err
-	}
-	r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
-	return r, nil
+	return s.scanGuestRequest(s.db.QueryRowContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, decided_by, until_at, until_ts
+		 FROM guest_request WHERE id = ?`, id))
 }
 
 // ListPendingRequests returns an owner's still-pending printed-QR requests, newest
@@ -566,18 +566,51 @@ func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestR
 	return out, rows.Err()
 }
 
+// ListRecentDecidedRequests returns an owner's decided (approved/denied/expired)
+// printed-QR requests since the given time, newest decision first. It feeds the
+// guests page's recent-activity list, so every account member — not just the one
+// who decided — can see how a request was resolved.
+func (s *Store) ListRecentDecidedRequests(ctx context.Context, owner string, since time.Time) ([]GuestRequest, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, decided_by, until_at, until_ts
+		 FROM guest_request
+		 WHERE owner = ? AND status != 'pending' AND decided_at >= ?
+		 ORDER BY decided_at DESC, id DESC`,
+		owner, since.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GuestRequest
+	for rows.Next() {
+		r, err := s.scanGuestRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // DecideGuestRequest approves or denies a pending request, scoped to owner. It
-// returns the request (so the caller can apply the plate on approval) or
-// ErrNotFound if it is not the owner's or no longer pending.
-func (s *Store) DecideGuestRequest(ctx context.Context, owner string, id int64, approve bool, until string) (GuestRequest, error) {
+// records who decided and (on approval) when the granted window ends, so the
+// decision stays legible later — to the visitor re-scanning the door code and
+// to the other account members. It returns the request (so the caller can
+// apply the plate on approval) or ErrNotFound if it is not the owner's or no
+// longer pending.
+func (s *Store) DecideGuestRequest(ctx context.Context, owner string, id int64, approve bool, until string, decidedBy string, untilTS time.Time) (GuestRequest, error) {
 	status := "denied"
 	if approve {
 		status = "approved"
 	}
+	untilStamp := ""
+	if !untilTS.IsZero() {
+		untilStamp = untilTS.UTC().Format(time.RFC3339)
+	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE guest_request SET status = ?, decided_at = ?, until_at = ?
+		`UPDATE guest_request SET status = ?, decided_at = ?, decided_by = ?, until_at = ?, until_ts = ?
 		 WHERE id = ? AND owner = ? AND status = 'pending'`,
-		status, nowUTC(), until, id, owner)
+		status, nowUTC(), decidedBy, until, untilStamp, id, owner)
 	if err != nil {
 		return GuestRequest{}, err
 	}

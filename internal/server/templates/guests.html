@@ -93,6 +93,25 @@
   </section>
   {{end}}
 
+  {{if .RecentRequests}}
+  <section class="card">
+    <h2><span class="ic">{{template "ic-bell"}}</span> Recent requests</h2>
+    <p class="subtitle">How the latest printed-QR requests were resolved. Everyone on the account sees this, so you always know whether someone already handled a request.</p>
+    {{range .RecentRequests}}
+    <div class="req">
+      <div class="req-main">
+        <span class="plate" style="--plate:var(--sec-vehicles)">{{.Plate}}</span>
+        <div class="req-meta">
+          <strong>{{.PermitLabel}}</strong>
+          <span class="empty-note">{{.Outcome}}{{if .DecidedBy}} by {{.DecidedBy}}{{end}} &middot; {{.Ago}}</span>
+          {{if .Live}}<span class="empty-note"{{if .Warn}} style="color:var(--danger)"{{end}}>{{.Live}}</span>{{end}}
+        </div>
+      </div>
+    </div>
+    {{end}}
+  </section>
+  {{end}}
+
   <section class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>

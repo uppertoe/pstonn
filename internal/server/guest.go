@@ -41,21 +41,22 @@ func qrDataURI(text string) (string, error) {
 
 // guestActView drives the public activation menu (State "guest").
 type guestActView struct {
-	Token          string        // raw token, echoed into the POST form
-	OwnerEmail     string        // account holder, shown for trust
-	PermitLabel    string        // which permit this affects
-	CurrentReg     string        // what is on the permit right now ("" if unknown)
-	Cars           []vehicleView // the cars this link may activate
-	AllowOvernight bool          // whether the overnight checkbox is offered
-	AllowPlate     bool          // whether the visitor may type an arbitrary plate
-	RequestOnly    bool          // printed QR: entering a plate only requests approval
-	RevertPlate    string        // pre-existing plate the guest may put back ("" = no revert offered)
-	PendingReg     string        // plate the schedule targets but the council doesn't show yet ("" = settled)
-	Stalled        bool          // the pending change has taken suspiciously long; stop polling
-	SelectedReg    string        // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
-	UntilText      string        // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
-	KeepForm       bool          // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
-	FP             string        // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
+	Token          string         // raw token, echoed into the POST form
+	OwnerEmail     string         // account holder, shown for trust
+	PermitLabel    string         // which permit this affects
+	CurrentReg     string         // what is on the permit right now ("" if unknown)
+	Cars           []vehicleView  // the cars this link may activate
+	AllowOvernight bool           // whether the overnight checkbox is offered
+	AllowPlate     bool           // whether the visitor may type an arbitrary plate
+	RequestOnly    bool           // printed QR: entering a plate only requests approval
+	RevertPlate    string         // pre-existing plate the guest may put back ("" = no revert offered)
+	PendingReg     string         // plate the schedule targets but the council doesn't show yet ("" = settled)
+	Stalled        bool           // the pending change has taken suspiciously long; stop polling
+	SelectedReg    string         // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
+	UntilText      string         // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
+	KeepForm       bool           // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
+	FP             string         // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
+	Req            *guestWaitView // printed door QR only: this browser's own remembered request (from the greq cookie), so a re-scan shows its fate instead of a blank form
 }
 
 // guestWaitView drives the visitor's "waiting for approval" page (State
@@ -65,7 +66,7 @@ type guestWaitView struct {
 	Plate      string
 	ReqID      int64
 	Nonce      string
-	Status     string // "pending" | "approved" | "denied"
+	Status     string // template-ready state: "pending" | "approved" | "applied" | "stalled" | "denied" | "superseded" | "ended"
 	Until      string // set when approved
 }
 
@@ -75,6 +76,20 @@ type guestReqView struct {
 	Plate       string
 	PermitLabel string
 	Ago         string // "2 min ago"
+}
+
+// guestDecidedView is one recently decided printed-QR request on the guests
+// page. It exists for the member who DIDN'T decide: everyone on the account got
+// the "approve this?" nudge, so everyone can come back later and see how it was
+// resolved — and where the approved plate stands now.
+type guestDecidedView struct {
+	Plate       string
+	PermitLabel string
+	Outcome     string // "Approved" | "Declined" | "Not answered"
+	DecidedBy   string // deciding member ("" for expired-unanswered)
+	Ago         string // "2 hr ago" (since the decision)
+	Live        string // approved rows: where the plate stands now ("" = nothing to add)
+	Warn        bool   // amber the live note (superseded / stalled)
 }
 
 // qrShowView drives the on-screen visitor QR the resident shows in person (instant,
@@ -339,12 +354,23 @@ func pendingState(actual, want string, decidedAt, now time.Time) (pendingReg str
 // buildGuestView assembles the activation-menu view model from actual state:
 // the council-side current plate, the revert offer, and the pending/stalled
 // status against the schedule's resolved target.
-func (s *Server) buildGuestView(ctx context.Context, gc guestCtx, permit model.Permit, current string) guestActView {
+func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permit, current string) guestActView {
+	ctx := r.Context()
 	cars, _, _, _ := vehicleViews(gc.Vehicles)
 	view := guestActView{
 		Token: gc.rawToken, PermitLabel: permitLabel(permit),
 		Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
 		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
+	}
+	// A door-QR re-scan should answer "what happened to my request?", not present
+	// a blank form as if nothing ever happened. The visitor's own request (and
+	// only theirs — the cookie carries the request's poll nonce) is shown with
+	// its live fate: pending, on the permit, superseded, ended, or denied.
+	if gc.Grant.RequestOnly {
+		if req, nonce, ok := s.guestReqFromCookie(r, gc); ok {
+			status, _ := s.requestLiveState(ctx, permit, req)
+			view.Req = &guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: status, Until: req.Until}
+		}
 	}
 	// A printed door QR is meant to be left out in public, so the page must not
 	// disclose the holder's email or the plate currently on the permit to anyone
@@ -404,7 +430,7 @@ func (s *Server) renderGuestMenu(w http.ResponseWriter, r *http.Request, gc gues
 // per-booking choice, never sticky state.
 func (s *Server) renderGuestMenuOpts(w http.ResponseWriter, r *http.Request, gc guestCtx, permit model.Permit, current, flash, warn string, keepForm bool) {
 	noStore(w)
-	view := s.buildGuestView(r.Context(), gc, permit, current)
+	view := s.buildGuestView(r, gc, permit, current)
 	view.KeepForm = keepForm
 	data := dashboardData{State: "guest", Loc: s.cfg.DisplayLocation, Guest: view, Flash: flash, Warn: warn}
 	// The in-page activation swaps (hx-post car/plate, the live poll) want just the
@@ -439,7 +465,7 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := s.guestCurrentPlate(r.Context(), gc, permit)
-	view := s.buildGuestView(r.Context(), gc, permit, current)
+	view := s.buildGuestView(r, gc, permit, current)
 	if r.URL.Query().Get("fp") == view.FP {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -885,6 +911,51 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 			})
 		}
 	}
+	// Recently decided printed-QR requests: every member got the "approve this?"
+	// nudge, so every member can see how it was resolved — including the live
+	// fate of an approved plate (on the permit / superseded / ended). Best-effort
+	// like the queue above: an error just hides the section.
+	if recent, rerr := s.store.ListRecentDecidedRequests(ctx, owner, time.Now().Add(-guestReqCookieTTL)); rerr == nil {
+		now := time.Now()
+		permitByID := map[int64]model.Permit{}
+		for _, p := range permits {
+			permitByID[p.ID] = p
+		}
+		for _, rq := range recent {
+			v := guestDecidedView{
+				Plate: rq.Plate, PermitLabel: labelByPermit[rq.PermitID],
+				DecidedBy: rq.DecidedBy, Ago: agoText(now, rq.DecidedAt),
+			}
+			switch rq.Status {
+			case "approved":
+				v.Outcome = "Approved"
+				if p, ok := permitByID[rq.PermitID]; ok {
+					switch st, replacedBy := s.requestLiveState(ctx, p, rq); st {
+					case "applied":
+						v.Live = "On the permit until " + rq.Until + "."
+					case "approved":
+						v.Live = "Being put on the permit…"
+					case "stalled":
+						v.Live, v.Warn = "Not yet confirmed on the permit — check the permit's schedule.", true
+					case "superseded":
+						// Members may see the superseding plate (unlike the public door-QR
+						// pages, which never disclose the permit's current plate).
+						v.Live, v.Warn = "No longer on the permit — since replaced.", true
+						if replacedBy != "" {
+							v.Live = "No longer on the permit — since replaced by " + replacedBy + "."
+						}
+					case "ended":
+						v.Live = "The pass has ended."
+					}
+				}
+			case "denied":
+				v.Outcome = "Declined"
+			default: // "expired": aged out with nobody answering
+				v.Outcome = "Not answered"
+			}
+			base.RecentRequests = append(base.RecentRequests, v)
+		}
+	}
 	if doors, derr := s.store.ListPrintedGrants(ctx, owner); derr == nil {
 		for _, d := range doors {
 			base.DoorGrants = append(base.DoorGrants, doorGrantView{
@@ -1255,6 +1326,101 @@ func randNonce() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// requestLiveState classifies where a printed-QR request stands RIGHT NOW, in
+// the template's own status terms, so every surface that shows a request (the
+// wait page's poll, a door-QR re-scan, the guests page's recent list) derives
+// the same answer from the same resolution the scheduler acts on:
+//
+//	pending    — awaiting the holder's decision
+//	denied     — declined, or expired unanswered (reads the same to a visitor)
+//	ended      — approved, but the granted window has since lapsed
+//	superseded — approved, but the schedule now resolves to a different plate
+//	             (or to nothing): the pass was overridden, not merely slow
+//	applied    — approved AND the council's own record shows the plate
+//	stalled    — approved but unconfirmed past guestApplyTimeout
+//	approved   — approved, council catching up (keep polling)
+//
+// replacedBy is the plate now steering the permit, only for "superseded" ("" =
+// nothing scheduled). Owner-facing surfaces may show it; the PUBLIC door-QR
+// pages must not — a poster scan must never disclose the permit's current plate.
+func (s *Server) requestLiveState(ctx context.Context, permit model.Permit, req store.GuestRequest) (status, replacedBy string) {
+	switch req.Status {
+	case "pending":
+		return "pending", ""
+	case "denied", "expired":
+		return "denied", ""
+	}
+	// Approved. Ended is checked first: after the window lapses the schedule
+	// naturally resolves elsewhere, which must read as "ended", not "superseded".
+	now := time.Now().In(s.cfg.DisplayLocation)
+	end := req.UntilTS
+	if end.IsZero() && !req.DecidedAt.IsZero() {
+		// Rows approved before until_ts existed: reproduce the approval's window
+		// (printed-QR approvals always ran to the end of the approval's day).
+		end = dayEndLocal(req.DecidedAt.In(s.cfg.DisplayLocation), 0)
+	}
+	if !end.IsZero() && !now.Before(end) {
+		return "ended", ""
+	}
+	want, _, _ := s.guestDesired(ctx, permit)
+	if !strings.EqualFold(want, req.Plate) {
+		return "superseded", want
+	}
+	if strings.EqualFold(permit.ActiveRegistration, req.Plate) {
+		return "applied", ""
+	}
+	if !req.DecidedAt.IsZero() && time.Since(req.DecidedAt) > guestApplyTimeout {
+		return "stalled", ""
+	}
+	return "approved", ""
+}
+
+// guestReqCookie remembers the visitor's own printed-QR request in their
+// browser: "reqID.nonce", where the nonce is the same per-request secret the
+// wait page's poll URL already carries — the cookie only persists it client-
+// side, introducing no new secret class. Scoped to /g/ (the public guest
+// routes) and long enough to outlive the granted window, so the morning-after
+// re-scan can still say "your pass has ended".
+const guestReqCookie = "greq"
+
+const guestReqCookieTTL = 48 * time.Hour
+
+func (s *Server) setGuestReqCookie(w http.ResponseWriter, reqID int64, nonce string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     guestReqCookie,
+		Value:    fmt.Sprintf("%d.%s", reqID, nonce),
+		Path:     "/g/",
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(s.cfg.PublicBaseURL, "https://"),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(guestReqCookieTTL.Seconds()),
+	})
+}
+
+// guestReqFromCookie resolves the browser's remembered request. It is gated on
+// the nonce (a stale, purged, or tampered cookie simply resolves to nothing)
+// and pinned to THIS grant, so a request made at one door never surfaces at
+// another. Returns the nonce too, for the status fragment's poll URL.
+func (s *Server) guestReqFromCookie(r *http.Request, gc guestCtx) (store.GuestRequest, string, bool) {
+	c, err := r.Cookie(guestReqCookie)
+	if err != nil {
+		return store.GuestRequest{}, "", false
+	}
+	idStr, nonce, ok := strings.Cut(c.Value, ".")
+	if !ok || nonce == "" {
+		return store.GuestRequest{}, "", false
+	}
+	id := atoi64(idStr)
+	if id <= 0 {
+		return store.GuestRequest{}, "", false
+	}
+	req, err := s.store.GuestRequestForPoll(r.Context(), id, nonce)
+	if err != nil || req.GrantID != gc.Grant.ID {
+		return store.GuestRequest{}, "", false
+	}
+	return req, nonce, true
+}
+
 // guestRequest handles a printed-QR scan: it records a pending request for the
 // plate the visitor typed, notifies the account holder, and shows a page that
 // polls until the holder decides. Nothing is put on the permit here — the
@@ -1282,6 +1448,9 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 	if created { // a re-scan of the same plate reuses the pending request; don't re-nudge
 		s.notifyGuestRequest(r.Context(), permit, plate)
 	}
+	// Remember the request in this browser (the one that made it), so a later
+	// re-scan of the same door code shows its fate instead of a blank form.
+	s.setGuestReqCookie(w, reqID, nonce)
 	s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation,
 		Wait: &guestWaitView{Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
 }
@@ -1302,19 +1471,17 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 			// Aged out unanswered; to the visitor that is a "not approved".
 			v.Status = "denied"
 		}
-		// "approved" means the resident said yes; only report it as ON the permit
-		// once the council's own record (active_registration, set from a confirmed
-		// read-back by the apply or the scheduler) actually shows the plate. Until
-		// then the visitor keeps seeing "being put on", never a false "it's on".
+		// "approved" means the resident said yes; requestLiveState only reports it
+		// as ON the permit once the council's own record actually shows the plate
+		// ("applied"), flags a long-unconfirmed apply ("stalled"), and — the states
+		// this endpoint couldn't see before — notices when the pass has since been
+		// overridden ("superseded") or its window has lapsed ("ended"), instead of
+		// misreading either as a stall.
 		if req.Status == "approved" {
-			if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil && strings.EqualFold(permit.ActiveRegistration, req.Plate) {
-				v.Status = "applied"
-			} else if !req.DecidedAt.IsZero() && time.Since(req.DecidedAt) > guestApplyTimeout {
-				// Approved but the council still hasn't confirmed after a while (a
-				// lapsed session, a persistent apply failure). Stop the endless
-				// spinner and tell the visitor to check with the resident.
-				v.Status = "stalled"
+			if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil {
+				v.Status, _ = s.requestLiveState(r.Context(), permit, req)
 			}
+			// A permit lookup error keeps Status "approved": transient — keep polling.
 		}
 	case errors.Is(err, store.ErrNotFound):
 		v = guestWaitView{Status: "denied"} // wrong nonce / unknown id — a real terminal
@@ -1451,7 +1618,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	now := time.Now().In(s.cfg.DisplayLocation)
 
 	if !approve {
-		if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, false, ""); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, false, "", user, time.Time{}); err != nil && !errors.Is(err, store.ErrNotFound) {
 			s.serverError(w, err)
 			return
 		}
@@ -1478,7 +1645,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		s.serverError(w, cerr) // don't approve if we couldn't set up the change
 		return
 	}
-	if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, true, untilPhrase(now, false)); err != nil {
+	if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, true, untilPhrase(now, false), user, end); err != nil {
 		// The approval didn't land — raced with a concurrent deny (ErrNotFound: the
 		// row is no longer pending) or a DB error. Roll back the override we
 		// optimistically created, so a denied or undecided request can never leave a

@@ -1197,16 +1197,29 @@ func TestPrintedRequestFlow(t *testing.T) {
 	}
 
 	// Another owner can't decide it; the real owner can approve once.
-	if _, err := s.DecideGuestRequest(ctx, bob, reqID, true, "2026-07-21T00:00:00Z"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DecideGuestRequest(ctx, bob, reqID, true, "2026-07-21T00:00:00Z", bob, time.Time{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign decide = %v, want ErrNotFound", err)
 	}
-	dec, err := s.DecideGuestRequest(ctx, owner, reqID, true, "2026-07-21T00:00:00Z")
+	wantEnd := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	dec, err := s.DecideGuestRequest(ctx, owner, reqID, true, "2026-07-21T00:00:00Z", owner, wantEnd)
 	if err != nil || dec.Status != "approved" || dec.Until != "2026-07-21T00:00:00Z" {
 		t.Fatalf("approve = %+v, %v", dec, err)
 	}
+	if dec.DecidedBy != owner || !dec.UntilTS.Equal(wantEnd) {
+		t.Fatalf("decision audit = by %q until %v, want by %q until %v", dec.DecidedBy, dec.UntilTS, owner, wantEnd)
+	}
 	// Deciding again is a no-op (no longer pending) and drops out of the queue.
-	if _, err := s.DecideGuestRequest(ctx, owner, reqID, true, ""); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DecideGuestRequest(ctx, owner, reqID, true, "", owner, time.Time{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("re-decide = %v, want ErrNotFound", err)
+	}
+	// The decision shows in the recent list (any window covering now), with the
+	// audit fields intact — the feed every account member sees.
+	if recent, err := s.ListRecentDecidedRequests(ctx, owner, time.Now().Add(-time.Hour)); err != nil ||
+		len(recent) != 1 || recent[0].Plate != "TRADIE1" || recent[0].DecidedBy != owner || recent[0].Status != "approved" {
+		t.Fatalf("recent decided = %+v, %v", recent, err)
+	}
+	if recent, _ := s.ListRecentDecidedRequests(ctx, bob, time.Now().Add(-time.Hour)); len(recent) != 0 {
+		t.Fatalf("foreign owner should see no recent decisions, got %d", len(recent))
 	}
 	if reqs, _ := s.ListPendingRequests(ctx, owner); len(reqs) != 0 {
 		t.Fatalf("decided request should leave the queue, got %d", len(reqs))
@@ -1711,7 +1724,7 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 	if err != nil || n != int64(maxPendingGuestRequests) {
 		t.Fatalf("expired %d, err=%v; want %d", n, err, maxPendingGuestRequests)
 	}
-	if _, err := s.DecideGuestRequest(ctx, owner, id1, true, "today"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.DecideGuestRequest(ctx, owner, id1, true, "today", owner, time.Time{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deciding an expired request must fail, got %v", err)
 	}
 	if _, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "n"); err != nil || !created {

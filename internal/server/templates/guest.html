@@ -61,7 +61,15 @@
 {{if and .Guest.PendingReg (not .Guest.Stalled)}}<div hx-get="/g/live/{{.Guest.Token}}?fp={{.Guest.FP}}" hx-trigger="every 2500ms" hx-target="#gbody" hx-swap="innerHTML"></div>{{end}}
 {{end}}
 {{if .Warn}}<div class="banner warn" style="margin-top:14px">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
-{{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">Enter your plate to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.</p>{{end}}
+{{if .Guest.Req}}
+{{/* This browser already asked (greq cookie): show that request's live fate —
+     waiting / on the permit / superseded / ended / denied — above the form,
+     so a re-scan confirms what happened instead of looking like amnesia.
+     Pending and approved states carry their own poller (see guest-req-status). */}}
+<p class="gnow" style="margin-top:14px;text-align:center">Your request to use <span class="plate">{{.Guest.Req.Plate}}</span>:</p>
+<div aria-live="polite" style="text-align:center">{{template "guest-req-status" .Guest.Req}}</div>
+{{end}}
+{{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">{{if .Guest.Req}}Need a different car on the permit? Enter its plate below to ask again.{{else}}Enter your plate to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.{{end}}</p>{{end}}
 <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px"{{if not .Guest.RequestOnly}} hx-post="/g/{{.Guest.Token}}" hx-target="#gbody" hx-swap="innerHTML"{{end}}>
   {{if .Guest.Cars}}
   <p class="sub">Tap your car to put it on the permit</p>
@@ -119,6 +127,20 @@
 <div id="reqstatus">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
   <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
+</div>
+{{else if eq .Status "superseded"}}
+{{/* approved, but the permit has since been steered to another plate. Terminal.
+     Deliberately does NOT say what replaced it: the door QR is public, and the
+     permit's current plate is never disclosed to whoever scans it. */}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
+  <p class="gresult">Your request was approved, but <span class="plate">{{.Plate}}</span> is no longer on the permit &mdash; it has since been changed. If you still need parking, send a new request.</p>
+</div>
+{{else if eq .Status "ended"}}
+{{/* approved, and the granted window has simply lapsed. Terminal. */}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
+  <p class="gresult">Your time on the permit with <span class="plate">{{.Plate}}</span> has ended. If you still need parking, send a new request.</p>
 </div>
 {{else if eq .Status "approved"}}
 {{/* the resident said yes; keep polling until the council confirms the plate is on */}}
