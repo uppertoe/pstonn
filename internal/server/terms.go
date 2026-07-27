@@ -94,7 +94,7 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 	u, _ := identity.FromContext(r.Context())
 	for i := range s.terms.Clauses {
 		if r.FormValue(fmt.Sprintf("agree%d", i)) == "" {
-			s.formError(w, r, "Please tick all three boxes to continue.")
+			s.formError(w, r, "Please tick every box to continue.")
 			return
 		}
 	}

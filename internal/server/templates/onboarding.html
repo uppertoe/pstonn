@@ -2,6 +2,7 @@
 {{/* ================= ONBOARDING ================= */}}
 {{template "appbar" .}}
 <main id="main" tabindex="-1">
+  {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
@@ -44,6 +45,7 @@
 {{/* ================= PERMIT PICKER ================= */}}
 {{template "appbar" .}}
 <main id="main" tabindex="-1">
+  {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
   <section class="card">
     <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to manage</div>

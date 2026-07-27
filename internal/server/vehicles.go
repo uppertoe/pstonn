@@ -19,6 +19,10 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base.Vehicles, _, _, _ = vehicleViews(vehicles)
+	if r.URL.Query().Get("saved") == "1" {
+		// Saving a driver email otherwise changes nothing visible on the page.
+		base.Flash = "Driver email saved."
+	}
 	s.render(w, base)
 }
 

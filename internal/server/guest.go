@@ -66,7 +66,7 @@ type guestWaitView struct {
 	Plate      string
 	ReqID      int64
 	Nonce      string
-	Status     string // template-ready state: "pending" | "approved" | "applied" | "stalled" | "denied" | "superseded" | "ended"
+	Status     string // template-ready state: "pending" | "approved" | "applied" | "stalled" | "denied" | "expired" | "superseded" | "ended"
 	Until      string // set when approved
 }
 
@@ -597,7 +597,10 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
-	_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "error", err.Error())
+	// The activity log is user-facing: record a plain-English detail and keep the
+	// raw council error in the server log only.
+	log.Printf("guest activate %s on permit %d: %v", reg, permit.ID, err)
+	_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "error", guestApplyDetail(err))
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The override is saved and the scheduler will apply it shortly; the pending
 		// banner + poller (from renderGuestMenu) track the ACTUAL result — no claim.
@@ -684,7 +687,8 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
-	_ = s.store.RecordApply(bg, permit.ID, target, "guest", "error", err.Error())
+	log.Printf("guest revert to %s on permit %d: %v", target, permit.ID, err)
+	_ = s.store.RecordApply(bg, permit.ID, target, "guest", "error", guestApplyDetail(err))
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The restore is saved; the pending banner + poller track the actual result.
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
@@ -733,6 +737,16 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 		return guestCtx{}, model.Permit{}, false
 	}
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
+}
+
+// guestApplyDetail is the user-facing activity-log detail for a failed guest
+// apply: the Activity page renders it verbatim, so it must be a plain sentence,
+// not a raw council error (which goes to the server log instead).
+func guestApplyDetail(err error) string {
+	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
+		return "Couldn't reach the council; p.stonn will keep trying."
+	}
+	return "The council did not accept the change."
 }
 
 func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string, d model.DisplacedBooking) {
@@ -998,12 +1012,16 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 			vehicleIDs = append(vehicleIDs, id)
 		}
 	}
-	recipients := parseEmails(r.FormValue("recipients"))
+	recipients, droppedEmails := parseEmails(r.FormValue("recipients"))
 	if len(vehicleIDs) == 0 {
 		s.formError(w, r, "Choose at least one car this link may activate.")
 		return
 	}
 	if len(recipients) == 0 {
+		if len(droppedEmails) > 0 {
+			s.formError(w, r, "None of those recipient emails look valid. Check them and try again.")
+			return
+		}
 		s.formError(w, r, "Add at least one recipient email.")
 		return
 	}
@@ -1029,11 +1047,15 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base.NewGuestLinks = links
-	if sent > 0 {
+	switch {
+	case sent == len(links):
 		base.Flash = "Guest pass created and links emailed."
-	} else {
+	case sent > 0:
+		base.Flash = "Guest pass created. Some links couldn't be emailed — copy the links below to be sure everyone gets theirs."
+	default:
 		base.Flash = "Guest pass created. Copy the links below to share them."
 	}
+	base.Flash += skippedNote(droppedEmails)
 	s.render(w, base)
 }
 
@@ -1143,7 +1165,8 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 
 	// New recipients (if any) each get a fresh token + link.
 	var newLinks []guestLinkView
-	if emails := parseEmails(r.FormValue("recipients")); len(emails) > 0 {
+	emails, droppedEmails := parseEmails(r.FormValue("recipients"))
+	if len(emails) > 0 {
 		recs, links := s.mintLinks(emails)
 		added, err := s.store.AddGuestTokens(r.Context(), owner, id, recs)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -1178,14 +1201,18 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		}
 		sent := s.emailLinks(owner, plabel, newLinks)
 		base.NewGuestLinks = newLinks
-		if sent > 0 {
+		switch {
+		case sent == len(newLinks):
 			base.Flash = "Guest pass updated and new links emailed."
-		} else {
+		case sent > 0:
+			base.Flash = "Guest pass updated. Some links couldn't be emailed — copy the links below to be sure everyone gets theirs."
+		default:
 			base.Flash = "Guest pass updated. Copy the new links below to share them."
 		}
 	} else {
 		base.Flash = "Guest pass updated."
 	}
+	base.Flash += skippedNote(droppedEmails)
 	s.render(w, base)
 }
 
@@ -1203,12 +1230,16 @@ func (s *Server) mintLinks(emails []string) ([]store.GuestRecipient, []guestLink
 }
 
 // emailLinks sends each link best-effort (no-op without SMTP) and returns how
-// many were accepted.
+// many were accepted. Failures are logged so a guest who never received their
+// link can be traced; the caller's flash + the shown-once links panel are the
+// user-facing fallback.
 func (s *Server) emailLinks(owner, permitLabel string, links []guestLinkView) int {
 	sent := 0
 	for _, l := range links {
 		if err := s.notify.SendGuestLink(l.Email, owner, permitLabel, l.URL); err == nil {
 			sent++
+		} else {
+			log.Printf("guest link email to %s for %s: %v", l.Email, owner, err)
 		}
 	}
 	return sent
@@ -1293,27 +1324,40 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
+	http.Redirect(w, r, "/vehicles?saved=1", http.StatusSeeOther)
 }
 
 // parseEmails splits a free-text recipient list (comma/space/semicolon/newline
 // separated), lower-cases, validates, and de-duplicates. Invalid tokens are
-// dropped silently so one typo doesn't discard the rest.
-func parseEmails(s string) []string {
+// dropped so one typo doesn't discard the rest, and returned separately so the
+// caller can tell the user who was skipped.
+func parseEmails(s string) (out, dropped []string) {
 	fields := strings.FieldsFunc(s, func(r rune) bool {
 		return r == ',' || r == ' ' || r == ';' || r == '\n' || r == '\r' || r == '\t'
 	})
 	seen := map[string]bool{}
-	var out []string
 	for _, f := range fields {
 		e := strings.ToLower(strings.TrimSpace(f))
-		if e == "" || seen[e] || !looksLikeEmail(e) {
+		if e == "" || seen[e] {
+			continue
+		}
+		if !looksLikeEmail(e) {
+			dropped = append(dropped, e)
 			continue
 		}
 		seen[e] = true
 		out = append(out, e)
 	}
-	return out
+	return out, dropped
+}
+
+// skippedNote turns parseEmails' dropped tokens into a flash suffix, so a
+// typo'd recipient doesn't vanish without a trace.
+func skippedNote(dropped []string) string {
+	if len(dropped) == 0 {
+		return ""
+	}
+	return " Skipped (not a valid email): " + strings.Join(dropped, ", ") + "."
 }
 
 // ================= PRINTED QR: REQUEST + APPROVE =================
@@ -1332,7 +1376,8 @@ func randNonce() string {
 // the same answer from the same resolution the scheduler acts on:
 //
 //	pending    — awaiting the holder's decision
-//	denied     — declined, or expired unanswered (reads the same to a visitor)
+//	denied     — declined by the holder
+//	expired    — aged out unanswered (distinct from an actual "no")
 //	ended      — approved, but the granted window has since lapsed
 //	superseded — approved, but the schedule now resolves to a different plate
 //	             (or to nothing): the pass was overridden, not merely slow
@@ -1347,8 +1392,11 @@ func (s *Server) requestLiveState(ctx context.Context, permit model.Permit, req 
 	switch req.Status {
 	case "pending":
 		return "pending", ""
-	case "denied", "expired":
+	case "denied":
 		return "denied", ""
+	case "expired":
+		// Aged out unanswered — distinct from an actual "no" on every surface.
+		return "expired", ""
 	}
 	// Approved. Ended is checked first: after the window lapses the schedule
 	// naturally resolves elsewhere, which must read as "ended", not "superseded".
@@ -1466,11 +1514,9 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 	var v guestWaitView
 	switch {
 	case err == nil:
+		// Status passes through as-is: "expired" (aged out unanswered) renders its
+		// own message, distinct from an actual "denied".
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
-		if req.Status == "expired" {
-			// Aged out unanswered; to the visitor that is a "not approved".
-			v.Status = "denied"
-		}
 		// "approved" means the resident said yes; requestLiveState only reports it
 		// as ON the permit once the council's own record actually shows the plate
 		// ("applied"), flags a long-unconfirmed apply ("stalled"), and — the states
@@ -1571,7 +1617,7 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The at-rest key changed, so we can't reproduce the printed code. Ask the
 		// holder to replace it (which mints a fresh one they can reprint).
-		s.message(w, http.StatusConflict, "This code can't be shown again on this server. Use Replace to print a new one.")
+		s.message(w, http.StatusConflict, "This code can't be shown again on this server. Remove it on the Guests page, then create a new printed QR for this permit.")
 		return
 	}
 	url := s.guestLink(raw)
@@ -1672,8 +1718,16 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		confirmed = true
 		// The approved plate may have bumped a still-live booking's car off the
 		// permit; warn that driver if they're reachable. The approving member saw
-		// the change happen, so no account annotation is needed here.
-		s.displacedDriver(bg, permit, prev, req.Plate, user)
+		// the change happen, but the OTHER members didn't — fan the confirmation
+		// out like every other plate change (the guest-link path does the same).
+		d := s.displacedDriver(bg, permit, prev, req.Plate, user)
+		outcome := notify.ApplyOutcome{
+			Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: req.Plate, By: user, Source: "doorqr", OK: true,
+			DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
+		}
+		if err := s.notify.EnqueueApply(bg, outcome); err != nil {
+			log.Printf("doorqr apply notify enqueue for %s: %v", permit.Owner, err)
+		}
 	}
 	cancel()
 	s.sched.Kick()

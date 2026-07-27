@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,7 +58,10 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusBadGateway, "Couldn't link your council account. Check that your password is correct and that your council account uses this email address.")
 		return
 	}
-	redirectHome(w, r)
+	// ?linked=1 turns into the "Council account linked." flash — after a first
+	// link the user lands on the permit picker, so this is the only confirmation
+	// the sign-in worked.
+	http.Redirect(w, r, "/schedule?linked=1", http.StatusSeeOther)
 }
 
 // councilUnlink removes the account's stored council session but keeps its
@@ -169,17 +173,25 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	// Courtesy heads-up (best-effort; not a login code) so they know to sign in.
 	// Throttled so a primary can't email-bomb an address (target: 1/day) or
 	// mass-send via SMTP (fanout: a few/hour per owner). The member is still added
-	// regardless; only the email is rate-limited.
-	if s.inviteFanout.allow("o:"+owner) && s.inviteTarget.allow("t:"+email) {
+	// regardless; only the email is rate-limited — and the flash tells the owner
+	// whether a heads-up went out, so a skipped email doesn't leave the new member
+	// waiting for an invitation that never comes.
+	mailed := false
+	if s.notify.EmailAvailable() && s.inviteFanout.allow("o:"+owner) && s.inviteTarget.allow("t:"+email) {
+		mailed = true
 		go func(to, from string) {
 			if e := s.notify.SendInvite(to, from); e != nil {
 				log.Printf("invite email to %s: %v", to, e)
 			}
 		}(email, owner)
 	} else {
-		log.Printf("invite email to %s throttled", email)
+		log.Printf("invite email to %s skipped (throttled or email not configured)", email)
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	q := url.Values{"shared": {email}}
+	if mailed {
+		q.Set("mailed", "1")
+	}
+	http.Redirect(w, r, "/settings?"+q.Encode(), http.StatusSeeOther)
 }
 
 // removeMember (owner only) revokes a secondary's shared access.

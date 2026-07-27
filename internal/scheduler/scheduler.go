@@ -405,6 +405,10 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if s.snapshotPath != "" && time.Since(s.lastSnapshot) > 24*time.Hour {
 		if err := s.store.Snapshot(ctx, s.snapshotPath); err != nil {
 			log.Printf("scheduler: backup snapshot: %v", err)
+			// A silently failing backup is exactly the operator condition systemAlert
+			// exists for (its per-key throttle keeps the retry loop from spamming).
+			s.systemAlert(ctx, "backup-snapshot", "Backup snapshot is failing",
+				fmt.Sprintf("The daily database snapshot to %s failed: %v. File-level backups are stale until this succeeds.", s.snapshotPath, err))
 		} else {
 			s.lastSnapshot = time.Now()
 			log.Printf("scheduler: wrote backup snapshot %s", s.snapshotPath)
@@ -461,6 +465,10 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 				log.Printf("scheduler: retire session %s: %v", cs.Owner, err)
 			} else {
 				log.Printf("scheduler: session for %s reached the re-link limit; unlinked (re-link required)", cs.Owner)
+				// The renewal reminder (maybeRemind) is email-only and best-effort, so
+				// it must not be the sole signal: tell the user their permit just
+				// stopped being managed, exactly as the expired-cookie path does.
+				s.alertRelink(cs.Owner)
 			}
 			continue
 		}
@@ -1069,10 +1077,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
 		// A council write endpoint returned "not captured": the API shape may have
-		// changed. This is systemic (hits every user), so alert the operator.
+		// changed. This is systemic (hits every user), so alert the operator — and
+		// ALSO treat it as a normal failed apply for this user: an activity row
+		// from the first tick, exponential backoff instead of a retry every
+		// minute, and the standard "still updating" notice if it persists.
 		s.systemAlert(ctx, "not-captured",
 			"Council write endpoint not working (API shape change?)",
 			fmt.Sprintf("SetVehicle for permit %s returned ErrNotCaptured. If the council changed its API this affects ALL users; investigate promptly.", p.CouncilPermitID))
+		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
 		return true
 	case errors.Is(err, parking.ErrSessionExpired):
 		// The cookie died between keep-warm passes. Try a saved-password

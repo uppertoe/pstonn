@@ -122,6 +122,13 @@
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-x"}}</div>
   <p class="gresult">Not approved. Ask the resident, or try again.</p>
 </div>
+{{else if eq .Status "expired"}}
+{{/* aged out unanswered — distinct from an actual "no", so the visitor knows
+     knocking or re-scanning is reasonable rather than unwelcome. Terminal. */}}
+<div id="reqstatus">
+  <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
+  <p class="gresult">The resident didn't respond in time, so this request lapsed. Try knocking, or scan the code again to re-send it.</p>
+</div>
 {{else if eq .Status "stalled"}}
 {{/* approved, but the council hasn't confirmed after a while — stop spinning */}}
 <div id="reqstatus">

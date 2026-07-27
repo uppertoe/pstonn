@@ -32,6 +32,13 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
 	}
+	if shared := r.URL.Query().Get("shared"); shared != "" {
+		if r.URL.Query().Get("mailed") == "1" {
+			base.Flash = "Access granted. We've emailed " + shared + " to let them know they can sign in with that address."
+		} else {
+			base.Flash = "Access granted to " + shared + ". No email went out this time — let them know they can sign in with that address."
+		}
+	}
 	// Notification preferences are per-person: each user (primary or secondary)
 	// controls how THEY are notified, keyed to their own signed-in email.
 	pref, err := s.store.GetNotifyPref(ctx, user)

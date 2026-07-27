@@ -253,7 +253,7 @@ type ApplyOutcome struct {
 	Reg         string // the vehicle we tried to set
 	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
 	By          string // who made the change, when it was a guest activation ("" otherwise)
-	Source      string // "roster" / "override" / "guest" (success context)
+	Source      string // "roster" / "override" / "guest" / "doorqr" (success context)
 	OK          bool
 	CurrentReg  string // what is still on the permit on failure ("" if unknown)
 	Reason      string // one plain sentence: why it failed
@@ -297,6 +297,9 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, o.Reg)
 		const confirm = "\n\nNothing to do — this is just your confirmation it went through."
 		switch {
+		case o.Source == "doorqr":
+			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s approved a visitor's request from the printed door QR, so it overrides your schedule until that booking ends — then your roster takes over again.",
+				o.PermitLabel, car, o.By)
 		case o.By != "":
 			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.",
 				o.PermitLabel, car, o.By)

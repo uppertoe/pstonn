@@ -13,20 +13,13 @@ import (
 )
 
 // pickerPage renders the permit picker on its own route (for "manage another
-// permit" from the dashboard).
+// permit" from the dashboard). It goes through appShell so it gets the same
+// gating (terms, council link) and chrome (sign-out, contact) as every other
+// signed-in page; appShell already renders the picker itself for a user with
+// no managed permits, so this handler only adds the "manage another" case.
 func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
-	u, ok := s.user(w, r)
+	base, ok := s.appShell(w, r, "")
 	if !ok {
-		return
-	}
-	_, owner, isPrimary := s.resolveAccount(r.Context())
-	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, Loc: s.cfg.DisplayLocation}
-	if !isPrimary {
-		base.SharedWith = owner
-	}
-	if !s.council.Linked(r.Context(), owner) {
-		base.State = "onboarding"
-		s.render(w, base)
 		return
 	}
 	s.renderPicker(w, r, base)

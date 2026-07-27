@@ -13,7 +13,7 @@ type ApplyRecord struct {
 	PermitID     int64
 	Registration string
 	Source       string
-	Status       string // "success" | "error" | "noop"
+	Status       string // "success" | "error" | "changed" (external drift observed)
 	Detail       string
 	At           time.Time
 }

@@ -53,16 +53,30 @@
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
   });
-  // Surface server-side validation errors. The server returns 422 with a plain
-  // message for these; htmx does NOT swap non-2xx bodies, so without this the
-  // form would appear to do nothing. Show the message as a toast and don't swap.
+  // Surface server-side errors. htmx does NOT swap non-2xx bodies, so without
+  // this every failed submit would appear to do nothing. Validation problems
+  // arrive as 422 with a bare plain-text message; everything else (403/409/429/
+  // 5xx…) arrives as the server's minimal message page, whose first <p> is the
+  // user-facing sentence — pull it out rather than toasting raw HTML. An
+  // unrecognised body (e.g. a proxy error page) falls back to a generic line.
   addEventListener('htmx:beforeSwap', function (e) {
     var x = e.detail && e.detail.xhr;
-    if (x && x.status === 422) {
-      e.detail.shouldSwap = false;
+    if (!x || x.status < 400) return;
+    e.detail.shouldSwap = false;
+    if (x.status === 422) {
       e.detail.isError = false;
       showToast((x.responseText || 'Something needs your attention.').trim());
+      return;
     }
+    var msg = 'Something went wrong. Please try again.';
+    var body = x.responseText || '';
+    if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
+      try {
+        var p = new DOMParser().parseFromString(body, 'text/html').querySelector('p');
+        if (p && p.textContent.trim()) msg = p.textContent.trim();
+      } catch (err) {}
+    }
+    showToast(msg);
   });
   var toastTimer;
   function showToast(msg) {

@@ -29,12 +29,15 @@ func TestHashGuestTokenStable(t *testing.T) {
 }
 
 func TestParseEmails(t *testing.T) {
-	got := parseEmails("Dad@Example.com, mum@example.com\n dad@example.com ; bogus ,,")
+	got, dropped := parseEmails("Dad@Example.com, mum@example.com\n dad@example.com ; bogus ,,")
 	want := []string{"dad@example.com", "mum@example.com"} // lower-cased, de-duped, invalid dropped
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("parseEmails = %v, want %v", got, want)
 	}
-	if len(parseEmails("")) != 0 {
+	if strings.Join(dropped, ",") != "bogus" {
+		t.Fatalf("parseEmails dropped = %v, want [bogus]", dropped)
+	}
+	if out, _ := parseEmails(""); len(out) != 0 {
 		t.Fatal("empty input should yield no emails")
 	}
 }
@@ -183,7 +186,7 @@ func TestRequestLiveState(t *testing.T) {
 
 	// Undecided and refused states are terminal regardless of the schedule.
 	for _, tc := range []struct{ status, want string }{
-		{"pending", "pending"}, {"denied", "denied"}, {"expired", "denied"},
+		{"pending", "pending"}, {"denied", "denied"}, {"expired", "expired"},
 	} {
 		r := base
 		r.Status = tc.status
