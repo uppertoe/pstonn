@@ -48,6 +48,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, err)
 			return
 		}
+		pv.IsPrimary = base.IsPrimary
 		pvs = append(pvs, pv)
 	}
 	base.Vehicles = vviews
@@ -403,6 +404,7 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 	// Fragments are one-shot: never embed another follow-up fetch, so a council
 	// outage can't turn the page into a persistent polling loop.
 	pv.PlateRefreshing = false
+	_, _, pv.IsPrimary = s.resolveAccount(ctx)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "permit-body", pv); err != nil {
 		log.Printf("render permit-body: %v", err)

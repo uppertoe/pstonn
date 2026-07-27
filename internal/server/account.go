@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -229,11 +230,19 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
-	if err := s.store.RemoveMember(r.Context(), owner, email); err != nil {
+	// Removal also revokes any guest pass or door QR that member minted — those
+	// are bearer links that would otherwise keep working after they lose access.
+	// Report the count: the primary needs to know their household's links changed.
+	revoked, err := s.store.RemoveMember(r.Context(), owner, email)
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	q := url.Values{"removed": {email}}
+	if revoked > 0 {
+		q.Set("revoked", strconv.FormatInt(revoked, 10))
+	}
+	http.Redirect(w, r, "/settings?"+q.Encode(), http.StatusSeeOther)
 }
 
 // leaveAccount lets a secondary give up their shared access, returning them to
@@ -244,7 +253,7 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "You own this account, so there is nothing to leave.")
 		return
 	}
-	if err := s.store.RemoveMembership(r.Context(), user); err != nil {
+	if _, err := s.store.RemoveMembership(r.Context(), user); err != nil {
 		s.serverError(w, err)
 		return
 	}

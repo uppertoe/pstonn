@@ -136,6 +136,24 @@ func TestAuthorizationMatrix(t *testing.T) {
 		}
 	})
 
+	// Retiring a permit is owner-only: it is irreversible (roster, bookings and
+	// history go with it) and a council permit can only be claimed by one account,
+	// so a secondary who deleted it could immediately re-add it under their own
+	// account and leave the primary with no self-service recovery.
+	t.Run("secondary cannot stop managing a permit", func(t *testing.T) {
+		permitID, err := s.store.UpsertPermit(ctx, owner, "VPP-LOCKOUT", "1", "Shared permit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid := strconv.FormatInt(permitID, 10)
+		if w := s.doReq("POST", "/permits/"+pid+"/delete", secondary, goodOrigin, url.Values{}); w.Code != http.StatusForbidden {
+			t.Fatalf("secondary POST /permits/{id}/delete = %d, want 403", w.Code)
+		}
+		if _, err := s.store.GetPermit(ctx, permitID); err != nil {
+			t.Fatalf("a secondary deleted the account's permit: %v", err)
+		}
+	})
+
 	t.Run("cross-owner IDOR cannot delete another account's vehicle", func(t *testing.T) {
 		w := s.doReq("POST", "/vehicles/"+strconv.FormatInt(vehID, 10)+"/delete", other, goodOrigin, url.Values{})
 		if w.Code == http.StatusInternalServerError {
@@ -179,7 +197,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		grantID, err := s.store.CreateGuestGrant(ctx, owner, permitID, "Nanny", false,
+		grantID, err := s.store.CreateGuestGrant(ctx, owner, "", permitID, "Nanny", false,
 			[]int64{vehID}, []store.GuestRecipient{{Email: "guest@example.com", TokenHash: hashGuestToken("idor-token-aaaabbbbccccdddd")}})
 		if err != nil {
 			t.Fatal(err)
@@ -301,7 +319,7 @@ func TestGuestTokenAuthz(t *testing.T) {
 		t.Fatal(err)
 	}
 	doorRaw := "door-token-aaaabbbbccccddddeeeeffff"
-	if _, err := s.store.CreatePrintedGrant(ctx, owner, permitID, hashGuestToken(doorRaw), ""); err != nil {
+	if _, err := s.store.CreatePrintedGrant(ctx, owner, "", permitID, hashGuestToken(doorRaw), ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -378,7 +396,7 @@ func TestGuestPageBoostReturnsFullPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := "boost-test-guest-token-000111222333"
-	if _, err := s.store.CreateQRGrant(ctx, owner, pid, hashGuestToken(raw), time.Hour); err != nil {
+	if _, err := s.store.CreateQRGrant(ctx, owner, "", pid, hashGuestToken(raw), time.Hour); err != nil {
 		t.Fatal(err)
 	}
 

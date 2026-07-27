@@ -255,11 +255,11 @@ func TestGuestReqFromCookie(t *testing.T) {
 	const owner = "u@example.com"
 	pidA, _ := s.store.UpsertPermit(ctx, owner, "P1", "14", "A")
 	pidB, _ := s.store.UpsertPermit(ctx, owner, "P2", "14", "B")
-	grantA, err := s.store.CreatePrintedGrant(ctx, owner, pidA, "hashA", "sealedA")
+	grantA, err := s.store.CreatePrintedGrant(ctx, owner, "", pidA, "hashA", "sealedA")
 	if err != nil {
 		t.Fatal(err)
 	}
-	grantB, err := s.store.CreatePrintedGrant(ctx, owner, pidB, "hashB", "sealedB")
+	grantB, err := s.store.CreatePrintedGrant(ctx, owner, "", pidB, "hashB", "sealedB")
 	if err != nil {
 		t.Fatal(err)
 	}

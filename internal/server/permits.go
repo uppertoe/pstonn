@@ -196,10 +196,23 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 
 // deletePermit stops p.stonn administering a permit: it drops the permit and its
 // schedule (weekly rules + one-offs) and history. The council permit is left
-// exactly as it is; we simply stop changing its plate. Any account member may do
-// this, like adding one — it's part of managing the schedule.
+// exactly as it is; we simply stop changing its plate.
+//
+// OWNER ONLY, unlike the rest of schedule management. This is the one action a
+// secondary could use to lock the primary out: the delete is irreversible (roster,
+// bookings and 90 days of history go with it) and a council permit can only be
+// claimed by one p.stonn account, so a secondary holding their own council login
+// for the same address could delete it here and immediately re-add it under their
+// own account — leaving the primary with no self-service recovery. Everything a
+// household member legitimately needs (roster, one-offs, guest passes, vehicles)
+// stays open to them; retiring a permit is account-structural, like unlinking.
 func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	_, owner, isPrimary := s.resolveAccount(r.Context())
+	if !isPrimary {
+		s.message(w, http.StatusForbidden,
+			"Only the account owner can stop managing a permit. Ask them if this permit should be removed.")
+		return
+	}
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return

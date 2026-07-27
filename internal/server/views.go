@@ -141,6 +141,10 @@ type permitView struct {
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool        // no weekly rules yet — a fresh permit
 	CopyFrom    []permitOpt // this owner's OTHER permits, to copy a schedule from
+	// IsPrimary gates the owner-only "stop managing this permit" action. Carried on
+	// the permit view (not just the page) because the card renders as a standalone
+	// htmx fragment, where the dashboard's own IsPrimary is out of scope.
+	IsPrimary bool
 	// PlateRefreshing: "on permit now" was served from a stale (or absent) cache
 	// while a background council refresh runs; the card renders a subtle spinner
 	// and a one-shot htmx follow-up that swaps in the refreshed value. Full page

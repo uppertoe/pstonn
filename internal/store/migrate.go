@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS guest_grant (
     on_screen       INTEGER NOT NULL DEFAULT 0,  -- ephemeral QR grant (hidden from the pass list)
     request_only    INTEGER NOT NULL DEFAULT 0,  -- printed QR: scanning only REQUESTS; holder must approve
     enabled         INTEGER NOT NULL DEFAULT 1,
-    created_at      TEXT NOT NULL
+    created_at      TEXT NOT NULL,
+    created_by      TEXT NOT NULL DEFAULT ''    -- member who minted it ('' = the account owner / pre-dates the column)
 );
 CREATE INDEX IF NOT EXISTS idx_guest_grant_owner ON guest_grant(owner);
 
@@ -261,6 +262,11 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 		`ALTER TABLE council_session ADD COLUMN reconnected_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_request ADD COLUMN decided_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_request ADD COLUMN until_ts TEXT NOT NULL DEFAULT ''`,
+		// Which member minted a guest pass. Needed to revoke a departing member's
+		// passes without touching the primary's: a pass is a bearer capability over
+		// the permit, so losing account access must also lose the passes you made.
+		// Rows predating this column have '' and are treated as the account's own.
+		`ALTER TABLE guest_grant ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

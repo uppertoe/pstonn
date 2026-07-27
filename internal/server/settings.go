@@ -32,6 +32,18 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
 	}
+	if removed := r.URL.Query().Get("removed"); removed != "" {
+		base.Flash = removed + " no longer has access."
+		if n := atoi(r.URL.Query().Get("revoked")); n > 0 {
+			// Say it plainly: guest links they had created have stopped working, so
+			// the owner isn't surprised when a visitor's link is suddenly dead.
+			pass := "guest pass"
+			if n > 1 {
+				pass = "guest passes"
+			}
+			base.Flash += fmt.Sprintf(" We also stopped %d %s they had created — anyone holding those links can no longer use your permit.", n, pass)
+		}
+	}
 	if shared := r.URL.Query().Get("shared"); shared != "" {
 		if r.URL.Query().Get("mailed") == "1" {
 			base.Flash = "Access granted. We've emailed " + shared + " to let them know they can sign in with that address."

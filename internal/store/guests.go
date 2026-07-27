@@ -87,7 +87,7 @@ type GuestGrantDetail struct {
 // CreateGuestGrant creates a grant, its allowed-vehicle set, and one token per
 // recipient, all in a transaction. Every vehicle must belong to owner (IDOR
 // guard). Returns the new grant id.
-func (s *Store) CreateGuestGrant(ctx context.Context, owner string, permitID int64, label string, allowOvernight bool, vehicleIDs []int64, recipients []GuestRecipient) (int64, error) {
+func (s *Store) CreateGuestGrant(ctx context.Context, owner, createdBy string, permitID int64, label string, allowOvernight bool, vehicleIDs []int64, recipients []GuestRecipient) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -104,8 +104,8 @@ func (s *Store) CreateGuestGrant(ctx context.Context, owner string, permitID int
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-		owner, permitID, label, boolInt(allowOvernight), nowUTC())
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, enabled, created_at, created_by) VALUES (?, ?, ?, ?, 1, ?, ?)`,
+		owner, permitID, label, boolInt(allowOvernight), nowUTC(), createdBy)
 	if err != nil {
 		return 0, err
 	}
@@ -256,7 +256,7 @@ func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64
 // and its single token expires after ttl. It is hidden from the pass list. Expired
 // on-screen grants for the owner are pruned first so they do not accumulate.
 // Returns the token hash to store (caller keeps the raw token for the QR URL).
-func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64, tokenHash string, ttl time.Duration) (int64, error) {
+func (s *Store) CreateQRGrant(ctx context.Context, owner, createdBy string, permitID int64, tokenHash string, ttl time.Duration) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -278,9 +278,9 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner string, permitID int64,
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, enabled, created_at)
-		 VALUES (?, ?, 'Visitor QR', 0, 1, 1, 1, ?)`,
-		owner, permitID, nowUTC())
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, enabled, created_at, created_by)
+		 VALUES (?, ?, 'Visitor QR', 0, 1, 1, 1, ?, ?)`,
+		owner, permitID, nowUTC(), createdBy)
 	if err != nil {
 		return 0, err
 	}
@@ -312,7 +312,7 @@ type PrintedGrant struct {
 // any existing printed grant for that permit and inserts a fresh one. tokenSealed is
 // the raw token encrypted at rest so the same code can be reprinted later; tokenHash
 // is the lookup key used when a visitor scans.
-func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID int64, tokenHash, tokenSealed string) (int64, error) {
+func (s *Store) CreatePrintedGrant(ctx context.Context, owner, createdBy string, permitID int64, tokenHash, tokenSealed string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -330,8 +330,8 @@ func (s *Store) CreatePrintedGrant(ctx context.Context, owner string, permitID i
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, request_only, enabled, created_at)
-		 VALUES (?, ?, 'Printed QR', 0, 1, 0, 1, 1, ?)`, owner, permitID, nowUTC())
+		`INSERT INTO guest_grant (owner, permit_id, label, allow_overnight, allow_plate, on_screen, request_only, enabled, created_at, created_by)
+		 VALUES (?, ?, 'Printed QR', 0, 1, 0, 1, 1, ?, ?)`, owner, permitID, nowUTC(), createdBy)
 	if err != nil {
 		return 0, err
 	}

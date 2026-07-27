@@ -306,23 +306,83 @@ WHERE (SELECT COUNT(1) FROM account_member WHERE owner = ?) < ?`,
 
 // RemoveMember revokes a secondary's access, scoped to the owner so one account
 // cannot remove another's member.
-func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) error {
-	if _, err := s.db.ExecContext(ctx,
+func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) (revokedPasses int64, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner); err != nil {
-		return err
+		return 0, err
 	}
 	// Their personal notification prefs go with their access.
-	_, err := s.db.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail)
-	return err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail); err != nil {
+		return 0, err
+	}
+	n, err := revokeGrantsBy(ctx, tx, owner, memberEmail)
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
 }
 
 // RemoveMembership lets a secondary leave whatever account they belong to.
-func (s *Store) RemoveMembership(ctx context.Context, memberEmail string) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM account_member WHERE member_email = ?`, memberEmail); err != nil {
-		return err
+func (s *Store) RemoveMembership(ctx context.Context, memberEmail string) (revokedPasses int64, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail)
-	return err
+	defer tx.Rollback()
+	// Resolve the account first: the grants to revoke are scoped to it, and the
+	// membership row is about to go.
+	var owner string
+	err = tx.QueryRowContext(ctx,
+		`SELECT owner FROM account_member WHERE member_email = ?`, memberEmail).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil // not a member of anything; nothing to do
+	}
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE member_email = ?`, memberEmail); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail); err != nil {
+		return 0, err
+	}
+	n, err := revokeGrantsBy(ctx, tx, owner, memberEmail)
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
+}
+
+// revokeGrantsBy deletes the guest passes and door QRs a departing member minted,
+// in the same transaction as their removal.
+//
+// This is the whole point of guest_grant.created_by. A pass is a BEARER
+// capability: whoever holds the link can put a car on the permit, and a printed
+// door QR is a permanent anonymous channel into the account's notifications.
+// Without this cascade, "remove their access" removed only their ability to sign
+// in — anyone who had copied a raw link (or kept a printed poster) retained
+// working access indefinitely, and the account holder had no way to know which
+// row to delete. Deleting the grant cascades its tokens, vehicle joins and
+// pending requests via foreign keys.
+//
+// Scoped to the departing member: the primary's own passes, and legacy rows with
+// an empty created_by, are deliberately left alone — removing a housemate must
+// not silently break the family's own links.
+func revokeGrantsBy(ctx context.Context, tx *sql.Tx, owner, memberEmail string) (int64, error) {
+	if memberEmail == "" {
+		return 0, nil
+	}
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM guest_grant WHERE owner = ? AND created_by = ?`, owner, memberEmail)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // IsPrimary reports whether owner is a primary of any shared account (has at

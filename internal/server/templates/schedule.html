@@ -26,10 +26,12 @@
       {{range .ExpiredPermits}}
       <li class="exprow">
         <div class="expmain"><span class="expname">{{.Label}}</span><span class="expstatus">{{.StatusText}}{{if .Detail}} · {{.Detail}}{{end}}</span></div>
+        {{if $.IsPrimary}}
         <form method="post" action="/permits/{{.ID}}/delete"
               data-confirm="Remove this expired permit and its saved schedule? Copy it onto your new permit first if you still need it." data-confirm-ok="Remove">
           <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
         </form>
+        {{end}}
       </li>
       {{end}}
     </ul>
@@ -163,7 +165,10 @@
   {{range .Overrides}}
   <div class="oneoff-item">
     <span class="veh">{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span></span>
-    <span class="when">{{localTime .StartsAt $.Loc}} → {{if .EndsAt}}{{localTime .EndsAt $.Loc}}{{else}}open-ended{{end}}</span>
+    {{/* Name whoever booked it. The account is shared, so "who decided this?" is
+         a real question — and an open-ended booking beats the roster indefinitely,
+         which is worth being able to attribute. */}}
+    <span class="when">{{localTime .StartsAt $.Loc}} → {{if .EndsAt}}{{localTime .EndsAt $.Loc}}{{else}}open-ended{{end}}{{if .CreatedBy}} · by {{.CreatedBy}}{{end}}</span>
     <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#permit-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
       <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking">{{template "ic-x"}}</button>
     </form>
@@ -174,12 +179,17 @@
 <p class="empty-note">No one-off bookings scheduled.</p>
 {{end}}
 
+{{/* Owner-only: retiring a permit is irreversible (schedule + history) and a
+     council permit can only be claimed by one account, so a secondary must not be
+     able to do it. Hidden rather than 403-on-click. */}}
+{{if .IsPrimary}}
 <div class="permit-foot">
   <form method="post" action="/permits/{{.Permit.ID}}/delete"
         hx-confirm="Stop managing this permit? Its weekly schedule and one-off bookings will be deleted. The council permit itself is not changed." data-confirm-ok="Stop managing">
     <button type="submit">{{template "ic-x"}} Stop managing this permit</button>
   </form>
 </div>
+{{end}}
 
 {{/* Add-one-off modal, teleported to <body> so it escapes the card's transform
      (an animated/transformed ancestor becomes the containing block for position:fixed). */}}

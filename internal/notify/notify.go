@@ -355,9 +355,15 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 		case o.Source == "doorqr":
 			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s approved a visitor's request from the printed door QR, so it overrides your schedule until that booking ends — then your roster takes over again.",
 				o.PermitLabel, car, o.By)
-		case o.By != "":
+		case o.Source == "guest":
 			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.",
 				o.PermitLabel, car, o.By)
+		case o.Source == "override" && o.By != "":
+			// Name whoever made the booking. On a shared account this is the only
+			// signal distinguishing "the schedule ran" from "someone booked over it",
+			// and the plate alone doesn't say who decided it.
+			body = fmt.Sprintf("Your %s is now set to %s, for a one-off booking made by %s.%s",
+				o.PermitLabel, car, o.By, confirm)
 		case o.Source == "roster":
 			body = fmt.Sprintf("Your %s is now set to %s for today, as scheduled by your weekly roster.%s", o.PermitLabel, car, confirm)
 		case o.Source == "override":

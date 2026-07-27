@@ -1057,8 +1057,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// change (someone edited the plate directly in the council portal, which
 		// checkDrift logs) as a duplicate of the original apply and stay silent — so
 		// the account never hears that their deliberate manual change was reverted.
+		// By names whoever created the winning one-off, so a household can tell
+		// "my roster ran" from "someone booked over it" — the account is shared, and
+		// an unattributed change is indistinguishable from the schedule working.
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), OK: true,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), By: res.By, OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
 		}, "success|"+prev+">"+want)
 		if d.Contact != "" && s.notifier != nil && s.notifier.Enabled() {

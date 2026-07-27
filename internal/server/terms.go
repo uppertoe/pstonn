@@ -114,7 +114,7 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if !isPrimary {
-		if err := s.store.RemoveMembership(ctx, user); err != nil {
+		if _, err := s.store.RemoveMembership(ctx, user); err != nil {
 			s.serverError(w, err)
 			return
 		}

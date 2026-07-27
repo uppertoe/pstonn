@@ -1046,7 +1046,7 @@ func agoText(now, t time.Time) string {
 // createGuestGrant creates a grant + a per-recipient token, emails each link, and
 // re-renders the page showing the links once (the only time we hold the raw token).
 func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	if err := r.ParseForm(); err != nil {
 		s.formError(w, r, "Could not read the form. Please try again.")
 		return
@@ -1075,7 +1075,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recs, links := s.mintLinks(recipients)
-	if _, err := s.store.CreateGuestGrant(r.Context(), owner, permitID, label, allowOvernight, vehicleIDs, recs); err != nil {
+	if _, err := s.store.CreateGuestGrant(r.Context(), owner, user, permitID, label, allowOvernight, vehicleIDs, recs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That permit or car isn't one you manage.")
 			return
@@ -1308,10 +1308,10 @@ func (s *Server) emailLinks(ctx context.Context, owner, permitLabel string, link
 // goes on the permit until the end of the day. The grant self-expires (qrTTL).
 func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 	noStore(w) // the page embeds a live activation token; keep it out of caches
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	permitID := atoi64(r.FormValue("permit_id"))
 	raw, hash := newGuestToken()
-	if _, err := s.store.CreateQRGrant(r.Context(), owner, permitID, hash, qrTTL); err != nil {
+	if _, err := s.store.CreateQRGrant(r.Context(), owner, user, permitID, hash, qrTTL); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
 			return
@@ -1626,26 +1626,26 @@ func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, pl
 // approves live. It replaces any existing printed QR for the permit.
 // mintPrintedGrant creates (or replaces) a permit's door QR, sealing the raw token
 // at rest so the same code can be reprinted later. Returns the new grant id.
-func (s *Server) mintPrintedGrant(ctx context.Context, owner string, permitID int64) (int64, error) {
+func (s *Server) mintPrintedGrant(ctx context.Context, owner, createdBy string, permitID int64) (int64, error) {
 	raw, hash := newGuestToken()
 	sealed, err := s.box.Seal(raw)
 	if err != nil {
 		return 0, err
 	}
-	return s.store.CreatePrintedGrant(ctx, owner, permitID, hash, sealed)
+	return s.store.CreatePrintedGrant(ctx, owner, createdBy, permitID, hash, sealed)
 }
 
 // showPrintedQR handles "Print a door QR" for a permit. It is idempotent: if the
 // permit already has a door QR it reopens that (same code) rather than rotating the
 // token, so a copy already on the fridge keeps working.
 func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	permitID := atoi64(r.FormValue("permit_id"))
 	if g, err := s.store.PrintedGrantForPermit(r.Context(), owner, permitID); err == nil {
 		http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", g.GrantID), http.StatusSeeOther)
 		return
 	}
-	grantID, err := s.mintPrintedGrant(r.Context(), owner, permitID)
+	grantID, err := s.mintPrintedGrant(r.Context(), owner, user, permitID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That permit isn't one you manage.")

@@ -90,6 +90,28 @@ func TestComposeApplyCopy(t *testing.T) {
 		t.Fatalf("guest copy missing activator/guest-link: %q", gb)
 	}
 
+	// A one-off booked by a household member names who booked it: on a shared
+	// account that is the only thing distinguishing "the schedule ran" from
+	// "someone booked over it". It must NOT be described as a guest link.
+	_, ob, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "override", By: "partner@example.com", OK: true})
+	if !strings.Contains(ob, "partner@example.com") || !strings.Contains(ob, "one-off booking") {
+		t.Fatalf("override copy should name the booker: %q", ob)
+	}
+	if strings.Contains(ob, "guest link") {
+		t.Fatalf("a member's one-off must not be described as a guest link: %q", ob)
+	}
+	// An unattributed one-off keeps the original second-person wording.
+	_, ub, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "override", OK: true})
+	if !strings.Contains(ub, "the one-off booking you made") {
+		t.Fatalf("unattributed one-off copy changed: %q", ub)
+	}
+
+	// A printed-QR approval is attributed to the approving member, not to a link.
+	_, db, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "doorqr", By: "mum@example.com", OK: true})
+	if !strings.Contains(db, "mum@example.com") || !strings.Contains(db, "printed door QR") {
+		t.Fatalf("door-QR copy missing approver/context: %q", db)
+	}
+
 	// Failure links the council portal and flags high priority for a hard refusal.
 	_, fb, pri, tag := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Name: "Van", OK: false, CurrentReg: "Y", Reason: "The council refused.", Action: "Try again."})
 	if !strings.Contains(fb, "Van — X") || !strings.Contains(fb, councilPortalURL) {

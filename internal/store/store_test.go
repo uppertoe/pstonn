@@ -230,13 +230,13 @@ func TestAccountMembers(t *testing.T) {
 	}
 
 	// Owner removes one; the removal is owner-scoped.
-	if err := s.RemoveMember(ctx, "someone-else@example.com", gran); err != nil {
+	if _, err := s.RemoveMember(ctx, "someone-else@example.com", gran); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := s.CountMembers(ctx, primary); n != 2 {
 		t.Fatalf("wrong owner must not remove a member; count = %d, want 2", n)
 	}
-	if err := s.RemoveMember(ctx, primary, gran); err != nil {
+	if _, err := s.RemoveMember(ctx, primary, gran); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := s.CountMembers(ctx, primary); n != 1 {
@@ -244,7 +244,7 @@ func TestAccountMembers(t *testing.T) {
 	}
 
 	// Secondary leaves of their own accord.
-	if err := s.RemoveMembership(ctx, nanny); err != nil {
+	if _, err := s.RemoveMembership(ctx, nanny); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := s.MemberAccount(ctx, nanny); ok {
@@ -834,7 +834,7 @@ func TestGuestBaselineAndOverrideSweep(t *testing.T) {
 	const owner = "alice@example.com"
 	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum")
 	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
-	if _, err := s.CreateGuestGrant(ctx, owner, p, "pass", false, []int64{v},
+	if _, err := s.CreateGuestGrant(ctx, owner, "", p, "pass", false, []int64{v},
 		[]GuestRecipient{{Email: "kid@example.com", TokenHash: "hashK"}}); err != nil {
 		t.Fatalf("create grant: %v", err)
 	}
@@ -899,16 +899,16 @@ func TestGuestPasses(t *testing.T) {
 	bPermit, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
 
 	// A foreign permit is rejected.
-	if _, err := s.CreateGuestGrant(ctx, alice, bPermit, "x", false, []int64{aV1}, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreateGuestGrant(ctx, alice, "", bPermit, "x", false, []int64{aV1}, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
 	}
 	// A foreign car is rejected.
-	if _, err := s.CreateGuestGrant(ctx, alice, aPermit, "x", false, []int64{bV}, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreateGuestGrant(ctx, alice, "", aPermit, "x", false, []int64{bV}, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign vehicle = %v, want ErrNotFound", err)
 	}
 
 	recips := []GuestRecipient{{Email: "dad@example.com", TokenHash: "hashD"}, {Email: "mum@example.com", TokenHash: "hashM"}}
-	grantID, err := s.CreateGuestGrant(ctx, alice, aPermit, "Friday", true, []int64{aV1, aV2}, recips)
+	grantID, err := s.CreateGuestGrant(ctx, alice, "", aPermit, "Friday", true, []int64{aV1, aV2}, recips)
 	if err != nil {
 		t.Fatalf("create grant: %v", err)
 	}
@@ -992,7 +992,7 @@ func TestResetGuestToken(t *testing.T) {
 	const alice, bob = "alice@example.com", "bob@example.com"
 	aV, _ := s.CreateVehicle(ctx, alice, "AAA111", "Dad")
 	aPermit, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
-	grantID, err := s.CreateGuestGrant(ctx, alice, aPermit, "Friday", false, []int64{aV},
+	grantID, err := s.CreateGuestGrant(ctx, alice, "", aPermit, "Friday", false, []int64{aV},
 		[]GuestRecipient{{Email: "dad@example.com", TokenHash: "hashD"}})
 	if err != nil {
 		t.Fatal(err)
@@ -1036,7 +1036,7 @@ func TestGuestGrantEdit(t *testing.T) {
 	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob")
 	p, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
 
-	gid, err := s.CreateGuestGrant(ctx, alice, p, "Friday", false, []int64{v1}, []GuestRecipient{{Email: "mum@example.com", TokenHash: "h1"}})
+	gid, err := s.CreateGuestGrant(ctx, alice, "", p, "Friday", false, []int64{v1}, []GuestRecipient{{Email: "mum@example.com", TokenHash: "h1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1127,12 +1127,12 @@ func TestQRGrant(t *testing.T) {
 	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
 
 	// A foreign permit is rejected.
-	if _, err := s.CreateQRGrant(ctx, owner, bp, "x", time.Hour); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreateQRGrant(ctx, owner, "", bp, "x", time.Hour); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
 	}
 
 	// A valid QR grant resolves with plate entry allowed and no cars.
-	if _, err := s.CreateQRGrant(ctx, owner, p, "qrhash", time.Hour); err != nil {
+	if _, err := s.CreateQRGrant(ctx, owner, "", p, "qrhash", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	gc, err := s.GuestContextByTokenHash(ctx, "qrhash")
@@ -1149,7 +1149,7 @@ func TestQRGrant(t *testing.T) {
 	}
 
 	// An expired token is treated as not-found.
-	if _, err := s.CreateQRGrant(ctx, owner, p, "expiredhash", -time.Hour); err != nil {
+	if _, err := s.CreateQRGrant(ctx, owner, "", p, "expiredhash", -time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.GuestContextByTokenHash(ctx, "expiredhash"); !errors.Is(err, ErrNotFound) {
@@ -1165,13 +1165,13 @@ func TestPrintedRequestFlow(t *testing.T) {
 	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
 
 	// A foreign permit can't back a printed grant.
-	if _, err := s.CreatePrintedGrant(ctx, owner, bp, "x", "xsealed"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreatePrintedGrant(ctx, owner, "", bp, "x", "xsealed"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
 	}
 
 	// The printed grant is request-only, allows free plate entry, and stays hidden
 	// from the management list (like the on-screen QR).
-	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "printhash", "sealed1")
+	grantID, err := s.CreatePrintedGrant(ctx, owner, "", p, "printhash", "sealed1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1188,7 +1188,7 @@ func TestPrintedRequestFlow(t *testing.T) {
 
 	// Showing a printed QR again replaces the prior grant for that permit (and, by
 	// cascade, any requests against it), so the old token stops resolving.
-	grantID, err = s.CreatePrintedGrant(ctx, owner, p, "printhash2", "sealed2")
+	grantID, err = s.CreatePrintedGrant(ctx, owner, "", p, "printhash2", "sealed2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1266,7 +1266,7 @@ func TestPrintedGrantPersistence(t *testing.T) {
 	}
 
 	// Mint one; it's findable by permit and by id, carries the sealed token + label.
-	grantID, err := s.CreatePrintedGrant(ctx, owner, p, "hashA", "sealedA")
+	grantID, err := s.CreatePrintedGrant(ctx, owner, "", p, "hashA", "sealedA")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1288,7 +1288,7 @@ func TestPrintedGrantPersistence(t *testing.T) {
 	}
 
 	// Replace rotates the sealed token but keeps one grant per permit.
-	newID, err := s.CreatePrintedGrant(ctx, owner, p, "hashB", "sealedB")
+	newID, err := s.CreatePrintedGrant(ctx, owner, "", p, "hashB", "sealedB")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1335,7 +1335,7 @@ func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
 	}
 	// Give alice something to cascade so deletion touches more than consent.
 	p, _ := s.UpsertPermit(ctx, alice, "P-alice", "14", "Alice permit")
-	if _, err := s.CreatePrintedGrant(ctx, alice, p, "ahash", "asealed"); err != nil {
+	if _, err := s.CreatePrintedGrant(ctx, alice, "", p, "ahash", "asealed"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1708,7 +1708,7 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 	const owner = "alice@example.com"
 	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum")
 	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
-	gid, err := s.CreateGuestGrant(ctx, owner, p, "door", false, []int64{v},
+	gid, err := s.CreateGuestGrant(ctx, owner, "", p, "door", false, []int64{v},
 		[]GuestRecipient{{Email: "door@example.com", TokenHash: "hashD"}})
 	if err != nil {
 		t.Fatal(err)
@@ -1829,5 +1829,95 @@ func TestSuppression(t *testing.T) {
 	}
 	if bad, _, _ := s.IsSuppressed(ctx, "dead@example.com"); bad {
 		t.Fatal("Unsuppress did not clear the address")
+	}
+}
+
+// TestRemoveMemberRevokesTheirPasses is the abuse-case fix: a guest pass is a
+// bearer link over the permit, so losing account access must also stop the passes
+// you minted — otherwise "remove their access" leaves anyone holding a copied
+// link (or a printed door QR) with working access forever.
+func TestRemoveMemberRevokesTheirPasses(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const primary, member = "primary@example.com", "member@example.com"
+
+	if err := s.AddMemberCapped(ctx, primary, member, 2); err != nil {
+		t.Fatal(err)
+	}
+	veh, err := s.CreateVehicle(ctx, primary, "CAR111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	permitID, err := s.UpsertPermit(ctx, primary, "VPP-REV", "1", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One pass the primary made, one the member made, plus the member's door QR.
+	ownPass, err := s.CreateGuestGrant(ctx, primary, primary, permitID, "Family", false,
+		[]int64{veh}, []GuestRecipient{{Email: "gran@example.com", TokenHash: "own-hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberPass, err := s.CreateGuestGrant(ctx, primary, member, permitID, "Their friend", false,
+		[]int64{veh}, []GuestRecipient{{Email: "burner@example.com", TokenHash: "member-hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePrintedGrant(ctx, primary, member, permitID, "door-hash", "sealed"); err != nil {
+		t.Fatal(err)
+	}
+	// A legacy pass with no recorded creator must be left alone (it predates the
+	// column, and deleting the household's own links would be worse than the gap).
+	legacyPass, err := s.CreateGuestGrant(ctx, primary, "", permitID, "Legacy", false,
+		[]int64{veh}, []GuestRecipient{{Email: "old@example.com", TokenHash: "legacy-hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	revoked, err := s.RemoveMember(ctx, primary, member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked != 2 { // their emailed pass + their door QR
+		t.Fatalf("revoked %d passes, want 2", revoked)
+	}
+
+	// The member's token no longer resolves — the actual security property.
+	if _, err := s.GuestContextByTokenHash(ctx, "member-hash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a removed member's guest link still resolves: %v", err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "door-hash"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a removed member's door QR still resolves: %v", err)
+	}
+	// The primary's own and the legacy pass survive.
+	if _, err := s.GuestContextByTokenHash(ctx, "own-hash"); err != nil {
+		t.Fatalf("the primary's own pass was revoked: %v", err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "legacy-hash"); err != nil {
+		t.Fatalf("a legacy (unattributed) pass was revoked: %v", err)
+	}
+	_ = ownPass
+	_ = memberPass
+	_ = legacyPass
+
+	// Leaving voluntarily must revoke just the same (the abuser's likely path:
+	// mint a pass, then leave before being removed).
+	if err := s.AddMemberCapped(ctx, primary, member, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateGuestGrant(ctx, primary, member, permitID, "Second try", false,
+		[]int64{veh}, []GuestRecipient{{Email: "burner2@example.com", TokenHash: "member-hash-2"}}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.RemoveMembership(ctx, member)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("leaving revoked %d passes, want 1", n)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "member-hash-2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a departed member's guest link still resolves: %v", err)
 	}
 }
