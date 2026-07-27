@@ -10,6 +10,8 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"net/mail"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -335,7 +337,72 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Address and token sanity. These are all operator-supplied and every one of
+	// them fails SILENTLY when mistyped: a bad SMTP_FROM makes every send bounce
+	// somewhere nobody reads, a bad ADMIN_EMAIL means systemic alerts vanish, and a
+	// short STATUS_TOKEN weakens the only gate on the outage endpoint. Refusing to
+	// start is much kinder than discovering it during an incident.
+	if cfg.SMTP.Enabled() {
+		if _, err := mail.ParseAddress(cfg.SMTP.From); err != nil {
+			return nil, fmt.Errorf("SMTP_FROM (%q) is not a valid email address: %w", cfg.SMTP.From, err)
+		}
+	}
+	for name, addr := range map[string]string{"ADMIN_EMAIL": cfg.AdminEmail, "CONTACT_TO": cfg.ContactTo} {
+		if addr == "" {
+			continue
+		}
+		if _, err := mail.ParseAddress(addr); err != nil {
+			return nil, fmt.Errorf("%s (%q) is not a valid email address: %w", name, addr, err)
+		}
+	}
+	// A guessable status token would expose the user roster; the endpoint has no
+	// attempt throttle, so length is the defence.
+	if cfg.StatusToken != "" && len(cfg.StatusToken) < 24 {
+		return nil, fmt.Errorf("STATUS_TOKEN is too short (%d chars): use at least 24 random characters, e.g. openssl rand -hex 24", len(cfg.StatusToken))
+	}
+
 	return cfg, nil
+}
+
+// MailDomainMismatch reports the sending domain and the app's own domain when
+// they differ, so main can warn. Mail whose From domain is unrelated to the links
+// inside it is the exact shape receivers score as phishing, and DMARC alignment
+// is judged on that domain — but plenty of legitimate setups relay through a
+// subdomain, so this is a warning, never a refusal to start.
+func (c *Config) MailDomainMismatch() (fromDomain, appDomain string, mismatch bool) {
+	if !c.SMTP.Enabled() || c.PublicBaseURL == "" {
+		return "", "", false
+	}
+	addr, err := mail.ParseAddress(c.SMTP.From)
+	if err != nil {
+		return "", "", false
+	}
+	at := strings.LastIndex(addr.Address, "@")
+	if at < 0 {
+		return "", "", false
+	}
+	fromDomain = strings.ToLower(addr.Address[at+1:])
+	u, err := url.Parse(c.PublicBaseURL)
+	if err != nil || u.Hostname() == "" {
+		return "", "", false
+	}
+	appDomain = strings.ToLower(u.Hostname())
+	// Compare registrable-ish suffixes: p.stonn.org sending as no-reply@stonn.org
+	// is aligned in every way that matters, so only flag genuinely unrelated ones.
+	return fromDomain, appDomain, !sharesParentDomain(fromDomain, appDomain)
+}
+
+// sharesParentDomain reports whether two hosts share their last two labels
+// (example.org vs mail.example.org → true; example.org vs other.net → false).
+func sharesParentDomain(a, b string) bool {
+	last2 := func(h string) string {
+		parts := strings.Split(strings.Trim(h, "."), ".")
+		if len(parts) < 2 {
+			return h
+		}
+		return strings.Join(parts[len(parts)-2:], ".")
+	}
+	return last2(a) == last2(b)
 }
 
 func splitCSV(raw string) []string {

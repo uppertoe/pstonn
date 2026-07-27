@@ -53,7 +53,13 @@ p.{$DOMAIN} {
 	# present a bearer token — the app instead verifies the SNS message signature
 	# and the topic ARN, and refuses anything else. It only exists when
 	# SES_SNS_TOPIC_ARN is set (otherwise the app 404s the path).
-	@public path /about /why /contact /healthz /council/confirm /g/* /status /hooks/ses
+	#
+	# /u/* is the unsubscribe link in every outgoing email. It must be login-free:
+	# most recipients (a guest sent a pass, a driver whose car came off a permit)
+	# have no account at all, and an opt-out they cannot reach is not an opt-out.
+	# The link carries a signed per-address token, so it can only ever stop mail to
+	# the one address it was issued for.
+	@public path /about /why /contact /healthz /council/confirm /g/* /status /hooks/ses /u/*
 	handle @public {
 		route {
 			import strip_client_identity

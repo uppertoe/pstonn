@@ -118,6 +118,17 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
+	// Turning email back on is how someone undoes their own unsubscribe: the opt-out
+	// lives in the suppression list (so it applies to people with no account too),
+	// and without this the toggle would appear to work while mail stayed blocked.
+	// Only clears a self-requested unsubscribe — never a bounce or a complaint.
+	if email {
+		if cleared, err := s.store.UnsuppressIfUnsubscribed(r.Context(), user); err != nil {
+			log.Printf("resubscribe %s: %v", user, err)
+		} else if cleared {
+			log.Printf("resubscribe: %s re-enabled email after unsubscribing", user)
+		}
+	}
 	// Failures-only: the sender has always honoured this, but nothing ever wrote
 	// it — so the "only tell me when something's wrong" preference was unreachable.
 	pref.FailuresOnly = r.FormValue("failures_only") != ""
@@ -166,6 +177,13 @@ func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
 // testNotify sends a test message on the signed-in user's own enabled channels.
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	user, _, _ := s.resolveAccount(r.Context())
+	// Throttled: it is the one authenticated button that sends mail on demand, so
+	// leaving it unbounded lets one account burn shared SMTP quota by holding it
+	// down. Their own address, so a low limit costs nothing legitimate.
+	if !s.testNotifyLimit.allow("u:" + user) {
+		s.formError(w, r, "You've sent a few test notifications already. Please wait a little while before sending another.")
+		return
+	}
 	if err := s.notify.SendTest(r.Context(), user); err != nil {
 		// Details (SMTP hosts, dial errors, ntfy URLs) go to the log, not the
 		// browser.

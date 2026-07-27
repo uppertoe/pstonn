@@ -1,0 +1,61 @@
+{{define "page-unsubscribe"}}
+{{/* ============ PUBLIC UNSUBSCRIBE (signed per-address link) ============
+     Reached from the footer of any email we send, by people who may have no
+     account at all. GET shows this; the button POSTs, so a link-prefetching mail
+     client can't unsubscribe someone on their behalf. */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    {{if .Unsub.Done}}
+    <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
+    <h1>Emails stopped</h1>
+    <p class="gresult">We won't email <strong>{{.Unsub.Address}}</strong> again.</p>
+    <p class="empty-note" style="margin-top:14px">
+      If this address belongs to a p.stonn account, your permit schedule keeps running as normal &mdash; you just won't get email about it.
+      Sign in and turn email back on in Settings whenever you like.
+    </p>
+    {{else}}
+    <h1>Stop emails to this address?</h1>
+    <p class="gresult">We'll stop sending anything to <strong>{{.Unsub.Address}}</strong>.</p>
+    <p class="empty-note" style="margin-top:12px">
+      Worth knowing first: if this address manages a visitor parking permit through p.stonn, these emails are how you find out when a plate change fails.
+      Stopping them means a problem could go unnoticed until someone gets a fine. You can turn email back on in Settings after signing in.
+    </p>
+    <form method="post" action="{{.Unsub.Path}}" style="margin-top:18px">
+      <button type="submit" class="danger">Stop emailing me</button>
+    </form>
+    {{end}}
+    {{if .Contact}}<p class="empty-note" style="margin-top:16px"><a href="/contact">Contact us</a> if you're getting mail you can't explain.</p>{{end}}
+  </section>
+</main>
+{{end}}
+
+{{define "page-confirm"}}
+{{/* ============ PUBLIC RENEWAL CONFIRM (single-use token) ============
+     The reminder email links here with GET. Acting requires the button (POST):
+     mail scanners and corporate link-checkers follow links, and if a GET were
+     enough they would satisfy the "is this person still here?" check that this
+     whole flow exists to make. */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    {{if .Confirm.Done}}
+    <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
+    <h1>Thanks &mdash; it'll keep running</h1>
+    <p class="gresult">Your visitor-permit scheduler will carry on as normal.{{if .Confirm.Until}} We'll check in again around {{.Confirm.Until}}.{{end}}</p>
+    {{else if .Confirm.Stale}}
+    <h1>Nothing to do</h1>
+    <p class="gresult">This confirmation link has already been used, so no further action is needed. Your permit scheduler will keep running.</p>
+    <p class="empty-note" style="margin-top:12px">If it ever stops, just open the app and reconnect your council account.</p>
+    {{else}}
+    <h1>Keep your permit scheduler running?</h1>
+    <p class="gresult">Confirm you'd still like p.stonn to keep updating your visitor permit.</p>
+    <p class="empty-note" style="margin-top:12px">This is a periodic check that someone is still using the service. If you do nothing, it stops on its own and you'd need to reconnect your council account.</p>
+    <form method="post" action="/council/confirm" style="margin-top:18px">
+      <input type="hidden" name="token" value="{{.Confirm.Token}}">
+      <button type="submit">Yes, keep it running</button>
+    </form>
+    {{end}}
+  </section>
+</main>
+{{end}}

@@ -38,12 +38,15 @@ type Service struct {
 	adminTopic string         // operator alert ntfy topic
 	loc        *time.Location // display timezone, for interpreting quiet-hours settings
 	http       *http.Client
+	// unsubKey signs unsubscribe links. Most recipients of our mail have no
+	// account, so a stateless per-address token is the only opt-out they can have.
+	unsubKey []byte
 }
 
 // New builds a Service. mail may be nil (email disabled); ntfyBase may be empty
 // (push disabled). adminEmail/adminTopic receive operator alerts (either may be
 // empty).
-func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEmail, adminTopic string, loc *time.Location) *Service {
+func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEmail, adminTopic string, loc *time.Location, unsubKey []byte) *Service {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -57,6 +60,7 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		adminTopic: strings.TrimSpace(adminTopic),
 		loc:        loc,
 		http:       &http.Client{Timeout: 10 * time.Second},
+		unsubKey:   unsubKey,
 	}
 }
 
@@ -95,6 +99,18 @@ func (s *Service) AdminConfigured() bool {
 	return (s.adminEmail != "" && s.mail.Enabled()) || (s.adminTopic != "" && s.ntfyBase != "")
 }
 
+// Provenance reasons. Each user-facing mail must say why THIS address received
+// it: several recipient classes (a guest handed a pass, a driver whose car came
+// off a permit) never signed up for anything and are owed an explanation and a
+// way out.
+const (
+	reasonAccount  = "this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit"
+	reasonGuest    = "someone shared their visitor parking permit with you by email"
+	reasonInvite   = "someone gave this address shared access to their p.stonn account"
+	reasonDisplace = "this address is the contact for a car that was on a visitor permit"
+	reasonTest     = "you asked p.stonn to send a test notification"
+)
+
 // ErrSuppressed reports that an address is on the suppression list, so nothing
 // was sent. It is a permanent condition, not a delivery failure: callers must
 // not retry, and the outbox treats it as terminal.
@@ -108,19 +124,23 @@ var ErrSuppressed = errors.New("address is suppressed (previous bounce or compla
 // Operator alerts deliberately do NOT go through here: if the operator's own
 // address bounces we still want every future attempt made (and the failure
 // logged), rather than the app quietly muting its own alarm channel.
-func (s *Service) sendEmail(ctx context.Context, to, subject, body string) error {
+func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
 	if s.store != nil {
-		if bad, reason, err := s.store.IsSuppressed(ctx, to); err != nil {
+		if bad, why, err := s.store.IsSuppressed(ctx, to); err != nil {
 			// Fail OPEN: a lookup error must not stop a permit notification going out.
 			log.Printf("notify: suppression lookup for %s: %v", to, err)
 		} else if bad {
-			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
+			return fmt.Errorf("%w: %s", ErrSuppressed, why)
 		}
 	}
-	err := s.mail.Send(to, subject, body)
+	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to)}
+	if reason != "" {
+		opts.Provenance = "You received this at " + to + " because " + reason + ". p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits."
+	}
+	err := s.mail.SendOpts(to, subject, body, opts)
 	if err != nil && errors.Is(err, mailer.ErrPermanent) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
 			log.Printf("notify: suppress %s: %v", to, serr)
@@ -178,7 +198,7 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	for _, m := range members {
 		mpref, _ := s.store.GetNotifyPref(ctx, m)
 		if s.mail.Enabled() {
-			if e := s.sendEmail(ctx, m, subject, body); e != nil {
+			if e := s.sendEmail(ctx, m, subject, body, reasonAccount); e != nil {
 				log.Printf("notify relink email %s: %v", m, e)
 			} else {
 				delivered++
@@ -245,7 +265,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 		}
 		reached := false
 		if wantEmail {
-			if e := s.sendEmail(ctx, d.email, subject, body); e != nil {
+			if e := s.sendEmail(ctx, d.email, subject, body, reasonAccount); e != nil {
 				log.Printf("notify permit-expiry email %s: %v", d.email, e)
 			} else {
 				reached = true
@@ -541,7 +561,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 
 		reached := false
 		if wantEmail {
-			if e := s.sendEmail(ctx, d.email, subject, emailBody); e != nil {
+			if e := s.sendEmail(ctx, d.email, subject, emailBody, reasonAccount); e != nil {
 				errs = append(errs, "email "+d.email+": "+e.Error())
 			} else {
 				reached = true
@@ -579,7 +599,7 @@ func (s *Service) SendTest(ctx context.Context, user string) error {
 	const body = "This is a test. Your permit-change notifications are set up correctly."
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
-		if e := s.sendEmail(ctx, user, subject, body); e != nil {
+		if e := s.sendEmail(ctx, user, subject, body, reasonTest); e != nil {
 			errs = append(errs, "email "+user+": "+e.Error())
 		}
 	}
@@ -606,7 +626,7 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 	const body = "You declined p.stonn's updated terms, so your council account has been disconnected and your permit is no longer being managed.\n\nPlease check your visitor permit with the council. To reconnect, sign in again and accept the terms."
 	var errs []string
 	if s.mail.Enabled() {
-		if e := s.sendEmail(ctx, owner, subject, body); e != nil {
+		if e := s.sendEmail(ctx, owner, subject, body, reasonAccount); e != nil {
 			errs = append(errs, "email: "+e.Error())
 		}
 	}
@@ -642,7 +662,7 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	lines = append(lines,
 		"",
 		"If you were not expecting this, you can ignore this email. You can also remove your access from Settings after signing in.")
-	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"))
+	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonInvite)
 }
 
 // SendGuestLink emails a recipient their personal guest-pass link (email only,
@@ -664,7 +684,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
 	}
-	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"))
+	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonGuest)
 }
 
 // NotifyDriverDisplaced warns whoever is responsible for a displaced car (the
@@ -675,9 +695,13 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 	if !s.mail.Enabled() {
 		return nil
 	}
-	subject := fmt.Sprintf("Heads up: %s is no longer on the %s", oldReg, permitLabel)
+	// This recipient is a third party with no account, and the permit label is the
+	// owner's own free text — typically their street address, and in the worst case
+	// anything a malicious account holder cares to type. Keep it out of the Subject
+	// (and out of the body) of mail we send to strangers from our own signed domain.
+	subject := fmt.Sprintf("Heads up: %s is no longer on the visitor parking permit", oldReg)
 	lines := []string{
-		fmt.Sprintf("%s is no longer the car covered by the visitor permit (%s).", oldReg, permitLabel),
+		fmt.Sprintf("%s is no longer the car covered by the visitor parking permit it was on.", oldReg),
 		fmt.Sprintf("The permit now shows %s instead.", newReg),
 		"",
 		fmt.Sprintf("If %s is still parked there, please move it — or put it back on the permit (with your link, or by asking the permit holder) so you stay covered.", oldReg),
@@ -687,7 +711,8 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 	// override) would otherwise mail a non-consenting stranger every transition.
 	// The 15-minute sent-window in the outbox is exactly the right granularity.
 	key := fmt.Sprintf("displaced|%s|%s|%s", to, permitLabel, oldReg)
-	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject, Body: strings.Join(lines, "\n"), DedupKey: key})
+	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
+		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDisplace})
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a
@@ -817,11 +842,12 @@ type outMessage struct {
 	Subject      string
 	Body         string
 	NotBefore    time.Time // earliest delivery (quiet-hours defer); zero = immediate
+	Reason       string    // "why you got this", for the mail footer
 }
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 	return s.store.EnqueueOutbox(ctx, store.OutboxItem{
-		Account: m.Account, DedupKey: m.DedupKey, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
+		Account: m.Account, DedupKey: m.DedupKey, Reason: m.Reason, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
 		NotBefore: m.NotBefore,
 	})
@@ -942,7 +968,7 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			// emailTargets, or a row addressed ONLY to a dead address would retry
 			// eight times and then dead-letter, which is exactly the reputation
 			// damage the suppression list exists to prevent.
-			e := s.sendEmail(ctx, addr, it.Subject, it.Body)
+			e := s.sendEmail(ctx, addr, it.Subject, it.Body, it.Reason)
 			if errors.Is(e, ErrSuppressed) {
 				log.Printf("notify: skipping suppressed recipient %s for %q", addr, it.Subject)
 				continue

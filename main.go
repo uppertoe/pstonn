@@ -92,10 +92,21 @@ func run() error {
 		log.Print("WARNING: COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
 	}
 	mail := mailer.New(cfg.SMTP)
-	notifier := notify.New(st, mail, cfg.Ntfy.BaseURL, cfg.Ntfy.Token, cfg.PublicBaseURL, cfg.AdminEmail, cfg.AdminNtfyTopic, cfg.DisplayLocation)
+	// Unsubscribe links are signed with a key derived from the at-rest key, so no
+	// per-recipient row is needed to offer an opt-out to people with no account.
+	unsubKey := notify.DeriveUnsubKey(cfg.DataEncryptionKey)
+	notifier := notify.New(st, mail, cfg.Ntfy.BaseURL, cfg.Ntfy.Token, cfg.PublicBaseURL, cfg.AdminEmail, cfg.AdminNtfyTopic, cfg.DisplayLocation, unsubKey)
 	log.Printf("notifications: email=%v ntfy=%v contact-form=%v admin-alerts=%v", mail.Enabled(), cfg.Ntfy.Enabled(), cfg.ContactEnabled(), notifier.AdminConfigured())
 	if !notifier.AdminConfigured() {
 		log.Print("WARNING: no admin alert channel configured (set ADMIN_EMAIL and/or ADMIN_NTFY_TOPIC); systemic failures will only be logged")
+	}
+	if from, app, mismatch := cfg.MailDomainMismatch(); mismatch {
+		log.Printf("WARNING: mail is sent from %q but the app is served at %q. Receivers judge DMARC alignment on the From domain, "+
+			"and mail whose sender is unrelated to the links inside it is scored as phishing. Prefer a From on %s, and publish SPF/DKIM/DMARC for the sending domain.", from, app, app)
+	}
+	if !cfg.SESHookEnabled() && mail.Enabled() {
+		log.Print("NOTE: SES_SNS_TOPIC_ARN not set, so bounce/complaint feedback is not wired up. " +
+			"Hard SMTP rejections are still learned at send time, but provider-reported bounces are not. See deploy/aws-ses-hook-setup.py")
 	}
 	sched := scheduler.New(st, council, cfg.DisplayLocation, scheduler.Options{
 		SessionMaxAge: cfg.Council.SessionMaxAge,

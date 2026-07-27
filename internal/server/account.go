@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -260,26 +259,39 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 	redirectHome(w, r)
 }
 
-// councilConfirm consumes the single-use token from a renewal-reminder email and
-// extends the session another SessionMaxAge. It is public and token-only (no
-// login) so it stays a genuine one-click. Because the first hit extends the
-// session, a used/unknown token still means "you're fine", so its message
-// reassures rather than alarms (covers email-scanner prefetch consuming it).
+// councilConfirm renders the "keep it running" page from a renewal-reminder
+// email. It is public and token-only (no login), so it stays one tap.
+//
+// GET only RENDERS a button; the POST below performs it. Mail scanners, corporate
+// link-checkers and mailbox previewers all follow links, so a GET that acted would
+// let a machine satisfy the very human-liveness check this flow exists to make —
+// quietly keeping a departed user's council session alive for another full cycle.
 func (s *Server) councilConfirm(w http.ResponseWriter, r *http.Request) {
+	noStore(w) // the URL carries a live single-use token; keep it out of caches
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	s.render(w, dashboardData{State: "confirm", Loc: s.cfg.DisplayLocation,
+		Confirm: &confirmView{Token: token, Stale: token == ""}})
+}
+
+// councilConfirmApply consumes the single-use token and extends the session by
+// another SessionMaxAge. A used, unknown or aged-out token is reported as
+// "nothing to do" rather than an error: the first use already extended it, so the
+// user is genuinely fine either way.
+func (s *Server) councilConfirmApply(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	token := strings.TrimSpace(r.FormValue("token"))
 	// A confirm link is only good for the reminder window it was sent for (plus
 	// slack for a user who opens mail late), not forever.
 	owner, err := s.store.ConfirmSession(r.Context(), token, s.confirmTokenTTL())
 	if err != nil {
-		s.message(w, http.StatusOK,
-			"This confirmation link has already been used, so no further action is needed. Your permit scheduler will keep running. If it ever stops, just open the app to reconnect your council account.")
+		s.render(w, dashboardData{State: "confirm", Loc: s.cfg.DisplayLocation,
+			Confirm: &confirmView{Stale: true}})
 		return
 	}
 	log.Printf("council session for %s confirmed via email link", owner)
-	msg := "Thanks. Your visitor-permit scheduler will keep running."
+	v := &confirmView{Done: true}
 	if s.cfg.Council.SessionMaxAge > 0 {
-		next := time.Now().Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 January 2006")
-		msg = fmt.Sprintf("Thanks. Your visitor-permit scheduler will keep running. We'll check in again around %s.", next)
+		v.Until = time.Now().Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 January 2006")
 	}
-	s.message(w, http.StatusOK, msg)
+	s.render(w, dashboardData{State: "confirm", Loc: s.cfg.DisplayLocation, Confirm: v})
 }

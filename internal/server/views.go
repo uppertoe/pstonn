@@ -72,6 +72,26 @@ type dashboardData struct {
 	Guest           guestActView       // public activation menu (State "guest")
 	Wait            *guestWaitView     // public "waiting for approval" page (State "guest-wait")
 	Admin           *adminView         // admin dashboard (State "admin")
+	Unsub           *unsubView         // public unsubscribe confirm/result (State "unsubscribe")
+	Confirm         *confirmView       // public renewal-confirm page (State "confirm")
+}
+
+// unsubView drives the public unsubscribe page. Address is the one address the
+// signed link authorises; Done marks the post-action confirmation.
+type unsubView struct {
+	Address string
+	Path    string // POST target (the same signed path)
+	Done    bool
+}
+
+// confirmView drives the public "keep my scheduler running" page. The emailed
+// link only GETs this; the button POSTs, so a mail scanner following links can no
+// longer silently satisfy the human-liveness check this flow exists to make.
+type confirmView struct {
+	Token string
+	Until string // when the session would otherwise lapse ("" if unknown)
+	Done  bool
+	Stale bool // token unknown/used/expired — reassure rather than alarm
 }
 
 type termsView struct {

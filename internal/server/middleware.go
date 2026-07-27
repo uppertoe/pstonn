@@ -75,7 +75,12 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 	if s.auth != nil {
 		http.Redirect(w, r, "/auth/login", http.StatusFound)
 	} else {
-		s.message(w, http.StatusUnauthorized, "Sign-in isn't configured. Run behind the forward-auth layer, set APP_OIDC_*, or use DEV_IDENTITY_EMAIL for local use.")
+		// A visitor sees a plain apology; the operator jargon (which env vars are
+		// missing) goes to the log where it belongs. This state means the deployment
+		// is misconfigured, so it is the operator who needs the detail, not a member
+		// of the public reading about APP_OIDC_*.
+		log.Print("sign-in is not configured: run behind the forward-auth layer, set APP_OIDC_*, or use DEV_IDENTITY_EMAIL for local use")
+		s.message(w, http.StatusUnauthorized, "Sign-in isn't available right now. Please try again shortly.")
 	}
 	return identity.User{}, false
 }

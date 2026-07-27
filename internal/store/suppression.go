@@ -14,6 +14,11 @@ const (
 	SuppressBounce    = "bounce"
 	SuppressComplaint = "complaint"
 	SuppressManual    = "manual"
+	// SuppressUnsubscribed is a recipient's own request to stop. Unlike a bounce or
+	// a complaint it is theirs to reverse: an account member re-enabling email in
+	// Settings clears it (see UnsuppressIfUnsubscribed), while a bounce or complaint
+	// stays until the operator intervenes.
+	SuppressUnsubscribed = "unsubscribed"
 )
 
 // Suppression is one address we must not email.
@@ -137,4 +142,20 @@ func (s *Store) Unsuppress(ctx context.Context, address string) error {
 	_, err := s.db.ExecContext(ctx,
 		`DELETE FROM mail_suppression WHERE address = ?`, normaliseAddr(address))
 	return err
+}
+
+// UnsuppressIfUnsubscribed clears ONLY a self-service unsubscribe, so a user who
+// changes their mind can resubscribe by re-enabling email in Settings. It
+// deliberately will not clear a bounce (the address is broken — sending again
+// just damages the domain) or a complaint (they reported us as spam; quietly
+// resuming would be indefensible). Reports whether a row was cleared.
+func (s *Store) UnsuppressIfUnsubscribed(ctx context.Context, address string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM mail_suppression WHERE address = ? AND reason = ?`,
+		normaliseAddr(address), SuppressUnsubscribed)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }

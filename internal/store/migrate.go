@@ -211,7 +211,8 @@ CREATE TABLE IF NOT EXISTS outbox (
     next_attempt  TEXT NOT NULL,                   -- RFC3339 UTC; earliest next try
     last_error    TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL,
-    sent_at       TEXT NOT NULL DEFAULT ''
+    sent_at       TEXT NOT NULL DEFAULT '',
+    reason        TEXT NOT NULL DEFAULT ''   -- "why you got this", shown in the mail footer
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 
@@ -267,6 +268,10 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 		// the permit, so losing account access must also lose the passes you made.
 		// Rows predating this column have '' and are treated as the account's own.
 		`ALTER TABLE guest_grant ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`,
+		// Why this address is receiving this message, for the mail's own footer.
+		// Recipients with no account (a guest, a displaced driver) otherwise have no
+		// idea who we are or how we got their address.
+		`ALTER TABLE outbox ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

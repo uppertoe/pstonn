@@ -40,7 +40,7 @@ func TestEnqueueApplyPerMemberPrefs(t *testing.T) {
 	// A mailer that is "enabled" (Host+From) so EnqueueApply addresses email; it is
 	// never drained here, so nothing is actually sent.
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "", "", "", "", "", time.UTC) // no ntfy configured
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key")) // no ntfy configured
 
 	if err := svc.EnqueueApply(ctx, ApplyOutcome{Owner: primary, PermitLabel: "VPP1", Reg: "ABC123", OK: true}); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestNotifyGuestRequestPerMemberFanout(t *testing.T) {
 	}
 
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "https://ntfy.test", "", "", "", "", time.UTC)
+	svc := New(st, m, "https://ntfy.test", "", "", "", "", time.UTC, []byte("test-unsub-key"))
 
 	if err := svc.NotifyGuestRequest(ctx, primary, "VPP1", "TRD441", "https://p.example/guests"); err != nil {
 		t.Fatal(err)

@@ -68,6 +68,7 @@ type OutboxItem struct {
 	Body         string
 	Attempts     int
 	NotBefore    time.Time // earliest delivery; zero = send as soon as due (quiet-hours defer)
+	Reason       string    // "why you got this", rendered in the mail footer
 }
 
 // outboxDedupWindow bounds how long a delivered (sent) row suppresses a
@@ -95,21 +96,21 @@ func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 	// outcome) each pass the check and double-insert — defeating the dedup this
 	// exists for.
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at)
-SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10
+INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at, reason)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10, ?12
 WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
   WHERE dedup_key = ?2
     AND (status = 'pending' OR (status = 'sent' AND sent_at > ?11)))`,
 		it.Account, it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
 		it.Subject, it.Body, nextAttempt, now,
-		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339))
+		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339), it.Reason)
 	return err
 }
 
 // DueOutbox returns pending notifications whose next attempt is due, oldest first.
 func (s *Store) DueOutbox(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts
+SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts, reason
 FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 		now.UTC().Format(time.RFC3339), limit)
 	if err != nil {
@@ -121,7 +122,7 @@ FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 		var it OutboxItem
 		var recips string
 		if err := rows.Scan(&it.ID, &it.DedupKey, &recips, &it.NtfyTopic, &it.NtfyPriority, &it.NtfyTag,
-			&it.Subject, &it.Body, &it.Attempts); err != nil {
+			&it.Subject, &it.Body, &it.Attempts, &it.Reason); err != nil {
 			return nil, err
 		}
 		if recips != "" {

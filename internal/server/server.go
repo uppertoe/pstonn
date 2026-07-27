@@ -42,6 +42,9 @@ type Server struct {
 	guestLinkOut *rateLimiter // per-owner throttle on guest-pass link emails
 	guestLinkTo  *rateLimiter // per-recipient throttle on guest-pass link emails
 	councilTry   *rateLimiter // per-user throttle on council password attempts (councilLink)
+	// testNotifyLimit throttles the on-demand "send test" button (per user): the
+	// only authenticated control that sends mail whenever it is pressed.
+	testNotifyLimit *rateLimiter
 	// guestSlots bounds CONCURRENT public guest requests. The store runs on a
 	// single SQLite connection shared with the scheduler, so unbounded anonymous
 	// reads don't merely slow pages down — they starve the reconcile loop, and a
@@ -51,6 +54,8 @@ type Server struct {
 	guestSlots chan struct{}
 	// snsCert caches SES/SNS signing certificates for the bounce webhook.
 	snsCert *certCache
+	// unsubKey verifies the signed per-address unsubscribe links in outgoing mail.
+	unsubKey []byte
 }
 
 // maxConcurrentGuest is how many public guest requests may be in flight at once.
@@ -71,12 +76,14 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		// 2.5s = ~240 hits/10 min, and several visitors can share one NAT address),
 		// so this is deliberately loose: it exists to stop a firehose from one
 		// source, not to police normal polling.
-		guestRead:    newRateLimiter(1200, 10*time.Minute),
-		guestLinkOut: newRateLimiter(20, time.Hour),     // <=20 guest-link emails / hour per owner
-		guestLinkTo:  newRateLimiter(5, 24*time.Hour),   // <=5 guest-link emails / day per recipient
-		councilTry:   newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
-		guestSlots:   make(chan struct{}, maxConcurrentGuest),
-		snsCert:      newCertCache(),
+		guestRead:       newRateLimiter(1200, 10*time.Minute),
+		guestLinkOut:    newRateLimiter(20, time.Hour),     // <=20 guest-link emails / hour per owner
+		guestLinkTo:     newRateLimiter(5, 24*time.Hour),   // <=5 guest-link emails / day per recipient
+		councilTry:      newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
+		testNotifyLimit: newRateLimiter(5, time.Hour),      // 5 test notifications / hour per user
+		guestSlots:      make(chan struct{}, maxConcurrentGuest),
+		snsCert:         newCertCache(),
+		unsubKey:        notify.DeriveUnsubKey(cfg.DataEncryptionKey),
 	}
 }
 
@@ -141,9 +148,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /notifications", s.withConsent(s.saveNotify))
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
 	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))
-	// Public, token-only: the renewal-confirm link from the reminder email. It
-	// carries a single-use token and requires no login (so it stays one click).
+	// Public, token-only: the renewal-confirm link from the reminder email.
 	mux.HandleFunc("GET /council/confirm", s.councilConfirm)
+	mux.HandleFunc("POST /council/confirm", s.councilConfirmApply)
+
+	// Public, signed-token: unsubscribe. GET confirms, POST acts (RFC 8058
+	// one-click). No login — most recipients have no account.
+	mux.HandleFunc("GET /u/{addr}/{token}", s.unsubscribePage)
+	mux.HandleFunc("POST /u/{addr}/{token}", s.unsubscribeApply)
 
 	// Public, signature-verified: SES bounce/complaint events via SNS. Registered
 	// only when a topic ARN is configured, so an unwired deployment 404s rather

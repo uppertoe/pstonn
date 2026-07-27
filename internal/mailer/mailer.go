@@ -71,32 +71,49 @@ func (m *Mailer) SendRenewalReminder(to string, deadline time.Time, confirmURL s
 		"",
 		"-- p.stonn",
 	}, "\r\n")
-	return m.send(to, "", subject, body)
+	return m.send(to, subject, body, Options{})
+}
+
+// Options carries the per-message extras. Zero value = a plain notice.
+type Options struct {
+	// ReplyTo sets Reply-To, so a reply reaches a submitter rather than the From
+	// address (the contact form).
+	ReplyTo string
+	// UnsubscribeURL adds List-Unsubscribe and RFC 8058 one-click support, plus a
+	// visible footer line. REQUIRED on anything sent to a person rather than to
+	// the operator: most of our recipients (a guest handed a pass, a driver whose
+	// car came off a permit) have no account and no other way to make us stop.
+	UnsubscribeURL string
+	// Provenance is one plain sentence saying why this address received this
+	// message ("Sent to x@y because ..."). Recipients with no account otherwise
+	// have no idea who we are or how we got their address.
+	Provenance string
 }
 
 // Send delivers a plain-text email. A nil *Mailer is a no-op.
 func (m *Mailer) Send(to, subject, body string) error {
-	if m == nil {
-		return nil
-	}
-	return m.send(to, "", subject, body)
+	return m.SendOpts(to, subject, body, Options{})
 }
 
-// SendWithReplyTo is Send with a Reply-To header, so a reply reaches the
-// submitter rather than the From address (used by the contact form). replyTo is
-// ignored when empty. A nil *Mailer is a no-op.
+// SendWithReplyTo is Send with a Reply-To header. A nil *Mailer is a no-op.
 func (m *Mailer) SendWithReplyTo(to, replyTo, subject, body string) error {
+	return m.SendOpts(to, subject, body, Options{ReplyTo: replyTo})
+}
+
+// SendOpts delivers a plain-text email with the extras in o. A nil *Mailer is a
+// no-op.
+func (m *Mailer) SendOpts(to, subject, body string, o Options) error {
 	if m == nil {
 		return nil
 	}
-	return m.send(to, replyTo, subject, body)
+	return m.send(to, subject, body, o)
 }
 
 // emailBoundary separates the two MIME parts. A fixed, unlikely token is fine for
 // transactional mail (both parts are base64-encoded, so it can't appear in a body).
 const emailBoundary = "==_pstonn_alt_b19c7f42a8=="
 
-func (m *Mailer) send(to, replyTo, subject, body string) error {
+func (m *Mailer) send(to, subject, body string, o Options) error {
 	headers := []string{
 		"From: " + headerValue(m.from),
 		"To: " + headerValue(to),
@@ -109,8 +126,17 @@ func (m *Mailer) send(to, replyTo, subject, body string) error {
 		// auto-responders and vacation replies don't bounce back at us.
 		"Auto-Submitted: auto-generated",
 	}
-	if replyTo != "" {
-		headers = append(headers, "Reply-To: "+headerValue(replyTo))
+	if o.ReplyTo != "" {
+		headers = append(headers, "Reply-To: "+headerValue(o.ReplyTo))
+	}
+	if o.UnsubscribeURL != "" {
+		// RFC 2369 + RFC 8058. The One-Click header is what makes Gmail/Yahoo show
+		// their native "unsubscribe" affordance instead of a "report spam" button —
+		// which is the outcome we actually want, since a complaint costs the whole
+		// domain's reputation while an unsubscribe costs one address.
+		headers = append(headers,
+			"List-Unsubscribe: <"+headerValue(o.UnsubscribeURL)+">",
+			"List-Unsubscribe-Post: List-Unsubscribe=One-Click")
 	}
 	headers = append(headers,
 		// Q-encode the subject when it contains non-ASCII (RFC 2047): permit and
@@ -120,6 +146,21 @@ func (m *Mailer) send(to, replyTo, subject, body string) error {
 		"MIME-Version: 1.0",
 		`Content-Type: multipart/alternative; boundary="`+emailBoundary+`"`,
 	)
+	// Footer: who we are, why this address got it, and how to stop. Appended to the
+	// plain text so it flows into the HTML part too (htmlDocument derives from it),
+	// and so a text-only client sees it identically.
+	if o.Provenance != "" || o.UnsubscribeURL != "" {
+		var f strings.Builder
+		f.WriteString(body)
+		f.WriteString("\r\n\r\n--\r\n")
+		if o.Provenance != "" {
+			f.WriteString(o.Provenance + "\r\n")
+		}
+		if o.UnsubscribeURL != "" {
+			f.WriteString("To stop emails to " + to + ": " + o.UnsubscribeURL + "\r\n")
+		}
+		body = f.String()
+	}
 	// multipart/alternative: a plain-text part (the source of truth, always shown
 	// by text-only clients) plus a branded HTML part. Both base64-encoded so long
 	// lines and any UTF-8 are transmitted intact.
