@@ -6,6 +6,7 @@ package server
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
@@ -61,6 +62,11 @@ type Server struct {
 	snsCert *certCache
 	// unsubKey verifies the signed per-address unsubscribe links in outgoing mail.
 	unsubKey []byte
+	// lastTouch throttles idle-clock writes: one per person per hour is ample
+	// against a 90-day bound, and the store shares one connection with the
+	// scheduler. Guarded by touchMu.
+	touchMu   sync.Mutex
+	lastTouch map[string]time.Time
 }
 
 // maxConcurrentGuest is how many public guest requests may be in flight at once.

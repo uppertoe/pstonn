@@ -6,7 +6,7 @@
     <h2><span class="ic">{{template "ic-link"}}</span> Council connection</h2>
     {{if .IsPrimary}}
     {{if .RelinkBy}}
-    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. p.stonn will email a one-click link to confirm you're still using it before <strong>{{.RelinkBy}}</strong>.</p>
+    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, it would stop around <strong>{{.RelinkBy}}</strong> &mdash; we'd email a one-click link first.</p>
     {{end}}
     {{if .CouncilLinked}}
     <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">

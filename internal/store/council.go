@@ -27,6 +27,11 @@ type CouncilSession struct {
 	// (zero = never). Surfaced in Settings so credential use is visible to the
 	// user, not just the operator's server log.
 	ReconnectedAt time.Time
+	// LastActive is the last authenticated visit by ANY member of the account —
+	// the idle clock the re-authorise bound is measured against. The bound exists
+	// to stop serving households that have left; a household that opens the app
+	// has plainly not left, so their visit resets it. Zero falls back to LinkedAt.
+	LastActive time.Time
 }
 
 // ---- Council session (per app user) ----
@@ -35,11 +40,11 @@ type CouncilSession struct {
 // ErrNotFound.
 func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSession, error) {
 	var cs CouncilSession
-	var expiry, updated, linked, reminded, reconnected string
+	var expiry, updated, linked, reminded, reconnected, lastActive string
 	err := s.db.QueryRowContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at
 FROM council_session WHERE owner = ?`, owner).
-		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected)
+		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
 	}
@@ -51,6 +56,7 @@ FROM council_session WHERE owner = ?`, owner).
 	cs.LinkedAt, _ = time.Parse(time.RFC3339, linked)
 	cs.ReminderSent, _ = time.Parse(time.RFC3339, reminded)
 	cs.ReconnectedAt, _ = time.Parse(time.RFC3339, reconnected)
+	cs.LastActive, _ = time.Parse(time.RFC3339, lastActive)
 	return cs, nil
 }
 
@@ -59,7 +65,7 @@ FROM council_session WHERE owner = ?`, owner).
 // secrets are included so callers can renew without a second lookup.
 func (s *Store) ListCouncilSessions(ctx context.Context) ([]CouncilSession, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at
 FROM council_session`)
 	if err != nil {
 		return nil, err
@@ -68,14 +74,15 @@ FROM council_session`)
 	var out []CouncilSession
 	for rows.Next() {
 		var cs CouncilSession
-		var expiry, updated, linked, reminded string
-		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken); err != nil {
+		var expiry, updated, linked, reminded, lastActive string
+		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive); err != nil {
 			return nil, err
 		}
 		cs.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
 		cs.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
 		cs.LinkedAt, _ = time.Parse(time.RFC3339, linked)
 		cs.ReminderSent, _ = time.Parse(time.RFC3339, reminded)
+		cs.LastActive, _ = time.Parse(time.RFC3339, lastActive)
 		out = append(out, cs)
 	}
 	return out, rows.Err()
@@ -122,10 +129,30 @@ func (s *Store) ConfirmSession(ctx context.Context, token string, maxAge time.Du
 			return "", ErrNotFound
 		}
 	}
+	// A click is a person confirming they are still here, so it resets the idle
+	// clock as well as the link clock.
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE council_session SET linked_at = ?, reminder_sent_at = '', confirm_token = '' WHERE owner = ?`,
-		nowUTC(), owner)
+		`UPDATE council_session SET linked_at = ?, last_active_at = ?, reminder_sent_at = '', confirm_token = '' WHERE owner = ?`,
+		nowUTC(), nowUTC(), owner)
 	return owner, err
+}
+
+// TouchAccountActive records that someone on the account used the app, resetting
+// the idle clock the re-authorise bound is measured against. Any member counts:
+// the bound exists to stop serving households that have left, and a secondary
+// opening the app is the household still being here.
+//
+// It also clears the reminder flag, so a later idle stretch can trigger a fresh
+// "are you still there?" email rather than being suppressed by one sent months
+// ago. The pending confirm token is deliberately left alone: it has its own TTL,
+// and invalidating a link the user may still click buys nothing.
+//
+// No-op when the account has no linked session — there is nothing to keep alive.
+func (s *Store) TouchAccountActive(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET last_active_at = ?, reminder_sent_at = '' WHERE owner = ?`,
+		nowUTC(), owner)
+	return err
 }
 
 // OwnerHasSchedule reports whether the owner has anything the scheduler could act
@@ -148,8 +175,8 @@ SELECT
 func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error {
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?)
+INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)
 ON CONFLICT(owner) DO UPDATE SET
     sub                 = excluded.sub,
     council_email       = excluded.council_email,
@@ -160,9 +187,10 @@ ON CONFLICT(owner) DO UPDATE SET
     linked_at           = excluded.linked_at,
     reminder_sent_at    = '',
     confirm_token       = '',
-    password_sealed     = excluded.password_sealed`,
+    password_sealed     = excluded.password_sealed,
+    last_active_at      = excluded.last_active_at`,
 		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
-		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password)
+		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now)
 	return err
 }
 

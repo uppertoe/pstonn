@@ -68,7 +68,7 @@ type Notifier interface {
 
 // Options configures the Scheduler's session-lifecycle behaviour.
 type Options struct {
-	SessionMaxAge time.Duration // re-authorise bound from last link (0 disables)
+	SessionMaxAge time.Duration // re-authorise bound measured from the last authenticated visit by any member (0 disables)
 	WarmInterval  time.Duration // how stale a session may get before renewal (default 1h45m ≈ 0.7× the safe idle window)
 	ReminderLead  time.Duration // how far before the bound to email the confirm link (0 = no reminder)
 	ExpiryLead    time.Duration // how far before a permit's expiry to warn the account (0 = no reminder)
@@ -465,12 +465,26 @@ const (
 	warmRetire                   // past the re-authorise bound; drop and require re-link
 )
 
-// decideWarm is the pure keep-warm policy: retire a session once it has reached
-// the re-authorise bound from its last interactive link (or has no known link
-// time), otherwise renew it when it has gone staler than warmInterval. maxAge <= 0
-// disables the bound.
-func decideWarm(now, linkedAt, updatedAt time.Time, maxAge, warmInterval time.Duration) warmAction {
-	if maxAge > 0 && (linkedAt.IsZero() || now.Sub(linkedAt) >= maxAge) {
+// decideWarm is the pure keep-warm policy: retire a session once the account has
+// been IDLE for maxAge, otherwise renew it when the cookie has gone staler than
+// warmInterval. maxAge <= 0 disables the bound.
+//
+// The bound is measured against lastActive — the last authenticated visit by any
+// member of the account, plus a click on the "are you still there?" email —
+// because its purpose is to stop holding a council session for a household that
+// has left the service or the area. Time since a password was typed is a poor
+// proxy for that: a set-and-forget household that uses the app every week would
+// be retired on schedule, while someone who moved away a year ago would look
+// identical to someone who linked yesterday.
+//
+// lastActive zero falls back to linkedAt (a session predating the idle clock);
+// both zero retires, since an unknown clock cannot be shown to be recent.
+func decideWarm(now, lastActive, linkedAt, updatedAt time.Time, maxAge, warmInterval time.Duration) warmAction {
+	idleSince := lastActive
+	if idleSince.IsZero() {
+		idleSince = linkedAt
+	}
+	if maxAge > 0 && (idleSince.IsZero() || now.Sub(idleSince) >= maxAge) {
 		return warmRetire
 	}
 	if now.Sub(updatedAt) < warmInterval {
@@ -497,14 +511,14 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		if cs.Cookie == "" {
 			continue
 		}
-		action := decideWarm(now, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.warmThresholdFor(cs.Owner, cs.UpdatedAt))
+		action := decideWarm(now, cs.LastActive, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.warmThresholdFor(cs.Owner, cs.UpdatedAt))
 		if action == warmRetire {
-			// Past the re-authorise bound (or an unknown link time): stop renewing,
-			// drop the session, and let the dashboard prompt a re-link.
+			// Nobody on this account has used the app for the whole bound: stop
+			// renewing, drop the session, and let the dashboard prompt a re-link.
 			if err := s.store.DeleteCouncilSession(ctx, cs.Owner); err != nil {
 				log.Printf("scheduler: retire session %s: %v", cs.Owner, err)
 			} else {
-				log.Printf("scheduler: session for %s reached the re-link limit; unlinked (re-link required)", cs.Owner)
+				log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", cs.Owner)
 				// The renewal reminder (maybeRemind) is email-only and best-effort, so
 				// it must not be the sole signal: tell the user their permit just
 				// stopped being managed, exactly as the expired-cookie path does.
@@ -870,10 +884,17 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
-	if s.sessionMaxAge <= 0 || s.reminderLead <= 0 || cs.LinkedAt.IsZero() || !cs.ReminderSent.IsZero() {
+	// Measured against the same idle clock decideWarm uses, so the reminder is a
+	// genuine "we haven't seen you in a while" rather than a fixed anniversary of
+	// linking. An active household never sees it, which is the point.
+	idleSince := cs.LastActive
+	if idleSince.IsZero() {
+		idleSince = cs.LinkedAt
+	}
+	if s.sessionMaxAge <= 0 || s.reminderLead <= 0 || idleSince.IsZero() || !cs.ReminderSent.IsZero() {
 		return
 	}
-	deadline := cs.LinkedAt.Add(s.sessionMaxAge)
+	deadline := idleSince.Add(s.sessionMaxAge)
 	if now.Before(deadline.Add(-s.reminderLead)) || !now.Before(deadline) {
 		return // not yet in the reminder window (or already past the deadline)
 	}

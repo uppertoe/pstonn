@@ -1921,3 +1921,73 @@ func TestRemoveMemberRevokesTheirPasses(t *testing.T) {
 		t.Fatalf("a departed member's guest link still resolves: %v", err)
 	}
 }
+
+// TestTouchAccountActive covers the idle clock: any member's visit resets it, it
+// re-arms the "are you still there?" reminder, and it is a no-op for an account
+// with no linked session.
+func TestTouchAccountActive(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "owner@example.com"
+
+	// No session yet: touching must not create one or error.
+	if err := s.TouchAccountActive(ctx, owner); err != nil {
+		t.Fatalf("touch with no session: %v", err)
+	}
+	if _, err := s.GetCouncilSession(ctx, owner); !errors.Is(err, ErrNotFound) {
+		t.Fatal("touching must not create a session row")
+	}
+
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "sealed"}); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := s.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs.LastActive.IsZero() {
+		t.Fatal("an interactive link should stamp the idle clock")
+	}
+
+	// Backdate the clock and mark a reminder as already sent, i.e. an account that
+	// went quiet and got the "still there?" email.
+	old := time.Now().Add(-80 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET last_active_at = ?, reminder_sent_at = ? WHERE owner = ?`,
+		old, old, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	// A visit moves the clock forward and clears the reminder flag, so a LATER
+	// idle stretch can trigger a fresh reminder instead of being suppressed by the
+	// one sent months ago.
+	if err := s.TouchAccountActive(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	cs2, err := s.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cs2.LastActive.After(cs.LastActive.Add(-time.Second)) || time.Since(cs2.LastActive) > time.Minute {
+		t.Fatalf("touch did not reset the idle clock: %v", cs2.LastActive)
+	}
+	if !cs2.ReminderSent.IsZero() {
+		t.Fatal("touch must clear the reminder flag so a later idle stretch can remind again")
+	}
+
+	// Confirming by email link also counts as being present.
+	if err := s.MarkReminderSent(ctx, owner, "tok-idle"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET last_active_at = ? WHERE owner = ?`, old, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConfirmSession(ctx, "tok-idle", 0); err != nil {
+		t.Fatal(err)
+	}
+	cs3, _ := s.GetCouncilSession(ctx, owner)
+	if time.Since(cs3.LastActive) > time.Minute {
+		t.Fatalf("a confirm click should reset the idle clock: %v", cs3.LastActive)
+	}
+}

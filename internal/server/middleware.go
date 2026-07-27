@@ -113,9 +113,14 @@ func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrim
 
 func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.user(w, r); !ok {
+		u, ok := s.user(w, r)
+		if !ok {
 			return
 		}
+		// Being here resets the account's idle clock (see decideWarm): the
+		// re-authorise bound exists to stop holding a council session for a household
+		// that has left, and someone signed in and using the app has not left.
+		s.touchActivity(r.Context(), u.Email)
 		// CSRF: every authenticated mutation must come from our own origin. This
 		// wraps all mutating routes (withConsent calls withUser), so a cross-site
 		// POST can't trigger link/unlink/delete/schedule changes.

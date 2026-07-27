@@ -22,8 +22,15 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if cs, err := s.store.GetCouncilSession(ctx, owner); err == nil {
 		base.CouncilLinked = true
 		base.AutoReconnect = cs.Password != ""
-		if !cs.LinkedAt.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
-			base.RelinkBy = cs.LinkedAt.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
+		// The deadline is measured from the last time anyone on the account used the
+		// app, so it moves forward as the household keeps using it. Showing it from
+		// the link date would be wrong (and alarming).
+		idleSince := cs.LastActive
+		if idleSince.IsZero() {
+			idleSince = cs.LinkedAt
+		}
+		if !idleSince.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
+			base.RelinkBy = idleSince.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
 		}
 		if base.AutoReconnect && !cs.ReconnectedAt.IsZero() {
 			base.LastReconnect = cs.ReconnectedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006, 3:04pm")

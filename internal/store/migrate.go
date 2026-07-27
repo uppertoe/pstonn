@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS council_session (
     reminder_sent_at     TEXT NOT NULL DEFAULT '',   -- when the approaching-expiry email was sent
     confirm_token        TEXT NOT NULL DEFAULT '',   -- single-use token for the email confirm link
     password_sealed      TEXT NOT NULL DEFAULT '',   -- opt-in sealed council password for auto-reconnect (empty = not saved)
-    reconnected_at       TEXT NOT NULL DEFAULT ''    -- last saved-password auto-reconnect; shown to the user in Settings
+    reconnected_at       TEXT NOT NULL DEFAULT '',   -- last saved-password auto-reconnect; shown to the user in Settings
+    last_active_at       TEXT NOT NULL DEFAULT ''    -- last authenticated visit by ANY member; the idle clock (see decideWarm)
 );
 
 CREATE TABLE IF NOT EXISTS vehicle (
@@ -289,6 +290,11 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 		// Recipients with no account (a guest, a displaced driver) otherwise have no
 		// idea who we are or how we got their address.
 		`ALTER TABLE outbox ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
+		// The re-authorise clock is now IDLE-based: it measures time since anyone on
+		// the account last used the app, not time since a password was typed. The
+		// point of the bound is to stop serving households that have left, and a
+		// household that visits regularly has plainly not left.
+		`ALTER TABLE council_session ADD COLUMN last_active_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
@@ -301,6 +307,12 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 	// treated as instantly past-bound on first keep-warm pass.
 	if _, err := s.db.Exec(
 		`UPDATE council_session SET linked_at = updated_at WHERE linked_at = '' AND updated_at != ''`); err != nil {
+		return err
+	}
+	// Seed the idle clock from the old link-time clock, so switching to idle-based
+	// expiry does not retire an existing session earlier than its owner expects.
+	if _, err := s.db.Exec(
+		`UPDATE council_session SET last_active_at = linked_at WHERE last_active_at = '' AND linked_at != ''`); err != nil {
 		return err
 	}
 	// Rebuild `override` if it predates the ad-hoc-plate columns: SQLite cannot

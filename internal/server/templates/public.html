@@ -58,6 +58,7 @@
     <h2 class="about-h2">The security model</h2>
     <ul>
       <li>p.stonn holds a live session to your council account, continuously renewed so it can act on your schedule while you're not here. That session can view and change your permit. It is encrypted at rest with a key held on this server.</li>
+      <li>The connection lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). We email a one-click link before that happens. This is deliberate: we don't want to keep access to the council account of someone who has moved away or stopped using the service.</li>
       <li><strong>What is and isn't encrypted:</strong> your council session, its access token, and your council password (if you saved it) are encrypted with AES-256-GCM. Everything else &mdash; your number plates, your schedule, your permit details, email addresses, and the activity and change logs &mdash; is stored unencrypted in the database on this server.</li>
       <li>This is necessary to reliably connect to your Stonnington ePermit account.</li>
       <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>

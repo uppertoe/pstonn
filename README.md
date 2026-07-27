@@ -59,11 +59,14 @@ unencrypted in the app's SQLite database on the server. Anyone with the server o
 its database can read it. See [/about](https://p.stonn.org/about) for what that
 means and what is stored.
 
-**How long does a link last?** A linked session stops after 90 days unless you
-confirm it. About a week before that, the app emails you a one-click link;
-clicking it extends the session another 90 days without signing in again. Ignore
-the email and the session lapses, the app stops managing your permit, and you
-re-link in the app (which also resets the clock).
+**How long does a link last?** As long as the account is in use. The connection
+stops after **90 days with nobody using it** — opening the app resets that clock,
+and it counts anyone you share the account with, not just you. If a household does
+go quiet, the app emails a one-click link about a week before the deadline;
+clicking it (or simply signing in) resets the clock. Ignore it and the session
+lapses, the app stops managing the permit, and you re-link in the app. The point
+is to stop holding a council session for someone who has moved away or stopped
+using the service.
 
 ## How it works
 
@@ -84,11 +87,13 @@ See `internal/parking`.
 
 **Keeping the session alive.** A keep-warm loop silently renews idle-but-valid
 sessions before they lapse, on a measured interval inside the observed idle window
-(~0.7x), with jitter and per-account spacing. A session is kept warm for at most
-90 days from the last time its clock was reset — either an interactive re-link OR
-a click on the one-click confirm email, which extends it without signing in. The
-confirm email goes out ~7 days before the deadline; ignore it and renewal stops,
-the session lapses, and the user is told to re-link. See `internal/scheduler`.
+(~0.7x), with jitter and per-account spacing. The re-authorise bound is measured
+against ACCOUNT IDLENESS — the last authenticated visit by any member (throttled
+to one write per person per hour), plus a click on the confirm email — not against
+the age of the link, because the bound exists to stop holding a session for a
+household that has left. The confirm email goes out ~7 days before the deadline;
+ignore it and renewal stops, the session lapses, and the user is told to re-link.
+See `internal/scheduler` (`decideWarm`).
 
 **Scheduling** is a reconcile loop: every minute (and immediately after any
 edit) it computes the target plate for each permit from the roster and active

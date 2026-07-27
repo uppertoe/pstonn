@@ -182,20 +182,32 @@ func TestDecideWarm(t *testing.T) {
 	const maxAge = 90 * 24 * time.Hour
 	const warm = 45 * time.Minute
 	cases := []struct {
-		name            string
-		linked, updated time.Time
-		want            warmAction
+		name                        string
+		lastActive, linked, updated time.Time
+		want                        warmAction
 	}{
-		{"fresh, in bound", now.Add(-24 * time.Hour), now.Add(-10 * time.Minute), warmSkip},
-		{"stale, in bound", now.Add(-24 * time.Hour), now.Add(-46 * time.Minute), warmRenew},
-		{"exactly warm boundary", now.Add(-24 * time.Hour), now.Add(-warm), warmRenew},
-		{"past re-link bound", now.Add(-91 * 24 * time.Hour), now.Add(-1 * time.Minute), warmRetire},
-		{"exactly at bound", now.Add(-maxAge), now.Add(-1 * time.Minute), warmRetire},
-		{"unknown link time", time.Time{}, now.Add(-1 * time.Minute), warmRetire},
+		// Renew/skip is decided by cookie staleness, independent of the idle clock.
+		{"fresh cookie, active", now.Add(-24 * time.Hour), now.Add(-24 * time.Hour), now.Add(-10 * time.Minute), warmSkip},
+		{"stale cookie, active", now.Add(-24 * time.Hour), now.Add(-24 * time.Hour), now.Add(-46 * time.Minute), warmRenew},
+		{"exactly warm boundary", now.Add(-24 * time.Hour), now.Add(-24 * time.Hour), now.Add(-warm), warmRenew},
+
+		// The bound is IDLENESS, not age. A household that linked a year ago but was
+		// here yesterday keeps its session...
+		{"linked long ago but recently active", now.Add(-24 * time.Hour), now.Add(-400 * 24 * time.Hour), now.Add(-46 * time.Minute), warmRenew},
+		// ...and one that linked recently but has not been seen for the whole bound
+		// is retired, which the old link-time clock would have missed entirely.
+		{"linked recently but idle past bound", now.Add(-91 * 24 * time.Hour), now.Add(-2 * 24 * time.Hour), now.Add(-1 * time.Minute), warmRetire},
+		{"exactly at the idle bound", now.Add(-maxAge), now.Add(-maxAge), now.Add(-1 * time.Minute), warmRetire},
+
+		// Sessions predating the idle clock fall back to the link time, so upgrading
+		// does not retire anyone early or keep a stale session forever.
+		{"no idle clock, link in bound", time.Time{}, now.Add(-24 * time.Hour), now.Add(-46 * time.Minute), warmRenew},
+		{"no idle clock, link past bound", time.Time{}, now.Add(-91 * 24 * time.Hour), now.Add(-1 * time.Minute), warmRetire},
+		{"no clock at all", time.Time{}, time.Time{}, now.Add(-1 * time.Minute), warmRetire},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := decideWarm(now, c.linked, c.updated, maxAge, warm); got != c.want {
+			if got := decideWarm(now, c.lastActive, c.linked, c.updated, maxAge, warm); got != c.want {
 				t.Fatalf("decideWarm = %v, want %v", got, c.want)
 			}
 		})
