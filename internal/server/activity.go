@@ -6,12 +6,13 @@ import (
 )
 
 // How many rows the Activity page shows. The question people actually arrive
-// with is "did today's change go through?", so a short list answers it without a
-// wall of scrolling on a phone — and a full-size list of BOTH logs was 200 rows.
-// "Show everything" raises it to the retention ceiling; anything older is gone
+// with is "did today's change go through?", and the answer to that is in the
+// first few rows — so the default stays short enough that both logs fit in about
+// a screen of phone scrolling rather than the 200 rows an uncapped page produced.
+// "Show more" raises it to the retention ceiling; anything older is gone
 // regardless (see PruneApplyLog / PruneChangeLog).
 const (
-	activityRows    = 20
+	activityRows    = 10
 	activityAllRows = 100
 )
 
