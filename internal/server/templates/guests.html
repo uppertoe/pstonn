@@ -288,7 +288,9 @@
      reads as the PERMIT expiring — alarming, and the opposite of what is
      happening. Every line here names its subject explicitly ("this code"). */}}
 <p class="subtitle" style="text-align:center;max-width:360px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
-<div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
+{{/* data-keep-awake: this code is held up for someone else to scan, so the screen
+     must not dim mid-scan. The printable poster deliberately has no marker. */}}
+<div data-keep-awake style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
   <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
 </div>
 <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.StopsAt}}</strong> &mdash; your permit itself is unchanged.</p>

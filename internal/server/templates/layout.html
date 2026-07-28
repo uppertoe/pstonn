@@ -24,6 +24,72 @@
     };
   })();
 </script>
+<script>
+  // htmx starts a view transition for every swap (globalViewTransitions above) but
+  // never handles ViewTransition.ready, and that promise REJECTS whenever the
+  // browser skips a transition — which it routinely does for an hx-boost
+  // navigation. The swap itself is fine (updateCallbackDone and finished both
+  // resolve); the only symptom was "InvalidStateError: Transition was aborted"
+  // twice per page load in the console. Attach the no-op handler htmx omits, to
+  // promises it never awaits. Must run BEFORE htmx.
+  (function () {
+    var native = document.startViewTransition;
+    if (!native) return;
+    var noop = function () {};
+    document.startViewTransition = function () {
+      var t = native.apply(document, arguments);
+      if (t) {
+        if (t.ready && t.ready.catch) t.ready.catch(noop);
+        if (t.finished && t.finished.catch) t.finished.catch(noop);
+      }
+      return t;
+    };
+  })();
+
+  // Keep the screen awake while a QR is being shown for someone else to scan.
+  // You hold the phone out and wait; a screen that dims or locks mid-scan is the
+  // real-world failure. Applies ONLY to on-screen codes — the printable poster is
+  // paper and carries no marker.
+  //
+  // The lock lives in this closure, NOT in Alpine state: an x-effect that both
+  // reads and writes the same reactive property loops and destabilises the
+  // component it is attached to.
+  window.pstonnWake = (function () {
+    var lock = null, want = false;
+    function acquire() {
+      if (!want || lock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+      navigator.wakeLock.request('screen').then(function (l) {
+        if (!want) { try { l.release(); } catch (e) {} return; }
+        lock = l;
+        l.addEventListener('release', function () { lock = null; });
+      }).catch(function () {}); // unsupported, denied, or not user-activated
+    }
+    function release() {
+      want = false;
+      if (lock) { try { lock.release(); } catch (e) {} lock = null; }
+    }
+    // The browser drops the lock whenever the tab is hidden; take it back on return.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') acquire();
+    });
+    return {
+      on: function () { want = true; acquire(); },
+      off: release,
+      // Sync from the DOM: on if any [data-keep-awake] element is actually being
+      // shown. getClientRects() rather than offsetParent — offsetParent is null for
+      // anything inside a position:fixed ancestor, which is exactly what the modal
+      // is, so it would report a visible QR as hidden.
+      sync: function () {
+        var live = Array.prototype.some.call(
+          document.querySelectorAll('[data-keep-awake]'),
+          function (el) { return el.getClientRects().length > 0; });
+        if (live) { this.on(); } else { release(); }
+      }
+    };
+  })();
+  document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
+  document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
+</script>
 <script src="{{asset "htmx.min.js"}}"></script>
 <script defer src="{{asset "alpine.min.js"}}"></script>
 {{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="{{asset "demos.css"}}">

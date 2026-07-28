@@ -250,12 +250,12 @@
      screen alive while it is open: you are holding the phone out for someone else
      to scan, and a screen that dims mid-scan is the real-world failure here. */}}
 <template x-teleport="body">
-{{/* NOTE: a screen wake lock while the code is showing would be a genuine
-     improvement (you hold the phone out to be scanned, and a dimming screen kills
-     the scan) — but doing it with x-effect means reading and writing the same
-     reactive property, which loops and destabilises Alpine on this component. It
-     needs a non-reactive holder to be done safely. Left out deliberately. */}}
-<div class="modal-wrap" x-show="qrOpen" x-cloak @keydown.escape.window="qrOpen=false">
+{{/* The screen is kept awake while the code shows — see window.pstonnWake in
+     layout.html. x-effect only READS qrOpen and defers to the helper; the lock
+     lives in a closure, because reading and writing one reactive property inside
+     an effect loops and destabilises the component. */}}
+<div class="modal-wrap" x-show="qrOpen" x-cloak @keydown.escape.window="qrOpen=false"
+     x-effect="qrOpen, $nextTick(() => window.pstonnWake.sync())">
   <div class="scrim" x-show="qrOpen" x-transition.opacity @click="qrOpen=false"></div>
   <div class="modal qrmodal" x-show="qrOpen" x-transition>
     <div class="modal-head"><strong>{{template "ic-qr"}} Visitor QR</strong>
