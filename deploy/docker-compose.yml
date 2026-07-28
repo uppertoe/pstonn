@@ -18,15 +18,22 @@ services:
       - AUTH_LOGOUT_URL=https://auth.${DOMAIN}/logout # vps-scaffold-auth sign-out
     volumes:
       - pstonn_data:/data
-    # Bound the log. The app logs email addresses, plates and permit identifiers
-    # while running, and Docker's default json-file driver keeps them forever —
-    # so without this the container log is an unbounded, un-retained store of
-    # personal data that no "delete my data" path can reach.
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    # Bound the log — the app writes email addresses, plates and permit identifiers
+    # while running, and that is a store of personal data no "delete my data" path
+    # can reach. HOW to bound it depends on the host, so this is deliberately not
+    # set here:
+    #   * Stock Docker defaults to json-file with NO cap, i.e. unbounded. If that
+    #     is your host, uncomment the block below.
+    #   * The vps-scaffold platform sets the daemon default to journald and caps it
+    #     (SystemMaxUse in /etc/systemd/journald.conf.d/), so logs are already
+    #     bounded and forcing json-file here would take this one container off the
+    #     host's log aggregation for no benefit. Check with:
+    #         docker info --format '{{.LoggingDriver}}'
+    # logging:
+    #   driver: json-file
+    #   options:
+    #     max-size: "10m"
+    #     max-file: "3"
     # --- CIS Docker Benchmark §5 hardening (CI-enforced) ---
     user: "65532:65532"
     cap_drop:

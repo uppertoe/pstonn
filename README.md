@@ -143,8 +143,9 @@ server-rendered `html/template` with htmx and Alpine.js.
 logs 90 days; a decided door-QR request 7 days (and its poll secret dropped once
 settled); a revoked guest link's recipient address 30 days; sent notifications
 stripped of their content at send and purged after 24h; bounce/unsubscribe
-suppressions 2 years, complaints kept. Container logs are size-capped in the
-compose fragment, and `deploy/backup-service.env.example` carries a restic
+suppressions 2 years, complaints kept. Container logs need a size cap too — stock Docker keeps json-file logs forever,
+while a journald host usually caps them already; see the note in
+`deploy/docker-compose.yml`. `deploy/backup-service.env.example` carries a restic
 retention policy — without one, "deleted" has no upper bound.
 
 ## Run locally
