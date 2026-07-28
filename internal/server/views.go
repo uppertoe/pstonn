@@ -47,12 +47,17 @@ type dashboardData struct {
 	ExpiredPermits []expiredPermitView // collapsed: expired/cancelled permits kept as copy sources
 	Log            []store.ApplyRecord
 	Changes        []changeView // who changed the setup (account_log), newest first
-	RelinkBy       string       // human date the session must be re-authorised by ("" if unknown)
-	CouncilLinked  bool         // settings: an active council session exists
-	AutoReconnect  bool         // settings: a saved password lets p.stonn auto-reconnect
-	LastReconnect  string       // settings: when the saved password last signed back in ("" = never)
-	Notify         notifyView   // settings: notification channels
-	Terms          termsView    // terms state + settings display
+	// Activity paging: whether older rows exist beyond what is shown, and whether
+	// we are already showing the expanded list.
+	LogMore       bool
+	ChangesMore   bool
+	ShowingAll    bool
+	RelinkBy      string     // human date the session must be re-authorised by ("" if unknown)
+	CouncilLinked bool       // settings: an active council session exists
+	AutoReconnect bool       // settings: a saved password lets p.stonn auto-reconnect
+	LastReconnect string     // settings: when the saved password last signed back in ("" = never)
+	Notify        notifyView // settings: notification channels
+	Terms         termsView  // terms state + settings display
 	// picker state
 	Pick []pickView
 	// HasPermits distinguishes the two empty-picker cases: the council account

@@ -16,6 +16,14 @@
       {{end}}
       </tbody>
     </table>
+    {{/* Say what's being shown. A silently truncated list is indistinguishable
+         from "that's everything", which is exactly the wrong impression on a page
+         people check to confirm something happened. */}}
+    {{if .Log}}
+    <p class="empty-note" style="margin-top:12px">
+      {{if .LogMore}}Showing the most recent {{len .Log}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}Kept for 90 days.
+    </p>
+    {{end}}
   </section>
 
   {{/* Who changed the SETUP, as opposed to what the scheduler did to the permit.
@@ -23,8 +31,8 @@
        only place a shared household can see who edited the roster, deleted a car
        or revoked a pass. Those changes produce no council apply, so they appear
        nowhere above. */}}
-  <div class="sectitle" style="--hue:var(--sec-settings);margin-top:26px"><span class="ic">{{template "ic-activity"}}</span> Account changes</div>
-  <p class="subtitle">Who changed the schedule, cars, guest passes or shared access &mdash; including you. Kept for 90 days.</p>
+  <div class="sectitle" id="changes" style="--hue:var(--sec-settings);margin-top:26px"><span class="ic">{{template "ic-activity"}}</span> Account changes</div>
+  <p class="subtitle">Who changed the schedule, cars, guest passes or shared access &mdash; including you.</p>
   <section class="card" style="--hue:var(--sec-settings)">
     <table class="mtable">
       <tbody>
@@ -39,6 +47,15 @@
       {{end}}
       </tbody>
     </table>
+    {{if .Changes}}
+    <p class="empty-note" style="margin-top:12px">
+      {{if .ChangesMore}}Showing the most recent {{len .Changes}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}Kept for 90 days.
+    </p>
+    {{end}}
   </section>
+
+  {{if .ShowingAll}}
+  <p class="empty-note" style="margin-top:14px;text-align:center"><a href="/activity">&larr; Back to the recent view</a></p>
+  {{end}}
 
 {{end}}
