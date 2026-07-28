@@ -29,7 +29,7 @@
           <label class="check">
             <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if index $.Edit.Selected .ID}} checked{{end}}{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
             <span class="dot" style="background:{{.Color}}"></span>
-            <span>{{.Label}}</span>
+            <span class="cname">{{.Label}}</span>
             <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
           </label>
           {{end}}
@@ -219,7 +219,7 @@
           <label class="check">
             <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if .Email}} data-email="{{.Email}}" @change="const e=$event.target.dataset.email; if($event.target.checked && recips.indexOf(e)<0){recips=(recips?recips+'\n':'')+e}"{{end}}>
             <span class="dot" style="background:{{.Color}}"></span>
-            <span>{{.Label}}</span>
+            <span class="cname">{{.Label}}</span>
             <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
           </label>
           {{end}}
