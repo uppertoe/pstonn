@@ -256,7 +256,7 @@ func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64
 // and its single token expires after ttl. It is hidden from the pass list. Expired
 // on-screen grants for the owner are pruned first so they do not accumulate.
 // Returns the token hash to store (caller keeps the raw token for the QR URL).
-func (s *Store) CreateQRGrant(ctx context.Context, owner, createdBy string, permitID int64, tokenHash string, ttl time.Duration) (int64, error) {
+func (s *Store) CreateQRGrant(ctx context.Context, owner, createdBy string, permitID int64, tokenHash, tokenSealed string, ttl time.Duration) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -289,12 +289,47 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner, createdBy string, perm
 		return 0, err
 	}
 	expires := time.Now().UTC().Add(ttl).Format(time.RFC3339)
+	// The raw token is kept (sealed) so the SAME code can be shown again while it is
+	// still live — see LiveQRGrant. Without it, re-opening the QR would have to mint
+	// a second token, leaving two working codes for one doorstep and a stated
+	// stop-working time that describes only the newer one. The exposure is much
+	// smaller than the printed QR's, which is sealed indefinitely: this one is
+	// deleted as soon as it lapses.
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, expires_at, created_at) VALUES (?, '', ?, ?, ?)`,
-		grantID, tokenHash, expires, nowUTC()); err != nil {
+		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, token_sealed, expires_at, created_at)
+		 VALUES (?, '', ?, ?, ?, ?)`,
+		grantID, tokenHash, tokenSealed, expires, nowUTC()); err != nil {
 		return 0, err
 	}
 	return grantID, tx.Commit()
+}
+
+// LiveQRGrant returns the permit's on-screen visitor QR if one is still working,
+// so re-opening it shows the SAME code rather than minting another.
+//
+// This is what makes the button safe to put somewhere prominent. A resident whose
+// visitor fumbles the scan will tap again; without reuse that mints a second live
+// token, and the first stays valid until its own expiry — two working codes for one
+// visitor, and a "stops working at" time that is true of only one of them. Reuse
+// also keeps an in-progress scan working instead of racing it.
+func (s *Store) LiveQRGrant(ctx context.Context, owner string, permitID int64, now time.Time) (tokenSealed string, expiresAt time.Time, err error) {
+	var exp string
+	err = s.db.QueryRowContext(ctx, `
+SELECT t.token_sealed, t.expires_at
+FROM guest_grant g JOIN guest_token t ON t.grant_id = g.id
+WHERE g.owner = ? AND g.permit_id = ? AND g.on_screen = 1 AND g.enabled = 1
+  AND t.revoked_at = '' AND t.token_sealed != ''
+  AND t.expires_at != '' AND t.expires_at > ?
+ORDER BY t.id DESC LIMIT 1`,
+		owner, permitID, now.UTC().Format(time.RFC3339)).Scan(&tokenSealed, &exp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expiresAt, _ = time.Parse(time.RFC3339, exp)
+	return tokenSealed, expiresAt, nil
 }
 
 // PrintedGrant is a durable door-QR pass: one per permit, reprintable because its

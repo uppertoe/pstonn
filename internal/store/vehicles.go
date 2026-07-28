@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"log"
 
 	"github.com/uppertoe/pstonn/internal/model"
 )
@@ -76,12 +77,41 @@ func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([
 	return out, rows.Err()
 }
 
-// vehiclePalette is a small, accessible categorical palette. A vehicle's colour
-// is assigned ONCE at creation and stored, so the same car reads identically
-// everywhere and adding/removing other cars never re-colours it.
+// vehiclePalette is a categorical palette for cars. A vehicle's colour is
+// assigned ONCE and stored, so the same car reads identically everywhere and
+// adding or removing other cars never re-colours it.
+//
+// ORDER IS THE DESIGN. pickVehicleColor takes the first unused entry, so a
+// household with four cars only ever sees the first four. These are ordered
+// farthest-first: each entry is the one most perceptually distant from every
+// entry before it, which is what makes a short prefix maximally legible.
+//
+// Sixteen because a household here is not just "our two cars": it is the nanny,
+// a carer, grandparents, a neighbour, a friend who visits weekly.
+//
+// Chosen by optimising perceptual separation (OKLab) inside a deliberately
+// narrow aesthetic envelope — lightness and chroma bounded so the set reads as
+// one family rather than as sixteen unrelated highlighter pens, which is what
+// unconstrained maximisation produces. Every entry clears 2.7:1 against BOTH the
+// light and the dark surface, because the colour is shown as a solid dot and a
+// plate border on each; the plate's TEXT is always var(--ink), never the car
+// colour, so these never have to carry text contrast. Minimum separation is
+// roughly double the previous palette's, including under simulated deuteranopia.
 var vehiclePalette = []string{
-	"#2f6feb", "#127a49", "#b54708", "#7a5af8",
-	"#0e7490", "#be185d", "#4d7c0f", "#9333ea",
+	"#b577e8", "#007914", "#a2614f", "#0081a2",
+	"#b29703", "#e465a3", "#5c65d6", "#896498",
+	"#e66f62", "#0c9c83", "#018ae4", "#717d07",
+	"#07745d", "#1ca045", "#ba3f7f", "#6a85bd",
+}
+
+// inPalette reports whether a stored colour belongs to the CURRENT palette.
+func inPalette(c string) bool {
+	for _, p := range vehiclePalette {
+		if p == c {
+			return true
+		}
+	}
+	return false
 }
 
 // pickVehicleColor returns the first palette colour not already used by this
@@ -138,44 +168,72 @@ func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label st
 	return id, tx.Commit()
 }
 
-// BackfillVehicleColors assigns a stored colour to any vehicle still missing one
-// (pre-migration rows), preserving each owner's CURRENT on-screen colours: it
-// walks their vehicles in the same order the UI lists them (label, registration)
-// and hands out palette colours in that order. Idempotent — a no-op once done.
+// BackfillVehicleColors gives every vehicle a colour from the CURRENT palette.
+//
+// It covers two cases with one pass: rows that never had a colour, and rows still
+// holding a colour from a superseded palette. The second matters because colours
+// are stored per car — without it, a household would keep its old colours while
+// any car added later drew from the new set, so one list would show two unrelated
+// palettes side by side and the "which car is this?" cue would be worse than
+// before, not better.
+//
+// Self-guarding, so it is safe to run on every boot: an owner is only touched
+// while any of their vehicles sits outside the palette, and once rewritten they
+// all sit inside it. Colours are handed out in the order the UI lists them
+// (label, registration) so a household's assignment is stable and reproducible.
 func (s *Store) BackfillVehicleColors(ctx context.Context) error {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, owner FROM vehicle WHERE color = '' ORDER BY owner, label, registration`)
+		`SELECT id, owner, color FROM vehicle ORDER BY owner, label, registration`)
 	if err != nil {
 		return err
 	}
 	type ov struct {
 		id    int64
 		owner string
+		color string
 	}
-	var todo []ov
+	var all []ov
 	for rows.Next() {
 		var r ov
-		if err := rows.Scan(&r.id, &r.owner); err != nil {
+		if err := rows.Scan(&r.id, &r.owner, &r.color); err != nil {
 			rows.Close()
 			return err
 		}
-		todo = append(todo, r)
+		all = append(all, r)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
+
+	// Which owners need rewriting: any vehicle missing a colour or on an old one.
+	stale := map[string]bool{}
+	for _, r := range all {
+		if r.color == "" || !inPalette(r.color) {
+			stale[r.owner] = true
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
 	i, prev := 0, ""
-	for _, r := range todo {
+	for _, r := range all {
+		if !stale[r.owner] {
+			continue
+		}
 		if r.owner != prev {
 			i, prev = 0, r.owner
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE vehicle SET color = ? WHERE id = ?`,
-			vehiclePalette[i%len(vehiclePalette)], r.id); err != nil {
+		want := vehiclePalette[i%len(vehiclePalette)]
+		i++
+		if r.color == want {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE vehicle SET color = ? WHERE id = ?`, want, r.id); err != nil {
 			return err
 		}
-		i++
 	}
+	log.Printf("vehicles: re-coloured %d household(s) onto the current palette", len(stale))
 	return nil
 }
 
@@ -199,3 +257,7 @@ func (s *Store) DeleteVehicle(ctx context.Context, owner string, id int64) error
 	_, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE id = ? AND owner = ?`, id, owner)
 	return err
 }
+
+// VehiclePaletteForTest exposes the palette so a test can assert the ordering
+// contract (all distinct) without making the palette itself writable.
+func VehiclePaletteForTest() []string { return append([]string(nil), vehiclePalette...) }

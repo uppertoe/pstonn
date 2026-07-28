@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -398,7 +399,7 @@ func TestGuestPageBoostReturnsFullPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := "boost-test-guest-token-000111222333"
-	if _, err := s.store.CreateQRGrant(ctx, owner, "", pid, hashGuestToken(raw), time.Hour); err != nil {
+	if _, err := s.store.CreateQRGrant(ctx, owner, "", pid, hashGuestToken(raw), "", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -496,4 +497,72 @@ func TestStatusRosterSealed(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("bad token = %d, want 401", w.Code)
 	}
+}
+
+// TestVisitorQRReusesLiveCode: re-opening the visitor QR must show the SAME code
+// while the first one is still working.
+//
+// This is what makes the permit-card button safe to put on the home page. A
+// resident whose visitor mis-scans will just tap again; minting a second token
+// would leave two working codes for one doorstep, invalidate neither, and make
+// the stated stop-working time true of only the newer one. It would also race a
+// scan already in progress.
+func TestVisitorQRReusesLiveCode(t *testing.T) {
+	ctx := context.Background()
+	s := newAuthzServer(t)
+	const owner = "owner@example.com"
+	pid, err := s.store.UpsertPermit(ctx, owner, "VPP1", "1", "VPP1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The permit-card button posts via htmx, which returns the bare qr-card
+	// fragment for the modal (the full-page branch needs a live council client).
+	show := func() string {
+		t.Helper()
+		r := httptest.NewRequest("POST", "/guests/qr",
+			strings.NewReader(url.Values{"permit_id": {strconv.FormatInt(pid, 10)}}.Encode()))
+		r.Host = "app.example.com"
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Origin", "https://app.example.com")
+		r.Header.Set("HX-Request", "true")
+		r.Header.Set("Remote-Email", owner)
+		r.Header.Set("Remote-Groups", "user")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("show visitor QR = %d, want 200: %s", w.Code, w.Body.String())
+		}
+		m := regexp.MustCompile(`/g/([A-Za-z0-9_-]{8,})`).FindStringSubmatch(w.Body.String())
+		if m == nil {
+			t.Fatalf("no activation link in the response")
+		}
+		return m[1]
+	}
+
+	first := show()
+	second := show()
+	if first != second {
+		t.Fatalf("re-opening minted a NEW code (%s then %s): two live codes for one visitor", first, second)
+	}
+
+	// Only the genuinely new code is an access grant worth logging.
+	changes, err := s.store.ListChanges(ctx, owner, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := 0
+	for _, c := range changes {
+		if c.Action == store.ActionDoorQRShow {
+			shown++
+		}
+	}
+	if shown != 1 {
+		t.Errorf("logged %d doorqr.show rows for one doorstep, want 1", shown)
+	}
+
+	// Expiry/revocation semantics are covered by TestLiveQRGrant in the store.
 }

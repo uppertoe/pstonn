@@ -3,19 +3,14 @@
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
   <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
   {{if .QR}}
-  {{/* ---- ON-SCREEN VISITOR QR (instant, expires) ---- */}}
+  {{/* ---- ON-SCREEN VISITOR QR ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
     <div class="editbar" style="text-align:left">
       <span class="eyebrow">{{template "ic-qr"}} Visitor QR</span>
       <a href="/guests"><button type="button" class="ghost sm">&larr; Done</button></a>
     </div>
     <h2 style="justify-content:center">{{.QR.PermitLabel}}</h2>
-    <p class="subtitle" style="text-align:center;max-width:360px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
-    <div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
-      <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
-    </div>
-    <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.ExpiresAt}}</strong>. Generate a fresh one each time.</p>
-    <p class="empty-note" style="word-break:break-all;margin-top:10px">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
+    {{template "qr-card" .}}
   </section>
 
   {{else if .Edit}}
@@ -129,10 +124,10 @@
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Visitor at the door?</h2>
     <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
-    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code expires in 15&nbsp;min (whoever scans it within that window can put a plate on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a plate on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
-        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. Expires 15&nbsp;min after you show it.</span></div>
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
         {{if gt (len .PermitOpts) 1}}
         <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
@@ -284,4 +279,18 @@
   <p class="posterhint noprint">Print it, laminate it, leave it up. This code doesn't expire &mdash; reopen this page any time to reprint the very same one.</p>
 </main>
 
+{{end}}
+
+{{define "qr-card"}}
+{{/* The QR itself, shared by the guests page and the schedule page's modal.
+
+     COPY NOTE: never say the code "expires". Next to a parking permit that word
+     reads as the PERMIT expiring — alarming, and the opposite of what is
+     happening. Every line here names its subject explicitly ("this code"). */}}
+<p class="subtitle" style="text-align:center;max-width:360px;margin:0 auto 14px">Show this to your visitor. They scan it, enter their number plate, and it goes on the permit until the end of today.</p>
+<div style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
+  <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
+</div>
+<p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.StopsAt}}</strong> &mdash; your permit itself is unchanged.</p>
+<p class="empty-note" style="word-break:break-all;margin-top:10px">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>
 {{end}}

@@ -98,7 +98,11 @@ type qrShowView struct {
 	PermitLabel string
 	ImageURI    template.URL // the QR as a data: URI (trusted: server-generated)
 	URL         string       // the activation URL (also printed under the QR)
-	ExpiresAt   string       // human-readable expiry
+	// StopsAt is when this CODE stops working, as a plain clock time. Deliberately
+	// not called "expires": next to a parking permit that word reads as the PERMIT
+	// expiring, which would be alarming and wrong. The copy says "this code stops
+	// working at …" for the same reason.
+	StopsAt string
 }
 
 // doorQRView drives the styled, printable door-QR poster (State "doorqr"). It is a
@@ -1317,15 +1321,87 @@ func (s *Server) emailLinks(ctx context.Context, owner, permitLabel string, link
 	return sent
 }
 
-// showVisitorQR mints a short-lived, plate-entry grant for a permit and renders a
-// QR the resident shows on-screen. A visitor scans it, types their plate, and it
-// goes on the permit until the end of the day. The grant self-expires (qrTTL).
-func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
-	noStore(w) // the page embeds a live activation token; keep it out of caches
-	user, owner, _ := s.resolveAccount(r.Context())
-	permitID := atoi64(r.FormValue("permit_id"))
+// visitorQR returns the permit's on-screen visitor QR, reusing the current one if
+// it is still working and minting a fresh one otherwise.
+//
+// Reuse is what lets this be a one-tap action from the schedule page. A resident
+// whose visitor mis-scans will simply tap again; minting each time would leave
+// several working codes for one doorstep, invalidate nothing, and make the stated
+// stop-working time true of only the newest. It also means re-opening the modal
+// cannot race a scan already in progress.
+func (s *Server) visitorQR(ctx context.Context, owner, user string, permit model.Permit) (*qrShowView, error) {
+	raw, expires, err := s.reuseVisitorQR(ctx, owner, permit.ID)
+	switch {
+	case err == nil: // still live: same code, its own original deadline
+	case errors.Is(err, store.ErrNotFound):
+		raw, expires, err = s.mintVisitorQR(ctx, owner, user, permit)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, err
+	}
+	img, err := qrDataURI(s.guestLink(raw))
+	if err != nil {
+		return nil, err
+	}
+	return &qrShowView{
+		PermitLabel: permitLabel(permit),
+		ImageURI:    template.URL(img),
+		URL:         s.guestLink(raw),
+		StopsAt:     expires.In(s.cfg.DisplayLocation).Format("3:04pm"),
+	}, nil
+}
+
+// reuseVisitorQR opens the sealed token of a still-working QR for this permit.
+// A token we cannot unseal is treated as absent, so a key problem yields a fresh
+// code rather than a dead end at the door.
+func (s *Server) reuseVisitorQR(ctx context.Context, owner string, permitID int64) (string, time.Time, error) {
+	sealed, expires, err := s.store.LiveQRGrant(ctx, owner, permitID, time.Now())
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	raw, err := s.box.Open(sealed)
+	if err != nil {
+		log.Printf("visitor QR: could not open a live token for permit %d (%v); minting a fresh one", permitID, err)
+		return "", time.Time{}, store.ErrNotFound
+	}
+	return raw, expires, nil
+}
+
+// mintVisitorQR creates a new short-lived plate-entry grant and logs it.
+func (s *Server) mintVisitorQR(ctx context.Context, owner, user string, permit model.Permit) (string, time.Time, error) {
 	raw, hash := newGuestToken()
-	if _, err := s.store.CreateQRGrant(r.Context(), owner, user, permitID, hash, qrTTL); err != nil {
+	sealed, err := s.box.Seal(raw)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if _, err := s.store.CreateQRGrant(ctx, owner, user, permit.ID, hash, sealed, qrTTL); err != nil {
+		return "", time.Time{}, err
+	}
+	// This mints a live, if short-lived, capability: whoever scans the screen can
+	// put a plate on the permit without further approval. Every other way of
+	// handing out permit access is logged, so this one is too. Only a genuinely NEW
+	// code is logged — re-opening the same one is not a new grant of access.
+	s.logChange(ctx, owner, user, store.ActionDoorQRShow, permitLabel(permit), "")
+	return raw, time.Now().Add(qrTTL), nil
+}
+
+// showVisitorQR renders the on-screen visitor QR for a permit. A visitor scans it,
+// types their plate, and it goes on the permit until the end of the day.
+//
+// Serves a bare card to htmx (the schedule page's modal) and a full page otherwise,
+// so the same action works from the permit card and from the guests page.
+func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
+	noStore(w) // the response embeds a live activation token; keep it out of caches
+	user, owner, _ := s.resolveAccount(r.Context())
+	permit, err := s.store.GetPermit(r.Context(), atoi64(r.FormValue("permit_id")))
+	if err != nil || permit.Owner != owner {
+		s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
+		return
+	}
+	qr, err := s.visitorQR(r.Context(), owner, user, permit)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
 			return
@@ -1333,15 +1409,13 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	permit, _ := s.store.GetPermit(r.Context(), permitID)
-	// This mints a live, if short-lived, capability: whoever scans the screen can
-	// put a plate on the permit without further approval. Every other way of
-	// handing out permit access is logged, so this one is too.
-	s.logChange(r.Context(), owner, user, store.ActionDoorQRShow, permitLabel(permit), "")
-	url := s.guestLink(raw)
-	img, err := qrDataURI(url)
-	if err != nil {
-		s.serverError(w, err)
+	// A boosted link is a navigation and wants the whole page; a plain hx-post from
+	// the permit card's button wants just the card to drop into its modal.
+	if isHX(r) && !isBoosted(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := templates.ExecuteTemplate(w, "qr-card", dashboardData{QR: qr, Loc: s.cfg.DisplayLocation}); err != nil {
+			log.Printf("render qr-card: %v", err)
+		}
 		return
 	}
 	base, ok := s.appShell(w, r, "guests")
@@ -1352,12 +1426,7 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	base.QR = &qrShowView{
-		PermitLabel: permitLabel(permit),
-		ImageURI:    template.URL(img),
-		URL:         url,
-		ExpiresAt:   time.Now().In(s.cfg.DisplayLocation).Add(qrTTL).Format("3:04pm"),
-	}
+	base.QR = qr
 	s.render(w, base)
 }
 

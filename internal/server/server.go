@@ -168,6 +168,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /account/members", s.withConsent(s.addMember))
 	mux.HandleFunc("POST /account/members/remove", s.withConsent(s.removeMember))
 	mux.HandleFunc("POST /account/leave", s.withUser(s.leaveAccount)) // secondary can always leave
+	mux.HandleFunc("GET /schedule/legend", s.withConsent(s.legendFragment))
 	mux.HandleFunc("POST /notifications", s.withConsent(s.saveNotify))
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
 	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))

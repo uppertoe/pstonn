@@ -53,13 +53,127 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		pvs = append(pvs, pv)
 	}
 	base.Vehicles = vviews
+	if used, lerr := s.legendColors(ctx, owner, vviews, now); lerr == nil {
+		base.LegendVehicles, base.LegendMore = legendVehicles(vviews, used)
+	} else {
+		log.Printf("legend colours for %s: %v", owner, lerr)
+	}
 	base.Permits = pvs
 	base.ExpiredPermits = expired
 	s.render(w, base)
 }
 
+// legendFragment serves just the Schedule page's colour key, re-fetched by the
+// page whenever a permit changes (see the schedule-changed trigger).
+func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
+	_, owner, _ := s.resolveAccount(r.Context())
+	vehicles, err := s.store.ListVehiclesFor(r.Context(), owner)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	vviews, _, _, _ := vehicleViews(vehicles)
+	used, err := s.legendColors(r.Context(), owner, vviews, time.Now().In(s.cfg.DisplayLocation))
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	var d dashboardData
+	d.LegendVehicles, d.LegendMore = legendVehicles(vviews, used)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := templates.ExecuteTemplate(w, "legend", d); err != nil {
+		log.Printf("render legend: %v", err)
+	}
+}
+
 // buildPermitView assembles one permit's roster grid, 14-day at-a-glance
 // calendar (resolved per day), and upcoming one-offs.
+// endOfDay is the last minute of t's calendar day in loc — the natural close of a
+// one-off booking, matching the "until the end of the day" language used for guest
+// activations.
+func endOfDay(t time.Time, loc *time.Location) time.Time {
+	l := t.In(loc)
+	return time.Date(l.Year(), l.Month(), l.Day(), 23, 59, 0, 0, loc)
+}
+
+// legendColors is the set of car colours the Schedule page will render, across
+// every permit on it: whatever each roster day and each live one-off points at,
+// plus whatever is on each permit right now.
+//
+// Read from the store rather than from the built permitViews so the htmx fragment
+// path can recompute it as cheaply as the full page — it is local SQLite only, no
+// council call. That matters because it runs on every roster tap. The day strip
+// adds nothing here: it resolves from those same rules and overrides, so its
+// colours are always a subset.
+func (s *Server) legendColors(ctx context.Context, owner string, vviews []vehicleView, now time.Time) (map[string]bool, error) {
+	colorByReg := map[string]string{}
+	colorByID := map[int64]string{}
+	for _, v := range vviews {
+		colorByID[v.ID] = v.Color
+		colorByReg[normPlate(v.Registration)] = v.Color
+	}
+	permits, err := s.store.ListPermitsFor(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	mark := func(c string) {
+		if c != "" {
+			used[c] = true
+		}
+	}
+	for _, p := range permits {
+		// Expired permits collapse into their own section and render no colours.
+		if p.Inactive(now, s.cfg.DisplayLocation) {
+			continue
+		}
+		mark(colorByReg[normPlate(p.ActiveRegistration)])
+		rules, err := s.store.ListRules(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, ru := range rules {
+			mark(colorByID[ru.VehicleID])
+		}
+		ovs, err := s.store.ListOverrides(ctx, p.ID, now)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range ovs {
+			mark(colorByID[o.VehicleID]) // an ad-hoc plate has no vehicle, so no colour
+		}
+	}
+	return used, nil
+}
+
+// normPlate canonicalises a registration for comparison: the council echoes
+// plates back in whatever case and spacing they were entered with.
+func normPlate(s string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
+}
+
+// colorOfPlate finds the household's colour for a plate that is on the permit.
+//
+// Matched on the PLATE rather than a vehicle id because "what is on the permit
+// now" comes back from the council as a bare registration — it may be a saved
+// car, or a visitor's one-off plate that belongs to no vehicle row at all.
+// Returns "" for the latter, which renders neutral: colour means "one of your
+// cars", and its absence means "not one of yours", which is worth knowing at a
+// glance. Case- and space-insensitive, since the council echoes plates back in
+// whatever form they were entered.
+func colorOfPlate(vs []vehicleView, plate string) string {
+	want := normPlate(plate)
+	if want == "" {
+		return ""
+	}
+	for _, v := range vs {
+		if normPlate(v.Registration) == want {
+			return v.Color
+		}
+	}
+	return ""
+}
+
 func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []vehicleView, colorByID, regByID, labelByID map[int64]string, now time.Time) (permitView, error) {
 	// Refresh "on permit now" from the council (cached ≤5 min, refreshed in the
 	// background — never a synchronous council call), so the display is truthful
@@ -164,6 +278,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
+		ActiveColor:     colorOfPlate(vviews, p.ActiveRegistration),
 		RosterEmpty:     len(rules) == 0,
 		Detail:          permitDetail(p),
 		PlateRefreshing: plateRefreshing,
@@ -309,13 +424,39 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		}
 		startsAt = t
 	}
+	// When it ENDS is an explicit choice, defaulting to the end of the day it
+	// starts. It used to be "blank means run forever", which made the open-ended
+	// booking the thing you got by not deciding — the opposite of what it should
+	// be. An indefinite booking quietly holds the permit against the household's
+	// own roster until somebody notices, so it now takes a deliberate selection.
+	//
+	// Measured from the START day rather than literally "today", so booking a car
+	// for next Tuesday ends at the end of next Tuesday rather than in the past.
+	//
+	// An unrecognised or absent value falls back to the safe default, so a stale
+	// cached page or a client that drops the field cannot resurrect the old
+	// forever-by-accident behaviour.
 	var endsAt *time.Time
-	if raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "23:59"); raw != "" {
+	switch r.FormValue("ends") {
+	case "open":
+		endsAt = nil // deliberate: runs until someone changes it
+	case "custom":
+		raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "23:59")
+		if raw == "" {
+			s.formError(w, r, "Pick the date this booking should end, or choose one of the other options.")
+			return
+		}
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
 		if err != nil {
 			s.formError(w, r, "Couldn't read the end time.")
 			return
 		}
+		endsAt = &t
+	case "nextday":
+		t := endOfDay(startsAt.AddDate(0, 0, 1), s.cfg.DisplayLocation)
+		endsAt = &t
+	default: // "day", and anything unexpected
+		t := endOfDay(startsAt, s.cfg.DisplayLocation)
 		endsAt = &t
 	}
 	if endsAt != nil && !endsAt.After(startsAt) {
@@ -445,6 +586,13 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 	// outage can't turn the page into a persistent polling loop.
 	pv.PlateRefreshing = false
 	_, _, pv.IsPrimary = s.resolveAccount(ctx)
+	// The colour key lives ABOVE the permit cards, outside this fragment's target,
+	// so a roster change would otherwise leave it stale until the next full load —
+	// a car could vanish from the schedule while its chip stayed in the key. Tell
+	// the page instead of pushing the key here: the key re-fetches itself, so the
+	// newest state comes from the newest request rather than from whichever
+	// overlapping response happened to land last.
+	w.Header().Set("HX-Trigger", "schedule-changed")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "permit-body", pv); err != nil {
 		log.Printf("render permit-body: %v", err)

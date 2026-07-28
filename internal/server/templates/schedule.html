@@ -1,15 +1,48 @@
+{{define "legend-inner"}}
+  {{if .LegendVehicles}}
+  <div class="legend">
+    {{range .LegendVehicles}}<span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}} <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span></span>{{end}}
+    {{if .LegendMore}}<a class="legend-more" href="/vehicles">+{{.LegendMore}} more</a>{{end}}
+  </div>
+  {{end}}
+{{end}}
+
+{{define "legend"}}
+{{/* A key for the colours ON THIS PAGE, not a list of every car — see
+     legendVehicles. The plate carries the car's colour here too: this block IS the
+     colour key, so rendering its plates in the generic teal .reg undercut the one
+     thing it exists to explain.
+
+     The #legend wrapper is ALWAYS rendered, even when the key is empty. It is the
+     target of an out-of-band swap from every roster/one-off change (see
+     respondPermit), and htmx can only swap into an element already in the DOM — if
+     the wrapper vanished whenever the key was empty, rostering the first car could
+     never bring it back. */}}
+<div id="legend"
+     {{/* The key refreshes itself. Every permit mutation replies with an
+          HX-Trigger of schedule-changed, and this element — which lives ABOVE the
+          permit cards and so survives their swaps — re-fetches once in response.
+          Pushing the key out-of-band from each response looked simpler but raced:
+          the key was computed when that request ran, so overlapping edits could
+          land out of order and leave it describing an older schedule. Pulling puts
+          the newest state in the newest response, and hx-sync=this:replace lets a
+          newer refresh cancel an older one still in flight. */}}
+     hx-get="/schedule/legend" hx-trigger="schedule-changed from:body"
+     hx-swap="outerHTML" hx-sync="this:replace">{{template "legend-inner" .}}</div>
+{{end}}
+
+
 {{define "page-schedule"}}
   {{/* ---------- SCHEDULE ---------- */}}
   {{if .Vehicles}}
-  <div class="legend">
-    {{range .Vehicles}}<span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}} <span class="reg">{{.Registration}}</span></span>{{end}}
-  </div>
+  {{template "legend" .}}
   {{else}}
   <div class="banner warn">{{template "ic-cars"}} <span>Add your plates on the <a href="/vehicles">Vehicles</a> page first, then pick which vehicle covers each day of the week.</span></div>
   {{end}}
   {{range .Permits}}
   <section class="card" id="permit-{{.Permit.ID}}" style="--hue:var(--sec-schedule)"
-           x-data="{addOpen:false}" @open-oneoff.window="addOpen=true" @htmx:after-request="addOpen=false">
+           x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="addOpen=true"
+           @htmx:after-request="if(!$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     {{template "permit-body" .}}
   </section>
   {{else}}
@@ -66,10 +99,30 @@
       </form>
     </div>
     {{if .Detail}}<span class="pdetail">{{.Detail}}</span>{{end}}
+    {{/* "Visitor at the door" lives HERE, on the permit it acts on, rather than in
+         a second FAB. Two things fall out of that: the permit is implicit (a
+         multi-permit account never has to pick one, which is exactly where the old
+         path was slowest), and it sits beside the "on permit now" badge, so you can
+         see what you are about to displace before you show the code. */}}
+    <button type="button" class="qrtrigger sm"
+            hx-post="/guests/qr" hx-vals='{"permit_id": "{{.Permit.ID}}"}'
+            {{/* transition:false — the app enables htmx globalViewTransitions, and
+                 running one over a modal Alpine has teleported into <body> aborts
+                 with "Transition was aborted because of invalid state", leaving the
+                 modal empty. This swap is inside an overlay that is animating in
+                 already, so it has nothing to gain from a view transition. */}}
+            hx-target="#qrbody-{{.Permit.ID}}" hx-swap="innerHTML transition:false"
+            @click="qrOpen=true">{{template "ic-qr"}} Show visitor QR</button>
   </div>
   <div class="nowbadge">
     <span class="muted" style="font-size:12.5px">on permit now</span>
-    {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
+    {{/* The plate carries its car's own colour, like every other plate in the app.
+         It used to render as .reg, which is teal-tinted whatever is on the permit —
+         a colour cue that looked meaningful and wasn't, on the one line whose whole
+         job is "which car is on the permit right now". An empty ActiveColor leaves
+         the neutral .plate default, which is how a visitor's one-off plate reads as
+         "not one of your cars". */}}
+    {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
     {{/* Fixed-size status slot: spinner while a background council check runs,
          a tick otherwise — same footprint either way, so the pill never shifts. */}}
     <span class="pslot">{{if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
@@ -191,6 +244,34 @@
 </div>
 {{end}}
 
+{{/* Visitor-QR modal, teleported for the same reason as the one-off modal below.
+     The card is fetched by htmx into #qrbody-N when the trigger is clicked, so the
+     token is only minted when the modal is actually opened. Wake Lock keeps the
+     screen alive while it is open: you are holding the phone out for someone else
+     to scan, and a screen that dims mid-scan is the real-world failure here. */}}
+<template x-teleport="body">
+{{/* NOTE: a screen wake lock while the code is showing would be a genuine
+     improvement (you hold the phone out to be scanned, and a dimming screen kills
+     the scan) — but doing it with x-effect means reading and writing the same
+     reactive property, which loops and destabilises Alpine on this component. It
+     needs a non-reactive holder to be done safely. Left out deliberately. */}}
+<div class="modal-wrap" x-show="qrOpen" x-cloak @keydown.escape.window="qrOpen=false">
+  <div class="scrim" x-show="qrOpen" x-transition.opacity @click="qrOpen=false"></div>
+  <div class="modal qrmodal" x-show="qrOpen" x-transition>
+    <div class="modal-head"><strong>{{template "ic-qr"}} Visitor QR</strong>
+      <button type="button" class="icon-btn" @click="qrOpen=false" aria-label="Close">{{template "ic-x"}}</button>
+    </div>
+    <div id="qrbody-{{.Permit.ID}}" class="qrbody">
+      <p class="empty-note">Getting a code&hellip;</p>
+    </div>
+    <div class="modal-actions">
+      <a href="/guests" class="link-quiet">Other ways to let visitors in &rarr;</a>
+      <button type="button" class="ghost" @click="qrOpen=false">Done</button>
+    </div>
+  </div>
+</div>
+</template>
+
 {{/* Add-one-off modal, teleported to <body> so it escapes the card's transform
      (an animated/transformed ancestor becomes the containing block for position:fixed). */}}
 <template x-teleport="body">
@@ -209,7 +290,16 @@
   <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override"
         hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
-        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:''}">
+        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
+                 endLabel(offset) {
+                   const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
+                   d.setDate(d.getDate() + offset);
+                   const same = (a, b) => a.toDateString() === b.toDateString();
+                   const today = new Date(), tmw = new Date(); tmw.setDate(tmw.getDate() + 1);
+                   if (same(d, today)) return 'Midnight tonight';
+                   if (same(d, tmw)) return 'Midnight tomorrow night';
+                   return 'Midnight ' + d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+                 }}">
     <div class="seg">
       <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved car</button>
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">One-off plate</button>
@@ -246,15 +336,31 @@
          Android (and some others) don't offer a time picker for datetime-local,
          so the hour can't be entered. type=date and type=time are well supported
          everywhere; the server recombines from_date/from_time (see addOverride). */}}
-    <div class="row2">
-      <label class="fld">From
-        <div class="dtpair"><input type="date" name="from_date" aria-label="Start date"><input type="time" name="from_time" aria-label="Start time"></div>
-      </label>
-      <label class="fld">Until
-        <div class="dtpair"><input type="date" name="until_date" aria-label="End date"><input type="time" name="until_time" aria-label="End time"></div>
-      </label>
-    </div>
-    <p class="empty-note">Leave "From" blank to start now, "Until" blank to keep it until you change it. Pick a date with no time and it runs from the start of that day to the end of the "Until" day.</p>
+    <label class="fld">From
+      <div class="dtpair"><input type="date" name="from_date" x-model="fromDate" aria-label="Start date"><input type="time" name="from_time" aria-label="Start time"></div>
+    </label>
+    {{/* Ending is a CHOICE, defaulting to the end of the day it starts. It used to
+         be an empty "Until" box, which meant the open-ended booking was what you
+         got by not deciding — and an indefinite one quietly overrides the
+         household's own roster until somebody notices. Running until you say
+         otherwise is still available, it just has to be picked. */}}
+    <label class="fld">Ends
+      {{/* The two default labels name the actual night, so they stay true when the
+           booking starts in the future — "midnight tonight" would be a lie for a
+           booking that starts next Monday. Same rule the server applies: the end is
+           measured from the day it STARTS. */}}
+      <select name="ends" x-model="ends">
+        <option value="day" x-text="endLabel(0)">Midnight tonight</option>
+        <option value="nextday" x-text="endLabel(1)">Midnight tomorrow night</option>
+        <option value="custom">Choose when it ends&hellip;</option>
+        <option value="open">Leave it on until I change it</option>
+      </select>
+    </label>
+    <label class="fld" x-show="ends=='custom'" x-cloak>Ends at
+      <div class="dtpair"><input type="date" name="until_date" aria-label="End date"><input type="time" name="until_time" aria-label="End time"></div>
+    </label>
+    <p class="empty-note" x-show="ends!='open'">Leave "From" blank to start now.{{" "}}<span x-show="ends=='custom'">A date with no time runs to the end of that day.</span></p>
+    <p class="empty-note" x-show="ends=='open'" x-cloak>This booking will keep overriding your weekly roster until you cancel it.</p>
     <div class="modal-actions">
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       <button type="submit">{{template "ic-plus"}} Book</button>

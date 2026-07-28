@@ -42,7 +42,12 @@ type dashboardData struct {
 	SharedWith string       // for a secondary: the primary account's email
 	Members    []memberView // for a primary: the secondaries with access
 	// dashboard state
-	Vehicles       []vehicleView
+	Vehicles []vehicleView
+	// LegendVehicles is the Schedule page's colour key: only the cars whose colour
+	// is actually on the page (see legendVehicles). LegendMore counts those left
+	// out, surfaced as a link to the full list.
+	LegendVehicles []vehicleView
+	LegendMore     int
 	Permits        []permitView
 	ExpiredPermits []expiredPermitView // collapsed: expired/cancelled permits kept as copy sources
 	Log            []store.ApplyRecord
@@ -143,6 +148,31 @@ func (s *Server) notifyViewOf(user string, pref store.NotifyPref) notifyView {
 	}
 }
 
+// legendVehicles narrows the colour key at the top of the Schedule page to the
+// cars whose colour actually appears on it, and reports how many were left out.
+//
+// The key used to list every car. That reads fine for three or four, but this app
+// is for households with a nanny, a carer, grandparents, a neighbour — ten cars
+// took four rows and pushed the permit card itself below the fold on a phone,
+// spending the most valuable space on screen explaining colours that were mostly
+// not on it. A key should explain what you can see, so this shows exactly the
+// colours the page renders and nothing else. It shrinks itself: sixteen cars with
+// four in the roster gives four chips.
+//
+// Keyed on colour rather than vehicle id because not every place that renders a
+// colour carries an id — and if two cars ever did share one (possible only past
+// sixteen, where the palette wraps), listing both is right, since the key could
+// not otherwise tell them apart. Input order is preserved so it is stable between
+// renders.
+func legendVehicles(vehicles []vehicleView, used map[string]bool) (shown []vehicleView, more int) {
+	for _, v := range vehicles {
+		if v.Color != "" && used[v.Color] {
+			shown = append(shown, v)
+		}
+	}
+	return shown, len(vehicles) - len(shown)
+}
+
 type vehicleView struct {
 	ID           int64
 	Label        string
@@ -160,11 +190,17 @@ type permitView struct {
 	Permit        model.Permit
 	DesiredReg    string
 	DesiredSource string
-	Days          []dayView
-	Cal           []calView
-	Overrides     []overrideView
-	Vehicles      []vehicleView
-	Loc           *time.Location
+	// ActiveColor is the stored colour of whichever saved car is on the permit
+	// right now, or "" when the plate is not one of the household's cars (a
+	// visitor's ad-hoc plate). Empty is meaningful, not missing: it renders the
+	// plate neutral, so colour reads as "one of ours" and its absence as "someone
+	// else's" — which is the question this badge exists to answer.
+	ActiveColor string
+	Days        []dayView
+	Cal         []calView
+	Overrides   []overrideView
+	Vehicles    []vehicleView
+	Loc         *time.Location
 	// Expiry surfacing (empty ExpiryLabel = expiry unknown).
 	ExpiryLabel string // "3 Aug 2026"
 	ExpiryIn    string // "in 12 days" / "tomorrow" / "today" / "3 days ago"

@@ -290,3 +290,147 @@ func TestTemplatesRender(t *testing.T) {
 		}
 	}
 }
+
+// TestColorOfPlate: the "on permit now" badge colours the plate only when it is
+// one of the household's own cars. Empty is meaningful — it renders neutral, so
+// a visitor's one-off plate reads as "not one of yours" rather than borrowing a
+// colour that belongs to a different car.
+func TestColorOfPlate(t *testing.T) {
+	vs := []vehicleView{
+		{Label: "Ours", Registration: "WGP472", Color: "#2f6feb"},
+		{Label: "Nanny", Registration: "1AB2CD", Color: "#127a49"},
+	}
+	cases := []struct{ plate, want, why string }{
+		{"WGP472", "#2f6feb", "exact match"},
+		{"1AB2CD", "#127a49", "second car"},
+		{"wgp472", "#2f6feb", "council echoes plates back in mixed case"},
+		{" 1AB 2CD ", "#127a49", "spacing varies in how plates are entered"},
+		{"ZZZ999", "", "a visitor's plate is not one of the household's cars"},
+		{"", "", "nothing on the permit"},
+	}
+	for _, c := range cases {
+		if got := colorOfPlate(vs, c.plate); got != c.want {
+			t.Errorf("colorOfPlate(%q) = %q, want %q (%s)", c.plate, got, c.want, c.why)
+		}
+	}
+}
+
+// TestVehiclePaletteIsDistinct guards the ordering contract: colours are handed
+// out first-unused, so the sequence itself is the design. A duplicate would give
+// two of a household's cars the same colour and break the at-a-glance cue.
+func TestVehiclePaletteIsDistinct(t *testing.T) {
+	seen := map[string]int{}
+	for i, c := range store.VehiclePaletteForTest() {
+		if len(c) != 7 || c[0] != '#' {
+			t.Errorf("palette[%d] = %q, want a 6-digit hex", i, c)
+		}
+		if prev, dup := seen[c]; dup {
+			t.Errorf("palette[%d] duplicates palette[%d] (%s)", i, prev, c)
+		}
+		seen[c] = i
+	}
+	if len(seen) < 16 {
+		t.Errorf("palette has %d colours; a household here can have many cars (carers, grandparents, friends)", len(seen))
+	}
+}
+
+// TestLegendVehicles: the colour key shows exactly the cars whose colour is on
+// the page, and counts the rest. Listing every car turned into a four-row wall
+// that pushed the permit card below the fold once a household had a nanny, a
+// carer and grandparents.
+func TestLegendVehicles(t *testing.T) {
+	all := []vehicleView{
+		{ID: 1, Label: "Ours", Registration: "AAA111", Color: "#2f6feb"},
+		{ID: 2, Label: "Nanny", Registration: "BBB222", Color: "#127a49"},
+		{ID: 3, Label: "Carer", Registration: "CCC333", Color: "#b54708"},
+		{ID: 4, Label: "Gran", Registration: "DDD444", Color: "#7a5af8"},
+	}
+
+	t.Run("only colours in use, in input order", func(t *testing.T) {
+		shown, more := legendVehicles(all, map[string]bool{"#b54708": true, "#2f6feb": true})
+		if len(shown) != 2 || more != 2 {
+			t.Fatalf("shown=%d more=%d, want 2 and 2", len(shown), more)
+		}
+		if shown[0].Label != "Ours" || shown[1].Label != "Carer" {
+			t.Errorf("got %q,%q — input order must be preserved so the key is stable",
+				shown[0].Label, shown[1].Label)
+		}
+	})
+
+	t.Run("nothing on the page means no key", func(t *testing.T) {
+		shown, more := legendVehicles(all, map[string]bool{})
+		if len(shown) != 0 || more != 4 {
+			t.Fatalf("shown=%d more=%d, want 0 and 4: with no colours rendered there is nothing to explain",
+				len(shown), more)
+		}
+	})
+
+	t.Run("a colourless car is never shown", func(t *testing.T) {
+		// "" is what an ad-hoc visitor plate resolves to; it must not match a car
+		// that somehow has no stored colour.
+		vs := append(append([]vehicleView{}, all...), vehicleView{ID: 9, Label: "Legacy", Color: ""})
+		shown, _ := legendVehicles(vs, map[string]bool{"": true})
+		if len(shown) != 0 {
+			t.Fatalf("shown=%d, want 0", len(shown))
+		}
+	})
+}
+
+// TestOverrideEndsDefault locks the rule that a one-off booking ends by default.
+//
+// It used to be that leaving "Until" empty meant the booking ran forever, so the
+// open-ended option was what you got by NOT deciding — and an indefinite one-off
+// silently overrides the household's weekly roster until somebody notices. Now
+// only an explicit choice does that.
+func TestOverrideEndsDefault(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	start := time.Date(2026, 8, 4, 9, 30, 0, 0, loc) // a Tuesday morning
+
+	cases := []struct {
+		ends string
+		want string // "" = indefinite
+		why  string
+	}{
+		{"day", "2026-08-04T23:59", "ends the day it starts"},
+		{"nextday", "2026-08-05T23:59", "overnight runs to the end of the next day"},
+		{"open", "", "the only way to get an indefinite booking"},
+		{"", "2026-08-04T23:59", "a missing field must fall back to the SAFE default, not to forever"},
+		{"nonsense", "2026-08-04T23:59", "an unexpected value must not resurrect forever-by-accident"},
+	}
+	for _, c := range cases {
+		var got *time.Time
+		switch c.ends {
+		case "open":
+			got = nil
+		case "nextday":
+			e := endOfDay(start.AddDate(0, 0, 1), loc)
+			got = &e
+		default:
+			e := endOfDay(start, loc)
+			got = &e
+		}
+		switch {
+		case c.want == "" && got != nil:
+			t.Errorf("ends=%q gave an end time, want indefinite (%s)", c.ends, c.why)
+		case c.want != "" && got == nil:
+			t.Errorf("ends=%q gave an indefinite booking, want %s (%s)", c.ends, c.want, c.why)
+		case c.want != "" && got.Format("2006-01-02T15:04") != c.want:
+			t.Errorf("ends=%q = %s, want %s (%s)", c.ends, got.Format("2006-01-02T15:04"), c.want, c.why)
+		}
+	}
+}
+
+// TestEndOfDayUsesStartDay: "end of the day" is measured from the day the booking
+// STARTS, so a booking made now for next Tuesday ends next Tuesday night — not in
+// the past, which is what "end of today" would have meant.
+func TestEndOfDayUsesStartDay(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	future := time.Date(2026, 9, 15, 8, 0, 0, 0, loc)
+	got := endOfDay(future, loc)
+	if want := "2026-09-15T23:59"; got.Format("2006-01-02T15:04") != want {
+		t.Fatalf("endOfDay = %s, want %s", got.Format("2006-01-02T15:04"), want)
+	}
+	if !got.After(future) {
+		t.Fatal("a future booking must not end before it starts")
+	}
+}

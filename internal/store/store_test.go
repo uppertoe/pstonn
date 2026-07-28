@@ -1167,12 +1167,12 @@ func TestQRGrant(t *testing.T) {
 	bp, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
 
 	// A foreign permit is rejected.
-	if _, err := s.CreateQRGrant(ctx, owner, "", bp, "x", time.Hour); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreateQRGrant(ctx, owner, "", bp, "x", "", time.Hour); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign permit = %v, want ErrNotFound", err)
 	}
 
 	// A valid QR grant resolves with plate entry allowed and no cars.
-	if _, err := s.CreateQRGrant(ctx, owner, "", p, "qrhash", time.Hour); err != nil {
+	if _, err := s.CreateQRGrant(ctx, owner, "", p, "qrhash", "", time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	gc, err := s.GuestContextByTokenHash(ctx, "qrhash")
@@ -1189,7 +1189,7 @@ func TestQRGrant(t *testing.T) {
 	}
 
 	// An expired token is treated as not-found.
-	if _, err := s.CreateQRGrant(ctx, owner, "", p, "expiredhash", -time.Hour); err != nil {
+	if _, err := s.CreateQRGrant(ctx, owner, "", p, "expiredhash", "", -time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.GuestContextByTokenHash(ctx, "expiredhash"); !errors.Is(err, ErrNotFound) {
@@ -2442,6 +2442,129 @@ VALUES (?, 5, 5, 'o@example.com', 'ZZZ999', 'nonce-'||?, ?, ?, ?, ?)`,
 		}
 		if (nonce != "") != c.keep {
 			t.Errorf("request %d: nonce kept = %v, want %v — %s", c.id, nonce != "", c.keep, c.why)
+		}
+	}
+}
+
+// TestLiveQRGrant covers what may and may not be reused as a visitor QR. Getting
+// this wrong in either direction is bad: reuse a dead code and the visitor at the
+// door scans something that no longer works; fail to reuse a live one and a second
+// tap mints a duplicate token while the first stays valid.
+func TestLiveQRGrant(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, other = "o@example.com", "other@example.com"
+	pid, err := s.UpsertPermit(ctx, owner, "VPP1", "1", "VPP1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+
+	if _, _, err := s.LiveQRGrant(ctx, owner, pid, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no QR yet = %v, want ErrNotFound", err)
+	}
+
+	if _, err := s.CreateQRGrant(ctx, owner, owner, pid, "livehash", "sealed-live", 15*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	sealed, stops, err := s.LiveQRGrant(ctx, owner, pid, now)
+	if err != nil {
+		t.Fatalf("a live QR should be reusable: %v", err)
+	}
+	if sealed != "sealed-live" {
+		t.Fatalf("sealed token = %q, want the stored one", sealed)
+	}
+	if stops.Before(now) {
+		t.Fatalf("stop-working time %v is already past", stops)
+	}
+
+	// Another account must never reuse this permit's code.
+	if _, _, err := s.LiveQRGrant(ctx, other, pid, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-owner lookup = %v, want ErrNotFound", err)
+	}
+
+	// Past its window: not reusable, so the caller mints a fresh one.
+	if _, _, err := s.LiveQRGrant(ctx, owner, pid, now.Add(16*time.Minute)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("lapsed QR = %v, want ErrNotFound", err)
+	}
+
+	// A grant with no sealed token (pre-dating the reuse feature) cannot be
+	// re-shown, since the raw code was never kept.
+	pid2, err := s.UpsertPermit(ctx, owner, "VPP2", "1", "VPP2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateQRGrant(ctx, owner, owner, pid2, "legacyhash", "", 15*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.LiveQRGrant(ctx, owner, pid2, now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unsealed legacy QR = %v, want ErrNotFound", err)
+	}
+}
+
+// TestBackfillRecoloursOldPalette: cars stored on a superseded palette must be
+// brought onto the current one.
+//
+// Colours live per car, so without this a household would keep its old colours
+// while any car added later drew from the new palette — two unrelated palettes in
+// one list, which is worse than the problem the new palette was meant to fix.
+func TestBackfillRecoloursOldPalette(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, other = "o@example.com", "other@example.com"
+
+	seed := func(owner, label, reg, color string) {
+		t.Helper()
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO vehicle (owner, label, registration, color, created_at) VALUES (?, ?, ?, ?, ?)`,
+			owner, label, reg, color, "2026-01-01T00:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(owner, "A", "AAA111", "#2f6feb") // a colour from the old palette
+	seed(owner, "B", "BBB222", "")        // never had one
+	seed(owner, "C", "CCC333", "#127a49") // old palette
+	// A household already fully on the current palette must be left untouched.
+	seed(other, "X", "XXX111", vehiclePalette[0])
+	seed(other, "Y", "YYY222", vehiclePalette[1])
+
+	if err := s.BackfillVehicleColors(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListVehiclesFor(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, v := range got {
+		if !inPalette(v.Color) {
+			t.Errorf("%s kept an off-palette colour %q", v.Label, v.Color)
+		}
+		if seen[v.Color] {
+			t.Errorf("%s duplicates a colour already used in the household (%s)", v.Label, v.Color)
+		}
+		seen[v.Color] = true
+	}
+
+	// Idempotent: a second run changes nothing.
+	before := map[string]string{}
+	for _, v := range got {
+		before[v.Label] = v.Color
+	}
+	if err := s.BackfillVehicleColors(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := s.ListVehiclesFor(ctx, owner)
+	for _, v := range again {
+		if before[v.Label] != v.Color {
+			t.Errorf("%s changed colour on a second run (%s -> %s): not idempotent", v.Label, before[v.Label], v.Color)
+		}
+	}
+	// The already-current household is undisturbed.
+	oth, _ := s.ListVehiclesFor(ctx, other)
+	for _, v := range oth {
+		if v.Color != vehiclePalette[0] && v.Color != vehiclePalette[1] {
+			t.Errorf("an up-to-date household was re-coloured: %s = %s", v.Label, v.Color)
 		}
 	}
 }
