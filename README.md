@@ -145,8 +145,10 @@ settled); a revoked guest link's recipient address 30 days; sent notifications
 stripped of their content at send and purged after 24h; bounce/unsubscribe
 suppressions 2 years, complaints kept. Container logs need a size cap too — stock Docker keeps json-file logs forever,
 while a journald host usually caps them already; see the note in
-`deploy/docker-compose.yml`. `deploy/backup-service.env.example` carries a restic
-retention policy — without one, "deleted" has no upper bound.
+`deploy/docker-compose.yml`. Backup retention comes from the
+platform's restic runner (see `deploy/backup-service.env.example`); whatever it
+is set to is the real upper bound on how long deleted data stays recoverable, and
+/about states that bound to users.
 
 ## Run locally
 
