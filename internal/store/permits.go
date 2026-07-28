@@ -25,14 +25,15 @@ func (s *Store) ListPermitsFor(ctx context.Context, owner string) ([]model.Permi
 }
 
 // permitCols is the column list backing scanPermit; keep the two in lockstep.
-const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type`
+const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak`
 
 // scanPermit reads one permit row (permitCols order), parsing the stored strings.
 func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 	var p model.Permit
 	var endDate, reminded string
 	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
-		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType)
+		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType,
+		&p.FailStreak)
 	if err != nil {
 		return p, err
 	}

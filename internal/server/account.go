@@ -45,10 +45,21 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Capacity check, before we take their password anywhere near the council.
-	// Only a NEW household counts: anyone already linked (including a re-link after
-	// an expiry) must never be locked out of their own running service.
+	// Only a NEW household counts: anyone we already serve must never be locked out
+	// of their own running service.
+	//
+	// "Already linked" is NOT the right test on its own, because the two paths that
+	// end a session — the idle bound and a rejected saved password — DELETE the row.
+	// A returning household then looks brand new while their permits, vehicles and
+	// schedule are all still here, so a full deployment would refuse to let them
+	// restart the service they were already using. HasOwnData covers that: a session,
+	// a permit, or a vehicle all mean this is a re-link, not a signup.
 	if s.cfg.MaxAccounts > 0 {
-		if _, err := s.store.GetCouncilSession(r.Context(), user); errors.Is(err, store.ErrNotFound) {
+		known, kerr := s.store.HasOwnData(r.Context(), user)
+		if kerr != nil {
+			log.Printf("capacity check for %s: %v", user, kerr)
+		}
+		if !known && kerr == nil {
 			n, cerr := s.store.CountLinkedAccounts(r.Context())
 			if cerr != nil {
 				log.Printf("capacity check for %s: %v", user, cerr)
@@ -259,6 +270,13 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	// are bearer links that would otherwise keep working after they lose access.
 	// Report the count: the primary needs to know their household's links changed.
 	revoked, err := s.store.RemoveMember(r.Context(), owner, email)
+	if errors.Is(err, store.ErrNotFound) {
+		// Not a member of this account: either a stale form or someone probing with
+		// another household's address. Either way there is nothing to remove, and
+		// saying so plainly avoids implying we know anything about that address.
+		s.message(w, http.StatusNotFound, "That person doesn't have shared access to this account.")
+		return
+	}
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -286,11 +304,23 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 	// Log against the account they are leaving (resolved before the membership
 	// row goes), so the primary can see it happened.
 	_, leftOwner, _ := s.resolveAccount(r.Context())
-	if _, err := s.store.RemoveMembership(r.Context(), user); err != nil {
+	revoked, err := s.store.RemoveMembership(r.Context(), user)
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.logChange(r.Context(), leftOwner, user, store.ActionMemberLeave, "", "")
+	// Leaving revokes the departing member's guest passes and door QRs exactly as
+	// being removed does, so the primary has to hear about it the same way. This is
+	// in fact the likelier path — mint a pass, then leave — and until now it was
+	// silent: the household's visitor links simply stopped working with nothing
+	// anywhere to explain why.
+	detail := ""
+	if revoked > 0 {
+		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
+		s.notifyDestructive(r.Context(), leftOwner, user, fmt.Sprintf(
+			"%s left the account. %d guest pass(es) or door QR(s) they created have stopped working.", user, revoked))
+	}
+	s.logChange(r.Context(), leftOwner, user, store.ActionMemberLeave, "", detail)
 	redirectHome(w, r)
 }
 
@@ -314,6 +344,18 @@ func (s *Server) councilConfirm(w http.ResponseWriter, r *http.Request) {
 // user is genuinely fine either way.
 func (s *Server) councilConfirmApply(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
+	// This route is PUBLIC (the link comes from an email, so there is no session)
+	// and it mutates, which puts it outside withUser's blanket protections. Both
+	// have to be applied by hand: without the body cap, r.FormValue on a multipart
+	// body buffers 32MB and spills to disk unauthenticated, and without the
+	// throttle the token is an unmetered guessing oracle that also competes with
+	// the scheduler for the single SQLite connection.
+	limitBody(r)
+	if !s.confirmLimit.allow(clientIP(r)) {
+		w.Header().Set("Retry-After", "60")
+		s.message(w, http.StatusTooManyRequests, "Too many attempts. Please wait a moment and try the link in your email again.")
+		return
+	}
 	token := strings.TrimSpace(r.FormValue("token"))
 	// A confirm link is only good for the reminder window it was sent for (plus
 	// slack for a user who opens mail late), not forever.

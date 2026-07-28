@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -162,7 +163,6 @@ CREATE TABLE IF NOT EXISTS guest_token (
     token_hash      TEXT NOT NULL UNIQUE,
     token_sealed    TEXT NOT NULL DEFAULT '',   -- printed door QR only: the raw token, encrypted at rest, so the SAME code can be reprinted (inert artifact; a scan can only request approval)
     revoked_at      TEXT NOT NULL DEFAULT '',
-    last_used_at    TEXT NOT NULL DEFAULT '',
     expires_at      TEXT NOT NULL DEFAULT '',   -- RFC3339 UTC; '' = never (persistent email link)
     created_at      TEXT NOT NULL,
     baseline_plate  TEXT NOT NULL DEFAULT '',   -- what was on the permit before this link's current run of activations ('' = unknown)
@@ -314,6 +314,27 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 	if _, err := s.db.Exec(
 		`UPDATE council_session SET last_active_at = linked_at WHERE last_active_at = '' AND linked_at != ''`); err != nil {
 		return err
+	}
+	// Drop guest_token.last_used_at. It recorded when a named guest last parked,
+	// was read by nothing, and was kept forever — so it is a third party's movement
+	// history with no purpose. Removing the writer (and the column from the schema
+	// above) was not enough on its own: an existing production database still
+	// carries the column AND its historical values, which is exactly what the
+	// retention pass claimed to have removed.
+	//
+	// Attempted rather than asserted. DROP COLUMN needs SQLite >= 3.35, and a
+	// migration that hard-fails takes the whole app down at boot; blanking the
+	// values achieves the privacy goal on any version, which is the part that
+	// actually matters.
+	if has, err := s.columnExists("guest_token", "last_used_at"); err != nil {
+		return err
+	} else if has {
+		if _, err := s.db.Exec(`ALTER TABLE guest_token DROP COLUMN last_used_at`); err != nil {
+			log.Printf("migrate: could not drop guest_token.last_used_at (%v); clearing its values instead", err)
+			if _, err := s.db.Exec(`UPDATE guest_token SET last_used_at = '' WHERE last_used_at != ''`); err != nil {
+				return fmt.Errorf("migrate: clear guest_token.last_used_at: %w", err)
+			}
+		}
 	}
 	// Rebuild `override` if it predates the ad-hoc-plate columns: SQLite cannot
 	// relax vehicle_id's NOT NULL/foreign key in place, so redefine the table and

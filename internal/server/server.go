@@ -49,6 +49,9 @@ type Server struct {
 	// statusLimit throttles the machine status endpoint: its bearer token is the
 	// only thing standing between a caller and the user roster.
 	statusLimit *rateLimiter
+	// confirmLimit throttles the public renewal-confirm POST, whose single-use
+	// token is the only thing gating a 90-day extension of a council session.
+	confirmLimit *rateLimiter
 	// councilRead throttles the two routes that make an UNCACHED, synchronous
 	// council read (the permit picker and adding a permit). Every other council
 	// read path has a cache and in-flight dedup; these did not, so one signed-in
@@ -96,9 +99,14 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		councilTry:      newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
 		testNotifyLimit: newRateLimiter(5, time.Hour),      // 5 test notifications / hour per user
 		councilRead:     newRateLimiter(12, 5*time.Minute), // 12 uncached council reads / 5 min per user
-		guestSlots:      make(chan struct{}, maxConcurrentGuest),
-		snsCert:         newCertCache(),
-		unsubKey:        notify.DeriveUnsubKey(cfg.DataEncryptionKey),
+		// The watchdog polls every 10 minutes, so this is ~30x real use: it exists
+		// to stop the bearer token being brute-forced, not to pace the watchdog.
+		statusLimit: newRateLimiter(30, 10*time.Minute), // 30 status polls / 10 min per IP
+		// A real user clicks the emailed link once, maybe retries a couple of times.
+		confirmLimit: newRateLimiter(10, 10*time.Minute), // 10 confirm attempts / 10 min per IP
+		guestSlots:   make(chan struct{}, maxConcurrentGuest),
+		snsCert:      newCertCache(),
+		unsubKey:     notify.DeriveUnsubKey(cfg.DataEncryptionKey),
 	}
 }
 

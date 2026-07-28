@@ -251,6 +251,12 @@
 <main id="main" tabindex="-1" class="posterwrap">
   <div class="posteractions noprint">
     <a href="/guests" hx-boost="false"><button type="button" class="ghost sm">&larr; Guests</button></a>
+    {{/* The permit label lives here, on screen, and NOT on the poster below: it is
+         the owner's own free text (usually an address or unit number) and the
+         poster is left on a wall for strangers to read. You still need to know
+         which permit you're printing, so it stays visible right up to the moment
+         you press Print. */}}
+    <p class="posterfor">Door QR for <strong>{{.DoorQR.PermitLabel}}</strong></p>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" onclick="window.print()">{{template "ic-qr"}} Print</button>
       <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
@@ -263,7 +269,7 @@
       <span class="poster-kicker">Visitor parking</span>
     </div>
     <div class="poster-body">
-      <h1 class="poster-title">{{.DoorQR.PermitLabel}}</h1>
+      <h1 class="poster-title">Visitor parking permit</h1>
       <p class="poster-lead">Scan to ask to use this parking permit</p>
       <div class="poster-qbox"><img src="{{.DoorQR.ImageURI}}" alt="Scan to request the visitor parking permit" width="240" height="240"></div>
       <ol class="poster-steps">
@@ -271,7 +277,7 @@
         <li>Enter your number plate</li>
         <li>The resident gets a notification and approves it &mdash; then your plate is on the permit</li>
       </ol>
-      <p class="poster-note">Nothing goes on the permit until the resident approves. Managed by {{.DoorQR.OwnerEmail}}.</p>
+      <p class="poster-note">Nothing goes on the permit until the resident approves.</p>
     </div>
     <div class="poster-foot">Set up with p.stonn &middot; an unofficial City of Stonnington permit helper</div>
   </article>

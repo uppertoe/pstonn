@@ -159,13 +159,22 @@ WHERE confirm_token != '' AND reminder_sent_at != '' AND reminder_sent_at < ?`,
 //
 // It also clears the reminder flag, so a later idle stretch can trigger a fresh
 // "are you still there?" email rather than being suppressed by one sent months
-// ago. The pending confirm token is deliberately left alone: it has its own TTL,
-// and invalidating a link the user may still click buys nothing.
+// ago — and it clears any outstanding confirm token with it.
+//
+// Clearing the token is not optional tidying. Both of its expiry mechanisms are
+// gated on reminder_sent_at being set: ClearStaleConfirmTokens only matches rows
+// that have it, and ConfirmSession skips its TTL check when it is empty. Blanking
+// the flag while leaving the token would therefore make that emailed link
+// IMMORTAL — a permanent "keep managing my permit" capability sitting in a
+// mailbox, defeating the human-liveness check the whole flow exists to make.
+// Nothing is lost by revoking it: the visit that got us here already reset the
+// same idle clock the link would have, so the link has nothing left to do, and a
+// later click lands on copy that says exactly that.
 //
 // No-op when the account has no linked session — there is nothing to keep alive.
 func (s *Store) TouchAccountActive(ctx context.Context, owner string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE council_session SET last_active_at = ?, reminder_sent_at = '' WHERE owner = ?`,
+		`UPDATE council_session SET last_active_at = ?, reminder_sent_at = '', confirm_token = '' WHERE owner = ?`,
 		nowUTC(), owner)
 	return err
 }
@@ -251,4 +260,39 @@ func (s *Store) ClearCouncilPassword(ctx context.Context, owner string) error {
 func (s *Store) DeleteCouncilSession(ctx context.Context, owner string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM council_session WHERE owner = ?`, owner)
 	return err
+}
+
+// DeleteCouncilSessionIfIdle retires a session only if it is STILL idle past the
+// cutoff, reporting whether it actually deleted anything.
+//
+// The keep-warm pass reads every session up front and then works through them
+// with a rate-limit sleep between council calls, so by the time it reaches a given
+// account its decision can be minutes stale. An unconditional delete therefore
+// retired people who came back mid-pass — landing them on "reconnect your council
+// account" seconds after they used the app. Re-checking the clock inside the
+// delete closes that window.
+//
+// It also makes the retire idempotent: if the reconcile loop already dropped this
+// session, this affects no rows and the caller can skip a second "you need to
+// reconnect" notice.
+//
+// The COALESCE mirrors decideWarm's fallback exactly: last activity, else the link
+// time, and an unknown clock (both empty) sorts before any timestamp, so it
+// retires — matching "an unknown clock cannot be shown to be recent".
+//
+// `<=` rather than `<` because decideWarm retires on `now.Sub(idle) >= maxAge`,
+// i.e. idle exactly AT the cutoff is already past the bound. Timestamps are stored
+// at second precision, so a strict `<` also disagreed with decideWarm for any
+// session inside the cutoff's own second.
+func (s *Store) DeleteCouncilSessionIfIdle(ctx context.Context, owner string, before time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+DELETE FROM council_session
+WHERE owner = ?
+  AND COALESCE(NULLIF(last_active_at, ''), linked_at) <= ?`,
+		owner, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }

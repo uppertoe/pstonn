@@ -9,7 +9,7 @@
     {{if .Unsub.Done}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
     <h1>Emails stopped</h1>
-    <p class="gresult">We won't email <strong>{{.Unsub.Address}}</strong> again.</p>
+    <p class="gresult">We've stopped emailing <strong>{{.Unsub.Address}}</strong>.</p>
     <p class="empty-note" style="margin-top:14px">
       If this address belongs to a p.stonn account, your permit schedule keeps running as normal &mdash; you just won't get email about it.
       Sign in and turn email back on in Settings whenever you like.
@@ -44,9 +44,13 @@
     <h1>Thanks &mdash; it'll keep running</h1>
     <p class="gresult">Your visitor-permit scheduler will carry on as normal.{{if .Confirm.Until}} We'll check in again around {{.Confirm.Until}}.{{end}}</p>
     {{else if .Confirm.Stale}}
-    <h1>Nothing to do</h1>
-    <p class="gresult">This confirmation link has already been used, so no further action is needed. Your permit scheduler will keep running.</p>
-    <p class="empty-note" style="margin-top:12px">If it ever stops, just open the app and reconnect your council account.</p>
+    {{/* This state also covers an EXPIRED or unknown link, not just a used one —
+         and an expired link means the deadline passed and the session really did
+         stop. Promising "it will keep running" would be a flat untruth in exactly
+         the case where the user needs to act. */}}
+    <h1>Nothing to do here</h1>
+    <p class="gresult">This link has already been used, or it has expired.</p>
+    <p class="empty-note" style="margin-top:12px">Open p.stonn to see where your permit scheduler stands. If it has stopped, you can reconnect your council account there and it will pick up your existing schedule.</p>
     {{else}}
     <h1>Keep your permit scheduler running?</h1>
     <p class="gresult">Confirm you'd still like p.stonn to keep updating your visitor permit.</p>

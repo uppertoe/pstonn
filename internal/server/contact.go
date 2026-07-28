@@ -96,10 +96,36 @@ func (rl *rateLimiter) allow(key string) bool {
 			}
 		}
 	}
-	// Still over the cap after a sweep (or between sweeps): drop everything
-	// rather than track an attacker-chosen key set forever.
+	// Still over the cap after a sweep (or between sweeps). Something has to go,
+	// but NOT everything: clearing the whole map also clears the keys that are
+	// currently AT the limit, and those are the only entries whose loss hands out
+	// a free pass. Rotating addresses is cheap (an IPv6 /64 is effectively
+	// unlimited), so a blanket wipe let an attacker keep the map saturated and
+	// thereby keep resetting every real limiter — turning the memory guard into a
+	// bypass for the throttle it was protecting.
+	//
+	// Keep the blocked keys, discard the rest. An attacker-chosen key seen once has
+	// nothing worth remembering; a key that reached its limit does.
 	if len(rl.hits) > maxLimiterKeys {
-		rl.hits = make(map[string][]time.Time)
+		blocked := make(map[string][]time.Time)
+		for k, ts := range rl.hits {
+			live := 0
+			for _, t := range ts {
+				if t.After(cutoff) {
+					live++
+				}
+			}
+			if live >= rl.limit {
+				blocked[k] = ts
+			}
+		}
+		// Only if the blocked set ALONE overflows do we give up and reset — that
+		// costs an attacker `limit` requests per key rather than one, and there is
+		// no bounded-memory alternative left.
+		if len(blocked) > maxLimiterKeys {
+			blocked = make(map[string][]time.Time)
+		}
+		rl.hits = blocked
 	}
 
 	// Drop this key's stale timestamps.
@@ -122,18 +148,40 @@ func (rl *rateLimiter) allow(key string) bool {
 // X-Forwarded-For entry: Caddy appends the address it actually received the
 // request from, while any earlier entries are client-supplied and spoofable
 // (taking the leftmost would let an attacker rotate the header to defeat the
-// throttle). Falls back to the connection's remote address.
+// throttle).
+//
+// X-Forwarded-For is only consulted when the request actually arrived from a
+// proxy — judged by the peer being loopback or a private address, which is what a
+// container network looks like. A request straight off the internet controls its
+// own headers completely, so trusting them there would hand every caller a fresh
+// limiter key per request and switch off every per-IP throttle in the app. In this
+// deployment nothing reaches the app except through Caddy, but a self-hoster
+// exposing the port directly should not silently lose their rate limits.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
-			return ip
+	peer := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		peer = host
+	}
+	if fromProxy(peer) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
+				return ip
+			}
 		}
 	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+	return peer
+}
+
+// fromProxy reports whether a peer address is one we are willing to accept
+// forwarding headers from: loopback, a private range, or a link-local address.
+// An unparseable peer is treated as untrusted.
+func fromProxy(peer string) bool {
+	ip := net.ParseIP(peer)
+	if ip == nil {
+		return false
 	}
-	return r.RemoteAddr
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // looksLikeEmail is a deliberately lenient sanity check (not RFC validation): a

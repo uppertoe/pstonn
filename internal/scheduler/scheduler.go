@@ -544,14 +544,24 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		if action == warmRetire {
 			// Nobody on this account has used the app for the whole bound: stop
 			// renewing, drop the session, and let the dashboard prompt a re-link.
-			if err := s.store.DeleteCouncilSession(ctx, cs.Owner); err != nil {
+			// Re-check the idle clock inside the delete. This pass sleeps between
+			// council calls, so the decision above can be minutes old by now — an
+			// unconditional delete retired people who came back mid-pass, seconds
+			// after they used the app. A no-op also means someone else (the reconcile
+			// loop's recoverOrRetire) got there first, so the alert is theirs to send,
+			// not ours to duplicate.
+			retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, now.Add(-s.sessionMaxAge))
+			switch {
+			case err != nil:
 				log.Printf("scheduler: retire session %s: %v", cs.Owner, err)
-			} else {
+			case retired:
 				log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", cs.Owner)
 				// The renewal reminder (maybeRemind) is email-only and best-effort, so
 				// it must not be the sole signal: tell the user their permit just
 				// stopped being managed, exactly as the expired-cookie path does.
 				s.alertRelink(cs.Owner)
+			default:
+				log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", cs.Owner)
 			}
 			continue
 		}
@@ -1116,6 +1126,21 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		wantName = ""
 	}
 	if want == "" || want == p.ActiveRegistration {
+		// The permit already shows what the schedule wants, so whatever failure or
+		// council-block episode was running has ended — even though this pass applies
+		// nothing. Clearing here matters because the streak previously only ever reset
+		// on a SCHEDULER apply success: an episode that ended any other way (a guest's
+		// inline apply, which writes active_registration itself, or the roster simply
+		// changing to match what is already on the permit) left the counter inflated
+		// permanently. A single one-minute blip weeks later would then land above the
+		// alert threshold, alarming the user instantly instead of after the intended
+		// grace, and taking the maximum retry backoff on the first failure of a fresh
+		// episode. Gated on the loaded value so the common already-correct pass stays
+		// read-only on the shared SQLite connection.
+		if want != "" && p.FailStreak != 0 {
+			s.clearFailStreak(ctx, p.ID)
+			s.clearRetry(p.ID)
+		}
 		return false // already correct (or unknown/foreign vehicle)
 	}
 	if s.retryDeferred(p.ID, time.Now()) {

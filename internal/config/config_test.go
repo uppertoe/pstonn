@@ -108,3 +108,29 @@ func TestInvalidEnvValuesFailFast(t *testing.T) {
 		}
 	})
 }
+
+// TestSharesParentDomain covers the multi-label public suffix case: without it,
+// any two .com.au domains look "aligned" and the DMARC mismatch warning never
+// fires for the most likely Australian misconfiguration.
+func TestSharesParentDomain(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"stonn.org", "stonn.org", true},
+		{"p.stonn.org", "stonn.org", true},
+		{"mail.stonn.org", "p.stonn.org", true},
+		{"stonn.org", "other.net", false},
+		// The bug: both reduce to "com.au" under a last-two-labels comparison.
+		{"p.stonn.com.au", "some-relay.com.au", false},
+		{"p.stonn.com.au", "stonn.com.au", true},
+		{"mail.example.co.uk", "example.co.uk", true},
+		{"example.co.uk", "other.co.uk", false},
+		{"localhost", "localhost", true},
+	}
+	for _, c := range cases {
+		if got := sharesParentDomain(c.a, c.b); got != c.want {
+			t.Errorf("sharesParentDomain(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

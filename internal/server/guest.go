@@ -765,6 +765,12 @@ func undeliverableText(reason string) string {
 		return "email bounced — check the address, or share the link another way"
 	case store.SuppressComplaint:
 		return "they marked our email as spam, so we've stopped emailing them"
+	case store.SuppressUnsubscribed:
+		// Added after this switch was written, and without a case here an
+		// unsubscribed recipient rendered as a normal "has a link" row — the silent
+		// suppression this page exists to expose. The owner needs to know the link
+		// never arrived and that re-sending will not help.
+		return "they unsubscribed, so we can't email them — share the link another way"
 	case store.SuppressManual:
 		return "email disabled for this address"
 	default:
@@ -1139,7 +1145,7 @@ func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
 // have. The original link can't be re-sent (only its hash is stored), so this
 // mints a new token and supersedes the old one. Owner-only.
 func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
-	_, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _ := s.resolveAccount(r.Context())
 	recipient := strings.TrimSpace(r.FormValue("recipient"))
 	if recipient == "" {
 		s.formError(w, r, "No recipient to re-send to.")
@@ -1161,6 +1167,10 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Logged because this ROTATES the token: the recipient's old link is now dead.
+	// A member silently re-keying someone else's access is exactly the kind of
+	// change the household should be able to see after the fact.
+	s.logChange(r.Context(), owner, user, store.ActionGuestResend, recipient, "")
 	permit, _ := s.store.GetPermit(r.Context(), permitID)
 	links := []guestLinkView{{Email: recipient, URL: s.guestLink(raw)}}
 	if s.emailLinks(r.Context(), owner, permitLabel(permit), links) == 0 {
@@ -1323,13 +1333,17 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	permit, _ := s.store.GetPermit(r.Context(), permitID)
+	// This mints a live, if short-lived, capability: whoever scans the screen can
+	// put a plate on the permit without further approval. Every other way of
+	// handing out permit access is logged, so this one is too.
+	s.logChange(r.Context(), owner, user, store.ActionDoorQRShow, permitLabel(permit), "")
 	url := s.guestLink(raw)
 	img, err := qrDataURI(url)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	permit, _ := s.store.GetPermit(r.Context(), permitID)
 	base, ok := s.appShell(w, r, "guests")
 	if !ok {
 		return
@@ -1351,23 +1365,34 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
 	// Name it before deleting, so the log and the notice can say which pass died.
 	label := s.grantLabel(r.Context(), owner, pathInt(r, "id"))
-	if err := s.store.DeleteGuestGrant(r.Context(), owner, pathInt(r, "id")); err != nil && !errors.Is(err, store.ErrNotFound) {
+	// A missing row is tolerated (a double-submitted form, a stale page) but must
+	// not be announced: logging it and emailing the household "a guest pass was
+	// deleted, those links have stopped working" for an id that never existed
+	// invents an event, and the dedup key only suppresses identical repeats.
+	err := s.store.DeleteGuestGrant(r.Context(), owner, pathInt(r, "id"))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
 	}
-	s.logChange(r.Context(), owner, user, store.ActionGuestDelete, label, "")
-	s.notifyDestructive(r.Context(), owner, user,
-		user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit.")
+	if err == nil {
+		s.logChange(r.Context(), owner, user, store.ActionGuestDelete, label, "")
+		s.notifyDestructive(r.Context(), owner, user,
+			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit.")
+	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
 func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
-	if err := s.store.RevokeGuestToken(r.Context(), owner, pathInt(r, "tid")); err != nil && !errors.Is(err, store.ErrNotFound) {
+	// Tolerate a missing row, but don't log an action that didn't happen.
+	err := s.store.RevokeGuestToken(r.Context(), owner, pathInt(r, "tid"))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
 	}
-	s.logChange(r.Context(), owner, user, store.ActionGuestRevoke, "", "")
+	if err == nil {
+		s.logChange(r.Context(), owner, user, store.ActionGuestRevoke, "", "")
+	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
@@ -1732,13 +1757,17 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
 	label := s.grantLabel(r.Context(), owner, atoi64(r.PathValue("id")))
-	if err := s.store.RevokePrintedGrant(r.Context(), owner, atoi64(r.PathValue("id"))); err != nil && !errors.Is(err, store.ErrNotFound) {
+	// As in deleteGuestGrant: a no-op must not announce itself to the household.
+	err := s.store.RevokePrintedGrant(r.Context(), owner, atoi64(r.PathValue("id")))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
 	}
-	s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
-	s.notifyDestructive(r.Context(), owner, user,
-		user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working.")
+	if err == nil {
+		s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
+		s.notifyDestructive(r.Context(), owner, user,
+			user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working.")
+	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 

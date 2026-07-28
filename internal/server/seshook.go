@@ -97,6 +97,15 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	// A signature is valid forever, so without a freshness check any captured
+	// notification can be replayed indefinitely. Replaying a bounce is close to
+	// idempotent, but it still bumps the hit counter and refreshes last_seen, which
+	// is enough to keep an address suppressed past the point it would have aged out.
+	if !freshSNSTimestamp(m.Timestamp, time.Now()) {
+		log.Printf("ses hook: refusing message with stale or unparseable timestamp %q", m.Timestamp)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 	switch m.Type {
 	case "SubscriptionConfirmation":
@@ -153,6 +162,14 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 			log.Printf("ses hook: suppressed %s (permanent bounce: %s)", rcpt.EmailAddress, detail)
 		}
 	case "complaint":
+		// RFC 5965 defines "not-spam" as the recipient moving our mail OUT of their
+		// spam folder — the opposite of a complaint, and SES forwards it as one.
+		// Acting on it would suppress someone for rescuing us, and a complaint row is
+		// the one kind that is never pruned and never user-clearable.
+		if strings.EqualFold(ev.Complaint.ComplaintFeedbackType, "not-spam") {
+			log.Printf("ses hook: ignoring a not-spam feedback report (the recipient un-junked our mail)")
+			return
+		}
 		for _, rcpt := range ev.Complaint.ComplainedRecipients {
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressComplaint, ev.Complaint.ComplaintFeedbackType); err != nil {
 				log.Printf("ses hook: suppress %s: %v", rcpt.EmailAddress, err)
@@ -167,14 +184,44 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 	}
 }
 
+// snsMaxSkew bounds how far an SNS message's own timestamp may be from now.
+// Generous in both directions: SNS retries a failing endpoint for a while, and
+// neither clock is guaranteed exact. Small enough that a captured message stops
+// being replayable the same day.
+const snsMaxSkew = 2 * time.Hour
+
+// freshSNSTimestamp reports whether an SNS Timestamp is close enough to now. An
+// absent or unparseable timestamp is refused rather than trusted: every genuine
+// message has one.
+func freshSNSTimestamp(ts string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return false
+	}
+	d := now.Sub(t)
+	if d < 0 {
+		d = -d
+	}
+	return d <= snsMaxSkew
+}
+
 // certCache memoises fetched SNS signing certificates. AWS rotates them rarely,
 // and re-fetching per notification would make a bounce storm into an outbound
 // request storm.
+//
+// Bounded: each miss costs an outbound fetch and a permanent map entry, so an
+// unbounded cache would be a slow memory leak driven by whatever URLs arrive.
+// The real host set is tiny (one signing endpoint per region), so overflow means
+// something is wrong and dropping everything is the safe response.
 type certCache struct {
 	mu    sync.Mutex
 	certs map[string]*x509.Certificate
 	http  *http.Client
 }
+
+// maxCachedCerts is far above the handful of regional SNS signing endpoints any
+// real deployment sees.
+const maxCachedCerts = 64
 
 func newCertCache() *certCache {
 	return &certCache{
@@ -183,17 +230,17 @@ func newCertCache() *certCache {
 	}
 }
 
-// errUntrustedCertHost rejects a signing certificate URL that is not an AWS
+// errUntrustedCertHost rejects a signing certificate URL that is not an SNS
 // host. Without this check the signature proves nothing: an attacker would sign
 // a forged notification with their own key and point us at their own cert.
-var errUntrustedCertHost = errors.New("signing certificate URL is not an AWS host")
+var errUntrustedCertHost = errors.New("signing certificate URL is not an SNS host")
 
 func (c *certCache) get(ctx context.Context, rawURL string) (*x509.Certificate, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	if u.Scheme != "https" || !isAWSHost(u.Host) {
+	if u.Scheme != "https" || !isSNSHost(u.Host) {
 		return nil, fmt.Errorf("%w: %q", errUntrustedCertHost, rawURL)
 	}
 	c.mu.Lock()
@@ -227,21 +274,67 @@ func (c *certCache) get(ctx context.Context, rawURL string) (*x509.Certificate, 
 	if err != nil {
 		return nil, err
 	}
+	// An expired or not-yet-valid certificate is not a signing key we should
+	// trust, and parsing alone never checks this. The chain itself is covered by
+	// the TLS handshake against the SNS host above (a public CA vouches for it),
+	// so the dates are what is left to verify.
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return nil, fmt.Errorf("signing cert is outside its validity window (%s to %s)",
+			cert.NotBefore.Format(time.RFC3339), cert.NotAfter.Format(time.RFC3339))
+	}
 	c.mu.Lock()
+	if len(c.certs) >= maxCachedCerts {
+		c.certs = map[string]*x509.Certificate{}
+	}
 	c.certs[rawURL] = cert
 	c.mu.Unlock()
 	return cert, nil
 }
 
-// isAWSHost reports whether a host belongs to Amazon. Matched on the registrable
-// suffix with a leading dot so "evil-amazonaws.com" and "amazonaws.com.evil.tld"
-// are both rejected.
-func isAWSHost(host string) bool {
+// isSNSHost reports whether a host is an Amazon SNS endpoint, which is the only
+// place a genuine signing certificate is published.
+//
+// "ends with .amazonaws.com" is NOT good enough, and the difference is the whole
+// security of this endpoint. Anyone with an AWS account can serve arbitrary files
+// from *.s3.amazonaws.com, so a suffix check lets an attacker publish their OWN
+// certificate on an "AWS host", sign a forged bounce with the matching key, and
+// pass every check here. They could then permanently suppress any address they
+// named — and a complaint row is never pruned, never user-clearable and invisible
+// to the household, so it silently kills the notifications this app exists to
+// send. Only sns.<region>.amazonaws.com (and the China partition equivalent) may
+// serve a signing cert; those hosts serve SNS's API, not attacker-supplied files.
+func isSNSHost(host string) bool {
 	h := strings.ToLower(host)
 	if i := strings.IndexByte(h, ':'); i >= 0 {
 		h = h[:i] // strip any port
 	}
-	return strings.HasSuffix(h, ".amazonaws.com")
+	rest, ok := strings.CutPrefix(h, "sns.")
+	if !ok {
+		return false
+	}
+	region, ok := strings.CutSuffix(rest, ".amazonaws.com.cn")
+	if !ok {
+		if region, ok = strings.CutSuffix(rest, ".amazonaws.com"); !ok {
+			return false
+		}
+	}
+	return isAWSRegion(region)
+}
+
+// isAWSRegion reports whether s looks like a single region label ("ap-southeast-2").
+// Rejecting dots is what stops "sns.evil.com.amazonaws.com" and any other attempt
+// to smuggle extra labels into the region position.
+func isAWSRegion(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 // snsSigningFields is the exact set and order of fields AWS signs, per message
@@ -325,7 +418,7 @@ func confirmSNSSubscription(ctx context.Context, subscribeURL string) error {
 	if err != nil {
 		return err
 	}
-	if u.Scheme != "https" || !isAWSHost(u.Host) {
+	if u.Scheme != "https" || !isSNSHost(u.Host) {
 		return fmt.Errorf("%w: %q", errUntrustedCertHost, subscribeURL)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subscribeURL, nil)

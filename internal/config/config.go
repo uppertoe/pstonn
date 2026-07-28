@@ -171,12 +171,15 @@ type CouncilConfig struct {
 	Scopes      []string // COUNCIL_SCOPES, space-separated (NO offline_access, the client rejects it)
 	APIBase     string   // COUNCIL_API_BASE, base URL for /ssp-svc/api calls
 
-	// SessionMaxAge bounds how long a linked council session is kept alive by
-	// keep-warm renewal before the user must re-authorise (re-link). It is the
-	// safety limit so a departed user's plate is not changed forever: measured
-	// from the last interactive link, after which we stop renewing, let the
-	// session lapse, and the dashboard prompts a re-link (which resets the clock).
-	// COUNCIL_SESSION_MAX_AGE_DAYS, default 90.
+	// SessionMaxAge bounds how long an account may sit IDLE before the user must
+	// re-authorise (re-link). It is the safety limit so a departed household's
+	// plate is not changed forever: measured from the last time anyone on the
+	// account used the app (see store.TouchAccountActive) or clicked the confirm
+	// email, after which we stop renewing, let the session lapse, and the dashboard
+	// prompts a re-link. Deliberately NOT measured from the original link: this is
+	// set-and-forget software, so a household using it every week would otherwise
+	// be retired on schedule while one that moved away a year ago looked identical
+	// to one that linked yesterday. COUNCIL_SESSION_MAX_AGE_DAYS, default 90.
 	SessionMaxAge time.Duration
 
 	// WarmInterval is how stale a still-valid session may get before keep-warm
@@ -426,17 +429,41 @@ func (c *Config) MailDomainMismatch() (fromDomain, appDomain string, mismatch bo
 	return fromDomain, appDomain, !sharesParentDomain(fromDomain, appDomain)
 }
 
-// sharesParentDomain reports whether two hosts share their last two labels
+// sharesParentDomain reports whether two hosts share a registrable parent
 // (example.org vs mail.example.org → true; example.org vs other.net → false).
+//
+// Comparing the last two labels alone is wrong under a multi-label public suffix:
+// p.stonn.com.au and some-relay.com.au both reduce to "com.au" and would look
+// aligned when they are unrelated domains with unrelated DMARC policies. That is
+// the likely shape for an Australian deployment, i.e. exactly the case this
+// warning exists for, so take one label more whenever the last two are a known
+// multi-label suffix.
 func sharesParentDomain(a, b string) bool {
-	last2 := func(h string) string {
-		parts := strings.Split(strings.Trim(h, "."), ".")
-		if len(parts) < 2 {
-			return h
-		}
-		return strings.Join(parts[len(parts)-2:], ".")
+	return registrable(a) == registrable(b)
+}
+
+// multiLabelSuffixes are public suffixes that are themselves two labels, so the
+// registrable domain under them needs three. Not exhaustive (the full Public
+// Suffix List is thousands of entries and not worth vendoring for a startup
+// warning) — it covers the ones this app plausibly meets.
+var multiLabelSuffixes = map[string]bool{
+	"com.au": true, "net.au": true, "org.au": true, "edu.au": true, "gov.au": true, "id.au": true,
+	"co.uk": true, "org.uk": true, "me.uk": true, "ac.uk": true, "gov.uk": true,
+	"co.nz": true, "net.nz": true, "org.nz": true,
+	"com.sg": true, "com.hk": true, "co.jp": true, "co.za": true, "com.br": true,
+}
+
+// registrable returns the registrable domain: the public suffix plus one label.
+func registrable(host string) string {
+	parts := strings.Split(strings.Trim(strings.ToLower(host), "."), ".")
+	if len(parts) < 2 {
+		return strings.Join(parts, ".")
 	}
-	return last2(a) == last2(b)
+	last2 := strings.Join(parts[len(parts)-2:], ".")
+	if multiLabelSuffixes[last2] && len(parts) >= 3 {
+		return strings.Join(parts[len(parts)-3:], ".")
+	}
+	return last2
 }
 
 func splitCSV(raw string) []string {

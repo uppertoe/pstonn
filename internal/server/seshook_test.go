@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -223,9 +224,29 @@ func TestSESHookCertHostCheck(t *testing.T) {
 		"https://sns.amazonaws.com.evil.tld/cert.pem",
 		"https://evil-amazonaws.com/cert.pem",
 		"http://sns.ap-southeast-2.amazonaws.com/cert.pem", // not https
+		// The dangerous near-miss: anyone with an AWS account can serve arbitrary
+		// files from these hosts, so accepting them means accepting an
+		// attacker-supplied signing key. "Ends with .amazonaws.com" is NOT the
+		// property we need — only SNS's own regional endpoints are.
+		"https://my-bucket.s3.amazonaws.com/cert.pem",
+		"https://s3.ap-southeast-2.amazonaws.com/my-bucket/cert.pem",
+		"https://sns.evil.com.amazonaws.com/cert.pem", // extra label in the region slot
+		"https://notsns.ap-southeast-2.amazonaws.com/cert.pem",
 	} {
 		if _, err := newCertCache().get(context.Background(), host); err == nil {
 			t.Fatalf("cert URL %q was accepted, want rejection", host)
+		}
+	}
+	// Genuine SNS endpoints must still pass the host check. They fail later (no
+	// server is listening), so assert on WHICH error came back.
+	for _, host := range []string{
+		"https://sns.ap-southeast-2.amazonaws.com/cert.pem",
+		"https://sns.us-east-1.amazonaws.com/cert.pem",
+		"https://sns.cn-north-1.amazonaws.com.cn/cert.pem",
+	} {
+		_, err := newCertCache().get(context.Background(), host)
+		if errors.Is(err, errUntrustedCertHost) {
+			t.Fatalf("cert URL %q was rejected as an untrusted host, want it allowed", host)
 		}
 	}
 }
@@ -240,5 +261,70 @@ func TestSESHookDisabled(t *testing.T) {
 	})
 	if w := postSNS(s, body); w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("hook with no topic configured = %d, want 404/405", w.Code)
+	}
+}
+
+// TestSESHookRejectsReplay: a valid signature never expires, so a captured
+// notification must be refused once it is old. Replaying a bounce is nearly
+// idempotent, but it still refreshes last_seen, which alone keeps an address
+// suppressed past the point it would have aged out.
+func TestSESHookRejectsReplay(t *testing.T) {
+	s, key := newSESTestServer(t)
+	ctx := context.Background()
+
+	msg := `{"notificationType":"Bounce","bounce":{"bounceType":"Permanent","bounceSubType":"General",
+	  "bouncedRecipients":[{"emailAddress":"replayed@example.com","status":"5.1.1"}]}}`
+	body := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "old", TopicARN: testTopic, Message: msg,
+		Timestamp: time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code == http.StatusOK {
+		t.Fatal("a day-old signed notification was accepted: it can be replayed forever")
+	}
+	if bad, _, _ := s.store.IsSuppressed(ctx, "replayed@example.com"); bad {
+		t.Fatal("a replayed notification wrote a suppression")
+	}
+
+	// A message with no timestamp at all is refused rather than trusted.
+	noTS := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "nots", TopicARN: testTopic, Message: msg,
+	})
+	if w := postSNS(s, noTS); w.Code == http.StatusOK {
+		t.Fatal("a notification with no timestamp was accepted")
+	}
+}
+
+// TestSESHookIgnoresNotSpam: RFC 5965 "not-spam" means the recipient moved our
+// mail OUT of junk. Treating that as a complaint would permanently suppress
+// someone for rescuing us — and a complaint is never pruned or user-clearable.
+func TestSESHookIgnoresNotSpam(t *testing.T) {
+	s, key := newSESTestServer(t)
+	ctx := context.Background()
+
+	msg := `{"notificationType":"Complaint","complaint":{"complaintFeedbackType":"not-spam",
+	  "complainedRecipients":[{"emailAddress":"rescuer@example.com"}]}}`
+	body := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "ns", TopicARN: testTopic, Message: msg,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code != http.StatusOK {
+		t.Fatalf("not-spam report = %d, want 200 (accepted but ignored)", w.Code)
+	}
+	if bad, reason, _ := s.store.IsSuppressed(ctx, "rescuer@example.com"); bad {
+		t.Fatalf("a not-spam report suppressed the recipient (reason %q)", reason)
+	}
+
+	// A real complaint on the same endpoint still suppresses.
+	real := `{"notificationType":"Complaint","complaint":{"complaintFeedbackType":"abuse",
+	  "complainedRecipients":[{"emailAddress":"angry@example.com"}]}}`
+	body = signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "ab", TopicARN: testTopic, Message: real,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code != http.StatusOK {
+		t.Fatalf("abuse complaint = %d, want 200", w.Code)
+	}
+	if bad, reason, _ := s.store.IsSuppressed(ctx, "angry@example.com"); !bad || reason != store.SuppressComplaint {
+		t.Fatalf("real complaint suppressed=%v reason=%q, want true/complaint", bad, reason)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -39,24 +40,44 @@ type Suppression struct {
 func normaliseAddr(a string) string { return strings.ToLower(strings.TrimSpace(a)) }
 
 // SuppressAddress records that an address must not be emailed. Repeated reports
-// bump the counter and refresh last_seen; a complaint upgrades an existing
-// bounce (it is the stronger signal and the one with legal weight), but a bounce
-// never downgrades a complaint.
+// bump the counter and refresh last_seen, and the STRONGEST reason seen wins.
+//
+// Strength is complaint > bounce > unsubscribed/manual, and it is not merely
+// cosmetic — each rank unlocks a different escape route, so a reason that is too
+// weak resumes mail that should have stopped:
+//
+//   - complaint is never pruned and never user-clearable (they reported us);
+//   - bounce survives the user re-enabling email in Settings (the mailbox is
+//     broken, and only the mailbox can fix that);
+//   - unsubscribed is cleared by re-enabling email, because that IS the person
+//     asking for mail again.
+//
+// So an address that unsubscribes and is LATER found dead must end up at
+// 'bounce'. Leaving it at 'unsubscribed' let one click in Settings delete the row
+// and resume hammering a dead address — the reputation damage this list exists to
+// prevent. The detail column follows the winning reason rather than always taking
+// the newest, so a complaint's feedback type is not overwritten by a later
+// bounce's SMTP diagnostic while the reason still reads 'complaint'.
 func (s *Store) SuppressAddress(ctx context.Context, address, reason, detail string) error {
 	addr := normaliseAddr(address)
 	if addr == "" {
 		return nil
 	}
 	now := nowUTC()
-	_, err := s.db.ExecContext(ctx, `
+	// Ties (the same reason reported again) go to the incoming row, refreshing the
+	// diagnostic. SQLite evaluates every RHS against the pre-update row, so these
+	// two assignments always agree on which side won.
+	const rank = `CASE %s.reason WHEN 'complaint' THEN 3 WHEN 'bounce' THEN 2 ELSE 1 END`
+	stmt := fmt.Sprintf(`
 INSERT INTO mail_suppression (address, reason, detail, first_seen, last_seen, hits)
 VALUES (?, ?, ?, ?, ?, 1)
 ON CONFLICT(address) DO UPDATE SET
-  reason    = CASE WHEN excluded.reason = 'complaint' THEN 'complaint' ELSE mail_suppression.reason END,
-  detail    = excluded.detail,
+  reason    = CASE WHEN (%[1]s) >= (%[2]s) THEN excluded.reason ELSE mail_suppression.reason END,
+  detail    = CASE WHEN (%[1]s) >= (%[2]s) THEN excluded.detail ELSE mail_suppression.detail END,
   last_seen = excluded.last_seen,
   hits      = mail_suppression.hits + 1`,
-		addr, reason, detail, now, now)
+		fmt.Sprintf(rank, "excluded"), fmt.Sprintf(rank, "mail_suppression"))
+	_, err := s.db.ExecContext(ctx, stmt, addr, reason, detail, now, now)
 	return err
 }
 

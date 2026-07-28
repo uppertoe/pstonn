@@ -141,11 +141,14 @@ func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason strin
 		opts.Provenance = "You received this at " + to + " because " + reason + ". p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits."
 	}
 	err := s.mail.SendOpts(to, subject, body, opts)
-	if err != nil && errors.Is(err, mailer.ErrPermanent) && s.store != nil {
+	// Only a REJECTED RECIPIENT earns a suppression. A permanent failure at MAIL
+	// FROM or DATA says something is wrong with us or the message, not with this
+	// mailbox, and acting on it would blacklist every user we tried to reach.
+	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
 			log.Printf("notify: suppress %s: %v", to, serr)
 		} else {
-			log.Printf("notify: suppressing %s after a permanent SMTP refusal: %v", to, err)
+			log.Printf("notify: suppressing %s after the mail server rejected the address: %v", to, err)
 		}
 	}
 	return err
@@ -251,6 +254,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 				Account: owner, Subject: subject, Body: body,
 				NtfyPriority: "default", NtfyTag: "calendar", NotBefore: nb,
 				DedupKey: fmt.Sprintf("expiry|%s|%s|%s", owner, permitLabel, date),
+				Reason:   reasonAccount,
 			}
 			if wantEmail {
 				m.Recipients = []string{d.email}
@@ -317,7 +321,8 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 		UnsubscribeURL: s.UnsubscribeURL(to),
 		Provenance:     "You received this at " + to + " because " + reasonAccount + ". p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.",
 	})
-	if err != nil && errors.Is(err, mailer.ErrPermanent) && s.store != nil {
+	// As in sendEmail: only a rejected recipient is evidence about this address.
+	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
 			log.Printf("notify: suppress %s: %v", to, serr)
 		}
@@ -495,6 +500,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 			Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 			NotBefore: s.deferUntil(d.pref, now, o),
+			Reason:    reasonAccount,
 		}
 		if d.pref.EmailEnabled && s.mail.Enabled() {
 			m.Recipients = []string{d.email}
@@ -550,6 +556,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				Account: o.Owner, Subject: subject, Body: emailBody,
 				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,
 				DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
+				Reason:   reasonAccount,
 			}
 			if wantEmail {
 				m.Recipients = []string{d.email}
@@ -749,6 +756,7 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 		m := outMessage{
 			Account: owner, Subject: subject, Body: body,
 			NtfyPriority: "high", NtfyTag: "bell",
+			Reason: reasonAccount,
 			// Per-member key (then per-target suffix in enqueueSplit): a re-scan of
 			// the same plate while the first nudge is still fresh doesn't re-notify
 			// anyone, and one member's rows never dedup away another member's.

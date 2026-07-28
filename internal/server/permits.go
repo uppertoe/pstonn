@@ -23,15 +23,6 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// This page makes an uncached, synchronous council read, so one HTTP request
-	// is one council request. Throttled per user: opening the picker a few times
-	// is normal, hammering it is not, and the council's opinion of us is the
-	// scarcest resource the app has.
-	if !s.councilRead.allow("cr:" + base.Owner) {
-		s.message(w, http.StatusTooManyRequests,
-			"You've refreshed the permit list a lot in the last few minutes. Please wait a moment before trying again — p.stonn keeps its requests to the council deliberately light.")
-		return
-	}
 	s.renderPicker(w, r, base)
 }
 
@@ -40,10 +31,25 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 // The live council read is inherent to this page, so it gets a deadline well
 // inside the server's 20s WriteTimeout: a slow portal yields the error branch
 // (a rendered page), not a dropped connection.
+//
+// The throttle lives HERE rather than in the /permits/picker handler because
+// appShell renders this page directly for any linked account with no managed
+// permits yet — the normal onboarding state. Gating only the named route left
+// every page load by such a user as one uncached council request, which is
+// exactly the one-for-one hole the throttle was introduced to close.
 func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashboardData) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	owner := base.Owner
+	// This page makes an uncached, synchronous council read, so one HTTP request
+	// is one council request. Throttled per account: opening the picker a few
+	// times is normal, hammering it is not, and the council's opinion of us is
+	// the scarcest resource the app has.
+	if !s.councilRead.allow("cr:" + owner) {
+		s.message(w, http.StatusTooManyRequests,
+			"You've refreshed the permit list a lot in the last few minutes. Please wait a moment before trying again — p.stonn keeps its requests to the council deliberately light.")
+		return
+	}
 	permits, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		base.State = "onboarding"
@@ -244,8 +250,12 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 	s.logChange(r.Context(), owner, user, store.ActionPermitRemove, label, "")
 	s.notifyDestructive(r.Context(), owner, user,
 		user+" stopped managing the permit \""+label+"\". Its weekly roster, one-off bookings and change history were deleted, and p.stonn will no longer update that permit.")
-	// Re-evaluate so the scheduler drops the now-removed permit promptly.
-	s.sched.Kick()
+	// Re-evaluate so the scheduler drops the now-removed permit promptly, and drop
+	// its backoff entry with it — nothing else ever removes one, so a deployment
+	// that churns permits leaks a map entry per deleted permit until restart.
+	// KickPermit rather than Kick: clearing a dead permit's own entry cannot give
+	// anyone else's permit a cheaper retry.
+	s.sched.KickPermit(p.ID)
 	redirectHome(w, r)
 }
 

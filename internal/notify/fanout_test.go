@@ -146,3 +146,75 @@ func TestNotifyGuestRequestPerMemberFanout(t *testing.T) {
 		t.Fatalf("after re-scan outbox = %d, want still 2 (deduped)", len(due))
 	}
 }
+
+// TestQueuedMailCarriesProvenance covers every path that puts person-facing mail
+// in the OUTBOX rather than sending it immediately.
+//
+// sendEmail takes a reason parameter, so the compiler forces the direct senders
+// to declare one — but the queued path carries the reason as a plain struct
+// field, and four of the six enqueue sites simply omitted it. The mail those
+// sites produce has no "you received this at X because Y" footer, which is the
+// Spam Act s18 sender identification the compliance pass set out to add. Quiet
+// hours default to 22:00-06:00, so the deferred path is the common one, not an
+// edge case.
+func TestQueuedMailCarriesProvenance(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const owner = "lily@example.com"
+	// Put "now" inside quiet hours so every notification takes the DEFERRED branch
+	// — the one that was dropping the reason. The window is anchored to the current
+	// hour so this holds whenever the test runs (QuietUntil must be 0-23, so a
+	// literal all-day window isn't expressible).
+	nowHour := time.Now().In(time.UTC).Hour()
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{
+		Owner: owner, EmailEnabled: true, QuietFrom: nowHour, QuietUntil: (nowHour + 2) % 24,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"))
+
+	cases := []struct {
+		name string
+		fire func() error
+	}{
+		{"apply outcome", func() error {
+			return svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "VPP1", Reg: "ABC123", OK: true})
+		}},
+		{"permit expiry", func() error {
+			svc.NotifyPermitExpiry(ctx, owner, "VPP1", time.Now().Add(14*24*time.Hour))
+			return nil
+		}},
+		{"guest request", func() error {
+			return svc.NotifyGuestRequest(ctx, owner, "VPP1", "XYZ789", "")
+		}},
+	}
+	for _, c := range cases {
+		if err := c.fire(); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+	}
+
+	// Drain everything queued, however far in the future it was deferred.
+	rows, err := st.DueOutbox(ctx, time.Now().UTC().Add(72*time.Hour), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < len(cases) {
+		t.Fatalf("queued %d messages, want at least %d — a path did not enqueue", len(rows), len(cases))
+	}
+	for _, r := range rows {
+		if len(r.Recipients) == 0 {
+			continue // push rows carry no footer
+		}
+		if r.Reason == "" {
+			t.Errorf("queued mail to %v (subject %q) has no provenance reason: "+
+				"it will send with no \"why you received this\" footer", r.Recipients, r.Subject)
+		}
+	}
+}

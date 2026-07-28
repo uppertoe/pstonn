@@ -193,11 +193,17 @@ var smtpExchangeTimeout = 30 * time.Second
 // when configured and offered, then MAIL/RCPT/DATA/QUIT. PLAIN auth still
 // refuses to run over plaintext (smtp.PlainAuth enforces TLS-or-localhost).
 func (m *Mailer) deliver(to string, msg []byte) error {
+	// RCPT TO takes a BARE address, never a display-name form. Operator-supplied
+	// addresses (ADMIN_EMAIL, CONTACT_TO) are validated with mail.ParseAddress,
+	// which happily accepts `Ops <ops@example.com>` — so without this the config
+	// looked valid and then every send to it failed at RCPT, silently, which is the
+	// precise failure mode that validation was added to prevent.
+	to = envelopeAddress(to)
 	// smtp.SendMail validates these to block SMTP command injection; keep that.
 	if strings.ContainsAny(to, "\r\n") {
 		return errors.New("mailer: recipient contains CR/LF")
 	}
-	from := senderAddress(m.from)
+	from := envelopeAddress(m.from)
 	if strings.ContainsAny(from, "\r\n") {
 		return errors.New("mailer: sender contains CR/LF")
 	}
@@ -230,11 +236,12 @@ func (m *Mailer) deliver(to string, msg []byte) error {
 	if err := c.Mail(from); err != nil {
 		return classify(err)
 	}
-	// The recipient is rejected here for a bad/unknown mailbox, which is the
-	// failure worth classifying: a 5xx means retrying can never help, and
-	// hammering a dead address is what damages a sending domain's reputation.
+	// This is the ONE stage where a 5xx is evidence about the recipient's address
+	// (the classic "user unknown"), so it alone yields ErrBadAddress and can put
+	// the address on the do-not-email list. Hammering a dead address is what
+	// destroys a sending domain's reputation.
 	if err := c.Rcpt(to); err != nil {
-		return classify(err)
+		return classifyRecipient(err)
 	}
 	w, err := c.Data()
 	if err != nil {
@@ -250,25 +257,46 @@ func (m *Mailer) deliver(to string, msg []byte) error {
 }
 
 // ErrPermanent marks a send that must never be retried: the server refused it
-// with a 5xx, so the address (or the message) is rejected outright. Callers use
-// errors.Is to decide between "back off and try again" and "stop, and remember
-// this address is undeliverable".
+// with a 5xx, so the address, the sender or the message is rejected outright.
+// Callers use errors.Is to decide between "back off and try again" and "stop".
 var ErrPermanent = errors.New("permanent SMTP failure")
+
+// ErrBadAddress marks the narrower case where the 5xx was the RECIPIENT being
+// rejected — the classic "user unknown" at RCPT TO. It wraps ErrPermanent, so
+// anything asking "should I retry?" still gets no; it exists for the one caller
+// that asks the much stronger question "is this address itself undeliverable?".
+//
+// The distinction matters because the answer to that question gets written to a
+// suppression list that lasts two years and is invisible to the user. A 5xx at
+// MAIL FROM is about OUR sender, and a 5xx at DATA is usually about the message
+// (size, content, or an unverified sender in an SES sandbox) — neither is
+// evidence that the recipient's mailbox is bad. Treating them as such would let
+// one misconfiguration walk the entire user base onto the do-not-email list,
+// which is precisely the silent, permanent notification failure this app cannot
+// afford: the notifications are what stop people being fined.
+var ErrBadAddress = fmt.Errorf("%w: recipient rejected", ErrPermanent)
 
 // classify inspects an SMTP reply and wraps permanent (5xx) refusals with
 // ErrPermanent. Transient replies (4xx) and connection-level errors pass through
-// unchanged so the existing retry/backoff applies.
-//
-// 421 is a 4xx and already transient. Note that a 5xx at RCPT is the classic
-// "user unknown"; a 5xx at DATA/close is usually the message being refused
-// (size, content) rather than the address, but both are futile to retry.
+// unchanged so the existing retry/backoff applies. 421 is a 4xx and already
+// transient.
 func classify(err error) error {
+	return classifyAt(err, ErrPermanent)
+}
+
+// classifyRecipient is classify for the RCPT stage, where a 5xx is evidence
+// about the recipient's address specifically.
+func classifyRecipient(err error) error {
+	return classifyAt(err, ErrBadAddress)
+}
+
+func classifyAt(err error, permanent error) error {
 	if err == nil {
 		return nil
 	}
 	var te *textproto.Error
 	if errors.As(err, &te) && te.Code >= 500 && te.Code < 600 {
-		return fmt.Errorf("%w: %d %s", ErrPermanent, te.Code, te.Msg)
+		return fmt.Errorf("%w: %d %s", permanent, te.Code, te.Msg)
 	}
 	return err
 }
@@ -280,9 +308,9 @@ func headerValue(s string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
 }
 
-// senderAddress extracts the bare address from a possibly-decorated From header
+// envelopeAddress extracts the bare address from a possibly-decorated header
 // ("Name <a@b>" → "a@b"); SendMail's envelope-from must be an address only.
-func senderAddress(from string) string {
+func envelopeAddress(from string) string {
 	if i := strings.LastIndex(from, "<"); i >= 0 {
 		if j := strings.Index(from[i:], ">"); j >= 0 {
 			return from[i+1 : i+j]
@@ -306,7 +334,7 @@ func messageID(from string) string {
 // messageIDDomain is the domain part of the sender address, falling back to a
 // literal when the configured From has no recognisable domain.
 func messageIDDomain(from string) string {
-	addr := senderAddress(from)
+	addr := envelopeAddress(from)
 	if i := strings.LastIndex(addr, "@"); i >= 0 && i+1 < len(addr) {
 		if d := strings.TrimSpace(addr[i+1:]); d != "" {
 			return d

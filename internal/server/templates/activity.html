@@ -1,6 +1,6 @@
 {{define "page-activity"}}
   {{/* ---------- ACTIVITY ---------- */}}
-  <div class="sectitle" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Plate changes</div>
+  <div class="sectitle" id="plates" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Plate changes</div>
   <p class="subtitle">Every plate change the scheduler has applied on your behalf.</p>
   <section class="card" style="--hue:var(--sec-activity)">
     <table class="mtable">
@@ -25,7 +25,7 @@
          people check to confirm something happened. */}}
     {{if .Log}}
     <p class="empty-note" style="margin-top:12px">
-      {{if .LogMore}}Showing the most recent {{len .Log}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}Kept for 90 days.
+      {{if .LogMore}}Showing the most recent {{len .Log}}. <a href="/activity?all=1#plates">Show more</a> &middot; {{end}}Kept for 90 days.
     </p>
     {{end}}
   </section>

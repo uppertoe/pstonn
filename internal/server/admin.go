@@ -93,12 +93,15 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		if a.NtfyEnabled {
 			row.NtfyTopic = a.NtfyTopic
 		}
-		// Council / keep-warm status.
+		// Council / keep-warm status. The re-authorise deadline is IDLE-based, so it
+		// must be read off the same clock decideWarm retires on — using linked_at
+		// showed a false "Re-link due", and a date months in the past, for any active
+		// household that happened to link more than maxAge ago.
 		needsAttention := false
 		switch {
 		case !a.Linked:
 			row.Status, row.StatusLabel = "unlinked", "Not linked"
-		case maxAge > 0 && !a.LinkedAt.IsZero() && now.Sub(a.LinkedAt) >= maxAge:
+		case maxAge > 0 && !idleSince(a).IsZero() && now.Sub(idleSince(a)) >= maxAge:
 			row.Status, row.StatusLabel = "relink", "Re-link due"
 			needsAttention = true
 		case a.WarmedAt.IsZero() || now.Sub(a.WarmedAt) > 6*time.Hour:
@@ -113,8 +116,8 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			if !a.WarmedAt.IsZero() {
 				row.Warmed = agoText(now, a.WarmedAt)
 			}
-			if maxAge > 0 && !a.LinkedAt.IsZero() {
-				row.RelinkBy = a.LinkedAt.Add(maxAge).In(loc).Format("2 Jan 2006")
+			if maxAge > 0 && !idleSince(a).IsZero() {
+				row.RelinkBy = idleSince(a).Add(maxAge).In(loc).Format("2 Jan 2006")
 			}
 		}
 		if a.LastApplyStatus != "" {
@@ -270,4 +273,15 @@ func sealRoster(key []byte, roster []store.RosterEntry) (string, error) {
 		return "", err
 	}
 	return box.Seal(string(plain))
+}
+
+// idleSince is the clock the re-authorise bound is measured against, mirroring
+// scheduler.decideWarm: last activity, falling back to the link time for sessions
+// that predate the idle column. Kept in step with that function — if they diverge,
+// /admin reports a deadline the scheduler does not act on.
+func idleSince(a store.AdminAccount) time.Time {
+	if !a.LastActive.IsZero() {
+		return a.LastActive
+	}
+	return a.LinkedAt
 }

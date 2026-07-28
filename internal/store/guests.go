@@ -512,15 +512,35 @@ WHERE recipient_email != '' AND revoked_at != '' AND revoked_at < ?`,
 	return res.RowsAffected()
 }
 
-// ClearSettledRequestNonces drops the poll secret from printed-QR requests that
-// are decided AND past their window, so a visitor's live capability does not sit
-// in the table for the rest of its retention. Pending and still-active approved
-// requests keep theirs — the visitor is still polling those.
+// settledNonceGrace is how long a denied or expired request keeps its poll secret
+// after being decided.
+//
+// It exists so the visitor can still LEARN the outcome. A denied or expired
+// request has no until_ts (no approved run ever started), so a plain "past its
+// window" test cleared the nonce on the very next sweep — sometimes in the same
+// pass that expired it — and GuestRequestForPoll requires the nonce. The visitor's
+// re-scan then resolved to nothing, so the distinct "your request timed out"
+// message was unreachable and every unsuccessful outcome looked like a refusal.
+// Matched to the 48h re-scan cookie window in the server package: once that cookie
+// is gone nobody can present the nonce anyway, so holding it longer buys nothing.
+const settledNonceGrace = 48 * time.Hour
+
+// ClearSettledRequestNonces drops the poll secret from printed-QR requests once it
+// can no longer tell a visitor anything, so a live capability does not sit in the
+// table for the rest of its retention. An approved request keeps its nonce until
+// its window ends; a denied or expired one keeps it for settledNonceGrace after
+// the decision. Pending requests always keep theirs — the visitor is still polling.
 func (s *Store) ClearSettledRequestNonces(ctx context.Context, now time.Time) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE guest_request SET nonce = ''
 WHERE nonce != '' AND status != 'pending'
-  AND (until_ts = '' OR until_ts < ?)`, now.UTC().Format(time.RFC3339))
+  AND (
+        (until_ts != '' AND until_ts < ?)
+     OR (until_ts = '' AND decided_at != '' AND decided_at < ?)
+     OR (until_ts = '' AND decided_at = '')
+      )`,
+		now.UTC().Format(time.RFC3339),
+		now.Add(-settledNonceGrace).UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}

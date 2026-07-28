@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -111,6 +112,34 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 		`DELETE FROM outbox WHERE status = 'pending' AND recipients = ?`, owner); err != nil {
 		return err
 	}
+	// Their address as the driver contact on ANOTHER household's car. Nothing about
+	// this belongs to that household — it is purely a way to reach this person — so
+	// deleting it is both correct and exactly what they asked for: no more
+	// "your car was bumped off the permit" mail from someone else's account.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE vehicle SET email = '' WHERE email = ? AND owner != ?`, owner, owner); err != nil {
+		return err
+	}
+	// Their address on guest passes OTHER households sent TO them. Only the dead
+	// ones: a revoked link's recipient is already scheduled to be forgotten after 30
+	// days and naming them serves nothing, so this just brings that forward. A LIVE
+	// link is deliberately left alone — blanking it would not stop the link working
+	// (it is a bearer URL already in their inbox), it would only stop the household
+	// that sent it from seeing who to revoke. Deleting your own account should not
+	// quietly break someone else's ability to manage their permit.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_token SET recipient_email = '' WHERE recipient_email = ? AND revoked_at != ''`,
+		owner); err != nil {
+		return err
+	}
+	// Their address inside another household's change log. A guest.create row stores
+	// every recipient as one comma-joined string, so the exact-match delete above
+	// misses it. Redact rather than delete: the row is that household's record of
+	// something THEY did, and erasing it would punch a hole in their audit trail to
+	// remove one name from it.
+	if err := redactLogTargets(ctx, tx, owner); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -167,7 +196,8 @@ type AdminAccount struct {
 	Owner           string
 	MemberOf        string    // non-empty: this owner is a secondary on another account
 	Linked          bool      // has a stored council session cookie
-	LinkedAt        time.Time // last interactive link (the re-authorise clock start)
+	LinkedAt        time.Time // last interactive link
+	LastActive      time.Time // last time anyone on the account used the app: the re-authorise clock
 	WarmedAt        time.Time // last keep-warm / refresh (council_session.updated_at)
 	TokenExpiry     time.Time
 	EmailEnabled    bool
@@ -189,7 +219,7 @@ func (s *Store) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT o.owner,
   COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner LIMIT 1), ''),
-  COALESCE(cs.cookie_sealed, ''), COALESCE(cs.linked_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
+  COALESCE(cs.cookie_sealed, ''), COALESCE(cs.linked_at, ''), COALESCE(cs.last_active_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
   COALESCE(np.email_enabled, 1), COALESCE(np.ntfy_enabled, 0), COALESCE(np.ntfy_topic, ''),
   COALESCE((SELECT version FROM consent c WHERE c.owner = o.owner ORDER BY id DESC LIMIT 1), ''),
   (SELECT COUNT(*) FROM permit p WHERE p.owner = o.owner),
@@ -215,9 +245,9 @@ ORDER BY o.owner`)
 	byOwner := map[string]int{}
 	for rows.Next() {
 		var a AdminAccount
-		var cookie, linked, warmed, expiry, lastAt string
+		var cookie, linked, active, warmed, expiry, lastAt string
 		var emailEn, ntfyEn int
-		if err := rows.Scan(&a.Owner, &a.MemberOf, &cookie, &linked, &warmed, &expiry,
+		if err := rows.Scan(&a.Owner, &a.MemberOf, &cookie, &linked, &active, &warmed, &expiry,
 			&emailEn, &ntfyEn, &a.NtfyTopic, &a.ConsentVersion, &a.PermitCount, &a.MemberCount,
 			&a.LastApplyStatus, &lastAt); err != nil {
 			return nil, err
@@ -226,6 +256,7 @@ ORDER BY o.owner`)
 		a.EmailEnabled = emailEn == 1
 		a.NtfyEnabled = ntfyEn == 1
 		a.LinkedAt, _ = time.Parse(time.RFC3339, linked)
+		a.LastActive, _ = time.Parse(time.RFC3339, active)
 		a.WarmedAt, _ = time.Parse(time.RFC3339, warmed)
 		a.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
 		a.LastApplyAt, _ = time.Parse(time.RFC3339, lastAt)
@@ -356,11 +387,28 @@ func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) (re
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner); err != nil {
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner)
+	if err != nil {
 		return 0, err
 	}
-	// Their personal notification prefs go with their access.
+	// Everything below deletes rows keyed by the EMAIL alone — notification prefs
+	// and queued mail are not scoped to an account, because a person only ever has
+	// one of each. So if that address was not actually a member of this account,
+	// this would be one household destroying an unrelated user's notification
+	// settings and swallowing their queued mail. Nothing downstream re-checks, so
+	// the membership delete has to be the gate: no row removed, nothing to clean up.
+	if n, err := res.RowsAffected(); err != nil {
+		return 0, err
+	} else if n == 0 {
+		return 0, ErrNotFound
+	}
+	// Their personal notification prefs go with their access — but read the push
+	// topic out FIRST, because queued messages already carry it and dropping the
+	// row would lose the only handle we have on them.
+	if err := dropQueuedPush(ctx, tx, memberEmail); err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail); err != nil {
 		return 0, err
 	}
@@ -392,6 +440,10 @@ func (s *Store) RemoveMembership(ctx context.Context, memberEmail string) (revok
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_member WHERE member_email = ?`, memberEmail); err != nil {
 		return 0, err
 	}
+	// Before the prefs row goes: it holds the only copy of their push topic.
+	if err := dropQueuedPush(ctx, tx, memberEmail); err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail); err != nil {
 		return 0, err
 	}
@@ -400,6 +452,91 @@ func (s *Store) RemoveMembership(ctx context.Context, memberEmail string) (revok
 		return 0, err
 	}
 	return n, tx.Commit()
+}
+
+// redactLogTargets removes one address from the comma-joined recipient lists in
+// other accounts' change-log rows, leaving the rest of each row intact.
+//
+// Done in Go rather than SQL string surgery because the match has to be on whole
+// list ELEMENTS: a LIKE '%addr%' rewrite would also mangle "xa@b.com" when asked
+// to remove "a@b.com". The LIKE below is only a prefilter to keep the scan small;
+// the real comparison is the exact element match in the loop.
+func redactLogTargets(ctx context.Context, tx *sql.Tx, addr string) error {
+	if addr == "" {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, target FROM account_log WHERE owner != ? AND target LIKE '%' || ? || '%'`, addr, addr)
+	if err != nil {
+		return err
+	}
+	type edit struct {
+		id     int64
+		target string
+	}
+	var edits []edit
+	for rows.Next() {
+		var e edit
+		if err := rows.Scan(&e.id, &e.target); err != nil {
+			rows.Close()
+			return err
+		}
+		parts := strings.Split(e.target, ", ")
+		kept := parts[:0]
+		for _, p := range parts {
+			if !strings.EqualFold(strings.TrimSpace(p), addr) {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) == len(parts) {
+			continue // prefilter matched a substring, not a whole address
+		}
+		e.target = strings.Join(kept, ", ")
+		edits = append(edits, e)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, e := range edits {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE account_log SET target = ? WHERE id = ?`, e.target, e.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dropQueuedPush deletes pending PUSH messages addressed to a departing member's
+// own ntfy topic.
+//
+// Notification preferences are per-person, so each member has their own topic,
+// and a queued push carries that topic with an EMPTY recipients column. The
+// queued-email purge matches on recipients, so it never touched these: a
+// quiet-hours-deferred notice (deferred up to eight hours by default) would still
+// push the household's plates and permit label to someone who had just lost
+// access. Same failure the email purge was written to prevent, on the other
+// channel.
+//
+// Must run BEFORE the member's notify_pref row is deleted — that row holds the
+// only copy of the topic.
+func dropQueuedPush(ctx context.Context, tx *sql.Tx, memberEmail string) error {
+	var topic string
+	err := tx.QueryRowContext(ctx,
+		`SELECT ntfy_topic FROM notify_pref WHERE owner = ?`, memberEmail).Scan(&topic)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // never set any preferences; nothing queued to a topic
+	}
+	if err != nil {
+		return err
+	}
+	if topic == "" {
+		return nil
+	}
+	_, err = tx.ExecContext(ctx,
+		`DELETE FROM outbox WHERE status = 'pending' AND ntfy_topic = ?`, topic)
+	return err
 }
 
 // revokeGrantsBy deletes the guest passes and door QRs a departing member minted,

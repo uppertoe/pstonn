@@ -229,9 +229,13 @@ func TestAccountMembers(t *testing.T) {
 		t.Fatal("adding an existing member to another account should fail")
 	}
 
-	// Owner removes one; the removal is owner-scoped.
-	if _, err := s.RemoveMember(ctx, "someone-else@example.com", gran); err != nil {
-		t.Fatal(err)
+	// Removal is owner-scoped, and a non-member is reported as such rather than
+	// quietly "succeeding". That matters because everything RemoveMember does
+	// after the membership delete is keyed by email alone (notification prefs,
+	// queued mail), so a silent no-op would have let one account wipe an unrelated
+	// person's settings.
+	if _, err := s.RemoveMember(ctx, "someone-else@example.com", gran); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("wrong owner removing a member: err = %v, want ErrNotFound", err)
 	}
 	if n, _ := s.CountMembers(ctx, primary); n != 2 {
 		t.Fatalf("wrong owner must not remove a member; count = %d, want 2", n)
@@ -629,6 +633,42 @@ func TestReminderAndConfirm(t *testing.T) {
 	}
 	if got, err := s.ConfirmSession(ctx, "tok-fresh", 21*24*time.Hour); err != nil || got != owner {
 		t.Fatalf("fresh token = %q, %v", got, err)
+	}
+}
+
+// TestTouchClearsConfirmToken: a visit to the app must revoke any outstanding
+// confirm link, not just the reminder flag.
+//
+// Both of the token's expiry mechanisms are gated on reminder_sent_at being set
+// (ClearStaleConfirmTokens matches only rows that have it; ConfirmSession skips
+// its TTL check without it), so clearing the flag alone would leave the emailed
+// link working FOREVER — the exact permanent mailbox capability the TTL exists to
+// prevent. Nothing is lost by revoking it: the visit already reset the same idle
+// clock the link would have.
+func TestTouchClearsConfirmToken(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "u@example.com"
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkReminderSent(ctx, owner, "tok-live"); err != nil {
+		t.Fatal(err)
+	}
+	// Someone on the account opens the app after the reminder goes out.
+	if err := s.TouchAccountActive(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := s.GetCouncilSession(ctx, owner)
+	if cs.ConfirmToken != "" {
+		t.Fatalf("confirm token survived a visit: %q — the emailed link is now immortal", cs.ConfirmToken)
+	}
+	if !cs.ReminderSent.IsZero() {
+		t.Fatal("reminder flag should be cleared so a later idle stretch can send a fresh one")
+	}
+	// The link in that email must no longer do anything, at any age.
+	if _, err := s.ConfirmSession(ctx, "tok-live", 21*24*time.Hour); err != ErrNotFound {
+		t.Fatalf("revoked token still confirmed: %v", err)
 	}
 }
 
@@ -2085,11 +2125,20 @@ func TestRetention(t *testing.T) {
 	if _, err := s.DecideGuestRequest(ctx, owner, reqID, false, "", owner, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
+	// A just-decided request KEEPS its nonce for settledNonceGrace, so the visitor
+	// can still see what happened (see TestSettledNonceGrace). Only once that window
+	// has passed does the poll secret go.
 	if _, err := s.ClearSettledRequestNonces(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.GuestRequestForPoll(ctx, reqID, "nonce-ret"); err != nil {
+		t.Fatalf("a just-denied request must stay pollable so the visitor learns its fate: %v", err)
+	}
+	if _, err := s.ClearSettledRequestNonces(ctx, time.Now().Add(settledNonceGrace+time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.GuestRequestForPoll(ctx, reqID, "nonce-ret"); !errors.Is(err, ErrNotFound) {
-		t.Fatal("a settled request should no longer be pollable with its old nonce")
+		t.Fatal("a long-settled request should no longer be pollable with its old nonce")
 	}
 
 	// --- suppression list is bounded, but a complaint is not forgotten ---
@@ -2112,5 +2161,287 @@ func TestRetention(t *testing.T) {
 	}
 	if bad, _, _ := s.IsSuppressed(ctx, "complained@example.com"); !bad {
 		t.Fatal("a complaint must NEVER age out — they asked us to stop")
+	}
+}
+
+// TestMigrateDropsLastUsedAt proves the column really goes away on a database
+// that already has it — i.e. production, not a fresh test DB.
+//
+// The retention pass claimed "guest_token.last_used_at is gone", but it only
+// deleted the code that wrote to it. The column and every historical value (when
+// a named guest last parked — a third party's movement history, read by nothing)
+// survived on any existing deployment, which is precisely where the claim needed
+// to hold.
+func TestMigrateDropsLastUsedAt(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	// Recreate the pre-migration shape and seed a value, as a deployed DB would have.
+	if _, err := s.db.ExecContext(ctx,
+		`ALTER TABLE guest_token ADD COLUMN last_used_at TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatalf("seed old column: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO permit (id, owner, council_permit_id, updated_at)
+VALUES (1, 'u@example.com', 'CP-1', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("seed permit: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO guest_grant (id, owner, permit_id, label, created_at, created_by)
+VALUES (1, 'u@example.com', 1, 'g', '2026-01-01T00:00:00Z', 'u@example.com')`); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO guest_token (grant_id, token_hash, created_at, last_used_at)
+VALUES (1, 'hash-1', '2026-01-01T00:00:00Z', '2026-06-01T09:15:00Z')`); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+	if has, err := s.columnExists("guest_token", "last_used_at"); err != nil || !has {
+		t.Fatalf("setup failed: column present = %v, err = %v", has, err)
+	}
+
+	// Re-running migrate is what an upgrade does.
+	if err := s.migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	has, err := s.columnExists("guest_token", "last_used_at")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		// The migration falls back to blanking when DROP COLUMN is unavailable, so
+		// accept that outcome — but never a retained timestamp.
+		var v string
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT last_used_at FROM guest_token WHERE token_hash = 'hash-1'`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		if v != "" {
+			t.Fatalf("last_used_at survived migration with value %q", v)
+		}
+		t.Log("DROP COLUMN unavailable; values were cleared instead")
+	}
+}
+
+// TestSuppressionPrecedence locks the ordering complaint > bounce > unsubscribed.
+//
+// Each rank unlocks a different escape route, so a too-weak reason resumes mail
+// that should have stopped. The dangerous case is unsubscribe-then-bounce: while
+// the row still read 'unsubscribed', re-enabling email in Settings deleted it and
+// the app resumed sending to a dead mailbox.
+func TestSuppressionPrecedence(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	reasonOf := func(addr string) string {
+		t.Helper()
+		_, r, err := s.IsSuppressed(ctx, addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	// A later bounce UPGRADES an unsubscribe: the mailbox is broken, and only the
+	// mailbox can fix that, so re-enabling email must no longer clear it.
+	const dead = "gone@example.com"
+	if err := s.SuppressAddress(ctx, dead, SuppressUnsubscribed, "user opted out"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SuppressAddress(ctx, dead, SuppressBounce, "550 user unknown"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonOf(dead); got != SuppressBounce {
+		t.Fatalf("unsubscribed + later bounce = %q, want %q", got, SuppressBounce)
+	}
+	if _, err := s.UnsuppressIfUnsubscribed(ctx, dead); err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonOf(dead); got != SuppressBounce {
+		t.Fatalf("re-enabling email cleared a BOUNCE (%q): the app would resume mailing a dead address", got)
+	}
+
+	// A complaint outranks everything and cannot be downgraded or overwritten.
+	const angry = "angry@example.com"
+	if err := s.SuppressAddress(ctx, angry, SuppressBounce, "451 deferred"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SuppressAddress(ctx, angry, SuppressComplaint, "abuse"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonOf(angry); got != SuppressComplaint {
+		t.Fatalf("bounce + complaint = %q, want %q", got, SuppressComplaint)
+	}
+	if err := s.SuppressAddress(ctx, angry, SuppressBounce, "550 later bounce"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reasonOf(angry); got != SuppressComplaint {
+		t.Fatalf("a later bounce downgraded a complaint to %q", got)
+	}
+	// The detail must still describe the complaint, not the newer bounce.
+	rows, err := s.ListSuppressions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Address == angry && r.Detail != "abuse" {
+			t.Fatalf("complaint detail overwritten by a later bounce: %q", r.Detail)
+		}
+	}
+}
+
+// TestDeleteAllForOwnerCrossAccountTraces covers the traces a departing user
+// leaves in OTHER households' records — and, just as importantly, the ones that
+// are deliberately left alone because they are the other household's data.
+func TestDeleteAllForOwnerCrossAccountTraces(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const leaver, other = "leaver@example.com", "other@example.com"
+
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO permit (id, owner, council_permit_id, updated_at) VALUES (9, ?, 'CP-9', '2026-01-01T00:00:00Z')`,
+		other); err != nil {
+		t.Fatal(err)
+	}
+	// The other household's car, with the leaver as its driver contact.
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO vehicle (id, owner, label, registration, email, created_at) VALUES (9, ?, 'Car', 'AAA111', ?, '2026-01-01T00:00:00Z')`,
+		other, leaver); err != nil {
+		t.Fatal(err)
+	}
+	// Two guest passes the other household sent TO the leaver: one revoked, one live.
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO guest_grant (id, owner, permit_id, label, created_at, created_by)
+VALUES (9, ?, 9, 'g', '2026-01-01T00:00:00Z', ?)`, other, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO guest_token (id, grant_id, recipient_email, token_hash, created_at, revoked_at)
+VALUES (91, 9, ?, 'h-dead', '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z'),
+       (92, 9, ?, 'h-live', '2026-01-01T00:00:00Z', '')`, leaver, leaver); err != nil {
+		t.Fatal(err)
+	}
+	// The other household's log row naming several recipients, the leaver among them.
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO account_log (owner, actor, action, target, detail, at)
+VALUES (?, ?, 'guest.create', ?, '', '2026-01-01T00:00:00Z')`,
+		other, other, "mum@example.com, "+leaver+", dad@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	// A near-miss address that must NOT be mangled by the redaction.
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO account_log (owner, actor, action, target, detail, at)
+VALUES (?, ?, 'guest.create', ?, '', '2026-01-01T00:00:00Z')`,
+		other, other, "xleaver@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteAllForOwner(ctx, leaver); err != nil {
+		t.Fatal(err)
+	}
+
+	var driverEmail string
+	if err := s.db.QueryRowContext(ctx, `SELECT email FROM vehicle WHERE id = 9`).Scan(&driverEmail); err != nil {
+		t.Fatal(err)
+	}
+	if driverEmail != "" {
+		t.Errorf("driver email on another household's car survived: %q", driverEmail)
+	}
+
+	var deadRecipient, liveRecipient string
+	if err := s.db.QueryRowContext(ctx, `SELECT recipient_email FROM guest_token WHERE id = 91`).Scan(&deadRecipient); err != nil {
+		t.Fatal(err)
+	}
+	if deadRecipient != "" {
+		t.Errorf("revoked pass still names the departed recipient: %q", deadRecipient)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT recipient_email FROM guest_token WHERE id = 92`).Scan(&liveRecipient); err != nil {
+		t.Fatal(err)
+	}
+	if liveRecipient != leaver {
+		// Deliberate: the link is a bearer URL already in their inbox, so blanking
+		// this would not revoke anything — it would only stop the sending household
+		// seeing who to revoke.
+		t.Errorf("live pass recipient was cleared (%q): the other household can no longer tell whose link to revoke", liveRecipient)
+	}
+
+	var joined, nearMiss string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT target FROM account_log WHERE target LIKE '%mum%'`).Scan(&joined); err != nil {
+		t.Fatal(err)
+	}
+	if want := "mum@example.com, dad@example.com"; joined != want {
+		t.Errorf("redacted log target = %q, want %q", joined, want)
+	}
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT target FROM account_log WHERE target LIKE '%xleaver%'`).Scan(&nearMiss); err != nil {
+		t.Fatalf("a near-miss address was destroyed by substring matching: %v", err)
+	}
+	if nearMiss != "xleaver@example.com" {
+		t.Errorf("near-miss address was mangled: %q", nearMiss)
+	}
+}
+
+// TestSettledNonceGrace: a denied or expired request must keep its poll secret
+// long enough for the visitor to learn what happened.
+//
+// Denied and expired rows have no until_ts, so the old "past its window" test
+// cleared their nonce on the next sweep — often the same pass that expired them.
+// GuestRequestForPoll requires the nonce, so the re-scan resolved to nothing and
+// the distinct "timed out" message could never be shown.
+func TestSettledNonceGrace(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO permit (id, owner, council_permit_id, updated_at) VALUES (5, 'o@example.com', 'CP-5', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO guest_grant (id, owner, permit_id, label, created_at, created_by)
+VALUES (5, 'o@example.com', 5, 'door', '2026-01-01T00:00:00Z', 'o@example.com')`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	mk := func(id int64, status, decidedAt, until string) {
+		t.Helper()
+		if _, err := s.db.ExecContext(ctx, `
+INSERT INTO guest_request (id, grant_id, permit_id, owner, plate, nonce, status, requested_at, decided_at, until_ts)
+VALUES (?, 5, 5, 'o@example.com', 'ZZZ999', 'nonce-'||?, ?, ?, ?, ?)`,
+			id, id, status, now.Format(time.RFC3339), decidedAt, until); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Just expired, and just denied: both must keep the nonce.
+	mk(1, "expired", now.Add(-time.Minute).Format(time.RFC3339), "")
+	mk(2, "denied", now.Add(-time.Minute).Format(time.RFC3339), "")
+	// Decided long ago: nobody can still be holding the cookie, so clear it.
+	mk(3, "denied", now.Add(-72*time.Hour).Format(time.RFC3339), "")
+	// Approved with a window that has ended: clear.
+	mk(4, "approved", now.Add(-2*time.Hour).Format(time.RFC3339), now.Add(-time.Hour).Format(time.RFC3339))
+	// Approved and still live: keep.
+	mk(5, "approved", now.Add(-time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+
+	if _, err := s.ClearSettledRequestNonces(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id   int64
+		keep bool
+		why  string
+	}{
+		{1, true, "a just-expired request must still be able to tell the visitor it timed out"},
+		{2, true, "a just-denied request must still be readable by the visitor"},
+		{3, false, "a long-decided request should not keep a live poll secret"},
+		{4, false, "an approved request whose window ended should not keep its nonce"},
+		{5, true, "a live approved request is still being polled"},
+	} {
+		var nonce string
+		if err := s.db.QueryRowContext(ctx, `SELECT nonce FROM guest_request WHERE id = ?`, c.id).Scan(&nonce); err != nil {
+			t.Fatal(err)
+		}
+		if (nonce != "") != c.keep {
+			t.Errorf("request %d: nonce kept = %v, want %v — %s", c.id, nonce != "", c.keep, c.why)
+		}
 	}
 }

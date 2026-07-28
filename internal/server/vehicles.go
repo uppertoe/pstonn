@@ -56,10 +56,16 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// The delete happened either way, so the household hears about it either way.
+	// Gating this on a resolved plate meant a transient read error turned a
+	// cascading delete of roster days and bookings into a silent one — the exact
+	// invisible change the notice exists to surface.
+	named := "a car"
 	if plate != "" {
-		s.logChange(r.Context(), owner, user, store.ActionVehicleDelete, plate, "")
-		s.notifyDestructive(r.Context(), owner, user,
-			user+" deleted the car "+plate+" from your p.stonn account. Any weekly roster days and one-off bookings that used it were removed too, so those days now fall back to whatever else is scheduled.")
+		named = "the car " + plate
 	}
+	s.logChange(r.Context(), owner, user, store.ActionVehicleDelete, plate, "")
+	s.notifyDestructive(r.Context(), owner, user,
+		user+" deleted "+named+" from your p.stonn account. Any weekly roster days and one-off bookings that used it were removed too, so those days now fall back to whatever else is scheduled.")
 	http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
 }

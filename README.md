@@ -140,8 +140,9 @@ with a daily consistent snapshot for file-level backups. **UI** is
 server-rendered `html/template` with htmx and Alpine.js.
 
 **Retention** is enforced in code, on the housekeeping pass: activity and change
-logs 90 days; a decided door-QR request 7 days (and its poll secret dropped once
-settled); a revoked guest link's recipient address 30 days; sent notifications
+logs 90 days; a door-QR request 7 days from the scan, whatever its outcome (and
+its poll secret dropped once settled); a revoked guest link's recipient address
+30 days; sent notifications
 stripped of their content at send and purged after 24h; bounce/unsubscribe
 suppressions 2 years, complaints kept. Container logs need a size cap too — stock Docker keeps json-file logs forever,
 while a journald host usually caps them already; see the note in

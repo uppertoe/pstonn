@@ -114,6 +114,11 @@ func changeText(c store.Change) string {
 	case store.ActionVehicleAdd:
 		return "added the car " + c.Target
 	case store.ActionVehicleDelete:
+		// Target can be empty when the plate could not be read at delete time; the
+		// row is still worth writing, so degrade to "a car" rather than a gap.
+		if c.Target == "" {
+			return "deleted a car (any roster days and bookings using it went too)"
+		}
 		return "deleted the car " + c.Target + " (any roster days and bookings using it went too)"
 	case store.ActionVehicleEmail:
 		return "changed the driver email for " + c.Target
@@ -125,6 +130,12 @@ func changeText(c store.Change) string {
 		return "deleted a guest pass" + optional(c.Target, " (") + closeParen(c.Target) + " — its links stopped working"
 	case store.ActionGuestRevoke:
 		return "revoked a guest link" + optional(c.Target, " for ")
+	case store.ActionGuestResend:
+		// Re-sending ROTATES the token: the recipient's previous link dies. That is
+		// a silent change to someone else's access, so it belongs in the log.
+		return "re-sent a guest link" + optional(c.Target, " to ") + " — the previous link stopped working"
+	case store.ActionDoorQRShow:
+		return "showed the on-screen visitor QR" + optional(c.Target, " for ")
 	case store.ActionGuestToggle:
 		if c.Detail == "off" {
 			return "paused all guest passes"
@@ -137,6 +148,10 @@ func changeText(c store.Change) string {
 	case store.ActionRequestOK:
 		return "approved a visitor's request for " + c.Target
 	case store.ActionRequestNo:
+		// The deny path does not fetch the plate, so this is usually empty.
+		if c.Target == "" {
+			return "declined a visitor's request"
+		}
 		return "declined a visitor's request for " + c.Target
 	case store.ActionMemberAdd:
 		return "gave " + c.Target + " shared access"
