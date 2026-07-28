@@ -9,7 +9,11 @@
         <tr>
           <td class="muted" style="white-space:nowrap">{{localTime .At $.Loc}}</td>
           <td><span class="reg">{{.Registration}}</span> <span class="muted">{{.Source}}</span></td>
-          <td>{{.Status}}{{if .Detail}} <span class="muted">· {{.Detail}}</span>{{end}}</td>
+          {{/* The plate is the headline; the outcome is a footnote to it — except
+               when it isn't, so error and changed carry colour and weight while a
+               success stays quiet. Rendering all three identically made a failed
+               apply look exactly like a working one. */}}
+          <td class="logst"><span class="s-{{.Status}}">{{.Status}}</span>{{if .Detail}} <span class="muted">· {{.Detail}}</span>{{end}}</td>
         </tr>
       {{else}}
         <tr><td colspan="3" class="empty-note">No changes applied yet.</td></tr>

@@ -202,6 +202,12 @@
   th { color:var(--muted); font-weight:600; font-size:12px; }
   tr:last-child td { border-bottom:0; }
   .reg { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; font-weight:650; letter-spacing:.4px; background:var(--primary-soft); color:var(--primary-2); padding:3px 8px; border-radius:7px; display:inline-block; }
+  /* Apply-log outcome. Subordinate to the plate above it, so a routine success
+     recedes; a failure has to be the thing your eye lands on instead. */
+  .logst { font-size:12.5px; line-height:1.5; }
+  .logst .s-success { color:var(--muted); }
+  .logst .s-error { color:var(--danger); font-weight:650; }
+  .logst .s-changed { color:var(--warn); font-weight:650; }
   :root[data-theme="dark"] .reg { color:var(--primary); }
   .veh { display:inline-flex; align-items:center; gap:8px; }
   .dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; box-shadow:0 0 0 3px color-mix(in srgb, currentColor 0%, transparent); }
@@ -390,11 +396,15 @@
     /* Vehicle driver-email field uses the full width */
     .vemail { max-width:none; }
     .vemail input { min-width:0; }
-    /* Activity log: stack each row into a readable block instead of a cramped table */
-    table.mtable, table.mtable tbody, table.mtable tr, table.mtable td { display:block; }
-    table.mtable tr { padding:9px 0; border-bottom:1px solid var(--line); }
+    /* Activity log: stack each row into a readable block instead of a cramped table.
+       Flex column rather than per-cell padding, because the plate chip's own
+       padding made the gap above it visibly wider than the one below — the rows
+       read as three loose lines instead of one block. A single gap is even
+       regardless of what each cell contains. */
+    table.mtable, table.mtable tbody, table.mtable td { display:block; }
+    table.mtable tr { display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:10px 0; border-bottom:1px solid var(--line); }
     table.mtable tr:last-child { border-bottom:0; }
-    table.mtable td { border:0; padding:1px 0; }
+    table.mtable td { border:0; padding:0; }
     table.mtable td[style*="nowrap"] { font-size:12px; color:var(--muted); }
   }
   .editbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:4px; }
