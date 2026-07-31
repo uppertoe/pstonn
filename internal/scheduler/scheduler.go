@@ -1008,21 +1008,26 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 			continue // the council no longer lists it; syncing that is not drift's job
 		}
 		actual := pi.CurrentRego
-		if model.SamePlate(actual, p.ActiveRegistration) {
-			continue
-		}
-		if actual == "" {
-			// An empty grid rego is the one reading the grid cannot be trusted on.
-			// managedVehicle corroborates "no vehicle" against permitVehicleCount
-			// (see parking.emptyIsCredible) precisely because blanking a plate on a
-			// misread writes a FALSE "changed directly at the council portal" row and
-			// tells the household their permit was cleared when it wasn't. The grid
-			// carries no such corroboration, so pay one extra call to confirm a
-			// clearing — rare, and only for the permit that looks cleared.
+		if actual == "" && !model.SamePlate("", p.ActiveRegistration) {
+			// The grid claims the permit was cleared, but an empty grid rego is the one
+			// reading the grid cannot be trusted on: it carries nothing to corroborate
+			// "no vehicle" the way managedVehicle does (permitVehicleCount, see
+			// parking.emptyIsCredible), and blanking a plate on a misread writes a FALSE
+			// "changed at the portal" row and tells the household their permit was
+			// cleared when it wasn't. So confirm against the authoritative per-permit
+			// read and ADOPT whatever it reports — which may be a genuine clearing ("")
+			// OR a plate the grid simply omitted. The latter is itself a real external
+			// change; discarding it (an earlier version continued on any non-empty
+			// confirmation) left a grid that persistently omits a rego unable to detect
+			// drift at all, even though the confirming call had already been paid for.
 			confirmed, cerr := s.council.CurrentVehicle(ctx, owner, p)
-			if cerr != nil || confirmed != "" {
-				continue // unconfirmed, or not actually cleared: believe nothing
+			if cerr != nil {
+				continue // couldn't confirm; believe nothing
 			}
+			actual = confirmed
+		}
+		if model.SamePlate(actual, p.ActiveRegistration) {
+			continue // agrees with our record (incl. the common grid==cached case): no drift
 		}
 		log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
 		// Record the external change durably so it appears in the activity log
