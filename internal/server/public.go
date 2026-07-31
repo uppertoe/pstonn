@@ -25,16 +25,18 @@ func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// about is the PUBLIC page describing the security model and notifications
-// frankly (no promises).
-func (s *Server) about(w http.ResponseWriter, r *http.Request) {
+// security is the PUBLIC page describing how the council login is held, what
+// else is stored, and what is not promised. Named for what it contains: it is a
+// security and data page, and filing it under "about" hid the one thing a visitor
+// most wants before handing over a council password.
+func (s *Server) security(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "about", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+	s.render(w, dashboardData{State: "security", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
 }
 
-// why is the PUBLIC "how it works" page: a plain explainer, the animated demos,
-// and how to get set up with a council ePermit.
-func (s *Server) why(w http.ResponseWriter, r *http.Request) {
+// how is the PUBLIC "how it works" page: why the app exists, the animated demos,
+// and what you need before starting.
+func (s *Server) how(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "why", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+	s.render(w, dashboardData{State: "how", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
 }

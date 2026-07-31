@@ -7,10 +7,10 @@
     <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
     <a href="/schedule" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
     <p class="lnote">A free service. Sign in with a one-time code sent to your email.</p>
-    {{/* The prerequisite belongs next to the button, not only on /why: signing up
+    {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
          up stuck, and the failure looks like "wrong password" when it isn't. */}}
-    <p class="lnote">You'll need an existing City of Stonnington <strong>ePermits</strong> account, with a visitor permit on it, using the same email address. p.stonn schedules a permit you already hold &mdash; it can't apply for one. <a href="/why">What you need &rarr;</a></p>
+    <p class="lnote">You'll need an existing City of Stonnington <strong>ePermits</strong> account, with a visitor permit on it, using the same email address. p.stonn schedules a permit you already hold &mdash; it can't apply for one. <a href="/how">What you need &rarr;</a></p>
   </section>
   <div class="demos">
     <div class="dm-mini" data-demo="mini">
@@ -22,7 +22,7 @@
           <div class="dm-sync">{{template "ic-check"}}</div>
         </div>
       </div>
-      <p class="dm-foot"><a href="/why">See how it works &rarr;</a></p>
+      <p class="dm-foot"><a href="/how">See how it works &rarr;</a></p>
     </div>
   </div>
   <section class="lsteps">
@@ -42,18 +42,18 @@
     </form>
   </section>
   {{end}}
-  <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/about">Security &amp; the fine print</a></p>
+  <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/security">Security &amp; data</a></p>
 </main>
 
 {{end}}
 
-{{define "page-about"}}
+{{define "page-security"}}
 {{/* ================= PUBLIC ABOUT ================= */}}
 {{template "publicheader" .}}
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
-    <h1 class="about-h1">About p.stonn</h1>
-    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/why">How it works</a>.</p>
+    <h1 class="about-h1">Security &amp; data</h1>
+    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/how">How it works</a>.</p>
 
     <h2 class="about-h2">The security model</h2>
     <ul>
@@ -99,12 +99,12 @@
 
 {{end}}
 
-{{define "page-why"}}
+{{define "page-how"}}
 {{/* ================= PUBLIC: WHY / HOW IT WORKS ================= */}}
 {{template "publicheader" .}}
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
-    <h1 class="about-h1">Why this exists</h1>
+    <h1 class="about-h1">How it works</h1>
     <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
     <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
     <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>

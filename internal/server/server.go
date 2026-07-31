@@ -249,8 +249,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/req/{id}", s.publicGuest(s.guestRequestStatus))
 
 	mux.HandleFunc("GET /{$}", s.landing)                   // public, not behind forward-auth
-	mux.HandleFunc("GET /about", s.about)                   // public
-	mux.HandleFunc("GET /why", s.why)                       // public
+	mux.HandleFunc("GET /security", s.security)             // public
+	mux.HandleFunc("GET /how", s.how)                       // public
 	mux.HandleFunc("GET /contact", s.contactPage)           // public
 	mux.HandleFunc("POST /contact", s.submitContact)        // public, rate-limited
 	mux.HandleFunc("GET /schedule", s.withUser(s.schedule)) // appShell gates internally too; wrapped for uniformity with the other app pages

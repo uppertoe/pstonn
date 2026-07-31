@@ -36,7 +36,7 @@
       </label>
       <button type="submit">{{template "ic-link"}} Link account</button>
     </form>
-    <p class="empty-note" style="margin-top:12px">Use a password you have not used elsewhere. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/about">How it works</a></p>
+    <p class="empty-note" style="margin-top:12px">Use a password you have not used elsewhere. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
     {{else}}
     <h2>Waiting for the account owner</h2>
     <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>
@@ -97,10 +97,10 @@
          broken loop. */}}
     {{if .HasPermits}}
     <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
-    <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. <a href="/why">What p.stonn can and can't do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. <a href="/how">What p.stonn can and cannot do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else}}
     <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
-    <p class="empty-note" style="margin-top:8px">Apply for a visitor permit on the council's ePermits site first, then come back and it will appear here. <a href="/why">How this works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">Apply for a visitor permit on the council's ePermits site first, then come back and it will appear here. <a href="/how">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{end}}
     {{end}}
   </section>

@@ -100,7 +100,7 @@
 </script>
 <script{{with .Nonce}} nonce="{{.}}"{{end}} src="{{asset "htmx.min.js"}}"></script>
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "alpine.min.js"}}"></script>
-{{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
+{{if or (eq .State "landing") (eq .State "how")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "demos.js"}}"></script>{{end}}
 {{template "styles" .}}
 </head>
@@ -164,8 +164,8 @@
 </script>
 
 {{if eq .State "landing"}}{{template "page-landing" .}}
-{{- else if eq .State "about"}}{{template "page-about" .}}
-{{- else if eq .State "why"}}{{template "page-why" .}}
+{{- else if eq .State "security"}}{{template "page-security" .}}
+{{- else if eq .State "how"}}{{template "page-how" .}}
 {{- else if eq .State "contact"}}{{template "page-contact" .}}
 {{- else if eq .State "guest"}}{{template "page-guest" .}}
 {{- else if eq .State "guest-wait"}}{{template "page-guest-wait" .}}

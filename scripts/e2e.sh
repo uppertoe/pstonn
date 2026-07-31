@@ -186,7 +186,7 @@ n2=$(a -D - -o /dev/null $BB/schedule | grep -io 'nonce-[A-Za-z0-9_-]*' | head -
 if [ -n "$n1" ] && [ "$n1" != "$n2" ]; then ok "the CSP nonce is fresh per response (H7)"; else bad "nonce not fresh ('$n1' / '$n2')"; fi
 bd=$(a $BB/); st=$(printf '%s' "$bd" | grep -c '<script'); nn=$(printf '%s' "$bd" | grep -c 'nonce=')
 eq "every script tag carries a nonce (H7)" "$st" "$nn"
-hasnt "public pages are NOT no-store" "$(curl -s -D - -o /dev/null $BB/about)" "cache-control:.*no-store"
+hasnt "public pages are NOT no-store" "$(curl -s -D - -o /dev/null $BB/security)" "cache-control:.*no-store"
 
 sec "9. RUN B — /status, which holds the roster"
 eq "no token is refused"            "$(curl -s -o /dev/null -w '%{http_code}' $BB/status)" "401"

@@ -56,7 +56,7 @@ encrypted at rest with AES-256-GCM.
 (if you saved it) your council password. The rest of your data — number plates,
 your schedule, permit details, email addresses, the activity log — is stored
 unencrypted in the app's SQLite database on the server. Anyone with the server or
-its database can read it. See [/about](https://p.stonn.org/about) for what that
+its database can read it. See [/security](https://p.stonn.org/security) for what that
 means and what is stored.
 
 **How long does a link last?** As long as the account is in use. The connection
@@ -149,7 +149,7 @@ while a journald host usually caps them already; see the note in
 `deploy/docker-compose.yml`. Backup retention comes from the
 platform's restic runner (see `deploy/backup-service.env.example`); whatever it
 is set to is the real upper bound on how long deleted data stays recoverable, and
-/about states that bound to users.
+/security states that bound to users.
 
 ## Run locally
 

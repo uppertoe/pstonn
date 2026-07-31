@@ -49,7 +49,7 @@ p.{$DOMAIN} {
 		}
 	}
 
-	# Public, no login: the about/why/contact pages, the healthcheck, the token-only
+	# Public, no login: the security/how/contact pages, the healthcheck, the token-only
 	# renewal-confirm link from reminder emails, and the token-only guest-pass
 	# activation links (/g/*). The shared session cookie is stripped here too, for
 	# the same reason as on the landing page.
@@ -68,7 +68,7 @@ p.{$DOMAIN} {
 	# have no account at all, and an opt-out they cannot reach is not an opt-out.
 	# The link carries a signed per-address token, so it can only ever stop mail to
 	# the one address it was issued for.
-	@public path /about /why /contact /healthz /council/confirm /g/* /status /hooks/ses /u/*
+	@public path /security /how /contact /healthz /council/confirm /g/* /status /hooks/ses /u/*
 	handle @public {
 		route {
 			import strip_client_identity

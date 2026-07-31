@@ -1,13 +1,13 @@
 {{/* =================== PUBLIC HEADER (landing / about) =================== */}}
 {{define "publicheader"}}
 <header class="appbar pubbar">
-  {{/* Landing and /why need their head-only demo assets (demos.css/js), which a
-       boosted body-swap never evaluates — entering /why from /about via boost
+  {{/* Landing and /how need their head-only demo assets (demos.css/js), which a
+       boosted body-swap never evaluates — entering /how from /security via boost
        would render the gallery unstyled and inert. Full navigations only. */}}
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/why" hx-boost="false" class="link-quiet{{if eq .State "why"}} active{{end}}"{{if eq .State "why"}} aria-current="page"{{end}}>How it works</a>
-    <a href="/about" class="link-quiet{{if eq .State "about"}} active{{end}}"{{if eq .State "about"}} aria-current="page"{{end}}>About</a>
+    <a href="/how" hx-boost="false" class="link-quiet{{if eq .State "how"}} active{{end}}"{{if eq .State "how"}} aria-current="page"{{end}}>How it works</a>
+    <a href="/security" class="link-quiet{{if eq .State "security"}} active{{end}}"{{if eq .State "security"}} aria-current="page"{{end}}>Security &amp; data</a>
     {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
   </nav>
   <div class="appbar-r">

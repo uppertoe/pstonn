@@ -78,7 +78,7 @@ func TestEveryScriptTagCarriesTheResponseNonce(t *testing.T) {
 	s := newAuthzServer(t)
 	// A spread of the layout's rendering states: the public pages (which also pull in
 	// the demo assets), and a signed-in path, which lands on the terms gate here.
-	for _, path := range []string{"/", "/about", "/why", "/schedule"} {
+	for _, path := range []string{"/", "/security", "/how", "/schedule"} {
 		t.Run(path, func(t *testing.T) {
 			email := ""
 			if path == "/schedule" {
