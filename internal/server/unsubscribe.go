@@ -29,7 +29,7 @@ func (s *Server) unsubscribePage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		// Deliberately vague and 200: this page is reachable by anyone, and
 		// confirming whether an address is known to us would leak membership.
-		s.message(w, http.StatusOK, "This unsubscribe link isn't valid or has expired. If you're still getting emails you don't want, reply to one of them and we'll sort it out.")
+		s.message(w, http.StatusOK, "This unsubscribe link is no longer valid. If you are still receiving email you do not want, reply to any of it and it will be stopped.")
 		return
 	}
 	noStore(w)
@@ -47,7 +47,7 @@ func (s *Server) unsubscribeApply(w http.ResponseWriter, r *http.Request) {
 	}
 	addr, ok := s.resolveUnsub(r)
 	if !ok {
-		s.message(w, http.StatusOK, "This unsubscribe link isn't valid or has expired. If you're still getting emails you don't want, reply to one of them and we'll sort it out.")
+		s.message(w, http.StatusOK, "This unsubscribe link is no longer valid. If you are still receiving email you do not want, reply to any of it and it will be stopped.")
 		return
 	}
 	if err := s.store.SuppressAddress(r.Context(), addr, store.SuppressUnsubscribed, "unsubscribed via email link"); err != nil {

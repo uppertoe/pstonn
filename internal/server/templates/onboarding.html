@@ -20,23 +20,23 @@
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>
       <label class="optin">
-        {{/* Unticked on a first link: retaining someone's council password is the
-             more consequential of the two outcomes, so it has to be a thing they
-             chose rather than a thing they failed to notice. On a re-link the box
-             reflects what they already decided (AutoReconnect = a password is
-             currently saved), so someone reconnecting is not silently opted out of
-             a setting they turned on. */}}
-        <input type="checkbox" name="save_password" value="1"{{if and .Relink .AutoReconnect}} checked{{end}}>
+        {{/* Ticked by default, deliberately. Without a saved password the schedule
+             stops the first time the council ends the session — which happens
+             whenever the resident signs in to ePermits themselves — and it stops
+             silently, which is how a car ends up on the wrong permit. The stored
+             value is a parking-permit login: sealed at rest, recoverable by the
+             council's own forgot-password email, and worth nothing anywhere else.
+             On a re-link the box reflects the choice already made. */}}
+        <input type="checkbox" name="save_password" value="1"{{if or (not .Relink) .AutoReconnect}} checked{{end}}>
         <span>
           <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It's encrypted with a key held on this server, and used only to sign back in if the council ends your session. The person running the server could technically read it &mdash; see <a href="/about">security</a>.
-          <br>Without it, if you ever sign in to the Stonnington ePermits site yourself, that logs p.stonn out — you'll need to come back here and re-link before your schedule runs again.
+          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
+          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
         </span>
       </label>
       <button type="submit">{{template "ic-link"}} Link account</button>
     </form>
-    <p class="empty-note" style="margin-top:12px">Your council account must use <strong>{{.User.Email}}</strong>, the email you signed in with.</p>
-    <p class="empty-note" style="margin-top:6px">Tip: use a password unique to your council account. You can disconnect or stop saving your password any time in Settings, and changing your council password also revokes access. <a href="/about">How it works &amp; security</a></p>
+    <p class="empty-note" style="margin-top:12px">Use a password you have not used elsewhere. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/about">How it works</a></p>
     {{else}}
     <h2>Waiting for the account owner</h2>
     <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>

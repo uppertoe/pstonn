@@ -102,10 +102,13 @@ func TestTemplatesRender(t *testing.T) {
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
-		// C11: on a FIRST link the box is unticked. Retaining someone's council
-		// password is the more consequential of the two outcomes, so it has to be
-		// chosen rather than merely not noticed.
-		{"onboarding-savepw-default-unchecked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1">`},
+		// On a FIRST link the box is TICKED. Without a saved password the schedule
+		// stops the first time the council ends the session — which happens whenever
+		// the resident signs in to ePermits themselves — and it stops silently, which
+		// is how a car ends up on the wrong permit. The stored value is a
+		// parking-permit login, sealed at rest and recoverable by the council's own
+		// forgot-password email.
+		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
 		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
 		{"relink-savepw-respects-opton", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: true, Loc: loc}, `name="save_password" value="1" checked>`},
 		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Re-link your council account"},

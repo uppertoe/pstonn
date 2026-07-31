@@ -125,7 +125,7 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 // which makes this sentence the only warning there is.
 func usageSentence(u store.VehicleUsage) string {
 	if len(u.Rules) == 0 && u.LiveOverrides == 0 {
-		return "It wasn't on any roster day or booking, so nothing else changed."
+		return "It was not on any roster day or booking, so nothing else has changed."
 	}
 	var parts []string
 	if len(u.Rules) > 0 {
@@ -147,7 +147,7 @@ func usageSentence(u store.VehicleUsage) string {
 	}
 	out := ""
 	if len(parts) > 0 {
-		out = "That leaves " + joinWords(parts) + " with nothing scheduled — those days will keep whatever plate is on the permit until you set them again."
+		out = joinWords(parts) + " now have nothing scheduled. Those days will keep whatever registration is currently on the permit until you set them again."
 	}
 	if u.LiveOverrides > 0 {
 		booking := "booking"
@@ -171,18 +171,18 @@ func deletedVehicleFlash(plate string, days, bookings int) string {
 	out := "Deleted " + plate + "."
 	switch {
 	case days == 1:
-		out += " That leaves 1 roster day with nothing scheduled — see Activity for which, and set it again so the permit doesn't just keep its current plate."
+		out += " One roster day now has nothing scheduled. Activity shows which day. Until you set it again, the permit will keep its current registration."
 	case days > 1:
-		out += fmt.Sprintf(" That leaves %d roster days with nothing scheduled — see Activity for which, and set them again so the permit doesn't just keep its current plate.", days)
+		out += fmt.Sprintf(" %d roster days now have nothing scheduled. Activity shows which days. Until you set them again, the permit will keep its current registration.", days)
 	}
 	switch {
 	case bookings == 1:
-		out += " 1 current one-off booking using it was removed too."
+		out += " One current one-off booking using it was also removed."
 	case bookings > 1:
-		out += fmt.Sprintf(" %d current one-off bookings using it were removed too.", bookings)
+		out += fmt.Sprintf(" %d current one-off bookings using it were also removed.", bookings)
 	}
 	if days == 0 && bookings == 0 {
-		out += " It wasn't on any roster day or booking, so nothing else changed."
+		out += " It was not on any roster day or booking, so nothing else has changed."
 	}
 	return out
 }

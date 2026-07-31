@@ -47,7 +47,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	// the scarcest resource the app has.
 	if !s.councilRead.allow("cr:" + owner) {
 		s.message(w, http.StatusTooManyRequests,
-			"You've refreshed the permit list a lot in the last few minutes. Please wait a moment before trying again — p.stonn keeps its requests to the council deliberately light.")
+			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again. p.stonn deliberately limits how often it contacts the council.")
 		return
 	}
 	permits, err := s.council.ListPermits(ctx, owner)

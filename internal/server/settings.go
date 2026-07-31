@@ -49,13 +49,13 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if removed := r.URL.Query().Get("removed"); looksLikeEmail(removed) {
 		base.Flash = removed + " no longer has access."
 		if n := atoi(r.URL.Query().Get("revoked")); n > 0 {
-			// Say it plainly: guest links they had created have stopped working, so
-			// the owner isn't surprised when a visitor's link is suddenly dead.
+			// Name the count: guest links they created have stopped working, and the
+			// owner should not first learn that from a visitor whose link is dead.
 			pass := "guest pass"
 			if n > 1 {
 				pass = "guest passes"
 			}
-			base.Flash += fmt.Sprintf(" We also stopped %d %s they had created — anyone holding those links can no longer use your permit.", n, pass)
+			base.Flash += fmt.Sprintf(" %d %s they created also stopped working, so anyone holding those links can no longer use the permit.", n, pass)
 		}
 	}
 	// An invitation is an offer, not access, so the wording must not promise the
@@ -63,16 +63,16 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	// see inviteSent.
 	if invited := r.URL.Query().Get("invited"); looksLikeEmail(invited) {
 		if r.URL.Query().Get("mailed") == "1" {
-			base.Flash = "Invitation sent. We've emailed " + invited + " — they'll be asked to accept next time they sign in, and they get access only once they do."
+			base.Flash = "Invitation sent to " + invited + ". They will be asked to accept it the next time they sign in, and will have access only once they do."
 		} else {
-			base.Flash = "Invitation recorded for " + invited + ". No email went out this time, so let them know to sign in and accept it."
+			base.Flash = "Invitation recorded for " + invited + ". No email was sent, so you will need to tell them to sign in and accept it."
 		}
 	}
 	if joined := r.URL.Query().Get("joined"); looksLikeEmail(joined) {
 		base.Flash = "You now share " + joined + "'s account."
 	}
 	if r.URL.Query().Get("declined") == "1" {
-		base.Flash = "Invitation declined. Nothing was shared, and you can still use p.stonn with your own account."
+		base.Flash = "Invitation declined. Nothing was shared, and your own account is unaffected."
 	}
 	// Notification preferences are per-person: each user (primary or secondary)
 	// controls how THEY are notified, keyed to their own signed-in email.

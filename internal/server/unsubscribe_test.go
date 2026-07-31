@@ -153,7 +153,7 @@ func TestUnsubscribeUnsignedVersionedToken(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expired token POST = %d, want a 200 refusal page", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "valid or has expired") {
+	if !strings.Contains(w.Body.String(), "no longer valid") {
 		t.Error("an expired link should get the same neutral message as an invalid one")
 	}
 	if bad, _, _ := s.store.IsSuppressed(context.Background(), victim); bad {

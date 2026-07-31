@@ -96,7 +96,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 					". p.stonn can only manage a permit you already hold: check you can sign in at the council's own ePermits site with this email address first. If your ePermits account uses a different email, sign out and sign back in to p.stonn with that address instead.")
 			return
 		}
-		s.message(w, http.StatusBadGateway, "Couldn't link your council account. This looks like a problem at our end or on the council's site rather than your password — please try again shortly.")
+		s.message(w, http.StatusBadGateway, "Could not link your council account. This appears to be a problem at our end or on the council's site rather than your password. Please try again shortly.")
 		return
 	}
 	s.logChange(r.Context(), user, user, store.ActionCouncilLink, "", "")
@@ -301,11 +301,11 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isP, _ := s.store.IsPrimary(ctx, u.Email); isP {
-		s.message(w, http.StatusConflict, "You already share your own account with someone else, so you can't also join another. Remove the people you've shared with first, or decline this invitation.")
+		s.message(w, http.StatusConflict, "You already share your own account with someone else, so you cannot also join another. Remove them first, or decline this invitation.")
 		return
 	}
 	if has, _ := s.store.HasOwnData(ctx, u.Email); has {
-		s.message(w, http.StatusConflict, "You already use p.stonn with your own permits, and joining another account would hide them. Decline this invitation, or remove your own account first if you'd rather share.")
+		s.message(w, http.StatusConflict, "You already have your own permits in p.stonn, and joining another account would hide them. Decline this invitation, or remove your own account first if you would rather share.")
 		return
 	}
 	if err := s.store.AcceptInvite(ctx, u.Email, owner); err != nil {

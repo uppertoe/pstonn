@@ -4,7 +4,7 @@
 <main id="main" tabindex="-1">
   <section class="card" style="max-width:560px;margin:26px auto">
     <div style="text-align:center"><div class="ring" style="margin-bottom:14px">{{template "ic-ticket"}}</div></div>
-    <h2 style="text-align:center;margin:0 0 6px;font-size:20px;letter-spacing:-.02em">{{if .Terms.Updated}}The terms have changed{{else}}Welcome &mdash; a few things first{{end}}</h2>
+    <h2 style="text-align:center;margin:0 0 6px;font-size:20px;letter-spacing:-.02em">{{if .Terms.Updated}}The terms have changed{{else}}Before you start{{end}}</h2>
     <p class="subtitle" style="text-align:center">{{if .Terms.Updated}}Please review and accept the updated terms to keep using p.stonn.{{else if .Terms.Intro}}{{.Terms.Intro}}{{else}}Please read and tick each point to start using p.stonn.{{end}}</p>
     <form method="post" action="/terms/accept" class="stack" style="max-width:none;gap:16px;margin-top:16px">
       {{range $i, $c := .Terms.Clauses}}
