@@ -34,16 +34,15 @@ const testTopic = "arn:aws:sns:ap-southeast-2:123456789012:pstonn-ses-events"
 const testCertURL = "https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-test.pem"
 
 // signSNS builds a signed SNS envelope the way AWS would, so the handler's
-// verification path is exercised for real rather than stubbed out. Version 1
-// (RSA-SHA1) is what a topic with no SignatureVersion attribute emits, which is
-// still the default.
+// verification path is exercised for real rather than stubbed out. Version 2
+// (RSA-SHA256) is what the live topic emits and the only version accepted.
 func signSNS(t *testing.T, key *rsa.PrivateKey, m *snsMessage) []byte {
 	t.Helper()
-	return signSNSVersion(t, key, m, "1")
+	return signSNSVersion(t, key, m, "2")
 }
 
-// signSNSVersion signs with either version, so the digest-pinning behaviour can be
-// exercised from both sides.
+// signSNSVersion can still produce a version-1 envelope, so the tests can prove the
+// weak digest is refused rather than merely unused.
 func signSNSVersion(t *testing.T, key *rsa.PrivateKey, m *snsMessage, version string) []byte {
 	t.Helper()
 	m.SignatureVersion = version
@@ -117,12 +116,6 @@ func newSESTestServer(t *testing.T) (*Server, *rsa.PrivateKey) {
 		terms:   loadTerms(""),
 		snsCert: cache,
 	}
-	// The SignatureVersion policy is process-wide (there is one topic per
-	// deployment), so a test that upgrades it must not leak that into the next one.
-	t.Cleanup(func() {
-		sesSigV2Seen.Store(false)
-		sesSigV1Noted.Store(false)
-	})
 	return s, key
 }
 
@@ -478,26 +471,16 @@ func TestSESHookThrottled(t *testing.T) {
 	}
 }
 
-// TestSESHookSignatureVersion pins the digest. SignatureVersion is NOT covered by
-// the signature, so a caller who can choose it chooses how strong the endpoint's
-// trust is — and version 1 is RSA-SHA1 over a string containing text a remote
-// mail server wrote.
+// TestSESHookSignatureVersion pins the digest to SHA-256. SignatureVersion is NOT
+// covered by the signature, so a caller who can choose it chooses how strong the
+// endpoint's trust is — and version 1 is RSA-SHA1 over a string containing text a
+// remote mail server wrote, verified by a key shared with every other topic in the
+// region. The live topic's SignatureVersion attribute is set to 2, so nothing
+// legitimate signs with 1 any more.
 func TestSESHookSignatureVersion(t *testing.T) {
 	msg := `{"notificationType":"Complaint","complaint":{"complaintFeedbackType":"abuse",
 	  "complainedRecipients":[{"emailAddress":"v@example.com"}]}}`
 	fresh := func() string { return time.Now().UTC().Format(time.RFC3339) }
-
-	t.Run("an unknown version is refused", func(t *testing.T) {
-		s, key := newSESTestServer(t)
-		body := signSNSVersion(t, key, &snsMessage{
-			Type: "Notification", MessageID: "v3", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
-		}, "1")
-		// Sign as v1, then relabel: the version is not covered by the signature.
-		relabelled := strings.Replace(string(body), `"SignatureVersion":"1"`, `"SignatureVersion":"3"`, 1)
-		if w := postSNS(s, []byte(relabelled)); w.Code != http.StatusForbidden {
-			t.Fatalf("SignatureVersion 3 = %d, want 403", w.Code)
-		}
-	})
 
 	t.Run("version 2 is accepted", func(t *testing.T) {
 		s, key := newSESTestServer(t)
@@ -507,49 +490,43 @@ func TestSESHookSignatureVersion(t *testing.T) {
 		if w := postSNS(s, body); w.Code != http.StatusOK {
 			t.Fatalf("SignatureVersion 2 = %d, want 200", w.Code)
 		}
-		if !sesSigV2Seen.Load() {
-			t.Fatal("a verified version-2 message should pin the topic to version 2")
-		}
 	})
 
-	t.Run("an unverified version 2 cannot pin the topic", func(t *testing.T) {
-		// Otherwise anyone could POST an unsigned {"SignatureVersion":"2"} and shut
-		// bounce handling down on a topic that legitimately still signs with 1.
+	// A correctly signed version-1 message is still refused: the signature being
+	// valid is not the point, the digest being SHA-1 is.
+	t.Run("a genuine version 1 is refused", func(t *testing.T) {
 		s, key := newSESTestServer(t)
-		forged, _ := json.Marshal(snsMessage{
-			Type: "Notification", MessageID: "f", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
-			SignatureVersion: "2", Signature: base64.StdEncoding.EncodeToString([]byte("not a signature")),
-			SigningCertURL: testCertURL,
-		})
-		if w := postSNS(s, forged); w.Code != http.StatusForbidden {
-			t.Fatalf("forged version-2 message = %d, want 403", w.Code)
-		}
-		if sesSigV2Seen.Load() {
-			t.Fatal("a message that failed verification upgraded the version policy")
-		}
-		// A genuine version-1 event still works, which is the whole point: refusing it
-		// would stop bounce processing and the app would keep mailing dead addresses.
-		good := signSNSVersion(t, key, &snsMessage{
-			Type: "Notification", MessageID: "g", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		body := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "v1", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
 		}, "1")
-		if w := postSNS(s, good); w.Code != http.StatusOK {
-			t.Fatalf("version-1 event after a forgery attempt = %d, want 200", w.Code)
+		if w := postSNS(s, body); w.Code != http.StatusForbidden {
+			t.Fatalf("SignatureVersion 1 = %d, want 403", w.Code)
 		}
 	})
 
-	t.Run("version 1 is refused once the topic has signed with version 2", func(t *testing.T) {
+	t.Run("an unknown version is refused", func(t *testing.T) {
 		s, key := newSESTestServer(t)
-		v2 := signSNSVersion(t, key, &snsMessage{
-			Type: "Notification", MessageID: "up", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		body := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "v3", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
 		}, "2")
-		if w := postSNS(s, v2); w.Code != http.StatusOK {
-			t.Fatalf("version-2 event = %d, want 200", w.Code)
+		// Sign as v2, then relabel: the version is not covered by the signature, so a
+		// relabelled message must be refused on the version alone.
+		relabelled := strings.Replace(string(body), `"SignatureVersion":"2"`, `"SignatureVersion":"3"`, 1)
+		if w := postSNS(s, []byte(relabelled)); w.Code != http.StatusForbidden {
+			t.Fatalf("SignatureVersion 3 = %d, want 403", w.Code)
 		}
-		v1 := signSNSVersion(t, key, &snsMessage{
-			Type: "Notification", MessageID: "down", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+	})
+
+	// Relabelling a v1 signature as v2 must not slip through: the digest the
+	// endpoint computes is SHA-256, so the v1 signature cannot verify against it.
+	t.Run("a version 1 signature relabelled as version 2 is refused", func(t *testing.T) {
+		s, key := newSESTestServer(t)
+		body := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "swap", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
 		}, "1")
-		if w := postSNS(s, v1); w.Code != http.StatusForbidden {
-			t.Fatalf("downgrade to version 1 = %d, want 403", w.Code)
+		relabelled := strings.Replace(string(body), `"SignatureVersion":"1"`, `"SignatureVersion":"2"`, 1)
+		if w := postSNS(s, []byte(relabelled)); w.Code != http.StatusForbidden {
+			t.Fatalf("relabelled v1 signature = %d, want 403", w.Code)
 		}
 	})
 }

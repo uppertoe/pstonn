@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto"
 	"crypto/rsa"
-	"crypto/sha1" //nolint:gosec // AWS SNS SignatureVersion 1 specifies SHA1WithRSA; not our choice.
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -20,7 +19,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/notify"
@@ -502,34 +500,24 @@ func snsSigningFields(m *snsMessage) []struct{ key, val string } {
 	)
 }
 
-// SignatureVersion 2 (RSA-SHA256) is the version we want, and SignatureVersion
-// itself is NOT covered by the signature — so letting the envelope choose the
-// digest lets a caller pick the weaker one. Version 1 is RSA-SHA1 over a string
-// that includes remote-influenced text (an SMTP diagnosticCode echoed back by
-// whatever server rejected our mail), and the regional signing key is shared by
-// every SNS topic in the region: an attacker can therefore have AWS sign material
+// Only SignatureVersion 2 (RSA-SHA256) is accepted.
+//
+// SignatureVersion is NOT itself covered by the signature, so accepting more than
+// one version lets the caller choose the digest. Version 1 is RSA-SHA1 over a
+// string that includes remote-influenced text (an SMTP diagnosticCode echoed back
+// by whatever server rejected our mail), and the regional signing key is shared by
+// every SNS topic in the region — an attacker can therefore have AWS sign material
 // of their own choosing and needs only a SHA-1 collision with a message naming our
 // topic. Chosen-prefix SHA-1 collisions are affordable.
 //
-// Version 1 is nevertheless still accepted, because SNS only emits version 2 when
-// the topic's SignatureVersion attribute is set to 2 and deploy/aws-ses-hook-setup.py
-// does not set it. Refusing version 1 outright on a topic that still speaks it
-// would silently stop ALL bounce and complaint processing, after which the app
-// keeps mailing addresses the provider has told us are dead — which is precisely
-// how a sending domain gets blocked, and the harm this endpoint exists to prevent.
-//
-// So the version is pinned by observation instead of by configuration: once this
-// process has verified a genuine version-2 message, version 1 is refused for the
-// rest of its life. A configured topic therefore cannot be downgraded back to
-// SHA-1 by an attacker choosing the envelope, and the day the topic attribute is
-// set the weak version stops being reachable without any deploy. Only a message
-// whose signature actually VERIFIED may flip the switch — otherwise an unsigned
-// `"SignatureVersion":"2"` POST would be a denial of service against bounce
-// handling.
-var (
-	sesSigV2Seen  atomic.Bool
-	sesSigV1Noted atomic.Bool
-)
+// This was previously pinned by observation rather than refused outright, because
+// SNS emits version 1 until the topic's SignatureVersion attribute is set, and
+// refusing it on a topic that still spoke it would have silently stopped ALL
+// bounce and complaint processing — after which the app keeps mailing addresses
+// the provider has told us are dead, which is how a sending domain gets blocked.
+// The attribute is now set on the live topic (and by
+// deploy/aws-ses-hook-setup.py), verified end to end with a real bounce, so the
+// weak version is gone rather than merely unreachable.
 
 // verifySNSSignature checks the message really came from the SNS topic it claims.
 //
@@ -540,17 +528,9 @@ func verifySNSSignature(ctx context.Context, cache *certCache, m *snsMessage) er
 	if m.Signature == "" || m.SigningCertURL == "" {
 		return errors.New("message is unsigned")
 	}
-	var hash crypto.Hash
-	switch m.SignatureVersion {
-	case "2":
-		hash = crypto.SHA256
-	case "1":
-		if sesSigV2Seen.Load() {
-			return errors.New("refusing SignatureVersion 1: this topic has already been seen signing with version 2")
-		}
-		hash = crypto.SHA1
-	default:
-		return fmt.Errorf("unsupported SignatureVersion %q", m.SignatureVersion)
+	if m.SignatureVersion != "2" {
+		return fmt.Errorf("refusing SignatureVersion %q: only 2 (RSA-SHA256) is accepted; "+
+			"set the topic's SignatureVersion attribute to 2", m.SignatureVersion)
 	}
 	sig, err := base64.StdEncoding.DecodeString(m.Signature)
 	if err != nil {
@@ -563,14 +543,7 @@ func verifySNSSignature(ctx context.Context, cache *certCache, m *snsMessage) er
 		sb.WriteString(f.val)
 		sb.WriteString("\n")
 	}
-	var digest []byte
-	if hash == crypto.SHA1 {
-		sum := sha1.Sum([]byte(sb.String())) //nolint:gosec // AWS SignatureVersion 1 mandates SHA1.
-		digest = sum[:]
-	} else {
-		sum := sha256.Sum256([]byte(sb.String()))
-		digest = sum[:]
-	}
+	digest := sha256.Sum256([]byte(sb.String()))
 	cert, err := cache.get(ctx, m.SigningCertURL)
 	if err != nil {
 		return err
@@ -579,22 +552,7 @@ func verifySNSSignature(ctx context.Context, cache *certCache, m *snsMessage) er
 	if !ok {
 		return errors.New("signing certificate is not RSA")
 	}
-	if err := rsa.VerifyPKCS1v15(pub, hash, digest, sig); err != nil {
-		return err
-	}
-	switch m.SignatureVersion {
-	case "2":
-		sesSigV2Seen.Store(true) // downgrade protection; see the comment above
-	case "1":
-		// Once per process: an operator can act on this, and it should not drown the
-		// log on every bounce.
-		if sesSigV1Noted.CompareAndSwap(false, true) {
-			log.Print("ses hook: this SNS topic signs with SignatureVersion 1 (RSA-SHA1). " +
-				"Upgrade it with: aws sns set-topic-attributes --topic-arn <arn> " +
-				"--attribute-name SignatureVersion --attribute-value 2 — after which this app refuses version 1.")
-		}
-	}
-	return nil
+	return rsa.VerifyPKCS1v15(pub, crypto.SHA256, digest[:], sig)
 }
 
 // confirmSNSSubscription completes the SNS handshake by fetching SubscribeURL.
