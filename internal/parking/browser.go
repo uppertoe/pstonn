@@ -37,12 +37,20 @@ const (
 	honestUA = "p.stonn/1.0 (+https://p.stonn.org; visitor-permit scheduler)"
 
 	// A current desktop Chrome identity for the OIDC surface. The UA and the
-	// client-hint values MUST agree (a UA that disagrees with sec-ch-ua is itself a
-	// bot tell), so bump them together. NOTE: keeping this current is an ongoing
-	// cost the honest API surface does not carry — a stale version is a tell, so
-	// this is a maintenance treadmill that only exists for the login replay.
-	chromeUA         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-	chromeSecUA      = `"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"`
+	// client-hint values MUST agree on the major version (a UA that disagrees with
+	// sec-ch-ua is itself a bot tell), so bump them together.
+	//
+	// NOTE: keeping this current is an ongoing cost the honest API surface does not
+	// carry — a stale version is a tell, so this is a maintenance treadmill that
+	// exists only for the login replay. Last bumped 2026-08-01 to Chrome 150 (the
+	// then-current stable was 150.0.7871.188; we deliberately track the widely-
+	// rolled-out major, not the newest, since a UA AHEAD of general rollout is more
+	// anomalous than one a little behind). The authoritative sec-ch-ua string for a
+	// given release — including the rotating GREASE brand below, which is designed
+	// NOT to be exact-matched — is whatever a real Chrome of this major sends from
+	// its DevTools Network tab; copy it from there when bumping.
+	chromeUA         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	chromeSecUA      = `"Not)A;Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"`
 	chromeSecMobile  = "?0"
 	chromePlatform   = `"Windows"`
 	acceptLanguageAU = "en-AU,en;q=0.9"
