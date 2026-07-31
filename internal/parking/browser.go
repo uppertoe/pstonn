@@ -9,15 +9,38 @@ import (
 	"time"
 )
 
-// This file makes the council traffic look like a normal browser and keeps it
-// from hammering the portal when Akamai pushes back. It does NOT disguise the
-// TLS fingerprint (Go's ClientHello differs from Chrome's); that is a known
-// residual risk to revisit if the login path is ever challenged.
-
-// A current desktop Chrome identity. The header set and the client-hint values
-// are kept mutually consistent (a UA that disagrees with sec-ch-ua is itself a
-// bot tell). Bump these together periodically so they don't age conspicuously.
+// This file governs the identity the council traffic presents, and keeps it from
+// hammering the portal when Azure Front Door pushes back.
+//
+// The identity is split by surface, deliberately (see councilIdentityBrowser):
+//
+//   - The OIDC login and silent-renew flow (login + auth surfaces) drive the
+//     council's OWN public SPA client through its OWN endpoints, so they present
+//     the SPA's request shape — a desktop Chrome identity. This is an authentic
+//     replay of the login the browser SPA performs, not a disguise bolted onto
+//     something unrelated.
+//   - The permit API (api surface) is p.stonn acting with a bearer token, not the
+//     browser SPA, so it identifies itself honestly as p.stonn. A datacenter
+//     client presenting a browser UA it cannot back up with a browser TLS
+//     fingerprint is the strongest bot tell we emit; on the surface that carries
+//     the bulk of steady-state traffic we simply stop emitting it.
+//
+// What this does NOT do, and by policy will not: disguise the TLS fingerprint
+// (Go's ClientHello differs from Chrome's), rotate identities, or route through
+// proxies. Those are evasion, and on an unauthorised integration they are what
+// turns a recoverable soft-block into a deliberate ban. Reducing load and
+// identifying honestly help the council too; hiding harder does not.
 const (
+	// honestUA identifies the permit-API traffic as p.stonn, with a URL an operator
+	// who sees the traffic can follow to find out what it is — the single biggest
+	// thing that turns "unknown bot" into "known, reachable integration".
+	honestUA = "p.stonn/1.0 (+https://p.stonn.org; visitor-permit scheduler)"
+
+	// A current desktop Chrome identity for the OIDC surface. The UA and the
+	// client-hint values MUST agree (a UA that disagrees with sec-ch-ua is itself a
+	// bot tell), so bump them together. NOTE: keeping this current is an ongoing
+	// cost the honest API surface does not carry — a stale version is a tell, so
+	// this is a maintenance treadmill that only exists for the login replay.
 	chromeUA         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 	chromeSecUA      = `"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"`
 	chromeSecMobile  = "?0"
@@ -25,11 +48,27 @@ const (
 	acceptLanguageAU = "en-AU,en;q=0.9"
 )
 
-// browserTransport sets the invariant browser headers (User-Agent, language, and
-// the sec-ch-ua client-hint family) on every outbound request that does not
-// already carry them, so no code path can accidentally ship Go's default
-// "Go-http-client/1.1" UA. Per-request-class headers (Accept, Sec-Fetch-*,
-// Origin, Referer) are set at the call sites via navHeaders/xhrHeaders.
+// councilIdentityBrowser reports whether a request path should present the SPA's
+// browser identity (login + OIDC surfaces) rather than p.stonn's honest one (the
+// permit API). An unrecognised path defaults to the honest identity: only the
+// paths we can positively identify as the SPA's own login flow get the costume.
+func councilIdentityBrowser(path string) bool {
+	switch classifyCouncilPath(path) {
+	case "login", "auth":
+		return true
+	default:
+		return false
+	}
+}
+
+// browserTransport sets the identity headers on every outbound request that does
+// not already carry them, so no code path can accidentally ship Go's default
+// "Go-http-client/1.1" UA. Which identity depends on the surface (see
+// councilIdentityBrowser): the OIDC login flow gets the Chrome UA + sec-ch-ua
+// client-hint family; the permit API gets the honest p.stonn UA and NO client
+// hints (Chrome client hints under a non-Chrome UA would be the very incoherence
+// the split exists to remove). Per-request-class headers (Accept, Sec-Fetch-*,
+// Origin, Referer) are still set at the call sites via navHeaders/xhrHeaders.
 //
 // Note: we deliberately do NOT set Accept-Encoding. Go's transport adds "gzip"
 // and transparently decompresses; overriding it (e.g. to add br) would disable
@@ -40,11 +79,15 @@ type browserTransport struct {
 }
 
 func (t browserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	setIfAbsent(req.Header, "User-Agent", chromeUA)
 	setIfAbsent(req.Header, "Accept-Language", acceptLanguageAU)
-	setIfAbsent(req.Header, "sec-ch-ua", chromeSecUA)
-	setIfAbsent(req.Header, "sec-ch-ua-mobile", chromeSecMobile)
-	setIfAbsent(req.Header, "sec-ch-ua-platform", chromePlatform)
+	if councilIdentityBrowser(req.URL.Path) {
+		setIfAbsent(req.Header, "User-Agent", chromeUA)
+		setIfAbsent(req.Header, "sec-ch-ua", chromeSecUA)
+		setIfAbsent(req.Header, "sec-ch-ua-mobile", chromeSecMobile)
+		setIfAbsent(req.Header, "sec-ch-ua-platform", chromePlatform)
+	} else {
+		setIfAbsent(req.Header, "User-Agent", honestUA)
+	}
 	if t.traffic != nil {
 		t.traffic.count(req.URL.Path)
 	}
@@ -140,7 +183,7 @@ func (c *Client) ownerLock(owner string) *sync.Mutex {
 
 // cooldownFor reports the remaining cooldown for an owner, if any. While in
 // cooldown, council calls short-circuit instead of hammering a portal that is
-// already pushing back (Akamai 429/403/503), which is how a soft block becomes a
+// already pushing back (Azure Front Door 429/403/503), which is how a soft block becomes a
 // hard one.
 func (c *Client) cooldownFor(owner string) (time.Duration, bool) {
 	if v, ok := c.cooldownUntil.Load(owner); ok {

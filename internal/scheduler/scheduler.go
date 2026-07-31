@@ -77,6 +77,12 @@ type Options struct {
 	RateDelay     time.Duration // minimum pause between council calls within a warm pass (anti-burst)
 	JitterFrac    float64       // ± fraction to randomise thresholds/delays (default 0.2)
 	SnapshotPath  string        // where to write the daily consistent DB backup snapshot ("" disables)
+	// SpreadWindow staggers SCHEDULED plate changes across a window opening at the
+	// schedule boundary, so a midnight roster rollover shared by every household
+	// does not become one back-to-back burst of council writes. 0 disables it and
+	// every due change is applied on the next tick. See spreadElapsed; the price is
+	// that a permit can show the previous day's plate until its slot comes up.
+	SpreadWindow time.Duration
 }
 
 // Scheduler reconciles permits on an interval and keeps linked council sessions
@@ -96,6 +102,11 @@ type Scheduler struct {
 	notifier      Notifier
 	rateDelay     time.Duration
 	jitterFrac    float64
+	spreadWindow  time.Duration
+
+	// fleetSize is how many permits the last reconcile pass saw, the herd size the
+	// rollover window is scaled against. Written once per pass, read per permit.
+	fleetSize atomic.Int64
 
 	trigger chan struct{}
 
@@ -174,6 +185,10 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	if rd < 0 {
 		rd = 0
 	}
+	sw := opts.SpreadWindow
+	if sw < 0 {
+		sw = 0
+	}
 	return &Scheduler{
 		store:         st,
 		council:       council,
@@ -187,6 +202,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		notifier:      opts.Notifier,
 		rateDelay:     rd,
 		jitterFrac:    jf,
+		spreadWindow:  sw,
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
 		nextTry:       make(map[int64]time.Time),
@@ -945,7 +961,37 @@ func describeFailure(kind parking.FailureKind, op string) (reason, action string
 // slow keep-warm cadence (already rate-spaced, once a session refreshes) catches
 // that drift and re-arms reconcile, at gentle council load rather than a per-tick
 // firehose. Any correction is kicked so reconcile re-applies the schedule promptly.
+//
+// It reads ONE owner-level Index/grid call rather than one managedVehicle call per
+// managed permit. A 2026-07-31 capture confirmed the grid's VehicleRego agrees with
+// managedVehicle's RegistrationNumber, and that the same row already carries the
+// status and end date the expiry warning needs — which used to be a SECOND council
+// call right after this one. So the per-warm council cost is now one API request
+// regardless of how many permits an owner manages, instead of managed+1.
+//
+// Only visitor permits are manageable (see server.isVisitorPermit), so that is
+// typically one or two per household rather than the full permit list — the capture
+// account held three permits but only one addable one. The win is therefore modest
+// per household; what matters is that permit count leaves the scaling term entirely.
 func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
+	// Anti-burst: space this read from the silent-renew that just ran.
+	if s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
+		return
+	}
+	live, err := s.council.ListPermits(ctx, owner)
+	if err != nil {
+		return // a read failure is not evidence of drift; try again next cycle
+	}
+	byCouncilID := make(map[string]parking.PermitInfo, len(live))
+	for _, pi := range live {
+		byCouncilID[pi.CouncilPermitID] = pi
+		// Refresh expiry/status/type from the same response. Owner-scoped, so it
+		// only touches rows this account manages.
+		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate)
+	}
+
+	// Re-read AFTER the meta write so Inactive below is judged on the expiry the
+	// council just reported, not the one we believed a moment ago.
 	permits, err := s.store.ListPermitsFor(ctx, owner)
 	if err != nil {
 		return
@@ -955,52 +1001,54 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 	for i := range permits {
 		p := permits[i]
 		if p.Inactive(now, s.loc) {
-			continue // don't read the council for permits we no longer act on
+			continue // don't act on permits we no longer manage
 		}
-		actual, err := s.council.CurrentVehicle(ctx, owner, p)
-		if err != nil {
+		pi, ok := byCouncilID[p.CouncilPermitID]
+		if !ok {
+			continue // the council no longer lists it; syncing that is not drift's job
+		}
+		actual := pi.CurrentRego
+		if model.SamePlate(actual, p.ActiveRegistration) {
 			continue
 		}
-		if !model.SamePlate(actual, p.ActiveRegistration) {
-			log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
-			// Record the external change durably so it appears in the activity log
-			// (nothing p.stonn does to the permit should be invisible) and so the
-			// re-assertion the kicked reconcile is about to perform isn't deduped
-			// away as a no-op against the pre-drift apply row.
-			s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
-			if e := s.store.SetPermitActive(ctx, p.ID, actual); e == nil {
-				drifted = true
+		if actual == "" {
+			// An empty grid rego is the one reading the grid cannot be trusted on.
+			// managedVehicle corroborates "no vehicle" against permitVehicleCount
+			// (see parking.emptyIsCredible) precisely because blanking a plate on a
+			// misread writes a FALSE "changed directly at the council portal" row and
+			// tells the household their permit was cleared when it wasn't. The grid
+			// carries no such corroboration, so pay one extra call to confirm a
+			// clearing — rare, and only for the permit that looks cleared.
+			confirmed, cerr := s.council.CurrentVehicle(ctx, owner, p)
+			if cerr != nil || confirmed != "" {
+				continue // unconfirmed, or not actually cleared: believe nothing
 			}
+		}
+		log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
+		// Record the external change durably so it appears in the activity log
+		// (nothing p.stonn does to the permit should be invisible) and so the
+		// re-assertion the kicked reconcile is about to perform isn't deduped
+		// away as a no-op against the pre-drift apply row.
+		s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
+		if e := s.store.SetPermitActive(ctx, p.ID, actual); e == nil {
+			drifted = true
 		}
 	}
 	if drifted {
 		s.Kick() // reconcile now: re-apply the schedule over the drift
 	}
-	s.syncPermitExpiry(ctx, owner) // refresh expiry/status + warn if a permit is expiring
+	s.warnExpiring(ctx, owner)
 }
 
-// syncPermitExpiry pulls each of the owner's permits from the council, writes back
-// their expiry date and status, and — when a permit is within expiryLead of its
-// end date — sends the account a one-time approaching-expiry warning. Runs on the
-// slow keep-warm cadence off an already-valid session, so it costs one grid call.
-func (s *Scheduler) syncPermitExpiry(ctx context.Context, owner string) {
-	// Anti-burst: space this council read from the drift reads that just ran.
-	if s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
-		return
-	}
-	live, err := s.council.ListPermits(ctx, owner)
-	if err != nil {
-		return
-	}
-	for _, pi := range live {
-		// Update every permit the council reports; owner-scoped, so it only
-		// touches rows this account manages.
-		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate)
-	}
+// warnExpiring sends the one-time approaching-expiry warning for any permit now
+// within expiryLead of its end date. It makes NO council call: checkDrift has
+// already written the council's own status and end date for every permit from the
+// grid read it shares with drift detection, so this reads purely local state.
+func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 	if s.expiryLead <= 0 {
 		return
 	}
-	// Re-read managed permits so we see the (just-updated) expiry + reminded flag.
+	// The expiry + reminded flag reflect the meta write checkDrift just made.
 	managed, err := s.store.ListPermitsFor(ctx, owner)
 	if err != nil {
 		return
@@ -1065,7 +1113,7 @@ func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalO
 	}
 	failN, unexpectedN := len(stats.failOwners), len(stats.unexpectedOwners)
 	busyN := len(stats.busyOwners)
-	// A widespread ErrCouncilBusy is a systemic block (Akamai / egress-IP throttle)
+	// A widespread ErrCouncilBusy is a systemic block (Azure Front Door / egress-IP throttle)
 	// that leaves permits stuck; treat it like a broad failure so the operator hears.
 	busySystemic := busyN >= 3 || (totalOwners >= 2 && busyN == totalOwners)
 	if busySystemic && !(unexpectedN >= 2 || failN >= 3) {
@@ -1123,6 +1171,123 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		return
 	}
 	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", cs.Owner, deadline.In(s.loc).Format("2006-01-02"))
+}
+
+// spreadElapsed reports whether a permit may act on a SCHEDULED change yet.
+//
+// Rosters are written in human hours, so households pile onto the same few
+// boundaries — overwhelmingly midnight — and every one of their changes leaves
+// this single IP in the minutes after it.
+//
+// What that actually looks like on the wire is worth being precise about, because
+// it decides what spreading can and cannot fix. reconcileAll already pauses
+// rateDelay after each permit it touches, so a shared boundary is NOT a
+// back-to-back burst: it is a sustained stream at one permit (three requests) per
+// rateDelay, lasting permits*rateDelay. Spreading does not remove a spike that was
+// never there. What it does is lower that sustained RATE, by making permits become
+// eligible over a window instead of all at the boundary.
+//
+// That only works while the window is WIDER than the serial drain. Below it the
+// loop is saturated either way and the window changes nothing — which is what
+// RolloverBound reports, so an operator is never left believing a too-narrow
+// window is helping.
+//
+// Each permit gets a fixed slot: permit P acts at Since + offset(P), offset spread
+// evenly across the effective window. It is derived from the permit id alone, so a
+// permit keeps the same slot across restarts and across days rather than being
+// re-drawn into a fresh pile-up, and it needs no stored state.
+//
+// A change somebody is waiting for is never delayed: only res.Scheduled changes
+// are spread, so a booking or guest activation made just now still goes on the
+// next tick.
+//
+// The cost is precision — between the boundary and its slot a permit still shows
+// the previous day's plate — which is why the window is bounded by configuration
+// and why startup prints the convergence bound rather than leaving it implicit.
+func (s *Scheduler) spreadElapsed(permitID int64, res model.Resolution, now time.Time) bool {
+	window := s.effectiveSpread()
+	if window <= 0 || !res.Scheduled || res.Since.IsZero() {
+		return true
+	}
+	elapsed := now.Sub(res.Since)
+	if elapsed < 0 {
+		return true // clock skew: never hold a change back on a nonsense interval
+	}
+	// Past the whole window everything is eligible, so a permit can never be
+	// stranded by a boundary it somehow missed.
+	if elapsed >= window {
+		return true
+	}
+	return elapsed >= s.spreadOffset(permitID, window)
+}
+
+// spreadSpacingFactor sets the target pace as a multiple of rateDelay: at 2, a
+// shared boundary is retired at half the rate the loop could manage, so the
+// council sees a stream at half saturation instead of a saturated one.
+const spreadSpacingFactor = 2
+
+// effectiveSpread is how wide the rollover window actually is right now: enough to
+// pace THIS fleet at spreadSpacingFactor*rateDelay, capped by the configured
+// maximum delay.
+//
+// It scales with the fleet because a fixed window is wrong at both ends. A small
+// deployment has no herd to smooth — a handful of changes drain in seconds — so a
+// flat 30 minutes would delay every midnight rollover half an hour to solve a
+// problem that does not exist. A large one needs a window well past its own serial
+// drain before the rate drops at all. Deriving it from the fleet size gives a
+// deployment of five permits a window of seconds and a deployment of five hundred
+// the full configured cap, with no operator retuning in between.
+func (s *Scheduler) effectiveSpread() time.Duration {
+	if s.spreadWindow <= 0 || s.rateDelay <= 0 {
+		return 0
+	}
+	n := s.fleetSize.Load()
+	if n <= 0 {
+		return 0 // no pass has counted the fleet yet; spread nothing on a guess
+	}
+	want := time.Duration(n) * s.rateDelay * spreadSpacingFactor
+	if want > s.spreadWindow {
+		return s.spreadWindow
+	}
+	return want
+}
+
+// spreadOffset is a permit's fixed position in the rollover window, uniform in
+// [0, window). Hashed rather than taken from the id directly so that sequential
+// ids — which arrive in signup order, and so cluster by household and by street —
+// do not map to adjacent slots.
+func (s *Scheduler) spreadOffset(permitID int64, window time.Duration) time.Duration {
+	h := fnv.New64a()
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], uint64(permitID))
+	_, _ = h.Write(b[:])
+	u := float64(h.Sum64()>>11) / float64(uint64(1)<<53) // uniform in [0,1)
+	return time.Duration(u * float64(window))
+}
+
+// RolloverBound reports when a boundary shared by n permits is expected to have
+// fully converged, and whether spreading is doing anything for that fleet.
+//
+// Two limits apply and the larger wins: the window staggers when each permit
+// becomes ELIGIBLE, and the pass then retires eligible permits serially at one per
+// rateDelay. A window at or below n*rateDelay is not smoothing — the serial drain
+// is already the constraint — and saying so is the point of the second return
+// value.
+func (s *Scheduler) RolloverBound(n int) (bound time.Duration, spreading bool) {
+	if n <= 0 {
+		return 0, false
+	}
+	drain := time.Duration(n) * s.rateDelay
+	window := time.Duration(n) * s.rateDelay * spreadSpacingFactor
+	if window > s.spreadWindow {
+		window = s.spreadWindow
+	}
+	bound = drain
+	if window > bound {
+		bound = window
+	}
+	// Plus the tick that notices the last permit became eligible.
+	return bound + s.interval, window > drain
 }
 
 // jittered returns d scaled by a random factor in [1-jitterFrac, 1+jitterFrac].
@@ -1210,6 +1375,11 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 	for _, v := range vehicles {
 		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email}
 	}
+	// The herd the rollover window is sized against. Total permits over-estimates
+	// how many share any one boundary, which errs toward a wider window (gentler on
+	// the council, slightly later convergence) rather than a narrower one.
+	s.fleetSize.Store(int64(len(permits)))
+
 	now := time.Now().In(s.loc)
 	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}, busyOwners: map[string]bool{}}
 	// Space out the council writes: when many permits change at the same wall-clock
@@ -1396,6 +1566,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.settle(ctx, p)
 		return false // already correct
 	}
+	if !s.spreadElapsed(p.ID, res, now) {
+		return false // this permit's turn in the rollover window hasn't come up yet
+	}
 	if s.retryDeferred(p.ID, time.Now()) {
 		return false // failing lately; inside its stretched retry window
 	}
@@ -1467,7 +1640,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// Not linked yet, stay quiet; the dashboard prompts the user to link.
 		return false
 	case errors.Is(err, parking.ErrCouncilBusy):
-		// Portal is pushing back (Akamai) or we're in a per-owner cooldown. Feed the
+		// Portal is pushing back (Azure Front Door) or we're in a per-owner cooldown. Feed the
 		// fleet-wide detector so a systemic block reaches the operator...
 		if stats != nil {
 			stats.busyOwners[p.Owner] = true

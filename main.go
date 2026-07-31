@@ -126,11 +126,31 @@ func run() error {
 		PublicBaseURL: cfg.PublicBaseURL,
 		Notifier:      notifier,
 		RateDelay:     3 * time.Second,
+		SpreadWindow:  cfg.Council.RolloverWindow,
 		// A daily consistent snapshot next to the live DB: the restic files-only
 		// backup of the volume can catch the live db + WAL mid-write, but this
 		// file is always a coherent database to restore from.
 		SnapshotPath: filepath.Join(filepath.Dir(cfg.SQLitePath), "backup-snapshot.db"),
 	})
+	// State the rollover guarantee at startup rather than leaving it implicit: with
+	// a shared boundary (midnight, overwhelmingly) the question that matters is not
+	// the window setting but when every permit is actually expected to have
+	// converged, and whether the window is wide enough to be smoothing anything at
+	// all. Reported against the permits currently on file.
+	if n, err := st.CountPermits(ctx); err == nil && n > 0 {
+		bound, windowBinds := sched.RolloverBound(n)
+		if cfg.Council.RolloverWindow <= 0 {
+			log.Printf("rollover spread: DISABLED; %d permits sharing a boundary converge in ~%s, applied back to back", n, bound.Round(time.Second))
+		} else if windowBinds {
+			log.Printf("rollover spread: %s window over %d permits; a shared boundary converges by ~%s after it",
+				cfg.Council.RolloverWindow, n, bound.Round(time.Second))
+		} else {
+			log.Printf("rollover spread: %s window is NARROWER than the %d-permit serial drain, so it is not smoothing anything; "+
+				"a shared boundary still converges in ~%s. Raise COUNCIL_ROLLOVER_WINDOW above that to spread the burst.",
+				cfg.Council.RolloverWindow, n, bound.Round(time.Second))
+		}
+	}
+
 	srv := server.New(cfg, st, sessions, auth, council, sched, notifier, mail, box)
 
 	// Track the worker loops so shutdown can join them: st.Close() runs on

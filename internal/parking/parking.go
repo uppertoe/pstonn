@@ -71,7 +71,7 @@ var (
 	ErrLoginOffHost = errors.New("parking: council sign-in points off-host; refusing to send credentials")
 	// ErrNotCaptured marks a call whose request/response shape is still unknown.
 	ErrNotCaptured = errors.New("parking: endpoint not yet reverse-engineered (needs a capture)")
-	// ErrCouncilBusy means the portal is pushing back (Akamai 429/403/503) or the
+	// ErrCouncilBusy means the portal is pushing back (Azure Front Door 429/403/503) or the
 	// owner is in a backoff cooldown. Callers should treat it as transient and NOT
 	// retry immediately; the client already enforces an exponential per-owner
 	// cooldown so it is not hammered.
@@ -279,7 +279,7 @@ func (c *Client) accessToken(ctx context.Context, owner string) (string, error) 
 // renewLocked silent-renews the owner's session and persists the fresh token
 // (and any rotated cookie). The caller must hold ownerLock(owner). The IDM
 // endpoints sit behind the same per-owner cooldown as the API: they are the
-// path most likely to attract Akamai push-back, so hammering them while blocked
+// path most likely to attract Azure Front Door push-back, so hammering them while blocked
 // is exactly the soft-block → hard-block escalation the backoff exists to stop.
 func (c *Client) renewLocked(ctx context.Context, owner string, cs store.CouncilSession) (string, error) {
 	if d, blocked := c.cooldownFor(owner); blocked {
@@ -352,7 +352,7 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 
 // apiRequest issues an authenticated request to the permit API as the app user.
 // It short-circuits while the owner is in a soft-block cooldown, and classifies
-// Akamai push-back (429/403/503) as ErrCouncilBusy with an exponential backoff so
+// Azure Front Door push-back (429/403/503) as ErrCouncilBusy with an exponential backoff so
 // the scheduler stops re-hitting a portal that is already refusing us.
 // op is a plain-English description of what the request is doing, used to build
 // human notifications when it fails. On any non-2xx (other than the busy codes)
@@ -394,7 +394,7 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 	}
 	switch resp.StatusCode {
 	case http.StatusForbidden:
-		// Two very different things arrive as 403: Akamai push-back (an HTML
+		// Two very different things arrive as 403: Azure Front Door push-back (an HTML
 		// challenge page — transient, back off) and a genuine API refusal (JSON,
 		// e.g. permit access revoked — durable, will never self-heal). Treating
 		// the latter as "busy" would cooldown-loop the owner forever with a
@@ -415,10 +415,18 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 		return resp, nil
 	}
 	// Other non-2xx: 5xx is a server-side blip (transient); 4xx is a refusal.
+	// A refusal usually carries the council's OWN reason, and it is the only thing
+	// that can tell a user what to actually do — "Vehicle Registration has invalid
+	// pattern" is actionable where "council returned 400" is not. Read it before
+	// discarding the body.
+	errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxAPIBody))
 	drainClose(resp)
 	kind := FailRejected
 	if resp.StatusCode >= 500 {
 		kind = FailTransient
+	}
+	if msg := councilErrorMessage(errBody); msg != "" {
+		return nil, councilErr(kind, op, fmt.Errorf("the council refused it: %s (%d)", msg, resp.StatusCode))
 	}
 	return nil, councilErr(kind, op, fmt.Errorf("council returned %d", resp.StatusCode))
 }
@@ -451,8 +459,47 @@ func drainClose(resp *http.Response) {
 	resp.Body.Close()
 }
 
+// councilErrorPayload is the council's refusal body: a JSON ARRAY of message
+// objects, e.g.
+//
+//	[{"Level":0,"Message":"Vehicle Registration has invalid pattern","ID":null,…}]
+//
+// Captured live on 2026-07-31 from a rejected manageVehicle POST.
+type councilErrorPayload struct {
+	Message       string `json:"Message"`
+	CustomMessage string `json:"CustomMessage"`
+}
+
+// councilErrorMessage extracts a human-readable reason from a council refusal
+// body, or "" if there is nothing usable. The result is portal-controlled text
+// that flows into error strings, logs and user notifications, so it is passed
+// through safeExcerpt — a refusal message must not be able to forge log lines.
+//
+// Multiple messages are joined: the council reports per-field validation, and
+// showing only the first would hide the rest of what the user has to fix.
+func councilErrorMessage(body []byte) string {
+	var payload []councilErrorPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	var msgs []string
+	for _, p := range payload {
+		m := p.CustomMessage // the council's own user-facing wording, when it sets one
+		if strings.TrimSpace(m) == "" {
+			m = p.Message
+		}
+		if m = strings.TrimSpace(m); m != "" {
+			msgs = append(msgs, m)
+		}
+	}
+	if len(msgs) == 0 {
+		return ""
+	}
+	return safeExcerpt(strings.Join(msgs, "; "))
+}
+
 // isJSONResponse reports whether the response declares a JSON body — the shape
-// the council API itself speaks, as opposed to an Akamai HTML challenge page.
+// the council API itself speaks, as opposed to an Azure Front Door HTML challenge page.
 func isJSONResponse(resp *http.Response) bool {
 	ct := resp.Header.Get("Content-Type")
 	return strings.Contains(ct, "json")
@@ -647,7 +694,19 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 // so we first read the current vehicle to obtain its detail ID (and preserve its
 // state), then POST the edit. A no-op edit (unchanged plate) is skipped, mirroring
 // the portal, which sends no request when nothing changes. Success is any 2xx
-// with an empty body.
+// with an empty body — a 2026-07-31 capture confirmed a successful POST returns
+// exactly that: 200, no Content-Type, zero bytes. It says nothing about the
+// resulting state, which is why the confirmation read below is not optional.
+//
+// The pre-read is deliberately NOT cached away, though the same capture showed
+// PKPermitVehicleDetailID is stable across an edit and so could be. Three reasons:
+// writes are a small share of council traffic next to the keep-warm background
+// load, so the saving is a few percent; the read also carries the
+// CanEditOrDeleteVehicle check and the no-op short-circuit, both of which would
+// have to be reproduced from cached state; and a stale cached ID turns one
+// three-call change into a four-call one. The burst that actually matters is a
+// shared roster rollover, and that is better fixed by spreading the writes than by
+// shaving one call off each.
 func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
 	const op = "change the vehicle on your permit"
 	if c.sandbox != nil {

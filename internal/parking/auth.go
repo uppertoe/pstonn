@@ -121,7 +121,7 @@ func looksLikeHTML(resp *http.Response, head []byte) bool {
 }
 
 // classifyPushback records a per-owner penalty and returns ErrCouncilBusy when
-// the response is Akamai/rate-limit push-back (429/403/503); nil otherwise.
+// the response is Azure Front Door/rate-limit push-back (429/403/503); nil otherwise.
 func (c *Client) classifyPushback(owner string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests, http.StatusForbidden, http.StatusServiceUnavailable:
@@ -208,7 +208,7 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	if c.sandbox != nil {
 		return c.sandboxLink(ctx, owner, username) // any credentials link in sandbox mode
 	}
-	// Honour an existing push-back cooldown: retrying the login while Akamai is
+	// Honour an existing push-back cooldown: retrying the login while Azure Front Door is
 	// already refusing this owner is how a soft block escalates to a hard one.
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))

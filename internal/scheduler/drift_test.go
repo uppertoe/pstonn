@@ -111,7 +111,7 @@ func TestCheckDriftIgnoresReadFailures(t *testing.T) {
 	ctx := context.Background()
 	const owner, councilID = "err@example.com", "err-1"
 	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
-	fc.currentErr = errors.New("council unreachable")
+	fc.permitsErr = errors.New("council unreachable")
 
 	s.checkDrift(ctx, owner)
 
@@ -121,6 +121,45 @@ func TestCheckDriftIgnoresReadFailures(t *testing.T) {
 	}
 	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
 		t.Errorf("a failed council read wrote %d activity rows (err=%v)", len(logs), err)
+	}
+}
+
+// Drift reads the owner-level grid, which — unlike managedVehicle — carries nothing
+// to corroborate an EMPTY plate with (see parking.emptyIsCredible). So a blank grid
+// rego must be confirmed by a per-permit read before the app will believe a permit
+// was cleared. Getting this wrong blanks a live permit and tells the household, in
+// writing, that someone changed it in the portal when nobody did.
+func TestCheckDriftDoesNotTrustAnEmptyGridRego(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "blank@example.com", "blank-1"
+	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "ROSTER1")
+	// The grid says the permit has no plate; managedVehicle still shows ROSTER1.
+	fc.setGridRego(councilID, "")
+
+	s.checkDrift(ctx, owner)
+
+	p, _ := st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "ROSTER1" {
+		t.Errorf("an uncorroborated blank grid rego blanked the recorded plate to %q", p.ActiveRegistration)
+	}
+	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
+		t.Errorf("an uncorroborated blank grid rego wrote %d activity rows (err=%v)", len(logs), err)
+	}
+}
+
+// The mirror of the above: when BOTH views agree the permit is empty, it really was
+// cleared and the app must record it. This is what keeps the corroboration guard
+// from quietly disabling clearing detection altogether.
+func TestCheckDriftBelievesACorroboratedClearing(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "cleared2@example.com", "cleared-2"
+	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
+
+	s.checkDrift(ctx, owner)
+
+	p, _ := st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "" {
+		t.Errorf("a corroborated clearing was ignored; recorded plate is still %q", p.ActiveRegistration)
 	}
 }
 
@@ -145,16 +184,23 @@ func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
 	}
 }
 
-// An expired permit must not be read at all: it is a council request per permit per
-// warm cycle for something the app no longer acts on, and the app is deliberately
-// frugal with council traffic.
+// An expired permit must not be ACTED on. The owner-level grid read happens either
+// way — it is one call for the whole account, which is the point of reading the grid
+// — but an expired permit must produce no drift row and no council write, because
+// the app no longer manages it.
+//
+// The expiry is set on the COUNCIL, not just locally: the council is the authority
+// on end dates and checkDrift writes what it reports into the permit row, so a
+// locally-expired permit the council still reports as current is not expired.
 func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 	ctx := context.Background()
 	const owner, councilID = "expired@example.com", "expired-1"
 	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "MEDDLED1")
 
 	// Retire the permit: an end date whose local day is well past.
-	if err := st.UpdatePermitMeta(ctx, owner, councilID, "Approved", "", "", time.Now().AddDate(0, 0, -10)); err != nil {
+	past := time.Now().AddDate(0, 0, -10)
+	fc.setCouncilEndDate(councilID, past)
+	if err := st.UpdatePermitMeta(ctx, owner, councilID, "Approved", "", "", past); err != nil {
 		t.Fatalf("set expiry: %v", err)
 	}
 	if p, err := st.GetPermit(ctx, pid); err != nil || !p.Inactive(time.Now(), time.UTC) {
