@@ -216,3 +216,65 @@ func TestFindDisplaced(t *testing.T) {
 		}
 	})
 }
+
+// TestSamePlate (F5): one rule for "is this the same car?", because the sites that
+// decide "does the council need writing to?" and "has the plate changed?" must not
+// disagree. When they did, a case-only echo from the portal drove a real council
+// write, a "your permit was updated" notification and a displaced-driver email for
+// a change that changed nothing.
+func TestSamePlate(t *testing.T) {
+	same := []struct{ a, b string }{
+		{"ABC123", "abc123"},
+		{"ABC123", "AbC123"},
+		{"ABC123", "ABC 123"},  // the portal echoes back whatever spacing was typed
+		{"ABC123", " ABC123 "}, // ...and whatever padding
+		{"", ""},               // both unknown
+	}
+	for _, c := range same {
+		if !SamePlate(c.a, c.b) {
+			t.Errorf("SamePlate(%q, %q) = false, want true", c.a, c.b)
+		}
+	}
+	// Anything beyond case and spacing is a genuinely different car, and treating it
+	// as the same one would leave a car uncovered — the failure that costs a fine.
+	notSame := []struct{ a, b string }{
+		{"ABC123", "ABC124"},
+		{"ABC123", "ABC12"},
+		{"ABC123", ""},
+		{"AB1C23", "ABC123"},
+	}
+	for _, c := range notSame {
+		if SamePlate(c.a, c.b) {
+			t.Errorf("SamePlate(%q, %q) = true, want false", c.a, c.b)
+		}
+	}
+}
+
+// TestExpiryDeadline (F7): EndDate is the INCLUSIVE last valid day, reported by the
+// council as a zoneless date we parse as UTC midnight. Anything comparing `now`
+// against that bare instant treats the permit as finished from ~10-11am Melbourne
+// time on its final valid day, while it is still live and still needs its plate
+// kept right.
+func TestExpiryDeadline(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	end := mustTime(t, "2026-07-20 00:00 +0000") // how the council date arrives
+	got := ExpiryDeadline(end, loc)
+	if want := mustTime(t, "2026-07-21 00:00 +1000"); !got.Equal(want) {
+		t.Fatalf("ExpiryDeadline = %s, want %s", got, want)
+	}
+	// The instant the old bare-instant compare went quiet is still well inside the
+	// permit's life.
+	lateOnTheLastDay := mustTime(t, "2026-07-20 22:00 +1000")
+	if !lateOnTheLastDay.Before(got) {
+		t.Fatal("10pm on the last valid day must still be before the deadline")
+	}
+	// Same boundary Inactive uses, so nothing can be "expired" for one check and
+	// "live" for the other.
+	p := Permit{Status: "Granted", EndDate: end}
+	if p.Inactive(lateOnTheLastDay, loc) {
+		t.Fatal("Inactive and ExpiryDeadline disagree about the last valid day")
+	}
+	if !p.Inactive(got, loc) {
+		t.Fatal("a permit must be inactive from its deadline onward")
+	}
+}

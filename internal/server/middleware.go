@@ -2,30 +2,117 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/uppertoe/pstonn/internal/identity"
 )
 
-// securityHeaders sets defensive response headers on every request. The CSP
-// keeps all resource loads and form posts same-origin (blocking exfiltration and
-// external form hijack) and forbids framing (clickjacking). Alpine needs
-// 'unsafe-eval' and the few inline <script>/style blocks need 'unsafe-inline';
-// everything else is locked to 'self'.
-func securityHeaders(next http.Handler) http.Handler {
-	const csp = "default-src 'self'; " +
-		"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+// newScriptNonce mints the per-response CSP script nonce. 16 bytes is well past
+// guessable, and it MUST be fresh per response: a fixed or reused nonce is worse
+// than none, because it reads as containment while an injected <script
+// nonce="…"> would execute. crypto/rand.Read cannot fail without the OS entropy
+// source failing, in which case it panics rather than returning short — so there
+// is no degraded-nonce path to get wrong here.
+//
+// URL-safe base64 (the CSP grammar accepts it) so the alphabet is limited to
+// characters html/template leaves alone: standard base64's '+' and '=' come back
+// out of a template as &#43; and &#61;, which a browser does decode, but it means
+// the header and the markup no longer match byte for byte and every test and
+// bug-report grep has to know that.
+func newScriptNonce() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return base64.RawURLEncoding.EncodeToString(b[:])
+}
+
+// cspFor builds the policy for one response around that response's script nonce.
+//
+// 'unsafe-inline' is deliberately absent from script-src, and adding it back would
+// achieve nothing: under CSP3 a nonce in script-src makes browsers IGNORE
+// 'unsafe-inline' entirely. Every inline <script> in layout.html carries
+// {{.Nonce}} instead, and there are no on* handler attributes anywhere in the
+// templates (a nonce cannot cover those, so they were converted to
+// addEventListener) — templates_csp_test.go holds both facts.
+//
+// 'unsafe-eval' MUST STAY. Alpine compiles every x-data / @click / x-show
+// expression with `new Function`, and this app leans on Alpine throughout, so
+// removing it takes the app apart on the first interaction. Dropping it means
+// moving to the @alpinejs/csp build and rewriting each x-data into a registered
+// component — a real project, not a tidy-up. Do not "clean this up".
+//
+// style-src keeps 'unsafe-inline' for the same reason it cannot be nonced: the
+// colour language is carried by inline style= attributes (--hue, plate colours)
+// on ~20 elements, and nonces apply to elements, not attributes.
+//
+// object-src is spelled out rather than left to the default-src fallback: it costs
+// nothing and it is the one directive whose absence people reach for when they want
+// to argue the policy is incomplete.
+func cspFor(nonce string) string {
+	return "default-src 'self'; " +
+		"script-src 'self' 'nonce-" + nonce + "' 'unsafe-eval'; " +
 		"style-src 'self' 'unsafe-inline'; " +
 		"img-src 'self' data:; font-src 'self'; connect-src 'self'; " +
+		"object-src 'none'; " +
 		"form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+}
+
+// scriptNonce recovers the nonce securityHeaders minted for this response, by
+// reading back the CSP header it already set.
+//
+// The header is the single source of truth on purpose. render() is handed only a
+// ResponseWriter and a view model — the request (and so any context value) is out
+// of reach, and its ~40 call sites are spread across handler files, so a
+// context-threaded nonce would mean changing all of them and would still allow the
+// header and the markup to drift apart. Reading it back cannot drift: if the
+// attribute is present, it came from the policy actually being enforced.
+//
+// Absent header returns "", which is the correct answer for a response rendered
+// without securityHeaders in front of it (unit tests execute templates directly):
+// no policy is being enforced, so there is no nonce to honour.
+func scriptNonce(w http.ResponseWriter) string {
+	const marker = "'nonce-"
+	v := w.Header().Get("Content-Security-Policy")
+	i := strings.Index(v, marker)
+	if i < 0 {
+		return ""
+	}
+	v = v[i+len(marker):]
+	j := strings.IndexByte(v, '\'')
+	if j < 0 {
+		return ""
+	}
+	return v[:j]
+}
+
+// securityHeaders sets defensive response headers on every request. The CSP
+// keeps all resource loads and form posts same-origin (blocking exfiltration and
+// external form hijack) and forbids framing (clickjacking); see cspFor for what
+// each script-src source is doing there.
+func securityHeaders(next http.Handler) http.Handler {
+	// The app asks for exactly one powerful feature — the screen wake lock, so a QR
+	// stays readable while a visitor holds up their phone. Naming it and denying the
+	// rest means a future dependency cannot quietly start using the camera or location.
+	const permissions = "screen-wake-lock=(self), camera=(), microphone=(), geolocation=(), " +
+		"payment=(), usb=(), serial=(), midi=()"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", csp)
+		h.Set("Content-Security-Policy", cspFor(newScriptNonce()))
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Permissions-Policy", permissions)
+		// HSTS only when the request actually arrived over TLS. The site is DNS-only, so
+		// no proxy adds this for us — but sending it on a plaintext request is both
+		// meaningless (browsers ignore it) and a footgun for a local http run, which
+		// would pin localhost to https for the max-age.
+		if requestScheme(r) == "https" {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -67,6 +154,22 @@ func cacheStatic(h http.Handler) http.Handler {
 	})
 }
 
+// noStoreCache marks a response uncacheable. Every signed-in page shows household
+// data — permits, plates, the activity log, who has access — and none of it carried
+// any cache directive, so a browser was free to keep it: on the shared family device
+// this app is explicitly built for, one person signs out and the next presses Back
+// and reads the previous person's dashboard out of the back-forward cache.
+//
+// Deliberately NOT the guest routes' noStore helper, which also sets
+// Referrer-Policy: no-referrer. That is right for a page whose URL contains a live
+// token, but on an app page it would strip the same-origin Referer that sameOrigin
+// falls back on when a request carries no Origin — weakening the CSRF check to fix a
+// caching bug. Pragma is for the HTTP/1.0 intermediaries that ignore Cache-Control.
+func noStoreCache(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+}
+
 // user returns the signed-in identity, or redirects/errs and reports ok=false.
 func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bool) {
 	if u, ok := identity.FromContext(r.Context()); ok {
@@ -97,11 +200,17 @@ func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrim
 	user = u.Email
 	primary, ok, err := s.store.MemberAccount(ctx, user)
 	if err != nil {
-		// Data access still resolves to the caller's OWN account (so this can never
-		// read anyone else's data), but we no longer grant primary privilege on a
-		// failed lookup: if we can't prove they aren't a secondary, deny the
-		// owner-only gates (council link/unlink, account delete, member management)
-		// rather than fail open. A DB blip should cost a 403, not a privilege.
+		// Fail toward the caller's OWN account and withhold primary privilege: if we
+		// cannot prove they aren't a secondary, deny the owner-only gates (council
+		// link/unlink, account delete, member management) rather than fail open. A DB
+		// blip should cost a 403, not a privilege.
+		//
+		// Note what this does NOT guarantee. For a primary it is exactly right. For a
+		// SECONDARY it silently re-scopes them to their own email, so a mutation racing
+		// the blip writes into a phantom account of their own — invisible to them
+		// afterwards, and enough to flip their HasOwnData. It reads nobody else's data
+		// and escalates nothing (isPrimary stays false, the membership row is
+		// untouched), but it is a write-scope shift, not a no-op.
 		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", user, err)
 		return user, user, false
 	}
@@ -117,17 +226,22 @@ func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// Being here resets the account's idle clock (see decideWarm): the
-		// re-authorise bound exists to stop holding a council session for a household
-		// that has left, and someone signed in and using the app has not left.
-		s.touchActivity(r.Context(), u.Email)
+		noStoreCache(w)
 		// CSRF: every authenticated mutation must come from our own origin. This
 		// wraps all mutating routes (withConsent calls withUser), so a cross-site
 		// POST can't trigger link/unlink/delete/schedule changes.
+		//
+		// Checked BEFORE touchActivity: a request we are about to reject must not
+		// have side effects, and resetting the idle clock is one — it extends how
+		// long a council session is held for a household that may have left.
 		if isStateChanging(r) && !sameOrigin(r) {
 			s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
 			return
 		}
+		// Being here resets the account's idle clock (see decideWarm): the
+		// re-authorise bound exists to stop holding a council session for a household
+		// that has left, and someone signed in and using the app has not left.
+		s.touchActivity(r.Context(), u.Email)
 		if isStateChanging(r) {
 			limitBody(r)
 		}
@@ -159,6 +273,9 @@ func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
 			s.message(w, http.StatusForbidden, "This action is limited to administrators.")
 			return
 		}
+		// The admin page lists every account's email and push topic, so it is the last
+		// page that should sit in a shared browser's history cache.
+		noStoreCache(w)
 		h(w, r)
 	}
 }

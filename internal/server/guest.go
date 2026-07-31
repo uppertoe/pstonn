@@ -6,18 +6,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 	"rsc.io/qr"
 )
@@ -199,6 +203,18 @@ func permitLabel(p model.Permit) string {
 	return "Permit " + p.CouncilPermitID
 }
 
+// errApplyBusy stands in for a council write this process deliberately did NOT
+// make, because another plate change for the same permit was still in flight when
+// the apply budget ran out (see the AcquireApply calls below). Classified
+// transient: the booking is already saved, so the scheduler converges on it — the
+// page must show the honest "still applying" state rather than telling the
+// household their council login needs reconnecting.
+var errApplyBusy = &parking.CouncilError{
+	Kind: parking.FailTransient,
+	Op:   "change the vehicle on your permit",
+	Err:  errors.New("another plate change for this permit is still in flight"),
+}
+
 // dayEndLocal is midnight at the start of the day `extraDays` after t's day, in
 // t's location: extraDays=0 → end of today, extraDays=1 → end of tomorrow.
 func dayEndLocal(t time.Time, extraDays int) time.Time {
@@ -217,6 +233,97 @@ func untilPhrase(now time.Time, overnight bool) string {
 func noStore(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+}
+
+// ---- bounds on the public guest surface ----
+//
+// These are process-wide rather than fields on Server because the door QR is the
+// one capability handed to strangers, and every one of these bounds has to hold
+// across every request that reaches it — the same reasoning (and the same
+// in-memory, restart-resettable mechanism) as the invite and guest-link throttles
+// the Server already carries.
+var (
+	// guestScanner records that we have heard from a scanner at all. It is only
+	// ENFORCED once a grant's pending queue reaches its reserved tail (see
+	// PendingGuestRequestsInReserve), but it is consulted on every request so the
+	// slots a scanner already took are counted against it: that is what makes the
+	// reserved slots genuinely reachable by someone else. The window covers the
+	// hour-plus a pending row can live, because a bound shorter than the thing it
+	// bounds lets the same phone refill the queue as it drains.
+	guestScanner = newRateLimiter(1, 90*time.Minute)
+
+	// guestNudge bounds the "approve this?" nudge PER ACCOUNT. The nudge
+	// deliberately bypasses quiet hours at high priority and fans out to every
+	// member, and notify dedups on the plate — so cycling plates through a public
+	// poster turned one phone into roughly two 3am pushes a minute for every member
+	// of the household, and DENYING made room for more. Suppressing the push does
+	// not suppress the request: it still queues on the guests page, so a real
+	// visitor arriving during a flood is still answerable, just not by alarm.
+	guestNudge = newRateLimiter(4, 30*time.Minute)
+
+	// guestApplyNotify bounds the per-account "a guest put their car on your
+	// permit" fanout. notify's dedup key includes the plate, so a visitor-QR holder
+	// cycling plates produced an email plus a push per attempt with nothing
+	// suppressing any of it — the one notification path on this surface that had no
+	// per-account cap, unlike invites (1/day) and guest links (5/day). Sized well
+	// above a household's real use: a guest link switching between cars several
+	// times an afternoon is ordinary; a hundred plates an hour is not.
+	guestApplyNotify = newRateLimiter(10, time.Hour)
+
+	// guestStalls is the stall clock behind the visitor page's "taking longer than
+	// usual". See stallClock.
+	guestStalls = &stallClock{seen: map[stallKey]time.Time{}}
+)
+
+type stallKey struct {
+	permitID int64
+	want     string
+}
+
+// stallClock remembers when this process FIRST saw a permit's target plate go
+// unconfirmed on the council record.
+//
+// The pending banner used the winning override's creation time, which only exists
+// for a booked change: a roster-driven target had no clock at all, so `stalled`
+// could never become true and a visitor whose household had a broken council
+// session watched "Changing to X…" poll every 2.5 seconds for as long as the tab
+// stayed open, while the honest message telling them to check with the resident
+// was unreachable. Observation time is the clock that works for both: it starts
+// when someone first looks, it restarts when the target changes (the key includes
+// the plate), and it needs no schema and no per-browser state. Losing it on
+// restart only means the page spins for another guestApplyTimeout.
+type stallClock struct {
+	mu   sync.Mutex
+	seen map[stallKey]time.Time
+}
+
+// maxStallKeys bounds the map. A guest can mint keys (each activation resolves to
+// a new target plate), so on overflow it is cleared outright: the cost is a page
+// that spins for another guestApplyTimeout, never unbounded memory.
+const maxStallKeys = 4096
+
+// since returns the first time this process saw (permitID, want) outstanding,
+// recording now if this is the first sighting.
+func (c *stallClock) since(permitID int64, want string, now time.Time) time.Time {
+	k := stallKey{permitID: permitID, want: model.NormPlate(want)}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.seen) > maxStallKeys {
+		c.seen = map[stallKey]time.Time{}
+	}
+	if t, ok := c.seen[k]; ok {
+		return t
+	}
+	c.seen[k] = now
+	return now
+}
+
+// forget drops a target's clock once it has settled, so the next time the same
+// plate is being applied it is timed afresh rather than judged stalled instantly.
+func (c *stallClock) forget(permitID int64, want string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.seen, stallKey{permitID: permitID, want: model.NormPlate(want)})
 }
 
 // ================= PUBLIC ACTIVATION (no login) =================
@@ -255,11 +362,11 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 // permit, and only when it is NOT one of the link's own cars (those they can
 // simply tap; the revert exists to restore a plate they could not pick).
 func revertPlate(baseline string, until time.Time, current string, cars []model.Vehicle, now time.Time) string {
-	if baseline == "" || !now.Before(until) || strings.EqualFold(baseline, current) {
+	if baseline == "" || !now.Before(until) || model.SamePlate(baseline, current) {
 		return ""
 	}
 	for _, v := range cars {
-		if strings.EqualFold(v.Registration, baseline) {
+		if model.SamePlate(v.Registration, baseline) {
 			return ""
 		}
 	}
@@ -353,11 +460,31 @@ func revertPinEnd(now, baselineUntil time.Time) time.Time {
 // pendingState reports whether the council record has caught up to the
 // schedule's target: a non-empty pendingReg means "still applying"; stalled
 // means it has been outstanding past guestApplyTimeout and polling should stop.
-func pendingState(actual, want string, decidedAt, now time.Time) (pendingReg string, stalled bool) {
-	if want == "" || strings.EqualFold(actual, want) {
+//
+// since is when the change was asked for: the winning booking's creation time
+// when there is one, otherwise when this process first saw the target go
+// unconfirmed (see stallClock). A zero since still means "never stalled", so a
+// caller with no clock at all understates rather than accusing a healthy apply.
+func pendingState(actual, want string, since, now time.Time) (pendingReg string, stalled bool) {
+	if want == "" || model.SamePlate(actual, want) {
 		return "", false
 	}
-	return want, !decidedAt.IsZero() && now.Sub(decidedAt) > guestApplyTimeout
+	return want, !since.IsZero() && now.Sub(since) > guestApplyTimeout
+}
+
+// stallSince picks the clock pendingState should judge a target by: the booking's
+// own creation time when the schedule resolved to a deliberate booking, else the
+// first time we saw this target outstanding. Roster-driven targets have no
+// creation time, which is why they could never stall.
+func stallSince(permitID int64, current, want string, decidedAt, now time.Time) time.Time {
+	if !decidedAt.IsZero() {
+		return decidedAt
+	}
+	if want == "" || model.SamePlate(current, want) {
+		guestStalls.forget(permitID, want)
+		return time.Time{}
+	}
+	return guestStalls.since(permitID, want, now)
 }
 
 // buildGuestView assembles the activation-menu view model from actual state:
@@ -402,12 +529,13 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		// has nothing to undo — and reverting would wrongly displace that deliberate
 		// booking. Requiring the link's own live override to match the resolved
 		// winner keeps the offer honest and prevents the clobber.
-		if gp, ok := s.store.ActiveGuestOverridePlate(ctx, permit.ID, gc.TokenID, time.Now()); ok && strings.EqualFold(gp, want) {
+		if gp, ok := s.store.ActiveGuestOverridePlate(ctx, permit.ID, gc.TokenID, time.Now()); ok && model.SamePlate(gp, want) {
 			view.RevertPlate = revertPlate(gc.BaselinePlate, gc.BaselineUntil, current, gc.Vehicles, time.Now())
 		}
-		view.PendingReg, view.Stalled = pendingState(current, want, decidedAt, time.Now())
+		now := time.Now()
+		view.PendingReg, view.Stalled = pendingState(current, want, stallSince(permit.ID, current, want, decidedAt, now), now)
 		if !until.IsZero() {
-			now := time.Now().In(s.cfg.DisplayLocation)
+			now := now.In(s.cfg.DisplayLocation)
 			view.UntilText = untilText(now, until.In(s.cfg.DisplayLocation))
 		}
 		// The highlight follows the guest's choice the moment it is saved; the
@@ -489,7 +617,7 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 	}
 	flash := ""
 	if view.PendingReg == "" && !view.Stalled {
-		if want, _, _ := s.guestDesired(r.Context(), permit); want != "" && strings.EqualFold(current, want) {
+		if want, _, _ := s.guestDesired(r.Context(), permit); want != "" && model.SamePlate(current, want) {
 			flash = current + " is now on the permit."
 		}
 	}
@@ -604,13 +732,30 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	bg := context.WithoutCancel(r.Context())
 	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	defer cancel()
-	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, reg)
+	// Serialise with the reconcile loop for the duration of the write AND the
+	// active_registration write that records it. Without this the loop could be
+	// mid-apply of the roster plate, and whichever of us reached the council last
+	// would decide the plate while whichever wrote the database last decided our
+	// belief about it — leaving the council holding one car and the row naming
+	// another. Every later tick then compares its target against that wrong belief,
+	// finds nothing to do, and leaves a car uncovered until the next drift check.
+	// Bounded by applyCtx, so a stuck claim cannot hold the request open. Held over
+	// the council write and the row that records it — those two are the one decision
+	// — and released immediately after, so the audit row, the notices and rendering
+	// the page never hold up a reconcile pass.
+	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
+	err := error(errApplyBusy)
+	if claimed {
+		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
+			_ = s.store.SetPermitActive(bg, permit.ID, reg)
+		}
+	}
+	release()
 	// Plain Kick, deliberately: this handler already attempted the council write
 	// itself, so clearing the permit's failure backoff would add council pressure
 	// without adding a chance of success — and this path is unauthenticated.
 	s.sched.Kick()
 	if err == nil {
-		_ = s.store.SetPermitActive(bg, permit.ID, reg)
 		_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "success", "activated by "+createdBy)
 		d := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
 		s.notifyGuestApply(bg, permit, reg, name, createdBy, d)
@@ -696,10 +841,19 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	bg := context.WithoutCancel(r.Context())
 	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	defer cancel()
-	err := s.council.SetVehicle(applyCtx, permit.Owner, permit, target)
+	// Exclusive for this permit over the write and the row that records it (see
+	// guestActivate): a revert racing the reconcile loop is the same lost update, and
+	// here the plate left behind would be the one the guest just asked us to remove.
+	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
+	err := error(errApplyBusy)
+	if claimed {
+		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, target); err == nil {
+			_ = s.store.SetPermitActive(bg, permit.ID, target)
+		}
+	}
+	release()
 	s.sched.Kick()
 	if err == nil {
-		_ = s.store.SetPermitActive(bg, permit.ID, target)
 		_ = s.store.RecordApply(bg, permit.ID, target, "guest", "success", "put back by "+createdBy)
 		// A revert can't displace a third party: the guest's own overrides were
 		// just swept, and the baseline is only re-pinned when nothing else covers
@@ -793,6 +947,18 @@ func guestApplyDetail(err error) string {
 }
 
 func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string, d model.DisplacedBooking) {
+	if s.notify == nil {
+		return
+	}
+	// Bounded per account (see guestApplyNotify). The change itself is never
+	// dropped — it is on the permit, in the activity log, and on the schedule — but
+	// the notification is the only part of this path a link holder can trigger at
+	// will, and notify's dedup key includes the plate, so cycling plates meant one
+	// email and one push per attempt with nothing in the way.
+	if !guestApplyNotify.allow("ga:" + permit.Owner) {
+		log.Printf("guest apply notify for %s throttled", permit.Owner)
+		return
+	}
 	// Enqueue durably (a fast insert): unlike the scheduler's apply-notify, this
 	// path has no reconcile-loop retry behind it, so a fire-and-forget send could
 	// silently drop the "a guest put their car on your permit" notice.
@@ -813,7 +979,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 // displaced but its driver couldn't be told). Best-effort: on any store error it
 // stays quiet — a missed heads-up is low-harm, the account fanout still fires.
 func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev, next, actor string) model.DisplacedBooking {
-	if prev == "" || strings.EqualFold(prev, next) {
+	if prev == "" || model.SamePlate(prev, next) {
 		return model.DisplacedBooking{}
 	}
 	now := time.Now()
@@ -834,7 +1000,7 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 		return model.DisplacedBooking{}
 	}
 	d := model.FindDisplaced(overrides, vehicles, prev, actor, members, now)
-	if d.Contact != "" {
+	if d.Contact != "" && s.notify != nil {
 		if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, next); err != nil {
 			log.Printf("enqueue driver-displaced for %s: %v", d.Contact, err)
 		}
@@ -1064,7 +1230,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
-	label := strings.TrimSpace(r.FormValue("label"))
+	label := guestGrantLabel(r.FormValue("label"))
 	allowOvernight := r.FormValue("allow_overnight") != ""
 	var vehicleIDs []int64
 	for _, v := range r.Form["vehicle_id"] {
@@ -1083,6 +1249,10 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.formError(w, r, "Add at least one recipient email.")
+		return
+	}
+	if len(recipients) > maxGuestRecipients {
+		s.formError(w, r, tooManyRecipients)
 		return
 	}
 
@@ -1120,14 +1290,34 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	s.render(w, base)
 }
 
+// tokenShape matches the SHAPE of a token this app mints: base64url, and long
+// enough to be one. The bound is loose on purpose — this is not an existence check
+// (see guestManifest) and a token that is merely an unfamiliar length must still
+// be allowed to work.
+var tokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
+
 // guestManifest serves a per-recipient web app manifest, so a guest can install
 // their link to the home screen (Android/Chrome "Install") and have the icon open
 // straight to THEIR menu (start_url is their own link). Public and token-scoped;
-// icons are the app's static PNGs. No token validation: a manifest for a dead link
-// is harmless (the page it points to just shows "no longer active").
+// icons are the app's static PNGs. Existence is deliberately not checked: a
+// manifest for a dead link is harmless (the page it points to just shows "no
+// longer active"), and checking would put a DB query on an anonymous route.
 func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
-	// {token} is a single clean path segment (base64url); %q JSON-escapes it.
-	startURL := fmt.Sprintf("%q", "/g/"+r.PathValue("token"))
+	// The shape gate keeps anything that isn't a token out of the document, and
+	// json.Marshal — not %q, which is Go quoting and emits \x01 for a decoded
+	// control byte — makes what does get in valid JSON. With %q a single such byte
+	// broke the whole manifest, so "Install" silently stopped working.
+	token := r.PathValue("token")
+	if !tokenShape.MatchString(token) {
+		http.NotFound(w, r)
+		return
+	}
+	start, err := json.Marshal("/g/" + token)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	startURL := string(start)
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprint(w, `{
@@ -1207,7 +1397,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Could not read the form. Please try again.")
 		return
 	}
-	label := strings.TrimSpace(r.FormValue("label"))
+	label := guestGrantLabel(r.FormValue("label"))
 	allowOvernight := r.FormValue("allow_overnight") != ""
 	var vehicleIDs []int64
 	for _, v := range r.Form["vehicle_id"] {
@@ -1231,6 +1421,10 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 	// New recipients (if any) each get a fresh token + link.
 	var newLinks []guestLinkView
 	emails, droppedEmails := parseEmails(r.FormValue("recipients"))
+	if len(emails) > maxGuestRecipients {
+		s.formError(w, r, tooManyRecipients)
+		return
+	}
 	if len(emails) > 0 {
 		recs, links := s.mintLinks(emails)
 		added, err := s.store.AddGuestTokens(r.Context(), owner, id, recs)
@@ -1280,6 +1474,32 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 	base.Flash += skippedNote(droppedEmails)
 	s.logChange(r.Context(), owner, user, store.ActionGuestUpdate, label, "")
 	s.render(w, base)
+}
+
+// maxGuestRecipients bounds one submission's recipient list. Every address on it
+// becomes a LIVE token over the household's permit and an outbound email, and the
+// list is free text inside a 64 KB body — which is room for roughly four thousand
+// of them, each costing token rows, a mail attempt and a management row on the
+// guests page. Far above any real household's list; far below anything that turns
+// one form post into a bulk mailer.
+const maxGuestRecipients = 20
+
+const tooManyRecipients = "That's too many recipients for one pass. Add up to 20 at a time."
+
+// maxGuestGrantLabel matches the permit-label cap, for the same reasons: the label
+// headlines the guest's page and rides into the email that carries their link, so
+// an unbounded one inflates every stored notification along the way.
+const maxGuestGrantLabel = 40
+
+// guestGrantLabel cleans and caps a pass name the same way a permit's is (control
+// characters stripped, trimmed, truncated by runes so a multi-byte name can't be
+// cut in half).
+func guestGrantLabel(s string) string {
+	label := cleanLabel(s)
+	if rs := []rune(label); len(rs) > maxGuestGrantLabel {
+		label = string(rs[:maxGuestGrantLabel])
+	}
+	return label
 }
 
 // mintLinks generates a fresh token per email: the store records to persist (only
@@ -1361,7 +1581,7 @@ func (s *Server) reuseVisitorQR(ctx context.Context, owner string, permitID int6
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	raw, err := s.box.Open(sealed)
+	raw, _, err := s.box.OpenCtx(secretbox.GuestToken(owner), sealed)
 	if err != nil {
 		log.Printf("visitor QR: could not open a live token for permit %d (%v); minting a fresh one", permitID, err)
 		return "", time.Time{}, store.ErrNotFound
@@ -1372,7 +1592,7 @@ func (s *Server) reuseVisitorQR(ctx context.Context, owner string, permitID int6
 // mintVisitorQR creates a new short-lived plate-entry grant and logs it.
 func (s *Server) mintVisitorQR(ctx context.Context, owner, user string, permit model.Permit) (string, time.Time, error) {
 	raw, hash := newGuestToken()
-	sealed, err := s.box.Seal(raw)
+	sealed, err := s.box.SealCtx(secretbox.GuestToken(owner), raw)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -1446,13 +1666,20 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionGuestDelete, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit.")
+			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit, and any car they had put on it has been taken off.")
+		// The sweep changed what the schedule resolves to, so the permit is now out of
+		// date. Without a kick it stays that way until the next pass — and the point of
+		// revoking was that the guest's plate comes off NOW.
+		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
 func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
+	// Name the recipient before their link dies, so the audit row says whose access
+	// was taken away rather than merely that some access was.
+	recipient, _ := s.store.GuestTokenRecipient(r.Context(), owner, pathInt(r, "tid"))
 	// Tolerate a missing row, but don't log an action that didn't happen.
 	err := s.store.RevokeGuestToken(r.Context(), owner, pathInt(r, "tid"))
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -1460,9 +1687,24 @@ func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err == nil {
-		s.logChange(r.Context(), owner, user, store.ActionGuestRevoke, "", "")
+		s.logChange(r.Context(), owner, user, store.ActionGuestRevoke, recipient, "")
+		// Told to the household like every other withdrawal of access (deleting a pass,
+		// removing a door QR): one member cutting off a person the others invited is
+		// exactly the change silence hides.
+		s.notifyDestructive(r.Context(), owner, user,
+			user+" revoked a guest link"+optional(recipient, " (")+closeParen(recipient)+" on your p.stonn account. That link no longer works, and any car it had put on your permit has been taken off.")
+		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
+}
+
+// kickScheduler asks the reconcile loop to run now. Tolerates a Server built
+// without one (tests construct one directly): a revocation must still take the
+// guest's authority away even when nothing is running to re-apply the schedule.
+func (s *Server) kickScheduler() {
+	if s.sched != nil {
+		s.sched.Kick()
+	}
 }
 
 func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
@@ -1481,7 +1723,8 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 		// Pausing kills every guest link at once — a visitor at the kerb just sees
 		// "no longer active", so the household should know it was deliberate.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" paused all guest passes on your p.stonn account. Existing guest links and printed door QRs will not work until they are resumed.")
+			user+" paused all guest passes on your p.stonn account. Existing guest links and printed door QRs will not work until they are resumed, and any car a guest had put on a permit has been taken off.")
+		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
@@ -1593,10 +1836,10 @@ func (s *Server) requestLiveState(ctx context.Context, permit model.Permit, req 
 		return "ended", ""
 	}
 	want, _, _ := s.guestDesired(ctx, permit)
-	if !strings.EqualFold(want, req.Plate) {
+	if !model.SamePlate(want, req.Plate) {
 		return "superseded", want
 	}
-	if strings.EqualFold(permit.ActiveRegistration, req.Plate) {
+	if model.SamePlate(permit.ActiveRegistration, req.Plate) {
 		return "applied", ""
 	}
 	if !req.DecidedAt.IsZero() && time.Since(req.DecidedAt) > guestApplyTimeout {
@@ -1660,11 +1903,29 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 	// holder's email (unlike the emailed/on-screen flows, where the recipient is known).
 	plate := normalizeReg(r.FormValue("plate"))
 	if !validRego(plate) {
-		s.render(w, dashboardData{State: "guest", Loc: s.cfg.DisplayLocation,
-			Warn: "Enter a valid number plate (letters and numbers, e.g. ABC123).",
-			Guest: guestActView{Token: gc.rawToken,
-				PermitLabel: permitLabel(permit), AllowPlate: true, RequestOnly: true}})
+		// Re-rendered through the shared view builder, which is where the request-only
+		// redaction lives. Assembling the view here instead put the permit's LABEL on a
+		// page anyone who scans a poster can reach — the owner's own text, typically an
+		// address or apartment number — and this branch is not even adversarial: it is
+		// what an ordinary visitor sees for "ABC-123", because validRego rejects the
+		// hyphen.
+		s.renderGuestMenu(w, r, gc, permit, "", "", "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 		return
+	}
+	// This browser's own remembered request, resolved before anything is created: it
+	// is the only evidence that the person asking is the one who asked before.
+	mine, myNonce, haveMine := s.guestReqFromCookie(r, gc)
+	ownRepeat := haveMine && mine.Status == "pending" && model.SamePlate(mine.Plate, plate)
+	// A re-submission of one's own pending plate consumes no slot, so it is never
+	// throttled. Anything else counts against this scanner, and is refused once the
+	// queue has grown into the slots held for someone we have not heard from — five
+	// junk plates from one phone must not be able to lock the next real visitor out
+	// of the door for the hour-plus a pending row lives.
+	if !ownRepeat && !guestScanner.allow("greq:"+clientIP(r)) {
+		if reserved, err := s.store.PendingGuestRequestsInReserve(r.Context(), gc.Grant.ID); err == nil && reserved {
+			s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please knock or contact them directly.")
+			return
+		}
 	}
 	reqID, nonce, created, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, randNonce())
 	if errors.Is(err, store.ErrGuestRequestLimit) {
@@ -1675,9 +1936,23 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		s.renderGuestResult(w, "", false, "Something went wrong sending your request. Please try again.")
 		return
 	}
-	if created { // a re-scan of the same plate reuses the pending request; don't re-nudge
-		s.notifyGuestRequest(r.Context(), permit, plate)
+	if !created {
+		// The plate already has a pending request, so this scan reused it — and the
+		// nonce that came back is THAT request's poll secret. Two visitors can type the
+		// same plate (a shared work ute, a plate typed wrong the same way twice), and
+		// the store cannot tell them apart, so it is only handed over to a browser that
+		// can already present it. Anyone else is told the truth about the plate they
+		// typed and given no way to read a stranger's request.
+		if haveMine && mine.ID == reqID {
+			s.setGuestReqCookie(w, mine.ID, myNonce)
+			s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation,
+				Wait: &guestWaitView{Plate: mine.Plate, ReqID: mine.ID, Nonce: myNonce, Status: mine.Status}})
+			return
+		}
+		s.renderGuestResult(w, "", true, "A request for "+plate+" is already waiting for the resident to approve. There's nothing more to do here — if it isn't approved shortly, try knocking.")
+		return
 	}
+	s.notifyGuestRequest(r.Context(), permit, plate)
 	// Remember the request in this browser (the one that made it), so a later
 	// re-scan of the same door code shows its fate instead of a blank form.
 	s.setGuestReqCookie(w, reqID, nonce)
@@ -1737,6 +2012,17 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 const guestApplyTimeout = 8 * time.Minute
 
 func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, plate string) {
+	if s.notify == nil {
+		return
+	}
+	// Throttled per ACCOUNT, not per plate (see guestNudge): the request itself is
+	// always recorded and always visible in the approvals queue — only the alarm is
+	// rationed, because the alarm is the part a stranger with a poster can aim at a
+	// household at 3am.
+	if !guestNudge.allow("n:" + permit.Owner) {
+		log.Printf("guest request nudge for %s throttled", permit.Owner)
+		return
+	}
 	// Enqueue durably (a fast DB insert) so the holder's "approve this?" nudge
 	// survives a restart and is retried — the printed-QR flow depends on it.
 	url := s.cfg.PublicBaseURL + "/guests"
@@ -1752,7 +2038,7 @@ func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, pl
 // at rest so the same code can be reprinted later. Returns the new grant id.
 func (s *Server) mintPrintedGrant(ctx context.Context, owner, createdBy string, permitID int64) (int64, error) {
 	raw, hash := newGuestToken()
-	sealed, err := s.box.Seal(raw)
+	sealed, err := s.box.SealCtx(secretbox.GuestToken(owner), raw)
 	if err != nil {
 		return 0, err
 	}
@@ -1796,7 +2082,7 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	raw, err := s.box.Open(g.TokenSealed)
+	raw, _, err := s.box.OpenCtx(secretbox.GuestToken(owner), g.TokenSealed)
 	if err != nil {
 		// The at-rest key changed, so we can't reproduce the printed code. Ask the
 		// holder to replace it (which mints a fresh one they can reprint).
@@ -1835,7 +2121,8 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working.")
+			user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working, and any car approved through it has been taken off the permit.")
+		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
@@ -1878,7 +2165,16 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		return
 	}
 	end := dayEndLocal(now, 0)
-	ovID, cerr := s.store.CreatePlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)")
+	// Tagged with the door QR's own token, so removing the poster (or pausing guest
+	// passes) can take this plate back off the permit. Untagged, the row was
+	// indistinguishable from a booking the household made itself, and "that code has
+	// stopped working" left the visitor parked on the permit for the rest of the day.
+	// A token we cannot resolve tags nothing (0) rather than blocking the approval.
+	doorToken, terr := s.store.GrantTokenID(r.Context(), req.GrantID)
+	if terr != nil {
+		log.Printf("doorqr approve: no token for grant %d: %v", req.GrantID, terr)
+	}
+	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)", doorToken)
 	if cerr != nil {
 		s.serverError(w, cerr) // don't approve if we couldn't set up the change
 		return
@@ -1904,8 +2200,21 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	// not drop the bookkeeping, and the budget stays under the WriteTimeout.
 	bg := context.WithoutCancel(r.Context())
 	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
-	if err := s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); err == nil {
-		_ = s.store.SetPermitActive(bg, permit.ID, req.Plate)
+	// Exclusive for this permit while we write (see guestActivate): an approval
+	// racing the reconcile loop could otherwise leave the council holding the roster
+	// plate while the row claims the visitor's, and the visitor is standing at the
+	// door believing they are covered. A claim we cannot get means we simply don't
+	// apply here — the override is saved, so the scheduler applies it, and the
+	// redirect already has a wording for "approving" versus "applied".
+	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
+	applyErr := error(errApplyBusy)
+	if claimed {
+		if applyErr = s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
+			_ = s.store.SetPermitActive(bg, permit.ID, req.Plate)
+		}
+	}
+	release()
+	if applyErr == nil {
 		_ = s.store.RecordApply(bg, permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
 		confirmed = true
 		// The approved plate may have bumped a still-live booking's car off the
@@ -1920,6 +2229,8 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		if err := s.notify.EnqueueApply(bg, outcome); err != nil {
 			log.Printf("doorqr apply notify enqueue for %s: %v", permit.Owner, err)
 		}
+	} else {
+		log.Printf("doorqr approve %s on permit %d: %v", req.Plate, permit.ID, applyErr)
 	}
 	cancel()
 	s.sched.Kick()

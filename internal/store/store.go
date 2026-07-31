@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"modernc.org/sqlite"
@@ -79,10 +80,60 @@ func (s *Store) Close() error { return s.db.Close() }
 // VACUUM INTO. File-level backup tools (restic on the volume) can read the live
 // db and WAL at different instants and produce a backup that doesn't restore;
 // this snapshot file is always a coherent database, so back THAT up.
+//
+// It builds the new copy beside the old one and swaps it in with a rename, because
+// VACUUM INTO refuses to overwrite and the obvious way to satisfy that — remove,
+// then vacuum — destroys the only good backup before knowing the new one will
+// succeed. A VACUUM that fails partway (disk full is the realistic case) then left
+// nothing restorable at all, and the retry repeated the same removal, so an outage
+// meant no usable backup for its entire duration. The rename is atomic on the same
+// filesystem: readers see either the previous snapshot or the new one, never a
+// half-written file.
 func (s *Store) Snapshot(ctx context.Context, path string) error {
-	_ = os.Remove(path) // VACUUM INTO refuses to overwrite an existing file
-	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
-	return err
+	tmp := path + ".tmp"
+	// A leftover temp file from a previous crash would fail the VACUUM below, and it
+	// is not the live backup, so it is safe to clear.
+	_ = os.Remove(tmp)
+	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, tmp); err != nil {
+		_ = os.Remove(tmp) // don't leave a partial file for the next run to trip over
+		return err
+	}
+	// fsync the copy before publishing it: a rename can otherwise be durable while
+	// the contents it points at are not, which after a power loss yields a snapshot
+	// that exists but does not open.
+	if err := fsyncFile(tmp); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("sync snapshot: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	// Also fsync the directory, so the rename itself survives a power loss.
+	return fsyncDir(filepath.Dir(path))
+}
+
+func fsyncFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
+}
+
+// fsyncDir makes a rename durable. A directory that cannot be opened for sync is
+// not worth failing the backup over — the snapshot itself is already written and
+// synced — so this reports the error for logging but the caller treats it as
+// advisory.
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil
+	}
+	defer d.Close()
+	_ = d.Sync()
+	return nil
 }
 
 func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

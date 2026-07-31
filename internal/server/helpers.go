@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -45,11 +46,48 @@ func (s *Server) message(w http.ResponseWriter, code int, msg string) {
 		`<p>%s</p><p><a href="/">&larr; Back</a>%s</p>`, template.HTMLEscapeString(msg), contact)
 }
 
+// safeLinkHref reports whether href may be emitted as an href by the helpers
+// below. HTMLEscapeString stops an attacker breaking out of the attribute but
+// says nothing at all about the SCHEME, so `javascript:alert(1)` survives it
+// verbatim — and these two pages are the only markup in the app built outside
+// html/template, whose contextual autoescaper would have applied exactly this
+// check for us. Both callers pass s.logoutURL() today, so nothing is reachable;
+// the allowlist is here so that stays true of the next caller.
+//
+// Permitted: a root-relative path, or an absolute http/https URL (the operator's
+// AUTH_LOGOUT_URL is off-host). Refused: any other scheme, and a scheme-relative
+// "//host" or "/\host", which browsers read as an authority and which would
+// silently send someone to another origin.
+func safeLinkHref(href string) bool {
+	if href == "" || strings.Contains(href, `\`) {
+		return false
+	}
+	u, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "http", "https":
+		return u.Host != ""
+	case "":
+		return u.Host == "" && strings.HasPrefix(href, "/")
+	default:
+		return false
+	}
+}
+
 // messageWithLink is message with an inline action link rendered as real
 // markup. Callers must never concatenate HTML into msg — message() escapes it,
 // which is exactly right for text and turns embedded tags into literal angle
 // brackets. after is escaped text following the link (e.g. a trailing clause).
+// An href that fails safeLinkHref degrades to the plain message: losing an
+// affordance is recoverable, emitting a hostile link is not.
 func (s *Server) messageWithLink(w http.ResponseWriter, code int, msg, label, href, after string) {
+	if !safeLinkHref(href) {
+		log.Printf("messageWithLink: refusing unsafe href %q, rendering message without the link", href)
+		s.message(w, code, msg)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#1a2233">`+

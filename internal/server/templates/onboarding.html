@@ -20,7 +20,13 @@
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>
       <label class="optin">
-        <input type="checkbox" name="save_password" value="1"{{if or (not .Relink) .AutoReconnect}} checked{{end}}>
+        {{/* Unticked on a first link: retaining someone's council password is the
+             more consequential of the two outcomes, so it has to be a thing they
+             chose rather than a thing they failed to notice. On a re-link the box
+             reflects what they already decided (AutoReconnect = a password is
+             currently saved), so someone reconnecting is not silently opted out of
+             a setting they turned on. */}}
+        <input type="checkbox" name="save_password" value="1"{{if and .Relink .AutoReconnect}} checked{{end}}>
         <span>
           <strong>Save my password so p.stonn can reconnect on its own.</strong>
           It's encrypted with a key held on this server, and used only to sign back in if the council ends your session. The person running the server could technically read it &mdash; see <a href="/about">security</a>.

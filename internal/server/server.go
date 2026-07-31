@@ -49,6 +49,20 @@ type Server struct {
 	// statusLimit throttles the machine status endpoint: its bearer token is the
 	// only thing standing between a caller and the user roster.
 	statusLimit *rateLimiter
+	// authLogin throttles the OIDC login kickoff. It is anonymous and it WRITES
+	// (a pending authorization row, plus a sweep of expired ones) on the single
+	// SQLite connection the reconcile loop needs, so it cannot be the one public
+	// route with no bound — a permit that stops being updated is a parking fine.
+	authLogin *rateLimiter
+	// sesHookLimit throttles the SNS bounce webhook. Verifying a message means
+	// fetching a signing certificate, so an unthrottled caller who knows the topic
+	// ARN (an identifier, not a secret) can turn one POST into one outbound TLS
+	// request.
+	sesHookLimit *rateLimiter
+	// unsubLimit throttles the unsubscribe endpoint. It is deliberately outside the
+	// CSRF gate (RFC 8058 one-click posts cross-origin), so this is the only thing
+	// pacing a replay of a token that never expires.
+	unsubLimit *rateLimiter
 	// confirmLimit throttles the public renewal-confirm POST, whose single-use
 	// token is the only thing gating a 90-day extension of a council session.
 	confirmLimit *rateLimiter
@@ -104,9 +118,17 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		statusLimit: newRateLimiter(30, 10*time.Minute), // 30 status polls / 10 min per IP
 		// A real user clicks the emailed link once, maybe retries a couple of times.
 		confirmLimit: newRateLimiter(10, 10*time.Minute), // 10 confirm attempts / 10 min per IP
-		guestSlots:   make(chan struct{}, maxConcurrentGuest),
-		snsCert:      newCertCache(),
-		unsubKey:     notify.DeriveUnsubKey(cfg.DataEncryptionKey),
+		// A person signing in redirects once. Generous enough for a shared NAT
+		// address, far below what it takes to make the state sweep hurt.
+		authLogin: newRateLimiter(30, 10*time.Minute), // 30 login starts / 10 min per IP
+		// SES delivers each event once and retries a handful of times; a real topic
+		// produces nothing like this volume.
+		sesHookLimit: newRateLimiter(60, 10*time.Minute), // 60 events / 10 min per IP
+		// One click per email, plus a provider's one-click POST and the odd retry.
+		unsubLimit: newRateLimiter(20, 10*time.Minute), // 20 attempts / 10 min per IP
+		guestSlots: make(chan struct{}, maxConcurrentGuest),
+		snsCert:    newCertCache(),
+		unsubKey:   notify.DeriveUnsubKey(cfg.DataEncryptionKey),
 	}
 }
 
@@ -137,6 +159,20 @@ func (s *Server) publicGuest(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// throttlePerIP wraps a public handler with a per-IP fixed-window limit, shedding
+// with 429 + Retry-After. Tolerates a nil limiter (tests build a Server directly),
+// because a throttle must never be the reason a public route panics.
+func (s *Server) throttlePerIP(rl *rateLimiter, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !rl.allow(clientIP(r)) {
+			w.Header().Set("Retry-After", "60")
+			s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and try again.")
+			return
+		}
+		h(w, r)
+	}
+}
+
 // Handler builds the routed, identity-aware http.Handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -144,8 +180,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(staticSub))))
 
 	if s.auth != nil {
-		mux.HandleFunc("GET /auth/login", s.auth.Login)
-		mux.HandleFunc("GET /auth/callback", s.auth.Callback)
+		// Both of these are anonymous and both WRITE to the store (Login inserts a
+		// pending authorization and sweeps expired ones; Callback consumes one), so
+		// they are throttled like every other public route rather than left as the
+		// one unbounded path onto the shared SQLite connection.
+		mux.HandleFunc("GET /auth/login", s.throttlePerIP(s.authLogin, s.auth.Login))
+		mux.HandleFunc("GET /auth/callback", s.throttlePerIP(s.authLogin, s.auth.Callback))
 		// Logout stays a GET (it is linked, not a form) but requires a same-origin
 		// Origin/Referer: without it any third-party page (or a link prefetcher)
 		// could embed /auth/logout and forcibly sign users out. App pages send a
@@ -168,6 +208,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /account/members", s.withConsent(s.addMember))
 	mux.HandleFunc("POST /account/members/remove", s.withConsent(s.removeMember))
 	mux.HandleFunc("POST /account/leave", s.withUser(s.leaveAccount)) // secondary can always leave
+	// Answering an invitation is the invited person's own consent step, and it must
+	// stay reachable before they have accepted anything — so withUser, not
+	// withConsent: a pending invite grants no access, and declining one should never
+	// require agreeing to terms first.
+	mux.HandleFunc("POST /account/invite/accept", s.withUser(s.acceptInvite))
+	mux.HandleFunc("POST /account/invite/decline", s.withUser(s.declineInvite))
 	mux.HandleFunc("GET /schedule/legend", s.withConsent(s.legendFragment))
 	mux.HandleFunc("POST /notifications", s.withConsent(s.saveNotify))
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))

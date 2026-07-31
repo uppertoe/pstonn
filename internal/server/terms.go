@@ -114,6 +114,9 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if !isPrimary {
+		// Declining the terms is a withdrawal of consent, so any session issued under
+		// the old acceptance stops here too.
+		defer s.revokeSessions(ctx, user)
 		if _, err := s.store.RemoveMembership(ctx, user); err != nil {
 			s.serverError(w, err)
 			return

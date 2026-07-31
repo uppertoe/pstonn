@@ -94,10 +94,27 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 		`DELETE FROM guest_grant WHERE created_by = ? AND owner != ?`, owner, owner); err != nil {
 		return err
 	}
-	// Their change-log entries elsewhere (as the actor, or named as the target of a
-	// member add/remove).
+	// Their OWN account's log goes with the account.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM account_log WHERE actor = ? OR target = ?`, owner, owner); err != nil {
+		`DELETE FROM account_log WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	// Elsewhere, de-identify rather than delete — the same treatment overrides get
+	// just below, and for the same reason. This used to be
+	// `DELETE ... WHERE actor = ? OR target = ?`, which reached into OTHER households'
+	// logs: a row recording something they did on that account, or a guest pass whose
+	// sole recipient was this address, was removed outright. That is another
+	// household's record of their own actions, and erasing it leaves an unexplained
+	// gap in an audit trail they rely on. redactLogTargets (called shortly after)
+	// handles the multi-recipient target lists the same way.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE account_log SET actor = 'a former member' WHERE owner != ? AND actor = ?`,
+		owner, owner); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE account_log SET target = 'a former member' WHERE owner != ? AND target = ?`,
+		owner, owner); err != nil {
 		return err
 	}
 	// De-identify bookings they made on another household's permits. The booking
@@ -159,13 +176,22 @@ func (s *Store) CountLinkedAccounts(ctx context.Context) (int, error) {
 type AccountMember struct {
 	Email   string
 	AddedAt time.Time
+	// Pending means the invited person has not accepted yet, so this row grants no
+	// access at all. See MemberAccount.
+	Pending bool
 }
 
 // MemberAccount returns the primary account owner that memberEmail is a secondary
 // of, or ok=false when they are their own account.
+//
+// A PENDING invite is not a membership: it is one person's proposal, and until the
+// invited person accepts it must not redirect their data, hide their own account, or
+// grant them sight of anyone else's household. This predicate is the single place
+// that distinction is enforced, because every caller resolves account scope through
+// here.
 func (s *Store) MemberAccount(ctx context.Context, memberEmail string) (owner string, ok bool, err error) {
 	err = s.db.QueryRowContext(ctx,
-		`SELECT owner FROM account_member WHERE member_email = ?`, memberEmail).Scan(&owner)
+		`SELECT owner FROM account_member WHERE member_email = ? AND invite_pending = 0`, memberEmail).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -175,9 +201,58 @@ func (s *Store) MemberAccount(ctx context.Context, memberEmail string) (owner st
 	return owner, true, nil
 }
 
+// PendingInvite returns the account that has invited memberEmail but is still
+// waiting on them, so the app can offer the choice when they next sign in.
+func (s *Store) PendingInvite(ctx context.Context, memberEmail string) (owner string, ok bool, err error) {
+	err = s.db.QueryRowContext(ctx,
+		`SELECT owner FROM account_member WHERE member_email = ? AND invite_pending = 1`, memberEmail).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return owner, true, nil
+}
+
+// AcceptInvite turns a pending invite into a real membership. Scoped to the owner
+// the invitee was actually shown, so a stale form cannot enrol them somewhere else,
+// and gated on still being pending so a replayed submit is a no-op rather than a
+// second acceptance.
+//
+// Returns ErrNotFound when there is no such pending invite.
+func (s *Store) AcceptInvite(ctx context.Context, memberEmail, owner string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE account_member SET invite_pending = 0, added_at = ?
+		 WHERE member_email = ? AND owner = ? AND invite_pending = 1`,
+		nowUTC(), memberEmail, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeclineInvite removes a pending invite. Deliberately restricted to pending rows:
+// this is the invitee's own refusal, not a way to leave an account they have already
+// joined (that is RemoveMembership, which also cleans up their prefs and passes).
+func (s *Store) DeclineInvite(ctx context.Context, memberEmail string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM account_member WHERE member_email = ? AND invite_pending = 1`, memberEmail)
+	return err
+}
+
 // AccountEmails returns every email that should be notified for an account: the
-// owner plus any secondaries. Always includes the owner, even if listing the
-// secondaries fails.
+// owner plus any ACCEPTED secondaries. Always includes the owner, even if listing
+// the secondaries fails.
+//
+// Pending invitees are excluded deliberately. ListMembers includes them so the owner
+// can see an unanswered invite, but someone who has not accepted is not part of the
+// household: mailing them a permit's activity would disclose that household's
+// movements to a person who never agreed to anything, on the say-so of whoever typed
+// their address.
 func (s *Store) AccountEmails(ctx context.Context, owner string) ([]string, error) {
 	emails := []string{owner}
 	ms, err := s.ListMembers(ctx, owner)
@@ -185,6 +260,9 @@ func (s *Store) AccountEmails(ctx context.Context, owner string) ([]string, erro
 		return emails, err
 	}
 	for _, m := range ms {
+		if m.Pending {
+			continue
+		}
 		emails = append(emails, m.Email)
 	}
 	return emails, nil
@@ -317,9 +395,13 @@ ORDER BY c.owner`)
 }
 
 // ListMembers returns the secondaries with access to owner's account, oldest first.
+// ListMembers returns the account's secondaries INCLUDING those still awaiting
+// acceptance, flagged as such. The owner needs to see an outstanding invite —
+// otherwise "I added them and nothing happened" is indistinguishable from a lost
+// email — but every access decision keys off Pending, never off mere presence here.
 func (s *Store) ListMembers(ctx context.Context, owner string) ([]AccountMember, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT member_email, added_at FROM account_member WHERE owner = ? ORDER BY added_at`, owner)
+		`SELECT member_email, added_at, invite_pending FROM account_member WHERE owner = ? ORDER BY added_at`, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -328,10 +410,12 @@ func (s *Store) ListMembers(ctx context.Context, owner string) ([]AccountMember,
 	for rows.Next() {
 		var m AccountMember
 		var at string
-		if err := rows.Scan(&m.Email, &at); err != nil {
+		var pending int
+		if err := rows.Scan(&m.Email, &at, &pending); err != nil {
 			return nil, err
 		}
 		m.AddedAt, _ = time.Parse(time.RFC3339, at)
+		m.Pending = pending != 0
 		out = append(out, m)
 	}
 	return out, rows.Err()
@@ -364,10 +448,14 @@ var ErrMemberLimit = errors.New("store: shared-access member limit reached")
 // the count check and insert are one statement, so concurrent adds can't slip
 // past the cap. Returns ErrMemberLimit when full, or the underlying error (e.g. a
 // unique-constraint violation when the email is already a member somewhere).
+// The invite starts PENDING: it is an offer, not a membership, and grants nothing
+// until the invited person accepts. Pending invites still count toward the cap, so
+// one account cannot hold open an unlimited number of outstanding offers — each one
+// is an email somebody else has to deal with.
 func (s *Store) AddMemberCapped(ctx context.Context, owner, memberEmail string, max int) error {
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO account_member (member_email, owner, added_at)
-SELECT ?, ?, ?
+INSERT INTO account_member (member_email, owner, added_at, invite_pending)
+SELECT ?, ?, ?, 1
 WHERE (SELECT COUNT(1) FROM account_member WHERE owner = ?) < ?`,
 		memberEmail, owner, nowUTC(), owner, max)
 	if err != nil {

@@ -7,3 +7,10 @@ docs
 *.db-wal
 *.db-shm
 data
+# A local .env holds the real DATA_ENCRYPTION_KEY, council-adjacent secrets and
+# SMTP credentials. The Dockerfile does COPY . ., so without this it lands in the
+# build stage: it cannot reach the published image (only the static binary is
+# copied out), but it is readable in the build cache and in any CI artifact or
+# intermediate layer someone inspects.
+.env
+.env.*

@@ -253,7 +253,7 @@
          you press Print. */}}
     <p class="posterfor">Door QR for <strong>{{.DoorQR.PermitLabel}}</strong></p>
     <div class="row" style="gap:8px;flex-wrap:wrap">
-      <button type="button" onclick="window.print()">{{template "ic-qr"}} Print</button>
+      <button type="button" data-print>{{template "ic-qr"}} Print</button>
       <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
     </div>
   </div>

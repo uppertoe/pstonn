@@ -16,10 +16,14 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -75,6 +79,17 @@ const maxSNSBody = 256 << 10
 // Anything else is refused — a forged bounce would let anyone silence any user's
 // notifications, which is a denial of service against a fine-avoidance tool.
 func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
+	// Throttle before anything else. Verifying a message can cost an outbound TLS
+	// fetch of a signing certificate, and the only identifier gating that work is a
+	// topic ARN — an identifier, not a secret — so an unthrottled caller turns one
+	// cheap POST into one of our requests to AWS, indefinitely. SES delivers each
+	// event once and retries a handful of times, so a real topic is nowhere near
+	// this ceiling.
+	if !s.sesHookLimit.allow(clientIP(r)) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxSNSBody))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -92,17 +107,21 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if err := verifySNSSignature(r.Context(), s.snsCert, &m); err != nil {
-		log.Printf("ses hook: signature verification failed: %v", err)
+	// Freshness BEFORE the signature. A signature is valid forever, so without this
+	// check any captured notification can be replayed indefinitely — replaying a
+	// bounce is close to idempotent, but it still bumps the hit counter and refreshes
+	// last_seen, which is enough to keep an address suppressed past the point it
+	// would have aged out. It runs first because parsing a timestamp costs nothing
+	// while verification may have to go and fetch a certificate: the order is what
+	// stops a caller spending our outbound bandwidth on messages we were always
+	// going to refuse.
+	if !freshSNSTimestamp(m.Timestamp, time.Now()) {
+		log.Printf("ses hook: refusing message with stale or unparseable timestamp %q", m.Timestamp)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	// A signature is valid forever, so without a freshness check any captured
-	// notification can be replayed indefinitely. Replaying a bounce is close to
-	// idempotent, but it still bumps the hit counter and refreshes last_seen, which
-	// is enough to keep an address suppressed past the point it would have aged out.
-	if !freshSNSTimestamp(m.Timestamp, time.Now()) {
-		log.Printf("ses hook: refusing message with stale or unparseable timestamp %q", m.Timestamp)
+	if err := verifySNSSignature(r.Context(), s.snsCert, &m); err != nil {
+		log.Printf("ses hook: signature verification failed: %v", err)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -156,10 +175,14 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 				detail = ev.Bounce.BounceSubType
 			}
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressBounce, detail); err != nil {
-				log.Printf("ses hook: suppress %s: %v", rcpt.EmailAddress, err)
+				log.Printf("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
 				continue
 			}
-			log.Printf("ses hook: suppressed %s (permanent bounce: %s)", rcpt.EmailAddress, detail)
+			// The address and the receiving server's diagnostic (which is free text
+			// from a third party, and often quotes the address back) go in the
+			// suppression row, which the admin page shows and PruneSuppressions
+			// clears. The log needs only the fixed-vocabulary subtype.
+			log.Printf("ses hook: suppressed %s (permanent bounce: %s)", notify.RedactEmail(rcpt.EmailAddress), ev.Bounce.BounceSubType)
 		}
 	case "complaint":
 		// RFC 5965 defines "not-spam" as the recipient moving our mail OUT of their
@@ -172,10 +195,10 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 		}
 		for _, rcpt := range ev.Complaint.ComplainedRecipients {
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressComplaint, ev.Complaint.ComplaintFeedbackType); err != nil {
-				log.Printf("ses hook: suppress %s: %v", rcpt.EmailAddress, err)
+				log.Printf("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
 				continue
 			}
-			log.Printf("ses hook: suppressed %s (spam complaint)", rcpt.EmailAddress)
+			log.Printf("ses hook: suppressed %s (spam complaint)", notify.RedactEmail(rcpt.EmailAddress))
 		}
 	case "delivery":
 		// Nothing to do; subscribing to deliveries is optional and harmless.
@@ -205,27 +228,45 @@ func freshSNSTimestamp(ts string, now time.Time) bool {
 	return d <= snsMaxSkew
 }
 
-// certCache memoises fetched SNS signing certificates. AWS rotates them rarely,
+// certCache memoises SNS signing-certificate lookups. AWS rotates them rarely,
 // and re-fetching per notification would make a bounce storm into an outbound
 // request storm.
 //
-// Bounded: each miss costs an outbound fetch and a permanent map entry, so an
-// unbounded cache would be a slow memory leak driven by whatever URLs arrive.
-// The real host set is tiny (one signing endpoint per region), so overflow means
-// something is wrong and dropping everything is the safe response.
+// Both outcomes are cached. Caching only successes made every REFUSED URL a free
+// outbound fetch, so a caller who varied the certificate filename spent our
+// bandwidth once per request; a negative entry makes the second attempt at a bad
+// URL cost nothing.
 type certCache struct {
 	mu    sync.Mutex
-	certs map[string]*x509.Certificate
+	certs map[string]cachedCert
 	http  *http.Client
 }
 
-// maxCachedCerts is far above the handful of regional SNS signing endpoints any
-// real deployment sees.
-const maxCachedCerts = 64
+// cachedCert is one lookup outcome: a usable certificate, or the error that
+// lookup produced. err != nil marks a negative entry.
+type cachedCert struct {
+	cert    *x509.Certificate
+	err     error
+	expires time.Time
+}
+
+const (
+	// maxCachedCerts is far above the handful of regional SNS signing endpoints any
+	// real deployment sees, so reaching it means someone is feeding us URLs.
+	maxCachedCerts = 64
+	// certTTL bounds how long a good certificate is reused. AWS rotates its signing
+	// certificate, and an entry that never expires pins us to the old key until the
+	// process restarts.
+	certTTL = 6 * time.Hour
+	// certNegTTL is short on purpose: a negative entry must absorb a flood without
+	// making a genuine, transient fetch failure (a blip reaching AWS) stick long
+	// enough to drop real bounce notifications.
+	certNegTTL = 5 * time.Minute
+)
 
 func newCertCache() *certCache {
 	return &certCache{
-		certs: map[string]*x509.Certificate{},
+		certs: map[string]cachedCert{},
 		http:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -235,26 +276,119 @@ func newCertCache() *certCache {
 // a forged notification with their own key and point us at their own cert.
 var errUntrustedCertHost = errors.New("signing certificate URL is not an SNS host")
 
-func (c *certCache) get(ctx context.Context, rawURL string) (*x509.Certificate, error) {
+// snsCertFile is the filename shape AWS publishes signing certificates under.
+// The host check alone left the path free, which means ANY bytes served from an
+// SNS endpoint that happen to contain a PEM block would have been accepted as a
+// trust anchor — AWS's own verifier libraries constrain the path for exactly this
+// reason. Pinning the shape also makes the cache key canonical, so a caller
+// cannot mint unlimited distinct keys (and unlimited fetches) out of one real URL.
+var snsCertFile = regexp.MustCompile(`^SimpleNotificationService-[A-Za-z0-9._-]{1,80}\.pem$`)
+
+// certKey validates a signing-certificate URL and returns the cache key for it.
+// Any query or fragment is refused outright rather than normalised away: genuine
+// SNS certificate URLs have neither, and tolerating them was what let `?n=1`,
+// `?n=2`, ... each be a separate cache miss.
+func certKey(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if u.Scheme != "https" || !isSNSHost(u.Host) {
-		return nil, fmt.Errorf("%w: %q", errUntrustedCertHost, rawURL)
+		return "", fmt.Errorf("%w: %q", errUntrustedCertHost, rawURL)
 	}
-	c.mu.Lock()
-	if cert, ok := c.certs[rawURL]; ok {
-		c.mu.Unlock()
-		return cert, nil
+	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", fmt.Errorf("signing certificate URL carries a query, fragment or userinfo: %q", rawURL)
 	}
-	c.mu.Unlock()
+	dir, file := path.Split(u.Path)
+	if dir != "/" || !snsCertFile.MatchString(file) {
+		return "", fmt.Errorf("signing certificate URL path is not a SimpleNotificationService-*.pem file: %q", rawURL)
+	}
+	return "https://" + strings.ToLower(u.Host) + u.Path, nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+func (c *certCache) get(ctx context.Context, rawURL string) (*x509.Certificate, error) {
+	key, err := certKey(rawURL)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	now := time.Now()
+	c.mu.Lock()
+	e, ok := c.certs[key]
+	c.mu.Unlock()
+	if ok && now.Before(e.expires) {
+		if e.err != nil {
+			return nil, e.err
+		}
+		// Re-check the dates on EVERY use, not just at fetch: a cached certificate
+		// outlives its own validity window otherwise, and "we trusted it an hour ago"
+		// is not a reason to keep trusting a signing key that has expired.
+		if err := checkCertWindow(e.cert, now); err != nil {
+			return nil, err
+		}
+		return e.cert, nil
+	}
+
+	// The fetch happens with the lock RELEASED: it is a network call, and holding
+	// the cache mutex across it would stall every other in-flight notification
+	// behind one slow AWS response. Concurrent misses for the same URL can each
+	// fetch; that is bounded by this route's per-IP throttle and by the negative
+	// entry below, and duplicating a rare fetch is much cheaper than serialising
+	// the handler on a remote host.
+	cert, ferr := fetchSNSCert(ctx, c.http, key)
+	if ferr != nil && (ctx.Err() != nil || errors.Is(ferr, context.Canceled) || errors.Is(ferr, context.DeadlineExceeded)) {
+		// A cancelled or timed-out REQUEST says nothing about the URL — SNS hanging up
+		// mid-fetch is routine — so it must not be remembered as a refusal and shut
+		// the next few minutes of genuine notifications out.
+		return nil, ferr
+	}
+	entry := cachedCert{cert: cert, err: ferr, expires: now.Add(certTTL)}
+	if ferr != nil {
+		entry.expires = now.Add(certNegTTL)
+	}
+	c.mu.Lock()
+	c.evictLocked(now)
+	c.certs[key] = entry
+	c.mu.Unlock()
+	if ferr != nil {
+		return nil, ferr
+	}
+	return cert, nil
+}
+
+// evictLocked keeps the map under maxCachedCerts. Expired entries go first, and
+// only if that is not enough does the entry closest to expiry go — dropping one
+// entry rather than clearing the map, so a flood of junk URLs cannot evict the one
+// certificate every real notification needs and turn each genuine event into a
+// fresh fetch.
+func (c *certCache) evictLocked(now time.Time) {
+	if len(c.certs) < maxCachedCerts {
+		return
+	}
+	for k, e := range c.certs {
+		if !now.Before(e.expires) {
+			delete(c.certs, k)
+		}
+	}
+	for len(c.certs) >= maxCachedCerts {
+		var oldestKey string
+		var oldest time.Time
+		for k, e := range c.certs {
+			if oldestKey == "" || e.expires.Before(oldest) {
+				oldestKey, oldest = k, e.expires
+			}
+		}
+		delete(c.certs, oldestKey)
+	}
+}
+
+// fetchSNSCert retrieves and parses one signing certificate. url has already been
+// validated by certKey.
+func fetchSNSCert(ctx context.Context, client *http.Client, url string) (*x509.Certificate, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -274,22 +408,24 @@ func (c *certCache) get(ctx context.Context, rawURL string) (*x509.Certificate, 
 	if err != nil {
 		return nil, err
 	}
-	// An expired or not-yet-valid certificate is not a signing key we should
-	// trust, and parsing alone never checks this. The chain itself is covered by
-	// the TLS handshake against the SNS host above (a public CA vouches for it),
-	// so the dates are what is left to verify.
-	now := time.Now()
+	if err := checkCertWindow(cert, time.Now()); err != nil {
+		return nil, err
+	}
+	return cert, nil
+}
+
+// checkCertWindow rejects an expired or not-yet-valid certificate. Parsing alone
+// never checks this. The chain itself is covered by the TLS handshake against the
+// SNS host (a public CA vouches for it), so the dates are what is left to verify.
+func checkCertWindow(cert *x509.Certificate, now time.Time) error {
+	if cert == nil {
+		return errors.New("no signing certificate")
+	}
 	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
-		return nil, fmt.Errorf("signing cert is outside its validity window (%s to %s)",
+		return fmt.Errorf("signing cert is outside its validity window (%s to %s)",
 			cert.NotBefore.Format(time.RFC3339), cert.NotAfter.Format(time.RFC3339))
 	}
-	c.mu.Lock()
-	if len(c.certs) >= maxCachedCerts {
-		c.certs = map[string]*x509.Certificate{}
-	}
-	c.certs[rawURL] = cert
-	c.mu.Unlock()
-	return cert, nil
+	return nil
 }
 
 // isSNSHost reports whether a host is an Amazon SNS endpoint, which is the only
@@ -366,27 +502,59 @@ func snsSigningFields(m *snsMessage) []struct{ key, val string } {
 	)
 }
 
+// SignatureVersion 2 (RSA-SHA256) is the version we want, and SignatureVersion
+// itself is NOT covered by the signature — so letting the envelope choose the
+// digest lets a caller pick the weaker one. Version 1 is RSA-SHA1 over a string
+// that includes remote-influenced text (an SMTP diagnosticCode echoed back by
+// whatever server rejected our mail), and the regional signing key is shared by
+// every SNS topic in the region: an attacker can therefore have AWS sign material
+// of their own choosing and needs only a SHA-1 collision with a message naming our
+// topic. Chosen-prefix SHA-1 collisions are affordable.
+//
+// Version 1 is nevertheless still accepted, because SNS only emits version 2 when
+// the topic's SignatureVersion attribute is set to 2 and deploy/aws-ses-hook-setup.py
+// does not set it. Refusing version 1 outright on a topic that still speaks it
+// would silently stop ALL bounce and complaint processing, after which the app
+// keeps mailing addresses the provider has told us are dead — which is precisely
+// how a sending domain gets blocked, and the harm this endpoint exists to prevent.
+//
+// So the version is pinned by observation instead of by configuration: once this
+// process has verified a genuine version-2 message, version 1 is refused for the
+// rest of its life. A configured topic therefore cannot be downgraded back to
+// SHA-1 by an attacker choosing the envelope, and the day the topic attribute is
+// set the weak version stops being reachable without any deploy. Only a message
+// whose signature actually VERIFIED may flip the switch — otherwise an unsigned
+// `"SignatureVersion":"2"` POST would be a denial of service against bounce
+// handling.
+var (
+	sesSigV2Seen  atomic.Bool
+	sesSigV1Noted atomic.Bool
+)
+
 // verifySNSSignature checks the message really came from the SNS topic it claims.
+//
+// Every cheap check runs before the certificate lookup, which may go to the
+// network: an attacker must not be able to make us fetch anything by sending a
+// message that was never going to verify.
 func verifySNSSignature(ctx context.Context, cache *certCache, m *snsMessage) error {
 	if m.Signature == "" || m.SigningCertURL == "" {
 		return errors.New("message is unsigned")
 	}
 	var hash crypto.Hash
 	switch m.SignatureVersion {
-	case "1":
-		hash = crypto.SHA1
 	case "2":
 		hash = crypto.SHA256
+	case "1":
+		if sesSigV2Seen.Load() {
+			return errors.New("refusing SignatureVersion 1: this topic has already been seen signing with version 2")
+		}
+		hash = crypto.SHA1
 	default:
 		return fmt.Errorf("unsupported SignatureVersion %q", m.SignatureVersion)
 	}
-	cert, err := cache.get(ctx, m.SigningCertURL)
+	sig, err := base64.StdEncoding.DecodeString(m.Signature)
 	if err != nil {
-		return err
-	}
-	pub, ok := cert.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		return errors.New("signing certificate is not RSA")
+		return fmt.Errorf("signature is not base64: %w", err)
 	}
 	var sb strings.Builder
 	for _, f := range snsSigningFields(m) {
@@ -394,10 +562,6 @@ func verifySNSSignature(ctx context.Context, cache *certCache, m *snsMessage) er
 		sb.WriteString("\n")
 		sb.WriteString(f.val)
 		sb.WriteString("\n")
-	}
-	sig, err := base64.StdEncoding.DecodeString(m.Signature)
-	if err != nil {
-		return fmt.Errorf("signature is not base64: %w", err)
 	}
 	var digest []byte
 	if hash == crypto.SHA1 {
@@ -407,7 +571,30 @@ func verifySNSSignature(ctx context.Context, cache *certCache, m *snsMessage) er
 		sum := sha256.Sum256([]byte(sb.String()))
 		digest = sum[:]
 	}
-	return rsa.VerifyPKCS1v15(pub, hash, digest, sig)
+	cert, err := cache.get(ctx, m.SigningCertURL)
+	if err != nil {
+		return err
+	}
+	pub, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return errors.New("signing certificate is not RSA")
+	}
+	if err := rsa.VerifyPKCS1v15(pub, hash, digest, sig); err != nil {
+		return err
+	}
+	switch m.SignatureVersion {
+	case "2":
+		sesSigV2Seen.Store(true) // downgrade protection; see the comment above
+	case "1":
+		// Once per process: an operator can act on this, and it should not drown the
+		// log on every bounce.
+		if sesSigV1Noted.CompareAndSwap(false, true) {
+			log.Print("ses hook: this SNS topic signs with SignatureVersion 1 (RSA-SHA1). " +
+				"Upgrade it with: aws sns set-topic-attributes --topic-arn <arn> " +
+				"--attribute-name SignatureVersion --attribute-value 2 — after which this app refuses version 1.")
+		}
+	}
+	return nil
 }
 
 // confirmSNSSubscription completes the SNS handshake by fetching SubscribeURL.

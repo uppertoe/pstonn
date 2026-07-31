@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/mail"
 	"net/url"
 	"os"
@@ -109,8 +110,12 @@ type Config struct {
 	// topic — travels and sits in the response in the clear, so one leaked
 	// STATUS_TOKEN yields the entire user list and a live read capability on
 	// everyone's notifications. With it, a leaked token yields ciphertext.
-	// Empty keeps the old plaintext behaviour (so the app can be deployed before
-	// the watchdog is updated), with a startup warning.
+	//
+	// It is therefore REQUIRED whenever StatusToken is set (Load refuses to start
+	// otherwise). There used to be a transitional allowance, warning at startup and
+	// serving plaintext, so the app could be deployed before the watchdog learned
+	// the sealed shape; that rollout is finished, and an allowance nobody needs is
+	// just a way for a plaintext roster to come back unnoticed.
 	RosterKey []byte
 
 	// SESTopicARN is the SNS topic that carries this domain's SES bounce and
@@ -306,23 +311,17 @@ func Load() (*Config, error) {
 	cfg.DisplayLocation = loc
 
 	if raw := strings.TrimSpace(os.Getenv("ROSTER_KEY")); raw != "" {
-		key, err := hex.DecodeString(raw)
+		key, err := hexKey("ROSTER_KEY", raw)
 		if err != nil {
-			return nil, fmt.Errorf("ROSTER_KEY: not valid hex: %w", err)
-		}
-		if len(key) != 32 {
-			return nil, fmt.Errorf("ROSTER_KEY: need 32 bytes (64 hex chars), got %d", len(key))
+			return nil, err
 		}
 		cfg.RosterKey = key
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("DATA_ENCRYPTION_KEY")); raw != "" {
-		key, err := hex.DecodeString(raw)
+		key, err := hexKey("DATA_ENCRYPTION_KEY", raw)
 		if err != nil {
-			return nil, fmt.Errorf("DATA_ENCRYPTION_KEY: not valid hex: %w", err)
-		}
-		if len(key) != 32 {
-			return nil, fmt.Errorf("DATA_ENCRYPTION_KEY: need 32 bytes (64 hex chars), got %d", len(key))
+			return nil, err
 		}
 		cfg.DataEncryptionKey = key
 	}
@@ -346,31 +345,49 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SESSION_SECRET must be set (>=16 bytes) when APP_OIDC_ISSUER is configured")
 	}
 
+	// PUBLIC_BASE_URL is how every link the app mints leaves the machine: the
+	// re-authorise confirm link in the reminder email, the guest-pass links, the
+	// door-QR URL. It is concatenated with a path, so a value that is not an
+	// absolute http(s) URL with a host does not fail — it produces a link that is
+	// merely wrong. A relative href in an email is not a link at all, and the
+	// reminder email exists precisely to stop a session lapsing, so the failure
+	// mode is the one thing the feature is for.
+	if cfg.PublicBaseURL != "" {
+		u, err := url.Parse(cfg.PublicBaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, fmt.Errorf("PUBLIC_BASE_URL (%q, or the value derived from DOMAIN) must be an absolute http(s) URL with a host, e.g. https://p.example.com", cfg.PublicBaseURL)
+		}
+	}
+
+	// Local runs are the one posture where an empty base is tolerable: every link
+	// is then a same-origin relative path, which a browser resolves correctly, and
+	// no mail goes anywhere real. Any other deployment must have one, and must find
+	// out now rather than in the mail nobody could click — the alternative, erroring
+	// only when a link is minted, surfaces weeks later inside a scheduler pass whose
+	// failure is invisible to the person it concerns.
+	localOnly := cfg.DevIdentityEmail != "" || cfg.Council.Sandbox
+	if cfg.PublicBaseURL == "" && !localOnly {
+		return nil, fmt.Errorf("PUBLIC_BASE_URL must be set (or DOMAIN, from which https://p.<DOMAIN> is derived): the confirm, guest-pass and door-QR links are absolute URLs, and without a base they are relative and unusable in email")
+	}
+
 	// DEV_IDENTITY_EMAIL authenticates every request as that user with the admin
 	// group and puts the at-rest cipher into ephemeral-key mode — a full auth
 	// bypass if it ever ships in production. Refuse to start when it is set
-	// alongside any production signal (a real encryption key or a configured OIDC
-	// login), so it can never silently coexist with a real deployment.
+	// alongside anything that means "real deployment", so it can never silently
+	// coexist with one.
 	if cfg.DevIdentityEmail != "" {
-		if len(cfg.DataEncryptionKey) == 32 {
-			return nil, fmt.Errorf("DEV_IDENTITY_EMAIL must not be set together with DATA_ENCRYPTION_KEY: it bypasses authentication (every request becomes an admin). Unset it for production")
-		}
-		if cfg.AppOIDC.Enabled() {
-			return nil, fmt.Errorf("DEV_IDENTITY_EMAIL must not be set together with APP_OIDC_ISSUER: it bypasses the OIDC login (every request becomes an admin). Unset it for production")
+		if sig := productionSignal(cfg); sig != "" {
+			return nil, fmt.Errorf("DEV_IDENTITY_EMAIL must not be set together with %s: it bypasses authentication (every request becomes an admin, with the group list [\"user\",\"admin\"]). Unset it for production", sig)
 		}
 	}
 
 	// COUNCIL_SANDBOX fakes the council in memory: logins "link" and plate
 	// changes "land" without anything reaching Stonnington. If it leaked into a
 	// production deployment users would see confirmations for changes that never
-	// happened, so refuse to start when it coexists with any production signal
-	// (same shape as the DEV_IDENTITY_EMAIL guard above).
+	// happened, so refuse to start on the same signals as above.
 	if cfg.Council.Sandbox {
-		if len(cfg.DataEncryptionKey) == 32 {
-			return nil, fmt.Errorf("COUNCIL_SANDBOX must not be set together with DATA_ENCRYPTION_KEY: it fakes the council, so no plate change would reach Stonnington. Unset it for production")
-		}
-		if cfg.AppOIDC.Enabled() {
-			return nil, fmt.Errorf("COUNCIL_SANDBOX must not be set together with APP_OIDC_ISSUER: it fakes the council, so no plate change would reach Stonnington. Unset it for production")
+		if sig := productionSignal(cfg); sig != "" {
+			return nil, fmt.Errorf("COUNCIL_SANDBOX must not be set together with %s: it fakes the council, so no plate change would reach Stonnington. Unset it for production", sig)
 		}
 	}
 
@@ -392,10 +409,23 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("%s (%q) is not a valid email address: %w", name, addr, err)
 		}
 	}
-	// A guessable status token would expose the user roster; the endpoint has no
-	// attempt throttle, so length is the defence.
+	// A guessable status token would expose the user roster. The endpoint does
+	// throttle attempts per client IP, so this floor is not the only defence — but
+	// the throttle is per-IP and the roster is worth a distributed guess, so keep
+	// both. The error deliberately does not report the length that was rejected:
+	// startup errors are logged, and the length of a live bearer token is not
+	// something to write down.
 	if cfg.StatusToken != "" && len(cfg.StatusToken) < 24 {
-		return nil, fmt.Errorf("STATUS_TOKEN is too short (%d chars): use at least 24 random characters, e.g. openssl rand -hex 24", len(cfg.StatusToken))
+		return nil, fmt.Errorf("STATUS_TOKEN is too short: use at least 24 random characters, e.g. openssl rand -hex 24")
+	}
+	// The roster is the sensitive half of /status, and the watchdog needs it only
+	// during an outage. Serving it unsealed puts every consented account's email
+	// and private push topic behind a single bearer token, so a leak of that token
+	// is a leak of the user list plus a live read on everyone's notifications.
+	// Sealing it is not optional any more: the staged rollout that once allowed a
+	// plaintext roster is done, and the app must not be able to fall back to it.
+	if cfg.StatusToken != "" && len(cfg.RosterKey) != 32 {
+		return nil, fmt.Errorf("ROSTER_KEY must be set (64 hex chars) whenever STATUS_TOKEN is: /status carries every consented account's email and push topic, and it is only ever served encrypted. Set the same key in the outage watchdog and have it request GET /status?roster=1")
 	}
 
 	return cfg, nil
@@ -464,6 +494,68 @@ func registrable(host string) string {
 		return strings.Join(parts[len(parts)-3:], ".")
 	}
 	return last2
+}
+
+// productionSignal names the first setting present that can only mean "this is a
+// real deployment", or "" when nothing does. The two local-only escape hatches
+// (DEV_IDENTITY_EMAIL, COUNCIL_SANDBOX) refuse to start beside any of them.
+//
+// The list is deliberately longer than the two secrets it started as. Those two
+// looked like a belt-and-braces pair but were complementary only by luck: the
+// recommended posture leaves APP_OIDC_ISSUER unset and signs users in through the
+// forward-auth layer, so DATA_ENCRYPTION_KEY was the *sole* backstop, and an
+// operator debugging a production incident by commenting out the key and setting
+// the dev email would have got a fully open app — every request an admin, right
+// after Caddy had correctly stripped the identity headers. DOMAIN and a
+// non-loopback PUBLIC_BASE_URL cannot be explained away: they exist only because
+// someone is serving this to the internet, and no local run needs them.
+func productionSignal(cfg *Config) string {
+	switch {
+	case len(cfg.DataEncryptionKey) == 32:
+		return "DATA_ENCRYPTION_KEY"
+	case cfg.AppOIDC.Enabled():
+		return "APP_OIDC_ISSUER"
+	case cfg.Domain != "":
+		return "DOMAIN"
+	case cfg.PublicBaseURL != "" && !loopbackBase(cfg.PublicBaseURL):
+		return "PUBLIC_BASE_URL"
+	}
+	return ""
+}
+
+// loopbackBase reports whether a base URL addresses this machine. Local
+// development legitimately sets PUBLIC_BASE_URL to a 127.0.0.1 or localhost
+// origin so guest-pass links resolve while clicking through the flow, so that
+// spelling must not be read as a production signal — but a public host must.
+func loopbackBase(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// hexKey decodes a 32-byte at-rest key supplied as 64 hex characters.
+//
+// The error deliberately says nothing about the value. encoding/hex reports the
+// offending character and its index ("invalid byte: U+0058 'X' at 17"), and
+// reporting the decoded length tells a reader how much of the key was accepted —
+// so a wrapped error puts fragments of a live secret into the startup log, the
+// container log, and whatever ships those off-host. The operator does not need
+// them: there is exactly one correct shape, and it is stated.
+func hexKey(name, raw string) ([]byte, error) {
+	key, err := hex.DecodeString(raw)
+	if err != nil || len(key) != 32 {
+		return nil, fmt.Errorf("%s must be exactly 32 bytes as 64 hex characters (generate with: openssl rand -hex 32)", name)
+	}
+	return key, nil
 }
 
 func splitCSV(raw string) []string {

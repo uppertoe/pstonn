@@ -102,7 +102,10 @@ func TestTemplatesRender(t *testing.T) {
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
-		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
+		// C11: on a FIRST link the box is unticked. Retaining someone's council
+		// password is the more consequential of the two outcomes, so it has to be
+		// chosen rather than merely not noticed.
+		{"onboarding-savepw-default-unchecked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1">`},
 		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
 		{"relink-savepw-respects-opton", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: true, Loc: loc}, `name="save_password" value="1" checked>`},
 		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Re-link your council account"},
@@ -386,16 +389,21 @@ func TestOverrideEndsDefault(t *testing.T) {
 	loc := time.FixedZone("AEST", 10*3600)
 	start := time.Date(2026, 8, 4, 9, 30, 0, 0, loc) // a Tuesday morning
 
+	// F6: the end is the day BOUNDARY (midnight starting the next day), because
+	// model.Resolve treats it as exclusive — a 23:59 end left the last minute of the
+	// day to the weekly roster, costing two council writes and two notifications
+	// where one was intended. So "ends the day it starts" reads as the next date at
+	// 00:00.
 	cases := []struct {
 		ends string
 		want string // "" = indefinite
 		why  string
 	}{
-		{"day", "2026-08-04T23:59", "ends the day it starts"},
-		{"nextday", "2026-08-05T23:59", "overnight runs to the end of the next day"},
+		{"day", "2026-08-05T00:00", "ends the day it starts"},
+		{"nextday", "2026-08-06T00:00", "overnight runs to the end of the next day"},
 		{"open", "", "the only way to get an indefinite booking"},
-		{"", "2026-08-04T23:59", "a missing field must fall back to the SAFE default, not to forever"},
-		{"nonsense", "2026-08-04T23:59", "an unexpected value must not resurrect forever-by-accident"},
+		{"", "2026-08-05T00:00", "a missing field must fall back to the SAFE default, not to forever"},
+		{"nonsense", "2026-08-05T00:00", "an unexpected value must not resurrect forever-by-accident"},
 	}
 	for _, c := range cases {
 		var got *time.Time
@@ -427,7 +435,7 @@ func TestEndOfDayUsesStartDay(t *testing.T) {
 	loc := time.FixedZone("AEST", 10*3600)
 	future := time.Date(2026, 9, 15, 8, 0, 0, 0, loc)
 	got := endOfDay(future, loc)
-	if want := "2026-09-15T23:59"; got.Format("2006-01-02T15:04") != want {
+	if want := "2026-09-16T00:00"; got.Format("2006-01-02T15:04") != want { // the boundary that closes 15 Sep; see F6
 		t.Fatalf("endOfDay = %s, want %s", got.Format("2006-01-02T15:04"), want)
 	}
 	if !got.After(future) {

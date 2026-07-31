@@ -55,6 +55,20 @@ var (
 	// A saved-password auto-reconnect that hits this must stop retrying and prompt a
 	// manual re-link; any OTHER error is treated as transient and retried.
 	ErrLoginRejected = errors.New("parking: login did not establish a session (check the username and password)")
+	// ErrLoginFormUnrecognised means the council's sign-in page was fetched fine but
+	// is not the form this client knows how to fill in (a missing or empty
+	// antiforgery token, or no credential inputs). It is deliberately distinct from
+	// ErrLoginRejected: the credentials were never even submitted, so nothing here
+	// says anything about the user's password. It needs an operator to look at the
+	// portal's HTML, and until they do, callers must keep the session and the saved
+	// password intact.
+	ErrLoginFormUnrecognised = errors.New("parking: council sign-in page shape not recognised (the portal's HTML changed?)")
+	// ErrLoginOffHost means the login flow was asked to send the user's council
+	// password somewhere the council configuration never named — an off-host form
+	// action, an off-host redirect, or a scheme downgrade. The credentials are NOT
+	// sent. Like ErrLoginFormUnrecognised this says nothing about the password, but
+	// unlike it this is a security event and is logged as one.
+	ErrLoginOffHost = errors.New("parking: council sign-in points off-host; refusing to send credentials")
 	// ErrNotCaptured marks a call whose request/response shape is still unknown.
 	ErrNotCaptured = errors.New("parking: endpoint not yet reverse-engineered (needs a capture)")
 	// ErrCouncilBusy means the portal is pushing back (Akamai 429/403/503) or the
@@ -62,6 +76,14 @@ var (
 	// retry immediately; the client already enforces an exponential per-owner
 	// cooldown so it is not hammered.
 	ErrCouncilBusy = errors.New("parking: council temporarily unavailable (rate-limited or blocked); backing off")
+)
+
+// Plain-English descriptions of what a council operation was trying to do,
+// carried on a CouncilError so a notification can name it. Shared as constants
+// where more than one function reports the same operation.
+const (
+	opLogin       = "sign in to your council account"
+	opReadVehicle = "read the current vehicle on your permit"
 )
 
 // FailureKind classifies WHY a council operation failed, so callers can word the
@@ -122,8 +144,8 @@ type Client struct {
 	store       *store.Store
 	box         *secretbox.Box
 	http        *http.Client // redirects handled manually; cookies passed per-user
-	regCache    sync.Map     // councilPermitID -> cachedReg, to bound council reads
-	regRefresh  sync.Map     // councilPermitID -> struct{}, dedupes in-flight background plate refreshes
+	regCache    sync.Map     // regKey -> cachedReg, to bound council reads
+	regRefresh  sync.Map     // regKey -> struct{}, dedupes in-flight background plate refreshes
 	traffic     trafficCounters
 
 	renewLocks    sync.Map   // owner -> *sync.Mutex, serialises silent-renew per owner
@@ -137,6 +159,18 @@ type Client struct {
 type cachedReg struct {
 	reg string
 	at  time.Time
+}
+
+// regKey identifies a cached plate reading. The owner is part of the key because
+// a council permit can change hands: a household permit is often visible to two
+// council logins, and "stop managing" here plus "manage" from the other account is
+// the ordinary way that happens. Keyed on the permit alone, the new holder was
+// served the previous holder's cached plate as their permit's current state — a
+// wrong plate is a real parking fine, so the cache must not be able to cross an
+// account boundary at all.
+type regKey struct {
+	owner    string
+	permitID string // the council's PKPermitID
 }
 
 // New builds a Client. Council OAuth endpoints follow the standard Duende
@@ -197,7 +231,12 @@ func (c *Client) Linked(ctx context.Context, owner string) bool {
 // a re-link (and the user is notified), rather than failing silently every tick
 // while still appearing "linked".
 func (c *Client) openCookie(owner, sealed string) (string, error) {
-	cookie, err := c.box.Open(sealed)
+	cookie, legacy, err := c.box.OpenCtx(secretbox.CouncilCookie(owner), sealed)
+	if legacy {
+		// Sealed before ciphertexts were bound to their owner and purpose. It still
+		// opens, and the next renew re-seals it bound; nothing to do but note it.
+		log.Printf("parking: cookie for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", owner)
+	}
 	if err != nil {
 		log.Printf("parking: unseal cookie for %s failed (%v); treating as expired session (re-link required)", owner, err)
 		return "", ErrSessionExpired
@@ -214,7 +253,7 @@ func (c *Client) accessToken(ctx context.Context, owner string) (string, error) 
 	}
 	// Reuse a cached access token while it is comfortably unexpired.
 	if cs.AccessToken != "" && time.Until(cs.TokenExpiry) > 60*time.Second {
-		if at, err := c.box.Open(cs.AccessToken); err == nil {
+		if at, _, err := c.box.OpenCtx(secretbox.CouncilToken(owner), cs.AccessToken); err == nil {
 			return at, nil
 		}
 	}
@@ -230,7 +269,7 @@ func (c *Client) accessToken(ctx context.Context, owner string) (string, error) 
 		return "", ErrNotLinked
 	}
 	if cs.AccessToken != "" && time.Until(cs.TokenExpiry) > 60*time.Second {
-		if at, err := c.box.Open(cs.AccessToken); err == nil {
+		if at, _, err := c.box.OpenCtx(secretbox.CouncilToken(owner), cs.AccessToken); err == nil {
 			return at, nil
 		}
 	}
@@ -254,7 +293,7 @@ func (c *Client) renewLocked(ctx context.Context, owner string, cs store.Council
 	if err != nil {
 		return "", err
 	}
-	sealedAccess, err := c.box.Seal(at)
+	sealedAccess, err := c.box.SealCtx(secretbox.CouncilToken(owner), at)
 	if err != nil {
 		return "", err
 	}
@@ -262,7 +301,7 @@ func (c *Client) renewLocked(ctx context.Context, owner string, cs store.Council
 	if newCookie != "" && newCookie != cookie {
 		// A Seal failure must not silently keep the OLD cookie: the rotation may
 		// have invalidated it, and the next renew would then look like an expiry.
-		sc, err := c.box.Seal(newCookie)
+		sc, err := c.box.SealCtx(secretbox.CouncilCookie(owner), newCookie)
 		if err != nil {
 			return "", err
 		}
@@ -471,24 +510,55 @@ type manageVehicleV struct {
 	VehicleType             *string `json:"VehicleType"`
 }
 
+// emptyIsCredible reports whether an EMPTY permitVehicles list can be believed.
+//
+// A JSON object that simply lacks the keys we expect decodes into a zero-valued
+// struct, so "this permit has no vehicle" and "we did not understand this
+// response" arrive looking identical. Treating the second as the first is not a
+// harmless default: the scheduler writes an empty active registration and logs
+// that the plate was "changed directly at the council portal" — a false claim
+// about the user's council account — and SetVehicle turns it into a durable "the
+// permit has no vehicle to change" refusal that never self-heals.
+//
+// So an empty list is believed only when the rest of the response corroborates
+// it: the permit is identified (permitNumber came back) and the portal's own
+// count agrees there are no vehicles. Anything else is an unexpected shape, which
+// is the operator alert that says the council changed its API.
+func (mv *managedVehicleResp) emptyIsCredible() bool {
+	return mv.PermitNumber != "" && mv.PermitVehicleCount == 0
+}
+
+// errVehicleShape describes an empty vehicle list that nothing in the response
+// corroborates.
+func errVehicleShape(mv *managedVehicleResp) error {
+	return fmt.Errorf("the council returned no vehicles but the response does not look like a permit record (permitNumber=%q, permitVehicleCount=%d): API shape change?",
+		mv.PermitNumber, mv.PermitVehicleCount)
+}
+
+// maxAPIBody bounds a permit-API JSON response. The real ones are a few
+// kilobytes; the bound exists so a hostile or broken portal cannot make a decode
+// consume memory in proportion to what it chooses to send. Matches the 1 MiB cap
+// the token exchange already applies.
+const maxAPIBody = 1 << 20
+
 // managedVehicle fetches the vehicle(s) currently on the permit.
 func (c *Client) managedVehicle(ctx context.Context, owner string, p model.Permit) (*managedVehicleResp, error) {
-	const op = "read the current vehicle on your permit"
-	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/permits/managedVehicle", op,
+	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/permits/managedVehicle", opReadVehicle,
 		url.Values{"permitID": {p.CouncilPermitID}}, nil)
 	if err != nil {
 		return nil, err // already classified (or a busy/auth sentinel)
 	}
 	defer resp.Body.Close()
 	var mv managedVehicleResp
-	if err := json.NewDecoder(resp.Body).Decode(&mv); err != nil {
-		return nil, councilErr(FailUnexpected, op, err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(&mv); err != nil {
+		return nil, councilErr(FailUnexpected, opReadVehicle, err)
 	}
 	return &mv, nil
 }
 
 // CurrentVehicle returns the registration currently allocated to the permit, or
-// "" if the permit has no vehicle.
+// "" if the permit genuinely has no vehicle. An empty list the response does not
+// corroborate is an error, not an empty plate — see emptyIsCredible.
 func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error) {
 	if c.sandbox != nil {
 		return c.sandboxCurrentVehicle(p)
@@ -498,6 +568,9 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 		return "", err
 	}
 	if len(mv.PermitVehicles) == 0 {
+		if !mv.emptyIsCredible() {
+			return "", councilErr(FailUnexpected, opReadVehicle, errVehicleShape(mv))
+		}
 		return "", nil
 	}
 	return mv.PermitVehicles[0].RegistrationNumber, nil
@@ -523,7 +596,7 @@ func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model
 		reg, err = c.sandboxCurrentVehicle(p) // in-memory: no cache needed
 		return reg, true, err
 	}
-	v, ok := c.regCache.Load(p.CouncilPermitID)
+	v, ok := c.regCache.Load(regKey{owner, p.CouncilPermitID})
 	if ok && time.Since(v.(cachedReg).at) < maxAge {
 		return v.(cachedReg).reg, true, nil
 	}
@@ -534,16 +607,29 @@ func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model
 	return "", false, ErrNoCachedPlate
 }
 
+// ForgetPermit drops an owner's cached plate for a permit. Call it when the app
+// stops managing the permit: the cache is otherwise never evicted, so a permit
+// that is removed and later re-added would answer from a reading taken before
+// anyone stopped watching it.
+//
+// The in-flight-refresh marker is deliberately left alone — it is removed by the
+// goroutine that owns it, and clearing it here would only let a second council
+// request start for a permit nobody is managing any more.
+func (c *Client) ForgetPermit(owner, councilPermitID string) {
+	c.regCache.Delete(regKey{owner, councilPermitID})
+}
+
 // refreshCurrentVehicle fetches the permit's plate in the background, detached
 // from any request context so a closed tab doesn't cancel it, deduplicating
 // concurrent refreshes per permit. Failures are logged and the stale cache
 // entry is left in place for the next attempt.
 func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
-	if _, inflight := c.regRefresh.LoadOrStore(p.CouncilPermitID, struct{}{}); inflight {
+	key := regKey{owner, p.CouncilPermitID}
+	if _, inflight := c.regRefresh.LoadOrStore(key, struct{}{}); inflight {
 		return
 	}
 	go func() {
-		defer c.regRefresh.Delete(p.CouncilPermitID)
+		defer c.regRefresh.Delete(key)
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		defer cancel()
 		reg, err := c.CurrentVehicle(ctx, owner, p)
@@ -551,7 +637,7 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 			log.Printf("parking: background plate refresh for permit %s: %v", p.CouncilPermitID, err)
 			return
 		}
-		c.regCache.Store(p.CouncilPermitID, cachedReg{reg: reg, at: time.Now()})
+		c.regCache.Store(key, cachedReg{reg: reg, at: time.Now()})
 	}()
 }
 
@@ -572,6 +658,13 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		return err
 	}
 	if len(mv.PermitVehicles) == 0 {
+		// "No vehicle to change" is a durable refusal: the user is told to act and
+		// nothing retries. A response we failed to understand must never become that
+		// verdict, so it is classified as unexpected instead — retried, and raised
+		// with the operator as a possible API change.
+		if !mv.emptyIsCredible() {
+			return councilErr(FailUnexpected, op, errVehicleShape(mv))
+		}
 		return councilErr(FailRejected, op, errors.New("the permit has no vehicle to change"))
 	}
 	if !mv.CanEditOrDeleteVehicle {
@@ -581,7 +674,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if strings.EqualFold(cur.RegistrationNumber, registration) {
 		// Already allocated (the read above IS the confirmation). Refresh the cache
 		// so callers reflect the council's own record, then report success.
-		c.regCache.Store(p.CouncilPermitID, cachedReg{reg: cur.RegistrationNumber, at: time.Now()})
+		c.regCache.Store(regKey{owner, p.CouncilPermitID}, cachedReg{reg: cur.RegistrationNumber, at: time.Now()})
 		return nil
 	}
 	permitID, err := strconv.ParseInt(p.CouncilPermitID, 10, 64)
@@ -614,8 +707,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if err != nil {
 		return err // classified (non-2xx / transport) or a busy/auth sentinel
 	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	drainClose(resp)
 
 	// Confirm the change against the council's OWN record before reporting success,
 	// so every state we then show or store (the dashboard's "on permit now", a
@@ -637,7 +729,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		// soothing "we'll keep trying" that never self-heals.
 		return councilErr(FailRejected, op, fmt.Errorf("change was accepted but the council still shows %q", confirmed))
 	}
-	c.regCache.Store(p.CouncilPermitID, cachedReg{reg: confirmed, at: time.Now()})
+	c.regCache.Store(regKey{owner, p.CouncilPermitID}, cachedReg{reg: confirmed, at: time.Now()})
 	return nil
 }
 
@@ -687,7 +779,7 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 	}
 	defer resp.Body.Close()
 	var g gridResp
-	if err := json.NewDecoder(resp.Body).Decode(&g); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(&g); err != nil {
 		return nil, councilErr(FailUnexpected, op, err)
 	}
 	out := make([]PermitInfo, 0, len(g.PermitGrid))

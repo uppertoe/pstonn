@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -185,6 +186,9 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// The account is gone, so any session still holding it must go too — otherwise a
+	// signed cookie keeps asserting an identity whose data no longer exists.
+	s.revokeSessions(r.Context(), user)
 	redirectHome(w, r)
 }
 
@@ -207,26 +211,31 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "That is your own email.")
 		return
 	}
-	if isP, _ := s.store.IsPrimary(ctx, email); isP {
-		s.message(w, http.StatusConflict, "That person already shares their own account with others, so they cannot join yours.")
-		return
-	}
-	// Block someone who already runs their own account: joining would hide their
-	// own permits and connection. They would need a different email, or to remove
-	// their own data first.
-	if has, _ := s.store.HasOwnData(ctx, email); has {
-		s.message(w, http.StatusConflict, "That person already uses p.stonn with their own account. Ask them to use a different email, or to remove their own account first.")
-		return
-	}
+	// Nothing here inspects the invited address. It used to: two probes rejected an
+	// address that was already a primary, or already had permits/vehicles of its own,
+	// each with its own message. Since neither outcome depends on anything the
+	// inviter knows, the endpoint answered "does this person use p.stonn, and is their
+	// permit set up?" for any address, with no write and no email — a membership
+	// oracle over a service whose users are all in one small area. Those constraints
+	// are really about the INVITEE's account, so they are checked when the invitee
+	// accepts, where the answer is about themselves and leaks nothing.
+	//
 	// Add atomically under the cap of two (the count check and insert are one
-	// statement, so concurrent adds cannot exceed it).
+	// statement, so concurrent adds cannot exceed it). The invite starts pending and
+	// grants nothing until accepted.
 	if err := s.store.AddMemberCapped(ctx, owner, email, 2); err != nil {
+		// The cap is a fact about the INVITER's own account, so reporting it precisely
+		// tells them nothing they could not already see on this page.
 		if errors.Is(err, store.ErrMemberLimit) {
 			s.message(w, http.StatusConflict, "You can share access with at most two people. Remove one first.")
 			return
 		}
+		// Anything else is a fact about the invited address — most likely that it
+		// already holds an invite or membership somewhere. Fall through to the same
+		// confirmation the success path renders, so the response cannot be used to
+		// probe. A pending invite grants nothing, so not creating one is safe.
 		log.Printf("add member %s to %s: %v", email, owner, err)
-		s.message(w, http.StatusConflict, "That email already has access to an account.")
+		s.inviteSent(w, r, email, false)
 		return
 	}
 	// Courtesy heads-up (best-effort; not a login code) so they know to sign in.
@@ -251,11 +260,75 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		log.Printf("invite email to %s skipped (throttled or email not configured)", email)
 	}
 	s.logChange(ctx, owner, user, store.ActionMemberAdd, email, "")
-	q := url.Values{"shared": {email}}
+	s.inviteSent(w, r, email, mailed)
+}
+
+// inviteSent renders the one confirmation every addMember outcome shares, so the
+// response cannot distinguish "invited" from "that address could not be invited".
+// The wording is deliberately about what happens next rather than about the invited
+// person, because we must not assert anything the inviter is not entitled to know.
+func (s *Server) inviteSent(w http.ResponseWriter, r *http.Request, email string, mailed bool) {
+	q := url.Values{"invited": {email}}
 	if mailed {
 		q.Set("mailed", "1")
 	}
 	http.Redirect(w, r, "/settings?"+q.Encode(), http.StatusSeeOther)
+}
+
+// acceptInvite is the invited person accepting shared access to someone's account.
+// This is the consent step the flow previously had no place for.
+//
+// The checks that used to run at invite time run HERE, because they are about the
+// person acting: joining an account hides your own permits and connection, so
+// someone who already runs their own account has to be told rather than silently
+// folded into another household.
+func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
+	u, _ := identity.FromContext(r.Context())
+	ctx := r.Context()
+	owner, ok, err := s.store.PendingInvite(ctx, u.Email)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if !ok {
+		redirectHome(w, r)
+		return
+	}
+	// The form carries the account it was rendered for, so a stale page cannot enrol
+	// them somewhere they never saw.
+	if shown := strings.ToLower(strings.TrimSpace(r.FormValue("owner"))); shown != "" && shown != owner {
+		redirectHome(w, r)
+		return
+	}
+	if isP, _ := s.store.IsPrimary(ctx, u.Email); isP {
+		s.message(w, http.StatusConflict, "You already share your own account with someone else, so you can't also join another. Remove the people you've shared with first, or decline this invitation.")
+		return
+	}
+	if has, _ := s.store.HasOwnData(ctx, u.Email); has {
+		s.message(w, http.StatusConflict, "You already use p.stonn with your own permits, and joining another account would hide them. Decline this invitation, or remove your own account first if you'd rather share.")
+		return
+	}
+	if err := s.store.AcceptInvite(ctx, u.Email, owner); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			redirectHome(w, r)
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	s.logChange(ctx, owner, u.Email, store.ActionMemberAdd, u.Email, "accepted the invitation")
+	http.Redirect(w, r, "/settings?joined="+url.QueryEscape(owner), http.StatusSeeOther)
+}
+
+// declineInvite is the invited person refusing. It removes the pending row outright,
+// so the address is free to be invited again or to start its own account.
+func (s *Server) declineInvite(w http.ResponseWriter, r *http.Request) {
+	u, _ := identity.FromContext(r.Context())
+	if err := s.store.DeclineInvite(r.Context(), u.Email); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/settings?declined=1", http.StatusSeeOther)
 }
 
 // removeMember (owner only) revokes a secondary's shared access.
@@ -270,6 +343,11 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	// are bearer links that would otherwise keep working after they lose access.
 	// Report the count: the primary needs to know their household's links changed.
 	revoked, err := s.store.RemoveMember(r.Context(), owner, email)
+	if err == nil {
+		// They have lost access to this household's data; a session issued while they
+		// had it must stop working now, not whenever its cookie happens to lapse.
+		s.revokeSessions(r.Context(), email)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		// Not a member of this account: either a stale form or someone probing with
 		// another household's address. Either way there is nothing to remove, and
@@ -309,6 +387,10 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// They chose to leave, so their sessions were scoped to an account they no longer
+	// belong to. Revoking makes the next request resolve them to their own account
+	// rather than continuing to act inside the household they just left.
+	s.revokeSessions(r.Context(), user)
 	// Leaving revokes the departing member's guest passes and door QRs exactly as
 	// being removed does, so the primary has to hear about it the same way. This is
 	// in fact the likelier path — mint a pass, then leave — and until now it was
@@ -371,4 +453,28 @@ func (s *Server) councilConfirmApply(w http.ResponseWriter, r *http.Request) {
 		v.Until = time.Now().Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 January 2006")
 	}
 	s.render(w, dashboardData{State: "confirm", Loc: s.cfg.DisplayLocation, Confirm: v})
+}
+
+// revokeSessions invalidates every session already issued to a person, after their
+// authority has been taken away (account deleted, shared access removed).
+//
+// Best-effort by design: the authority change itself has already been committed, so
+// failing here must not undo it or block the user's own request. It is logged loudly
+// because the consequence — a signed cookie that keeps working after access was
+// withdrawn — is exactly what the epoch exists to prevent.
+//
+// A no-op when the app runs behind forward-auth, where there is no app-issued session
+// to revoke and identity comes from the proxy on every request.
+func (s *Server) revokeSessions(ctx context.Context, email string) {
+	if s.store == nil || email == "" {
+		return
+	}
+	epoch, err := s.store.BumpSessionEpoch(ctx, email)
+	if err != nil {
+		log.Printf("SECURITY: could not revoke sessions for %s (%v); an existing sign-in may keep working until it expires", email, err)
+		return
+	}
+	if s.sessions != nil {
+		s.sessions.RevokeTo(email, epoch)
+	}
 }

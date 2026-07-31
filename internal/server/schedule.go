@@ -88,12 +88,19 @@ func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
 
 // buildPermitView assembles one permit's roster grid, 14-day at-a-glance
 // calendar (resolved per day), and upcoming one-offs.
-// endOfDay is the last minute of t's calendar day in loc — the natural close of a
-// one-off booking, matching the "until the end of the day" language used for guest
-// activations.
+// endOfDay closes a one-off booking at the END of t's calendar day in loc —
+// midnight at the start of the following day, which is what "until the end of the
+// day" means to the person booking it. Same convention as dayEndLocal, which
+// guest activations use.
+//
+// It must be the day boundary, not 23:59: model.Resolve treats a booking's end as
+// EXCLUSIVE, so a 23:59 end left the last minute of the day uncovered by the
+// booking. The weekly roster reasserted itself for that minute — a real council
+// write and a "your permit was updated" notification at 23:59, then the next day's
+// booking or roster writing again at 00:00, where one change was intended.
 func endOfDay(t time.Time, loc *time.Location) time.Time {
 	l := t.In(loc)
-	return time.Date(l.Year(), l.Month(), l.Day(), 23, 59, 0, 0, loc)
+	return time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, loc)
 }
 
 // legendColors is the set of car colours the Schedule page will render, across
@@ -147,9 +154,11 @@ func (s *Server) legendColors(ctx context.Context, owner string, vviews []vehicl
 }
 
 // normPlate canonicalises a registration for comparison: the council echoes
-// plates back in whatever case and spacing they were entered with.
+// plates back in whatever case and spacing they were entered with. Delegated to
+// model so that "are these the same plate?" has exactly one answer across the
+// app — the display layer's idea of it and the scheduler's must not diverge.
 func normPlate(s string) string {
-	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
+	return model.NormPlate(s)
 }
 
 // colorOfPlate finds the household's colour for a plate that is on the permit.
@@ -185,7 +194,12 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	if actual, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
 		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, 5*time.Minute); err == nil {
 		plateRefreshing = !fresh
-		if actual != p.ActiveRegistration {
+		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
+		// case they were entered with, and overwriting our belief with a case variant
+		// makes the scheduler's next tick see a plate that differs from its target —
+		// so it performs a real council write and tells the household their permit was
+		// updated (and emails a displaced driver) for a change that changes nothing.
+		if !model.SamePlate(actual, p.ActiveRegistration) {
 			p.ActiveRegistration = actual
 			_ = s.store.SetPermitActive(ctx, p.ID, actual)
 		}
@@ -441,7 +455,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	case "open":
 		endsAt = nil // deliberate: runs until someone changes it
 	case "custom":
-		raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "23:59")
+		raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "00:00")
 		if raw == "" {
 			s.formError(w, r, "Pick the date this booking should end, or choose one of the other options.")
 			return
@@ -450,6 +464,12 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			s.formError(w, r, "Couldn't read the end time.")
 			return
+		}
+		// A chosen date with no time means the whole of that day, so it closes at the
+		// day boundary. It used to default to 23:59, which left the last minute of the
+		// day to the weekly roster for exactly the reason endOfDay explains.
+		if strings.TrimSpace(r.FormValue("until_time")) == "" {
+			t = endOfDay(t, s.cfg.DisplayLocation)
 		}
 		endsAt = &t
 	case "nextday":
@@ -500,7 +520,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if endsAt == nil {
 		window += ", open-ended"
 	} else {
-		window += " until " + endsAt.In(s.cfg.DisplayLocation).Format("2 Jan 3:04pm")
+		window += " until " + windowEndText(*endsAt, s.cfg.DisplayLocation)
 	}
 	s.logChange(r.Context(), owner, user, store.ActionOverrideAdd, reg, window)
 	s.sched.KickPermit(p.ID)
@@ -526,12 +546,18 @@ func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := s.store.DeleteOverride(r.Context(), owner, pathInt(r, "oid")); err != nil {
+	// Scoped to this permit as well as this owner, and reporting whether anything
+	// went, so a booking on another of the account's permits cannot be deleted
+	// through this permit's URL and a miss stays silent.
+	deleted, err := s.store.DeleteOverrideOnPermit(r.Context(), owner, p.ID, pathInt(r, "oid"))
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.logChange(r.Context(), owner, user, store.ActionOverrideDelete, gone, "")
-	s.sched.KickPermit(p.ID)
+	if deleted {
+		s.logChange(r.Context(), owner, user, store.ActionOverrideDelete, gone, "")
+		s.sched.KickPermit(p.ID)
+	}
 	s.respondPermit(w, r, owner, p)
 }
 
@@ -610,4 +636,24 @@ func (s *Server) permitCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.respondPermit(w, r, owner, p)
+}
+
+// windowEndText renders a booking's end for a human.
+//
+// A booking that runs "to the end of a day" ends at the following midnight, because
+// model.Resolve treats the end as exclusive — a 23:59 end left the last minute of the
+// day uncovered and let the weekly roster reassert itself for sixty seconds. Correct,
+// but formatting that instant literally produces "5 Aug 12:00am" for a booking the
+// user made for the 4th, which reads as a whole day longer than they asked for.
+//
+// So a midnight end is described by the day it completes, not the day it touches.
+func windowEndText(end time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.Local
+	}
+	l := end.In(loc)
+	if l.Hour() == 0 && l.Minute() == 0 && l.Second() == 0 {
+		return "the end of " + l.AddDate(0, 0, -1).Format("2 Jan")
+	}
+	return l.Format("2 Jan 3:04pm")
 }

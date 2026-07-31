@@ -56,7 +56,11 @@ var weekdaysDisplay = []time.Weekday{
 	time.Thursday, time.Friday, time.Saturday,
 }
 
-var templates = template.Must(template.New("").Funcs(template.FuncMap{
+// templateFuncs is named rather than inlined so tests can exercise one helper
+// directly. Cloning the parsed template set is not an option: html/template refuses
+// to Clone once anything has executed, so a test doing that passes alone and fails in
+// a full run.
+var templateFuncs = template.FuncMap{
 	"asset":       asset,
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	"localTime": func(t time.Time, loc *time.Location) string {
@@ -65,6 +69,25 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 		// Australian style: day-first, 12-hour with lowercase am/pm.
 		return t.In(loc).Format("Mon 2 Jan, 3:04pm")
+	},
+	// localEnd renders a booking's END, which needs different treatment from its
+	// start: a booking that runs to the end of a day ends at the FOLLOWING midnight,
+	// because Resolve treats the end as exclusive. Printed literally that is
+	// "Wed 5 Aug, 12:00am" for a booking made for the 4th, which reads as a day longer
+	// than the person asked for. Name the day it completes instead.
+	//
+	// Deliberately not folded into localTime: a booking may legitimately START at
+	// midnight, and describing that as "end of" the previous day would be plainly
+	// wrong. Only the end of a window has this meaning.
+	"localEnd": func(t time.Time, loc *time.Location) string {
+		if t.IsZero() {
+			return ""
+		}
+		l := t.In(loc)
+		if l.Hour() == 0 && l.Minute() == 0 && l.Second() == 0 {
+			return "end of " + l.AddDate(0, 0, -1).Format("Mon 2 Jan")
+		}
+		return l.Format("Mon 2 Jan, 3:04pm")
 	},
 	"datetimeLocal": func(t time.Time, loc *time.Location) string {
 		return t.In(loc).Format("2006-01-02T15:04")
@@ -90,4 +113,6 @@ var templates = template.Must(template.New("").Funcs(template.FuncMap{
 		}
 		return fmt.Sprintf("%d:00 %s", hr, suffix)
 	},
-}).ParseFS(templateFS, "templates/*.html"))
+}
+
+var templates = template.Must(template.New("").Funcs(templateFuncs).ParseFS(templateFS, "templates/*.html"))

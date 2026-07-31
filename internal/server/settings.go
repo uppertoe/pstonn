@@ -39,7 +39,14 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
 	}
-	if removed := r.URL.Query().Get("removed"); removed != "" {
+	// Every address below is validated before it is composed into a message. These
+	// are written by our own redirects, but nothing stops someone handing a signed-in
+	// user a crafted /settings?... link: the value lands in the green success banner,
+	// which is the most trusted element on the page, in an app whose whole premise is
+	// holding council credentials. It is not an injection (html/template escapes it),
+	// but "phone this number to restore your permit" in our own voice is worth
+	// refusing outright. A value that is not a plausible address is dropped.
+	if removed := r.URL.Query().Get("removed"); looksLikeEmail(removed) {
 		base.Flash = removed + " no longer has access."
 		if n := atoi(r.URL.Query().Get("revoked")); n > 0 {
 			// Say it plainly: guest links they had created have stopped working, so
@@ -51,12 +58,21 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			base.Flash += fmt.Sprintf(" We also stopped %d %s they had created — anyone holding those links can no longer use your permit.", n, pass)
 		}
 	}
-	if shared := r.URL.Query().Get("shared"); shared != "" {
+	// An invitation is an offer, not access, so the wording must not promise the
+	// latter. It is also deliberately identical whether or not a row was created —
+	// see inviteSent.
+	if invited := r.URL.Query().Get("invited"); looksLikeEmail(invited) {
 		if r.URL.Query().Get("mailed") == "1" {
-			base.Flash = "Access granted. We've emailed " + shared + " to let them know they can sign in with that address."
+			base.Flash = "Invitation sent. We've emailed " + invited + " — they'll be asked to accept next time they sign in, and they get access only once they do."
 		} else {
-			base.Flash = "Access granted to " + shared + ". No email went out this time — let them know they can sign in with that address."
+			base.Flash = "Invitation recorded for " + invited + ". No email went out this time, so let them know to sign in and accept it."
 		}
+	}
+	if joined := r.URL.Query().Get("joined"); looksLikeEmail(joined) {
+		base.Flash = "You now share " + joined + "'s account."
+	}
+	if r.URL.Query().Get("declined") == "1" {
+		base.Flash = "Invitation declined. Nothing was shared, and you can still use p.stonn with your own account."
 	}
 	// Notification preferences are per-person: each user (primary or secondary)
 	// controls how THEY are notified, keyed to their own signed-in email.
@@ -81,9 +97,21 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	if base.IsPrimary {
 		if ms, err := s.store.ListMembers(ctx, owner); err == nil {
 			for _, m := range ms {
-				base.Members = append(base.Members, memberView{Email: m.Email, Added: m.AddedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006")})
+				base.Members = append(base.Members, memberView{
+					Email:   m.Email,
+					Added:   m.AddedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"),
+					Pending: m.Pending,
+				})
 			}
 		}
+		// An invitation aimed at this person, which they have not answered. Offered even
+		// to a primary: they cannot accept while they run their own account, but they are
+		// entitled to know it exists and to decline it.
+		if from, ok, err := s.store.PendingInvite(ctx, base.User.Email); err == nil && ok {
+			base.Invite = &inviteView{Owner: from}
+		}
+	} else if from, ok, err := s.store.PendingInvite(ctx, base.User.Email); err == nil && ok {
+		base.Invite = &inviteView{Owner: from}
 	}
 	s.render(w, base)
 }

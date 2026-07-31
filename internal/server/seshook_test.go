@@ -1,16 +1,21 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1" //nolint:gosec // matching AWS SignatureVersion 1
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -24,12 +29,25 @@ import (
 
 const testTopic = "arn:aws:sns:ap-southeast-2:123456789012:pstonn-ses-events"
 
+// testCertURL has the shape AWS actually publishes signing certificates under
+// (see snsCertFile); anything else is refused before a fetch is considered.
+const testCertURL = "https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-test.pem"
+
 // signSNS builds a signed SNS envelope the way AWS would, so the handler's
-// verification path is exercised for real rather than stubbed out.
+// verification path is exercised for real rather than stubbed out. Version 1
+// (RSA-SHA1) is what a topic with no SignatureVersion attribute emits, which is
+// still the default.
 func signSNS(t *testing.T, key *rsa.PrivateKey, m *snsMessage) []byte {
 	t.Helper()
-	m.SignatureVersion = "1"
-	m.SigningCertURL = "https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-test.pem"
+	return signSNSVersion(t, key, m, "1")
+}
+
+// signSNSVersion signs with either version, so the digest-pinning behaviour can be
+// exercised from both sides.
+func signSNSVersion(t *testing.T, key *rsa.PrivateKey, m *snsMessage, version string) []byte {
+	t.Helper()
+	m.SignatureVersion = version
+	m.SigningCertURL = testCertURL
 	var sb strings.Builder
 	for _, f := range snsSigningFields(m) {
 		sb.WriteString(f.key)
@@ -37,8 +55,20 @@ func signSNS(t *testing.T, key *rsa.PrivateKey, m *snsMessage) []byte {
 		sb.WriteString(f.val)
 		sb.WriteString("\n")
 	}
-	sum := sha1.Sum([]byte(sb.String())) //nolint:gosec // AWS SignatureVersion 1
-	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA1, sum[:])
+	var (
+		hash   crypto.Hash
+		digest []byte
+	)
+	if version == "2" {
+		hash = crypto.SHA256
+		sum := sha256.Sum256([]byte(sb.String()))
+		digest = sum[:]
+	} else {
+		hash = crypto.SHA1
+		sum := sha1.Sum([]byte(sb.String())) //nolint:gosec // AWS SignatureVersion 1
+		digest = sum[:]
+	}
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, hash, digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +109,7 @@ func newSESTestServer(t *testing.T) (*Server, *rsa.PrivateKey) {
 		t.Fatal(err)
 	}
 	cache := newCertCache()
-	cache.certs["https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-test.pem"] = cert
+	cache.certs[testCertURL] = cachedCert{cert: cert, expires: time.Now().Add(time.Hour)}
 
 	s := &Server{
 		cfg:     &config.Config{DisplayLocation: time.UTC, SESTopicARN: testTopic},
@@ -87,6 +117,12 @@ func newSESTestServer(t *testing.T) (*Server, *rsa.PrivateKey) {
 		terms:   loadTerms(""),
 		snsCert: cache,
 	}
+	// The SignatureVersion policy is process-wide (there is one topic per
+	// deployment), so a test that upgrades it must not leak that into the next one.
+	t.Cleanup(func() {
+		sesSigV2Seen.Store(false)
+		sesSigV1Noted.Store(false)
+	})
 	return s, key
 }
 
@@ -220,18 +256,18 @@ func TestSESHookRejectsForgery(t *testing.T) {
 // otherwise an attacker signs with their own key and supplies their own cert.
 func TestSESHookCertHostCheck(t *testing.T) {
 	for _, host := range []string{
-		"https://evil.example.com/cert.pem",
-		"https://sns.amazonaws.com.evil.tld/cert.pem",
-		"https://evil-amazonaws.com/cert.pem",
-		"http://sns.ap-southeast-2.amazonaws.com/cert.pem", // not https
+		"https://evil.example.com/SimpleNotificationService-a.pem",
+		"https://sns.amazonaws.com.evil.tld/SimpleNotificationService-a.pem",
+		"https://evil-amazonaws.com/SimpleNotificationService-a.pem",
+		"http://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-a.pem", // not https
 		// The dangerous near-miss: anyone with an AWS account can serve arbitrary
 		// files from these hosts, so accepting them means accepting an
 		// attacker-supplied signing key. "Ends with .amazonaws.com" is NOT the
 		// property we need — only SNS's own regional endpoints are.
-		"https://my-bucket.s3.amazonaws.com/cert.pem",
-		"https://s3.ap-southeast-2.amazonaws.com/my-bucket/cert.pem",
-		"https://sns.evil.com.amazonaws.com/cert.pem", // extra label in the region slot
-		"https://notsns.ap-southeast-2.amazonaws.com/cert.pem",
+		"https://my-bucket.s3.amazonaws.com/SimpleNotificationService-a.pem",
+		"https://s3.ap-southeast-2.amazonaws.com/SimpleNotificationService-a.pem",
+		"https://sns.evil.com.amazonaws.com/SimpleNotificationService-a.pem", // extra label in the region slot
+		"https://notsns.ap-southeast-2.amazonaws.com/SimpleNotificationService-a.pem",
 	} {
 		if _, err := newCertCache().get(context.Background(), host); err == nil {
 			t.Fatalf("cert URL %q was accepted, want rejection", host)
@@ -240,15 +276,282 @@ func TestSESHookCertHostCheck(t *testing.T) {
 	// Genuine SNS endpoints must still pass the host check. They fail later (no
 	// server is listening), so assert on WHICH error came back.
 	for _, host := range []string{
-		"https://sns.ap-southeast-2.amazonaws.com/cert.pem",
-		"https://sns.us-east-1.amazonaws.com/cert.pem",
-		"https://sns.cn-north-1.amazonaws.com.cn/cert.pem",
+		"https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-1234.pem",
+		"https://sns.us-east-1.amazonaws.com/SimpleNotificationService-1234.pem",
+		"https://sns.cn-north-1.amazonaws.com.cn/SimpleNotificationService-1234.pem",
 	} {
-		_, err := newCertCache().get(context.Background(), host)
-		if errors.Is(err, errUntrustedCertHost) {
-			t.Fatalf("cert URL %q was rejected as an untrusted host, want it allowed", host)
+		if _, err := certKey(host); err != nil {
+			t.Fatalf("cert URL %q was rejected (%v), want it allowed", host, err)
 		}
 	}
+}
+
+// TestSNSCertURLPathConstrained: the host check alone leaves the PATH free, and
+// an SNS endpoint serves plenty of bytes that are not a signing certificate. AWS's
+// own verifiers pin the filename shape; so do we, and the constraint doubles as a
+// canonical cache key so `?n=1`, `?n=2`, ... cannot mint unlimited cache misses.
+func TestSNSCertURLPathConstrained(t *testing.T) {
+	for _, raw := range []string{
+		"https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-x.pem?n=1", // query
+		"https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-x.pem#f",   // fragment
+		"https://sns.ap-southeast-2.amazonaws.com/cert.pem",                            // wrong name
+		"https://sns.ap-southeast-2.amazonaws.com/",                                    // no file
+		"https://sns.ap-southeast-2.amazonaws.com/sub/SimpleNotificationService-x.pem", // not at the root
+		"https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-x.pem.txt", // not a .pem
+		"https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-.pem/../x", // traversal
+		"https://user:pw@sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-x.pem",
+	} {
+		if _, err := certKey(raw); err == nil {
+			t.Fatalf("cert URL %q was accepted, want rejection", raw)
+		}
+	}
+	// Two spellings of the same URL must be ONE cache key, or the cache is a
+	// fetch amplifier rather than a fetch preventer.
+	a, err := certKey("https://SNS.ap-southeast-2.amazonaws.com/SimpleNotificationService-x.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := certKey(testCertURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatalf("different certificates share a cache key: %q", a)
+	}
+	c, _ := certKey("https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-x.pem")
+	if a != c {
+		t.Fatalf("host case changed the cache key: %q vs %q", a, c)
+	}
+}
+
+// countingTransport serves one certificate and counts how many times it was
+// actually fetched, which is the quantity G4 is about: a caller must not be able
+// to turn each POST into an outbound request.
+type countingTransport struct {
+	pem  []byte
+	code int
+	n    int
+}
+
+func (c *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	c.n++
+	code := c.code
+	if code == 0 {
+		code = http.StatusOK
+	}
+	return &http.Response{
+		StatusCode: code,
+		Status:     http.StatusText(code),
+		Body:       io.NopCloser(bytes.NewReader(c.pem)),
+		Header:     http.Header{},
+	}, nil
+}
+
+// TestSNSCertCacheBoundsFetches: a hit costs nothing, and — the part that was
+// missing — a MISS costs nothing the second time either. Without negative caching
+// every refused URL was a free outbound TLS request.
+func TestSNSCertCacheBoundsFetches(t *testing.T) {
+	ctx := context.Background()
+	_, certPEM := testSigningCert(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+
+	ok := &countingTransport{pem: certPEM}
+	cache := newCertCache()
+	cache.http = &http.Client{Transport: ok}
+	for i := 0; i < 5; i++ {
+		if _, err := cache.get(ctx, testCertURL); err != nil {
+			t.Fatalf("fetch %d: %v", i, err)
+		}
+	}
+	if ok.n != 1 {
+		t.Fatalf("%d outbound fetches for one certificate, want 1", ok.n)
+	}
+
+	bad := &countingTransport{code: http.StatusNotFound}
+	neg := newCertCache()
+	neg.http = &http.Client{Transport: bad}
+	for i := 0; i < 5; i++ {
+		if _, err := neg.get(ctx, testCertURL); err == nil {
+			t.Fatal("a 404 signing-cert URL was accepted")
+		}
+	}
+	if bad.n != 1 {
+		t.Fatalf("%d outbound fetches for one failing URL, want 1 (negative caching)", bad.n)
+	}
+
+	// A URL we refuse on shape must cost ZERO fetches, however many times it comes.
+	shape := &countingTransport{pem: certPEM}
+	sc := newCertCache()
+	sc.http = &http.Client{Transport: shape}
+	for i := 0; i < 64; i++ {
+		if _, err := sc.get(ctx, fmt.Sprintf("%s?n=%d", testCertURL, i)); err == nil {
+			t.Fatal("a query-bearing cert URL was accepted")
+		}
+	}
+	if shape.n != 0 {
+		t.Fatalf("%d outbound fetches for URLs we refuse outright, want 0", shape.n)
+	}
+}
+
+// TestSNSCertRevalidatedOnUse: "we trusted it an hour ago" is not a reason to keep
+// trusting a signing key that has since expired, and the cache is the only place
+// that would.
+func TestSNSCertRevalidatedOnUse(t *testing.T) {
+	cert, _ := testSigningCert(t, time.Now().Add(-48*time.Hour), time.Now().Add(-time.Hour))
+	cache := newCertCache()
+	// Cached while it was valid, with plenty of TTL left.
+	cache.certs[testCertURL] = cachedCert{cert: cert, expires: time.Now().Add(certTTL)}
+	if _, err := cache.get(context.Background(), testCertURL); err == nil {
+		t.Fatal("an expired certificate was served from the cache")
+	}
+}
+
+// TestSNSCertCacheEvictionKeepsWorkingEntry: clearing the whole map on overflow let
+// a flood of junk URLs evict the one certificate every real notification needs, so
+// each genuine event paid for a fresh fetch. Eviction must drop one entry, not all.
+func TestSNSCertCacheEvictionKeepsWorkingEntry(t *testing.T) {
+	cert, _ := testSigningCert(t, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	cache := newCertCache()
+	cache.certs[testCertURL] = cachedCert{cert: cert, expires: time.Now().Add(certTTL)}
+	now := time.Now()
+	for i := 0; i < maxCachedCerts*2; i++ {
+		cache.evictLocked(now)
+		cache.certs[fmt.Sprintf("https://sns.ap-southeast-2.amazonaws.com/SimpleNotificationService-%d.pem", i)] =
+			cachedCert{err: errors.New("nope"), expires: now.Add(certNegTTL)}
+	}
+	if len(cache.certs) > maxCachedCerts {
+		t.Fatalf("cache holds %d entries, over the %d cap", len(cache.certs), maxCachedCerts)
+	}
+	if _, ok := cache.certs[testCertURL]; !ok {
+		t.Fatal("the long-lived good certificate was evicted by short-lived junk")
+	}
+}
+
+// testSigningCert makes a self-signed RSA certificate with the given validity
+// window, plus its PEM encoding.
+func testSigningCert(t *testing.T, notBefore, notAfter time.Time) (*x509.Certificate, []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(7),
+		Subject:      pkix.Name{CommonName: "sns.amazonaws.com"},
+		NotBefore:    notBefore,
+		NotAfter:     notAfter,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// TestSESHookThrottled: the route is public and each accepted message can cost an
+// outbound certificate fetch, so it must shed like every other public route.
+func TestSESHookThrottled(t *testing.T) {
+	s, key := newSESTestServer(t)
+	s.sesHookLimit = newRateLimiter(1, time.Minute)
+	msg := `{"notificationType":"Bounce","bounce":{"bounceType":"Permanent","bounceSubType":"General",
+	  "bouncedRecipients":[{"emailAddress":"first@example.com","status":"5.1.1"}]}}`
+	body := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "t1", TopicARN: testTopic, Message: msg,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code != http.StatusOK {
+		t.Fatalf("first event = %d, want 200", w.Code)
+	}
+	second := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "t2", TopicARN: testTopic, Message: msg,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	w := postSNS(s, second)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("second event = %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("a shed request should say when to come back")
+	}
+}
+
+// TestSESHookSignatureVersion pins the digest. SignatureVersion is NOT covered by
+// the signature, so a caller who can choose it chooses how strong the endpoint's
+// trust is — and version 1 is RSA-SHA1 over a string containing text a remote
+// mail server wrote.
+func TestSESHookSignatureVersion(t *testing.T) {
+	msg := `{"notificationType":"Complaint","complaint":{"complaintFeedbackType":"abuse",
+	  "complainedRecipients":[{"emailAddress":"v@example.com"}]}}`
+	fresh := func() string { return time.Now().UTC().Format(time.RFC3339) }
+
+	t.Run("an unknown version is refused", func(t *testing.T) {
+		s, key := newSESTestServer(t)
+		body := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "v3", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		}, "1")
+		// Sign as v1, then relabel: the version is not covered by the signature.
+		relabelled := strings.Replace(string(body), `"SignatureVersion":"1"`, `"SignatureVersion":"3"`, 1)
+		if w := postSNS(s, []byte(relabelled)); w.Code != http.StatusForbidden {
+			t.Fatalf("SignatureVersion 3 = %d, want 403", w.Code)
+		}
+	})
+
+	t.Run("version 2 is accepted", func(t *testing.T) {
+		s, key := newSESTestServer(t)
+		body := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "v2", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		}, "2")
+		if w := postSNS(s, body); w.Code != http.StatusOK {
+			t.Fatalf("SignatureVersion 2 = %d, want 200", w.Code)
+		}
+		if !sesSigV2Seen.Load() {
+			t.Fatal("a verified version-2 message should pin the topic to version 2")
+		}
+	})
+
+	t.Run("an unverified version 2 cannot pin the topic", func(t *testing.T) {
+		// Otherwise anyone could POST an unsigned {"SignatureVersion":"2"} and shut
+		// bounce handling down on a topic that legitimately still signs with 1.
+		s, key := newSESTestServer(t)
+		forged, _ := json.Marshal(snsMessage{
+			Type: "Notification", MessageID: "f", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+			SignatureVersion: "2", Signature: base64.StdEncoding.EncodeToString([]byte("not a signature")),
+			SigningCertURL: testCertURL,
+		})
+		if w := postSNS(s, forged); w.Code != http.StatusForbidden {
+			t.Fatalf("forged version-2 message = %d, want 403", w.Code)
+		}
+		if sesSigV2Seen.Load() {
+			t.Fatal("a message that failed verification upgraded the version policy")
+		}
+		// A genuine version-1 event still works, which is the whole point: refusing it
+		// would stop bounce processing and the app would keep mailing dead addresses.
+		good := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "g", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		}, "1")
+		if w := postSNS(s, good); w.Code != http.StatusOK {
+			t.Fatalf("version-1 event after a forgery attempt = %d, want 200", w.Code)
+		}
+	})
+
+	t.Run("version 1 is refused once the topic has signed with version 2", func(t *testing.T) {
+		s, key := newSESTestServer(t)
+		v2 := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "up", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		}, "2")
+		if w := postSNS(s, v2); w.Code != http.StatusOK {
+			t.Fatalf("version-2 event = %d, want 200", w.Code)
+		}
+		v1 := signSNSVersion(t, key, &snsMessage{
+			Type: "Notification", MessageID: "down", TopicARN: testTopic, Message: msg, Timestamp: fresh(),
+		}, "1")
+		if w := postSNS(s, v1); w.Code != http.StatusForbidden {
+			t.Fatalf("downgrade to version 1 = %d, want 403", w.Code)
+		}
+	})
 }
 
 // TestSESHookDisabled: with no topic configured the route must not exist at all.
