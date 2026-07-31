@@ -104,6 +104,10 @@ func (c *Client) silentRenew(ctx context.Context, owner, cookie string) (string,
 	if err != nil {
 		return "", time.Time{}, "", err
 	}
+	// A clean renew is the fleet breaker's recovery signal: if the edge were still
+	// blocking our IP this authorize would not have returned a code. This is how a
+	// keep-warm probe closes a half-open circuit even when no API call is in flight.
+	c.noteCouncilSuccess(owner)
 	return tok.AccessToken, time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second), newCookie, nil
 }
 
@@ -212,6 +216,9 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	// already refusing this owner is how a soft block escalates to a hard one.
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
+	}
+	if err := c.breakerGate(); err != nil {
+		return err
 	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -349,6 +356,8 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	if !hasCookieNamed(cookie, councilSessionCookie) {
 		return ErrLoginRejected
 	}
+	// A completed login means the edge served the whole flow: recovery signal.
+	c.noteCouncilSuccess(owner)
 
 	// 5. Seal and store the session cookie. The password is sealed and kept only
 	//    if the user opted in to auto-reconnect; otherwise it is dropped here and
