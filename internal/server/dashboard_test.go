@@ -273,8 +273,21 @@ func TestTemplatesRender(t *testing.T) {
 		{"plate-refreshing-follow-up", func() permitView {
 			p := samplePermitView(loc)
 			p.PlateRefreshing = true
+			p.armPlatePoll(0)
 			return p
-		}, `hx-get="/permits/7/card"`},
+		}, `hx-get="/permits/7/card?n=1"`},
+		{"applying-follow-up", func() permitView {
+			// A change in flight arms the same bounded poll, even with a fresh cache.
+			p := samplePermitView(loc)
+			p.Applying = true
+			p.armPlatePoll(0)
+			return p
+		}, `hx-get="/permits/7/card?n=1"`},
+		{"applying-spinner", func() permitView {
+			p := samplePermitView(loc)
+			p.Applying = true
+			return p
+		}, `Applying your change`},
 	} {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {
@@ -283,6 +296,19 @@ func TestTemplatesRender(t *testing.T) {
 		if !strings.Contains(b.String(), ec.want) {
 			t.Fatalf("permit-body/%s missing %q", ec.name, ec.want)
 		}
+	}
+
+	// At the attempt cap the card must NOT arm another poll, so a council outage or
+	// a change the council keeps refusing cannot loop the card forever.
+	capped := samplePermitView(loc)
+	capped.Applying = true
+	capped.armPlatePoll(maxPlatePolls)
+	var cb bytes.Buffer
+	if err := templates.ExecuteTemplate(&cb, "permit-body", capped); err != nil {
+		t.Fatalf("render permit-body/poll-cap: %v", err)
+	}
+	if strings.Contains(cb.String(), "/permits/7/card") {
+		t.Fatalf("permit-body armed a follow-up poll at the attempt cap:\n%s", cb.String())
 	}
 
 	// The htmx fragment must render standalone (it's swapped in on schedule edits).
