@@ -289,6 +289,13 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		source = string(res.Source)
 	}
 	desiredReg, _, _ := dispReg(res.VehicleID, res.Registration)
+	// A change is in flight when the schedule wants a plate right now that the
+	// council's confirmed record does not yet show. desiredReg != "" excludes an
+	// unresolvable schedule (a deleted vehicle), which the scheduler reports rather
+	// than applies, so it is not "applying". SamePlate, not !=, for the same reason
+	// the drift check uses it: the council echoes case/spacing variants.
+	applying := res.Source != model.SourceNone && desiredReg != "" &&
+		!model.SamePlate(desiredReg, p.ActiveRegistration)
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
@@ -296,7 +303,11 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		RosterEmpty:     len(rules) == 0,
 		Detail:          permitDetail(p),
 		PlateRefreshing: plateRefreshing,
+		Applying:        applying,
 	}
+	// Default to a first-attempt poll; a fragment response refines this with the
+	// real attempt count (see respondPermit). A full page render keeps attempt 0.
+	pv.armPlatePoll(0)
 	fillExpiry(&pv, now)
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
 	// renewal creates a fresh permit under a new council id).
@@ -591,6 +602,28 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 
 // respondPermit re-renders just the permit's body for htmx swaps, or falls back
 // to a full-page redirect for non-htmx submits.
+// maxPlatePolls bounds how many times a card re-fetches itself to catch a plate
+// still settling at the council. At the 5s template interval that is ~50s — long
+// enough for a normal apply (the council read + write + confirm the scheduler
+// does, spaced), short enough that a council outage or a change the council keeps
+// refusing cannot turn the card into a permanent poll. Past the cap the card shows
+// the council's confirmed state and the "applying" spinner stays put until a
+// reload; the scheduler keeps retrying and notifies the user out of band.
+const maxPlatePolls = 10
+
+// armPlatePoll sets PollNext: whether this card should re-fetch itself, and with
+// what next attempt number. It arms while a background refresh is running (stale
+// cache) OR a change is in flight (Applying), never past maxPlatePolls. attempt is
+// how many polls have already been served — 0 on a full page render or the
+// fragment a user action returns, higher on a self-refresh follow-up.
+func (pv *permitView) armPlatePoll(attempt int) {
+	if attempt < maxPlatePolls && (pv.PlateRefreshing || pv.Applying) {
+		pv.PollNext = attempt + 1
+		return
+	}
+	pv.PollNext = 0
+}
+
 func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner string, p model.Permit) {
 	if r.Header.Get("HX-Request") == "" {
 		redirectHome(w, r)
@@ -608,9 +641,12 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 		s.serverError(w, err)
 		return
 	}
-	// Fragments are one-shot: never embed another follow-up fetch, so a council
-	// outage can't turn the page into a persistent polling loop.
-	pv.PlateRefreshing = false
+	// Re-arm the self-refresh against the attempt count this fetch carried, so the
+	// card keeps swapping in the settling plate — a bounded poll (armPlatePoll caps
+	// it), which is what lets a just-made change refresh without a manual reload
+	// while still preventing a council outage from looping forever.
+	attempt, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	pv.armPlatePoll(attempt)
 	_, _, pv.IsPrimary = s.resolveAccount(ctx)
 	// The colour key lives ABOVE the permit cards, outside this fragment's target,
 	// so a roster change would otherwise leave it stale until the next full load —

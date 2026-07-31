@@ -123,13 +123,17 @@
          the neutral .plate default, which is how a visitor's one-off plate reads as
          "not one of your cars". */}}
     {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
-    {{/* Fixed-size status slot: spinner while a background council check runs,
-         a tick otherwise — same footprint either way, so the pill never shifts. */}}
-    <span class="pslot">{{if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
-    {{if .PlateRefreshing}}{{/* One-shot follow-up that swaps in the checked value; the
-         fragment response never re-emits it (see respondPermit). display:none so the
-         helper div is not a flex item nudging the pill's layout. */}}
-    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card" hx-trigger="load delay:5s" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"></div>
+    {{/* Fixed-size status slot: an "applying" spinner while a change is landing, a
+         "checking" spinner while a background council read runs, a tick once the
+         shown plate IS the council's confirmed state — same footprint throughout, so
+         the pill never shifts. The plate above stays the council-confirmed value the
+         whole time; the spinner announces a pending change, it does not pre-show it. */}}
+    <span class="pslot">{{if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
+    {{if .PollNext}}{{/* Bounded self-refresh: re-fetches the card until the council
+         confirms the settled plate or the attempt cap is hit (see armPlatePoll), so a
+         just-made change swaps in without a reload while an outage still can't loop.
+         display:none so the helper div is not a flex item nudging the pill's layout. */}}
+    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:5s" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"></div>
     {{end}}
   </div>
 </div>

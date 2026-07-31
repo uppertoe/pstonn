@@ -232,10 +232,22 @@ type permitView struct {
 	// htmx fragment, where the dashboard's own IsPrimary is out of scope.
 	IsPrimary bool
 	// PlateRefreshing: "on permit now" was served from a stale (or absent) cache
-	// while a background council refresh runs; the card renders a subtle spinner
-	// and a one-shot htmx follow-up that swaps in the refreshed value. Full page
-	// renders only — fragment responses clear it so polling can't loop.
+	// while a background council refresh runs. Renders a subtle "checking" spinner.
 	PlateRefreshing bool
+	// Applying: the schedule's desired plate for right now is not yet the plate the
+	// council confirms is on the permit — a change is in flight (a booking just made,
+	// a roster edit affecting today). Renders an "applying" spinner. Crucially this
+	// is NOT the same as showing the new plate: "on permit now" keeps displaying the
+	// council-confirmed plate until the council itself confirms the change, so the
+	// badge never claims a change that hasn't landed.
+	Applying bool
+	// PollNext, when > 0, is the attempt number for a bounded self-refresh: the card
+	// re-fetches itself (/permits/{id}/card?n=PollNext) to swap in the settled plate
+	// without a manual reload, while a refresh or an apply is still outstanding.
+	// Bounded (see armPlatePoll) so a council outage or a rejected change can't turn
+	// the card into a permanent poll — the concern that used to force fragments to
+	// arm no follow-up at all, which is why a just-made change never refreshed.
+	PollNext int
 }
 
 // expiredPermitView is the compact row shown for a permit p.stonn no longer acts
