@@ -116,6 +116,11 @@
     </div>
     <p class="empty-note" style="margin-top:12px">Your login and password are managed by your organisation's sign-in provider, not this app.</p>
     {{if .Terms.Accepted}}<p class="empty-note" style="margin-top:8px">Terms accepted: {{.Terms.Accepted}}.</p>{{end}}
+    {{/* A signed-in person had no way to reach the contact form: it is linked from the
+         public header and from the footer of outgoing mail, neither of which is in
+         front of someone already inside the app. Shown only when contact is
+         configured, matching every other link to it. */}}
+    {{if .Contact}}<p class="empty-note" style="margin-top:8px">Something wrong, or a question? <a href="/contact">Get in touch</a>.</p>{{end}}
   </section>
 
 {{end}}

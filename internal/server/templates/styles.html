@@ -313,10 +313,21 @@
 
   /* one-offs list */
   .oneoff-list { display:grid; gap:8px; margin:2px 0 4px; }
-  .oneoff-item { display:grid; grid-template-columns:1fr auto 40px; align-items:center; gap:14px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; background:var(--surface-2); }
+  /* The car keeps its natural width and the detail column absorbs the slack: a
+     grid track's default minimum is its content width, so with `1fr auto` an
+     unbreakable string (the email in "· by …") pushed the row past its card. Making
+     BOTH tracks shrinkable is the obvious fix and the wrong one — the detail column
+     then wins the space and crushes the car's name and plate to a few characters.
+     Only the second track is flexible, so the long text wraps and the car does not. */
+  .oneoff-item { display:grid; grid-template-columns:auto minmax(0,1fr) 40px; align-items:center; gap:14px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; background:var(--surface-2); }
   .oneoff-item .veh { min-width:0; }
   .oneoff-item .veh .lab, .oneoff-item .veh { overflow:hidden; }
-  .oneoff-item .when { font-size:13px; color:var(--muted); text-align:left; white-space:nowrap; }
+  /* The cell wraps, but the timestamps inside it do not: a date split across two
+     lines is harder to read than a wrapped row is untidy. Only the attribution,
+     which is the long part, is allowed to break mid-word. */
+  .oneoff-item .when { font-size:13px; color:var(--muted); text-align:left; min-width:0; }
+  .oneoff-item .when .nb { white-space:nowrap; }
+  .oneoff-item .when .by { overflow-wrap:anywhere; }
   .oneoff-item form { justify-self:end; }
   @media (max-width:600px){
     .oneoff-item { grid-template-columns:1fr 40px; }
