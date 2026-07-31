@@ -99,8 +99,15 @@ type Config struct {
 	//
 	// This exists because convergence latency, not council capacity, is the limit:
 	// reconcile applies changes one permit at a time with a few seconds between
-	// them, and rosters roll at a common wall-clock boundary, so past roughly fifty
-	// households the last one's midnight change lands minutes late.
+	// them, and rosters roll at a common wall-clock boundary, so the last household's
+	// midnight change lands late in proportion to the fleet.
+	//
+	// That latency is no longer an implicit cliff to be guessed at. The rollover
+	// window (RolloverWindow) makes it deliberate and bounded, and startup logs the
+	// actual convergence bound for the permits on file — so the question "is this
+	// many accounts still acceptable?" is now answered by that number rather than by
+	// this cap. Raising MaxAccounts is safe as long as the logged bound stays inside
+	// what a roster can tolerate; it is the bound, not the account count, to watch.
 	MaxAccounts int
 
 	// RosterKey seals the user roster in the /status payload (32 bytes, 64 hex, via
@@ -198,6 +205,28 @@ type CouncilConfig struct {
 	// pass. See scheduler.warmLoop.
 	WarmInterval time.Duration
 
+	// RolloverWindow staggers SCHEDULED plate changes across a window opening at
+	// the schedule boundary, capped at this value. COUNCIL_ROLLOVER_WINDOW, default
+	// 60m. The window SCALES with the fleet (see scheduler.effectiveSpread), so this
+	// is a ceiling on how stale a permit may get, not a fixed delay: a handful of
+	// permits spread over seconds, a large fleet up to this cap.
+	//
+	// Rosters are written in human hours, so households share a handful of
+	// boundaries and overwhelmingly midnight; applied the moment they fall due,
+	// every household's change leaves this one IP back to back. Spreading them is
+	// the cheapest way to stop the largest burst we produce looking like abuse.
+	//
+	// The price is precision: between the boundary and its slot a permit still
+	// shows the previous day's plate. That is acceptable for a roster whose car
+	// arrives hours later and NOT acceptable for a change someone is waiting on, so
+	// only clock-driven changes are spread (model.Resolution.Scheduled) — a booking
+	// or guest activation still applies on the next tick.
+	//
+	// Below permits*RateDelay the window buys nothing, because the serial drain is
+	// already the constraint; startup logs the resulting convergence bound and says
+	// so. 0 disables spreading entirely.
+	RolloverWindow time.Duration
+
 	// ReminderLead is how far before the SessionMaxAge deadline to email the user
 	// a "confirm you're still using this" link. COUNCIL_REMINDER_LEAD_DAYS,
 	// default 7.
@@ -254,16 +283,17 @@ func Load() (*Config, error) {
 		DevIdentityEmail: strings.ToLower(strings.TrimSpace(os.Getenv("DEV_IDENTITY_EMAIL"))),
 		CookieSecure:     env("COOKIE_SECURE", "true") != "false",
 		Council: CouncilConfig{
-			Issuer:        env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
-			ClientID:      env("COUNCIL_CLIENT_ID", "ePermits.ssp.web"),
-			RedirectURI:   env("COUNCIL_REDIRECT_URI", "https://parkingpermits.stonnington.vic.gov.au/ssp/callback"),
-			Scopes:        strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
-			APIBase:       env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
-			SessionMaxAge: time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
-			WarmInterval:  envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
-			Sandbox:       env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
-			ReminderLead:  time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
-			ExpiryLead:    time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
+			Issuer:         env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
+			ClientID:       env("COUNCIL_CLIENT_ID", "ePermits.ssp.web"),
+			RedirectURI:    env("COUNCIL_REDIRECT_URI", "https://parkingpermits.stonnington.vic.gov.au/ssp/callback"),
+			Scopes:         strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
+			APIBase:        env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
+			SessionMaxAge:  time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
+			WarmInterval:   envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
+			RolloverWindow: envDuration("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
+			Sandbox:        env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
+			ReminderLead:   time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
+			ExpiryLead:     time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
 		},
 		AuthLogoutURL: strings.TrimSpace(os.Getenv("AUTH_LOGOUT_URL")),
 		TermsPath:     strings.TrimSpace(os.Getenv("TERMS_PATH")),

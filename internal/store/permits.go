@@ -206,3 +206,13 @@ func (s *Store) DeletePermit(ctx context.Context, id int64, owner string) error 
 	}
 	return tx.Commit()
 }
+
+// CountPermits returns how many permits are on file across all accounts. Used to
+// report the rollover convergence bound at startup: the burst a shared schedule
+// boundary produces scales with this number, so the guarantee is only meaningful
+// stated against it.
+func (s *Store) CountPermits(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM permit`).Scan(&n)
+	return n, err
+}

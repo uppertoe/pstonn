@@ -199,7 +199,7 @@ func envFloatTest(t *testing.T, key string, def float64) float64 {
 // from the environment and never persisted.
 //
 // This is the ONE core mechanism not yet validated live, and the login POST is
-// where Akamai bot-detection is most likely to bite. Runs only when
+// where Azure Front Door bot-detection is most likely to bite. Runs only when
 // PSTONN_LIVE_USERNAME and PSTONN_LIVE_PASSWORD are set.
 func TestLiveLinkLogin(t *testing.T) {
 	username := os.Getenv("PSTONN_LIVE_USERNAME")

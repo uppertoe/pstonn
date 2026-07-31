@@ -48,6 +48,12 @@ type fakeCouncil struct {
 
 // setCurrent makes the council report reg on a permit, as if someone had changed it
 // in the portal directly.
+//
+// It updates BOTH views the real council exposes: the per-permit managedVehicle
+// read (current) and the owner-level Index/grid row (permits). A 2026-07-31 live
+// capture confirmed the two agree, and drift detection now reads the grid, so a
+// fake that populated only one of them would no longer model the council at all.
+// Use setGridRego to drive them apart deliberately.
 func (f *fakeCouncil) setCurrent(councilPermitID, reg string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -55,6 +61,47 @@ func (f *fakeCouncil) setCurrent(councilPermitID, reg string) {
 		f.current = map[string]string{}
 	}
 	f.current[councilPermitID] = reg
+	f.upsertGridLocked(councilPermitID, func(pi *parking.PermitInfo) { pi.CurrentRego = reg })
+}
+
+// setGridRego changes ONLY the grid's view of the plate, leaving managedVehicle's
+// alone — the disagreement drift's empty-plate corroboration exists to survive.
+func (f *fakeCouncil) setGridRego(councilPermitID, reg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upsertGridLocked(councilPermitID, func(pi *parking.PermitInfo) { pi.CurrentRego = reg })
+}
+
+// setCouncilEndDate makes the council report an expiry for the permit. The council
+// is the authority on expiry, and checkDrift writes what it reports straight into
+// the permit row, so a test that wants an expired permit must expire it HERE.
+func (f *fakeCouncil) setCouncilEndDate(councilPermitID string, end time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upsertGridLocked(councilPermitID, func(pi *parking.PermitInfo) { pi.EndDate = end })
+}
+
+// upsertGridLocked finds or appends the grid row for a permit and applies mutate.
+// Callers hold f.mu. New rows default to a granted permit expiring well in the
+// future, so merely reporting a plate never silently retires the fixture.
+func (f *fakeCouncil) upsertGridLocked(councilPermitID string, mutate func(*parking.PermitInfo)) {
+	for i := range f.permits {
+		if f.permits[i].CouncilPermitID == councilPermitID {
+			mutate(&f.permits[i])
+			return
+		}
+	}
+	pi := parking.PermitInfo{
+		CouncilPermitID:  councilPermitID,
+		PermitTypeID:     "14",
+		PermitNumber:     "VPP" + councilPermitID,
+		PermitType:       "(A) 1st Visitor Permit",
+		Status:           "Granted",
+		EndDate:          time.Now().AddDate(1, 0, 0),
+		CanChangeVehicle: true,
+	}
+	mutate(&pi)
+	f.permits = append(f.permits, pi)
 }
 
 func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, reg string) error {
@@ -123,7 +170,9 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 	return f.reconnectErr
 }
 func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
-	return f.permits, f.permitsErr
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]parking.PermitInfo(nil), f.permits...), f.permitsErr
 }
 
 type sentMail struct {

@@ -156,7 +156,7 @@ func TestAPIRequest401RenewsAndRetries(t *testing.T) {
 	}
 }
 
-// An HTML 403 is Akamai push-back: transient, penalized, ErrCouncilBusy.
+// An HTML 403 is Azure Front Door push-back: transient, penalized, ErrCouncilBusy.
 func TestAPIRequest403HTMLIsBusy(t *testing.T) {
 	f := newFakeCouncil(t)
 	c, st, box := testClient(t, f)
@@ -572,5 +572,37 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "no vehicle to change") {
 		t.Fatalf("err = %v, want the no-vehicle refusal", err)
+	}
+}
+
+// The council reports a refusal as a JSON ARRAY of message objects. Captured live
+// on 2026-07-31 from a manageVehicle POST that was rejected. Before this was
+// parsed the body was discarded and the user saw only "council returned 400",
+// which says nothing they can act on.
+func TestCouncilErrorMessage(t *testing.T) {
+	const live = `[{"Level":0,"Message":"Vehicle Registration has invalid pattern","ID":null,"LinkURL":null,"Title":null,"CustomMessage":null,"LinkLabel":null}]`
+	if got := councilErrorMessage([]byte(live)); got != "Vehicle Registration has invalid pattern" {
+		t.Errorf("live refusal body parsed to %q", got)
+	}
+
+	for name, tc := range map[string]struct{ body, want string }{
+		"custom message wins":     {`[{"Message":"raw","CustomMessage":"Friendlier wording"}]`, "Friendlier wording"},
+		"blank custom falls back": {`[{"Message":"raw","CustomMessage":"  "}]`, "raw"},
+		"multiple joined":         {`[{"Message":"one"},{"Message":"two"}]`, "one; two"},
+		"empty array":             {`[]`, ""},
+		"not an array":            {`{"Message":"nope"}`, ""},
+		"not json":                {`<html>blocked</html>`, ""},
+		"all messages blank":      {`[{"Message":"","CustomMessage":""}]`, ""},
+	} {
+		if got := councilErrorMessage([]byte(tc.body)); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+
+	// Portal-controlled text reaches logs and notifications, so a refusal must not
+	// be able to forge log lines with embedded newlines.
+	got := councilErrorMessage([]byte("[{\"Message\":\"bad\\nJul 31 12:00:00 pstonn: forged\"}]"))
+	if strings.ContainsAny(got, "\n\r") {
+		t.Errorf("newlines survived into an error message: %q", got)
 	}
 }

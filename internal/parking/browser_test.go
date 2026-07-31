@@ -14,10 +14,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// TestBrowserTransportSetsUA confirms every outbound request carries a browser
-// User-Agent (never Go's default) and the client-hint headers, and that an
-// explicitly-set header is not overwritten.
-func TestBrowserTransportSetsUA(t *testing.T) {
+// TestBrowserTransportIdentityBySurface pins the split identity: the OIDC login
+// flow presents the SPA's Chrome identity (with matching client hints), the permit
+// API identifies honestly as p.stonn with NO Chrome client hints, and neither ever
+// ships Go's default UA.
+func TestBrowserTransportIdentityBySurface(t *testing.T) {
 	var gotUA, gotChUA, gotAccept string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.Header.Get("User-Agent")
@@ -27,26 +28,73 @@ func TestBrowserTransportSetsUA(t *testing.T) {
 	defer srv.Close()
 
 	client := &http.Client{Transport: browserTransport{base: http.DefaultTransport}}
-
-	// No headers set: transport must supply them.
-	if _, err := client.Get(srv.URL); err != nil {
-		t.Fatal(err)
+	get := func(path string) {
+		t.Helper()
+		gotUA, gotChUA, gotAccept = "", "", ""
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		if _, err := client.Do(req); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if strings.Contains(gotUA, "Go-http-client") || !strings.Contains(gotUA, "Chrome/") {
-		t.Fatalf("User-Agent = %q, want a Chrome UA and never the Go default", gotUA)
+
+	// The OIDC login surface: the SPA's Chrome identity, coherent with its hints.
+	get("/connect/authorize")
+	if !strings.Contains(gotUA, "Chrome/") {
+		t.Fatalf("login-surface UA = %q, want the Chrome identity", gotUA)
 	}
 	if gotChUA == "" {
-		t.Fatal("sec-ch-ua header was not set")
+		t.Fatal("login-surface sec-ch-ua was not set")
 	}
 
-	// Caller-set header must survive.
-	req, _ := http.NewRequest("GET", srv.URL, nil)
+	// The permit API surface: honest p.stonn, and crucially NO Chrome client hints
+	// — a p.stonn UA carrying Chrome hints would be the exact incoherence the split
+	// removes.
+	get("/ssp-svc/api/Index/grid")
+	if !strings.Contains(gotUA, "p.stonn/") {
+		t.Fatalf("api-surface UA = %q, want the honest p.stonn identity", gotUA)
+	}
+	if strings.Contains(gotUA, "Chrome/") {
+		t.Fatalf("api-surface UA still claims to be Chrome: %q", gotUA)
+	}
+	if gotChUA != "" {
+		t.Fatalf("api-surface leaked Chrome client hints: sec-ch-ua = %q", gotChUA)
+	}
+
+	// Neither surface may ever emit Go's default UA.
+	for _, p := range []string{"/connect/authorize", "/ssp-svc/api/x", "/Account/Login", "/anything"} {
+		get(p)
+		if strings.Contains(gotUA, "Go-http-client") || gotUA == "" {
+			t.Fatalf("path %s shipped a bare/Go UA: %q", p, gotUA)
+		}
+	}
+
+	// Caller-set header must survive on either surface.
+	req, _ := http.NewRequest("GET", srv.URL+"/ssp-svc/api/x", nil)
 	req.Header.Set("Accept", "application/json")
 	if _, err := client.Do(req); err != nil {
 		t.Fatal(err)
 	}
 	if gotAccept != "application/json" {
 		t.Fatalf("caller Accept overwritten: got %q", gotAccept)
+	}
+}
+
+// An unrecognised path must default to the honest identity, never the browser
+// costume: the disguise is granted only to paths positively identified as the
+// SPA's own login flow.
+func TestCouncilIdentityDefaultsHonest(t *testing.T) {
+	for path, wantBrowser := range map[string]bool{
+		"/idm/Account/Login":                 true,
+		"/connect/token":                     true,
+		"/connect/authorize":                 true,
+		"/ssp-svc/api/Index/grid":            false,
+		"/ssp-svc/api/permits/manageVehicle": false,
+		"/something/unexpected":              false,
+		"/":                                  false,
+	} {
+		if got := councilIdentityBrowser(path); got != wantBrowser {
+			t.Errorf("councilIdentityBrowser(%q) = %v, want %v", path, got, wantBrowser)
+		}
 	}
 }
 

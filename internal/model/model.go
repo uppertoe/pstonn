@@ -154,6 +154,22 @@ type Resolution struct {
 	Registration string
 	Source       Source
 	By           string // creator of the winning override ("" for roster/none)
+
+	// Since is when this allocation BECAME the right answer: local midnight for a
+	// roster day, the start (or booking time) of a winning override. Zero for
+	// SourceNone.
+	Since time.Time
+
+	// Scheduled distinguishes a change the CLOCK brought about from one a person
+	// just asked for. A roster day rolling over at midnight is scheduled; so is a
+	// booking made last week whose start time has now arrived. A booking or guest
+	// activation that takes effect the moment it is made is NOT — somebody is
+	// standing there waiting for it.
+	//
+	// It exists so the rollover spread can delay the first kind (nobody is
+	// watching, and 500 households sharing a midnight boundary is the worst burst
+	// the council sees) without ever delaying the second.
+	Scheduled bool
 }
 
 // Resolve decides which vehicle should be allocated to a permit at time now.
@@ -184,13 +200,30 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		}
 	}
 	if best != nil {
-		return Resolution{VehicleID: best.VehicleID, Registration: best.Registration, Source: SourceOverride, By: best.CreatedBy}
+		// An override takes effect when its window opens, or when it was booked if
+		// that is later (a booking backdated over a window already in progress takes
+		// effect the moment it is made). Comparing the two is also what says whether
+		// a person is waiting on this: StartsAt after CreatedAt means it was booked
+		// in advance and the clock brought it about.
+		since, scheduled := best.CreatedAt, false
+		if best.StartsAt.After(best.CreatedAt) {
+			since, scheduled = best.StartsAt, true
+		}
+		return Resolution{
+			VehicleID: best.VehicleID, Registration: best.Registration,
+			Source: SourceOverride, By: best.CreatedBy,
+			Since: since, Scheduled: scheduled,
+		}
 	}
 
 	wd := now.Weekday()
 	for _, r := range rules {
 		if r.Weekday == wd {
-			return Resolution{VehicleID: r.VehicleID, Source: SourceRoster}
+			// A roster day begins at local midnight, and now is already in the
+			// timezone rosters are expressed in (see the doc comment), so the day
+			// boundary is read straight off it.
+			midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			return Resolution{VehicleID: r.VehicleID, Source: SourceRoster, Since: midnight, Scheduled: true}
 		}
 	}
 	return Resolution{Source: SourceNone}
