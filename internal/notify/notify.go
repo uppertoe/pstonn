@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,6 +42,18 @@ type Service struct {
 	// unsubKey signs unsubscribe links. Most recipients of our mail have no
 	// account, so a stateless per-address token is the only opt-out they can have.
 	unsubKey []byte
+	// displacedTo throttles the displaced-driver notice per recipient. That mail
+	// goes to a third party who never signed up for anything, off a plate the
+	// account holder chooses, so a plate flipping back and forth (or an owner
+	// alternating two of them on purpose) would otherwise mail a stranger
+	// indefinitely; the 15-minute outbox dedup only bounds the rate, not the total.
+	displacedTo *sendLimiter
+	// unrecorded holds bookkeeping the store refused for rows the drain has ALREADY
+	// acted on. Touched only by the single RunOutbox goroutine, so it needs no lock.
+	unrecorded map[int64]outboxUpdate
+	// lastWriteAlert paces the operator alert for that condition, which otherwise
+	// repeats on every 15-second tick for as long as the disk stays broken.
+	lastWriteAlert time.Time
 }
 
 // New builds a Service. mail may be nil (email disabled); ntfyBase may be empty
@@ -61,8 +74,63 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		loc:        loc,
 		http:       &http.Client{Timeout: 10 * time.Second},
 		unsubKey:   unsubKey,
+		// Roughly three times what a real recipient sees: a guest whose car is
+		// displaced hears about it when the booking ends, so once or twice a day. Far
+		// below what makes an unsolicited mail stream feel like harassment, and well
+		// under the rate that earns a spam complaint against the whole domain.
+		displacedTo: newSendLimiter(6, 24*time.Hour),
+		unrecorded:  map[int64]outboxUpdate{},
 	}
 }
+
+// RedactEmail reduces an address to something safe to leave in a log while still
+// being useful: the provider is what an operator debugging a delivery problem
+// needs, and the mailbox is what identifies a household. Logs outlive the data
+// they describe (they are shipped, rotated, and read by whoever is on call),
+// while the addresses themselves are already in the DB for anyone entitled to
+// them, so there is nothing to gain by writing them twice.
+func RedactEmail(a string) string {
+	a = strings.TrimSpace(a)
+	if a == "" {
+		return "(none)"
+	}
+	at := strings.LastIndex(a, "@")
+	if at <= 0 {
+		return "***" // not an address shape; say nothing about it
+	}
+	local := []rune(a[:at])
+	return string(local[:1]) + "***" + strings.ToLower(a[at:])
+}
+
+// redactEmails is RedactEmail over a recipient list.
+func redactEmails(list []string) string {
+	if len(list) == 0 {
+		return "(none)"
+	}
+	out := make([]string, 0, len(list))
+	for _, a := range list {
+		out = append(out, RedactEmail(a))
+	}
+	return strings.Join(out, ", ")
+}
+
+// neutraliseLinks strips whole URLs out of owner-supplied free text (a permit
+// label) before it reaches mail we send to people who never opted in.
+//
+// The label is the owner's own text, capped at 40 characters and shown in the
+// app, but a guest-pass email is DKIM-signed by our domain and sent to any
+// address the owner types. The HTML alternative turns bare URLs in the body into
+// real links (mailer.linkify), so without this an account is a machine for
+// mailing a clickable attacker link from a domain with our reputation — and the
+// recipient's spam report lands as a complaint, which is the one suppression that
+// is never pruned and never user-clearable. Removing just the URL keeps every
+// legitimate label ("Nanny", "12 Example St") completely intact.
+func neutraliseLinks(label string) string {
+	return strings.TrimSpace(linkRun.ReplaceAllString(label, "(link removed)"))
+}
+
+// linkRun matches what the mail layer would turn into a clickable link.
+var linkRun = regexp.MustCompile(`(?i)\bhttps?://\S*`)
 
 // quietDefer decides when a notification for this member should actually be
 // delivered. Members can set quiet hours (default 22:00–06:00 local): a message
@@ -131,7 +199,7 @@ func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason strin
 	if s.store != nil {
 		if bad, why, err := s.store.IsSuppressed(ctx, to); err != nil {
 			// Fail OPEN: a lookup error must not stop a permit notification going out.
-			log.Printf("notify: suppression lookup for %s: %v", to, err)
+			log.Printf("notify: suppression lookup for %s: %v", RedactEmail(to), err)
 		} else if bad {
 			return fmt.Errorf("%w: %s", ErrSuppressed, why)
 		}
@@ -146,9 +214,12 @@ func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason strin
 	// mailbox, and acting on it would blacklist every user we tried to reach.
 	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
-			log.Printf("notify: suppress %s: %v", to, serr)
+			log.Printf("notify: suppress %s: %v", RedactEmail(to), serr)
 		} else {
-			log.Printf("notify: suppressing %s after the mail server rejected the address: %v", to, err)
+			// The full address and the server's own diagnostic go in the suppression
+			// row, which is where an operator looks and which gets pruned; the log line
+			// only needs to say that it happened.
+			log.Printf("notify: suppressing %s after the mail server rejected the address", RedactEmail(to))
 		}
 	}
 	return err
@@ -202,14 +273,14 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 		mpref, _ := s.store.GetNotifyPref(ctx, m)
 		if s.mail.Enabled() {
 			if e := s.sendEmail(ctx, m, subject, body, reasonAccount); e != nil {
-				log.Printf("notify relink email %s: %v", m, e)
+				log.Printf("notify relink email %s: %v", RedactEmail(m), e)
 			} else {
 				delivered++
 			}
 		}
 		if mpref.NtfyEnabled && s.ntfyBase != "" && mpref.NtfyTopic != "" {
 			if e := s.sendNtfy(ctx, mpref.NtfyTopic, subject, body, "high", "warning"); e != nil {
-				log.Printf("notify relink ntfy %s: %v", m, e)
+				log.Printf("notify relink ntfy %s: %v", RedactEmail(m), e)
 			} else {
 				delivered++
 			}
@@ -270,14 +341,14 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 		reached := false
 		if wantEmail {
 			if e := s.sendEmail(ctx, d.email, subject, body, reasonAccount); e != nil {
-				log.Printf("notify permit-expiry email %s: %v", d.email, e)
+				log.Printf("notify permit-expiry email %s: %v", RedactEmail(d.email), e)
 			} else {
 				reached = true
 			}
 		}
 		if wantNtfy {
 			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, "default", "calendar"); e != nil {
-				log.Printf("notify permit-expiry ntfy %s: %v", d.email, e)
+				log.Printf("notify permit-expiry ntfy %s: %v", RedactEmail(d.email), e)
 			} else {
 				reached = true
 			}
@@ -309,7 +380,7 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 	}
 	if s.store != nil {
 		if bad, reason, err := s.store.IsSuppressed(ctx, to); err != nil {
-			log.Printf("notify: suppression lookup for %s: %v", to, err)
+			log.Printf("notify: suppression lookup for %s: %v", RedactEmail(to), err)
 		} else if bad {
 			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
 		}
@@ -324,7 +395,7 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 	// As in sendEmail: only a rejected recipient is evidence about this address.
 	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
-			log.Printf("notify: suppress %s: %v", to, serr)
+			log.Printf("notify: suppress %s: %v", RedactEmail(to), serr)
 		}
 	}
 	return err
@@ -687,7 +758,12 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 	}
 	subject := "Your link to set a car on " + ownerEmail + "'s parking permit"
 	lines := []string{
-		ownerEmail + " has given you a link to put a car on their City of Stonnington visitor parking permit (" + permitLabel + ").",
+		// The label is free text the owner typed, and this recipient is whoever the
+		// owner named — so it goes in stripped of anything the mail layer would turn
+		// into a clickable link. It stays in the body because it is how the recipient
+		// knows WHICH permit this is ("Nanny", the flat number), which matters in a
+		// household with more than one.
+		ownerEmail + " has given you a link to put a car on their City of Stonnington visitor parking permit (" + neutraliseLinks(permitLabel) + ").",
 		"",
 		"When you arrive, open the link and choose your car. It stays on the permit until the end of the day.",
 		"",
@@ -718,6 +794,16 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 		fmt.Sprintf("The permit now shows %s instead.", newReg),
 		"",
 		fmt.Sprintf("If %s is still parked there, please move it — or put it back on the permit (with your link, or by asking the permit holder) so you stay covered.", oldReg),
+	}
+	// Per-recipient cap, on top of the dedup below. Every comparable path that mails
+	// an address the account merely NAMED has one (invites, guest links), because
+	// dedup alone only stops the same message twice — it does nothing about an owner
+	// alternating two plates, which yields a fresh key every time. Refusing is not a
+	// lost warning worth an error to the caller: the account's own notification
+	// already carries the "we couldn't reach the driver, please tell them" wording.
+	if !s.displacedTo.allow(to) {
+		log.Printf("notify: displaced-driver notice to %s throttled (per-recipient cap)", RedactEmail(to))
+		return nil
 	}
 	// Dedup key: this recipient has no account and no way to opt out, and a plate
 	// that flips back and forth (a guest double-tap, a schedule fighting an
@@ -986,7 +1072,44 @@ func (s *Service) RunOutbox(ctx context.Context) {
 	}
 }
 
+// outboxUpdate is the bookkeeping the drain owes the store for a row it has
+// already acted on: delivered, retired, or waiting on a backoff. It is carried as
+// data rather than written inline so a write the store REFUSES can be retried on
+// a later pass instead of being lost — see the unrecorded map.
+//
+// It deliberately holds no message content: `who` is already redacted, so parking
+// a row does not keep a copy of the recipient or subject in memory.
+type outboxUpdate struct {
+	status   string // "sent", "dead", or "retry"
+	attempts int
+	next     time.Time
+	lastErr  string
+	who      string // redacted recipient/topic, for the dead-letter announcement
+	why      string // why it was retired, for the same
+}
+
+// maxUnrecorded bounds the parked set. In practice it never exceeds one: the
+// first refused write stops the rest of the pass, so nothing new is sent (and
+// therefore nothing new is parked) until that one write succeeds. The cap is
+// there so a pathological intermittent failure cannot grow the map without
+// bound.
+const maxUnrecorded = 256
+
 func (s *Service) drainOutbox(ctx context.Context) {
+	if s.unrecorded == nil {
+		s.unrecorded = map[int64]outboxUpdate{}
+	}
+	// Settle what we already owe BEFORE sending anything new. These rows have been
+	// delivered (or retired) and are still 'pending' with next_attempt in the past
+	// only because the store refused the write, so DueOutbox would hand them back
+	// and we would send the very same email again.
+	if !s.flushUnrecorded(ctx) {
+		// Still refusing writes. Send nothing at all this pass: a delayed
+		// notification is recoverable, but a send loop against a live mailbox —
+		// 50 rows every 15 seconds for as long as the disk stays full — is the
+		// reputation event the whole suppression list exists to prevent.
+		return
+	}
 	due, err := s.store.DueOutbox(ctx, time.Now(), outboxBatch)
 	if err != nil {
 		log.Printf("notify: read outbox: %v", err)
@@ -996,30 +1119,121 @@ func (s *Service) drainOutbox(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if _, parked := s.unrecorded[it.ID]; parked {
+			continue // already delivered; we just cannot say so yet
+		}
 		lastErr, permanent := s.deliver(ctx, it)
-		if lastErr == "" {
-			_ = s.store.MarkOutboxSent(ctx, it.ID)
-			continue
-		}
-		attempts := it.Attempts + 1
-		if permanent || attempts >= outboxMaxAttempts {
-			_ = s.store.MarkOutboxDead(ctx, it.ID, lastErr)
-			// Always log the drop (the DB 'dead' row is otherwise unsurfaced), and
-			// log if the escalation itself fails — it uses NotifyAdmin, which may
-			// share the very channel that's failing.
-			why := fmt.Sprintf("after %d attempts", attempts)
+		upd := outboxUpdate{status: "sent", who: outboxTarget(it)}
+		switch attempts := it.Attempts + 1; {
+		case lastErr == "":
+		case permanent || attempts >= outboxMaxAttempts:
+			upd.status, upd.attempts, upd.lastErr = "dead", attempts, lastErr
+			upd.why = fmt.Sprintf("after %d attempts", attempts)
 			if permanent {
-				why = "permanently refused"
+				upd.why = "permanently refused"
 			}
-			log.Printf("notify: DROPPED (%s): %q to %v: %s", why, it.Subject, it.Recipients, lastErr)
-			if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
-				fmt.Sprintf("A notification could not be delivered (%s) and was dropped.\nSubject: %s\nTo: %s\nLast error: %s",
-					why, it.Subject, strings.Join(it.Recipients, ", "), lastErr)); ae != nil {
-				log.Printf("notify: dead-letter admin alert also failed: %v", ae)
-			}
-			continue
+		default:
+			upd.status, upd.attempts, upd.lastErr = "retry", attempts, lastErr
+			upd.next = time.Now().Add(outboxBackoff(attempts))
 		}
-		_ = s.store.RescheduleOutbox(ctx, it.ID, attempts, time.Now().Add(outboxBackoff(attempts)), lastErr)
+		if !s.record(ctx, it.ID, upd) {
+			return // the store is not accepting writes; stop sending (see flushUnrecorded)
+		}
+	}
+}
+
+// outboxTarget names a row's destination in redacted form, for logs and operator
+// alerts. An ntfy topic is a shared secret (it is the only access control on the
+// push server), so it is never written out either.
+func outboxTarget(it store.OutboxItem) string {
+	if len(it.Recipients) > 0 {
+		return redactEmails(it.Recipients)
+	}
+	if it.NtfyTopic != "" {
+		return "a push topic"
+	}
+	return "(none)"
+}
+
+// record applies one row's bookkeeping. On success the row leaves the parked set;
+// on failure it enters it, and the caller must stop draining. Reports whether the
+// store accepted the write.
+func (s *Service) record(ctx context.Context, id int64, u outboxUpdate) bool {
+	var err error
+	switch u.status {
+	case "sent":
+		err = s.store.MarkOutboxSent(ctx, id)
+	case "dead":
+		err = s.store.MarkOutboxDead(ctx, id, u.lastErr)
+	default:
+		err = s.store.RescheduleOutbox(ctx, id, u.attempts, u.next, u.lastErr)
+	}
+	if err != nil {
+		s.park(ctx, id, u, err)
+		return false
+	}
+	delete(s.unrecorded, id)
+	if u.status == "dead" {
+		s.announceDead(ctx, id, u)
+	}
+	return true
+}
+
+// park remembers bookkeeping the store refused, so a later pass can complete it
+// instead of re-delivering the row. This is the failure the drain used to discard
+// silently: a read-only remount or a full disk left the row 'pending' with
+// next_attempt in the past, and the same email went out every 15 seconds with
+// nothing anywhere saying so.
+func (s *Service) park(ctx context.Context, id int64, u outboxUpdate, err error) {
+	log.Printf("notify: outbox row %d was %s but the store refused the bookkeeping write (%v) — "+
+		"parking it and sending nothing further until that write lands", id, u.status, err)
+	if len(s.unrecorded) < maxUnrecorded {
+		s.unrecorded[id] = u
+	}
+	// Escalate too: an unwritable store does not fix itself (a full disk, a
+	// read-only remount), and every notification is now stalled behind it. Hourly,
+	// because the drain retries every 15 seconds and NotifyAdmin sends real mail.
+	if now := time.Now(); now.Sub(s.lastWriteAlert) > time.Hour {
+		s.lastWriteAlert = now
+		if ae := s.NotifyAdmin(ctx, "Notification outbox cannot be written",
+			fmt.Sprintf("A notification was delivered but the database would not record it (%v).\n"+
+				"Outbox row: %d\n\nNotifications are PAUSED until the write succeeds, so that the "+
+				"delivered message is not sent again on every retry. Check disk space and that the "+
+				"database volume is writable.", err, id)); ae != nil {
+			log.Printf("notify: outbox-write admin alert also failed: %v", ae)
+		}
+	}
+}
+
+// flushUnrecorded retries the bookkeeping owed for rows already acted on.
+// Reports whether the store is accepting writes (true when there was nothing to
+// do).
+func (s *Service) flushUnrecorded(ctx context.Context) bool {
+	for id, u := range s.unrecorded {
+		if ctx.Err() != nil {
+			return false
+		}
+		if !s.record(ctx, id, u) {
+			return false
+		}
+		log.Printf("notify: outbox row %d bookkeeping recorded on retry (%s)", id, u.status)
+	}
+	return true
+}
+
+// announceDead surfaces a dropped notification. The DB 'dead' row is otherwise
+// unsurfaced, and the escalation itself may share the very channel that failed,
+// so a failure to escalate is logged as well.
+//
+// The row id, not the message: the subject carries the permit label (typically a
+// street address) and a plate, and the row itself is still in the DB for a day if
+// an operator needs the detail.
+func (s *Service) announceDead(ctx context.Context, id int64, u outboxUpdate) {
+	log.Printf("notify: DROPPED outbox row %d (%s) to %s: %s", id, u.why, u.who, u.lastErr)
+	if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
+		fmt.Sprintf("A notification could not be delivered (%s) and was dropped.\nOutbox row: %d\nTo: %s\nLast error: %s",
+			u.why, id, u.who, u.lastErr)); ae != nil {
+		log.Printf("notify: dead-letter admin alert also failed: %v", ae)
 	}
 }
 
@@ -1044,12 +1258,15 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			// damage the suppression list exists to prevent.
 			e := s.sendEmail(ctx, addr, it.Subject, it.Body, it.Reason)
 			if errors.Is(e, ErrSuppressed) {
-				log.Printf("notify: skipping suppressed recipient %s for %q", addr, it.Subject)
+				log.Printf("notify: skipping suppressed recipient %s (outbox row %d)", RedactEmail(addr), it.ID)
 				continue
 			}
 			emailTargets++
 			if e != nil {
-				errs = append(errs, "email "+addr+": "+e.Error())
+				// Redacted: this string is stored in last_error and repeated in the
+				// dead-letter log and operator alert, so the full address would end up in
+				// three places that all outlive the notification.
+				errs = append(errs, "email "+RedactEmail(addr)+": "+e.Error())
 				if !errors.Is(e, mailer.ErrPermanent) {
 					allPermanent = false
 				}
@@ -1058,8 +1275,20 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			}
 		}
 	}
+	// A row addressing BOTH channels cannot express partial success: the outbox
+	// keeps one status per row, so an email failure sends the whole row round the
+	// retry loop and re-pushes an ntfy message that already worked — up to eight
+	// duplicate pushes for one event. enqueueSplit gives every target its own row
+	// precisely so this shape never exists, but the invariant belongs HERE, in the
+	// only code that would do the duplicating: push at most once, on the first
+	// attempt, and let email decide the row's fate as usual.
+	mixed := len(it.Recipients) > 0 && it.NtfyTopic != ""
+	if mixed && it.Attempts == 0 {
+		log.Printf("notify: outbox row %d addresses email and push in one row; "+
+			"pushing once only, since a retry cannot un-push it (enqueueSplit should have split it)", it.ID)
+	}
 	ntfyTargets, ntfyOK := 0, false
-	if it.NtfyTopic != "" && s.ntfyBase != "" {
+	if it.NtfyTopic != "" && s.ntfyBase != "" && !(mixed && it.Attempts > 0) {
 		ntfyTargets++
 		pr := it.NtfyPriority
 		if pr == "" {

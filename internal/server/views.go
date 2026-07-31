@@ -23,6 +23,11 @@ func (s *Server) logoutURL() string {
 func shortDay(w time.Weekday) string { return w.String()[:3] }
 
 type dashboardData struct {
+	// Nonce is the CSP script nonce for this response, stamped on every inline
+	// <script> in layout.html. render() fills it in from the response's own CSP
+	// header, so no handler has to remember to set it — and a page rendered with
+	// no policy in force simply gets "" (see scriptNonce).
+	Nonce       string
 	User        identity.User
 	OIDCEnabled bool
 	State       string // "landing" | "terms" | "onboarding" | "picker" | "app"
@@ -40,7 +45,8 @@ type dashboardData struct {
 	Owner      string       // effective account owner (email) that scopes the data
 	IsPrimary  bool         // whether the signed-in user owns this account
 	SharedWith string       // for a secondary: the primary account's email
-	Members    []memberView // for a primary: the secondaries with access
+	Members    []memberView // for a primary: the secondaries with access (and any unanswered invites)
+	Invite     *inviteView  // an invitation awaiting the signed-in person's answer
 	// dashboard state
 	Vehicles []vehicleView
 	// LegendVehicles is the Schedule page's colour key: only the cars whose colour
@@ -184,6 +190,17 @@ type vehicleView struct {
 type memberView struct {
 	Email string
 	Added string // human date the access was granted
+	// Pending means they have been invited but have not accepted, so they currently
+	// have no access. Shown so an unanswered invite is visible to the owner rather
+	// than looking like access that silently failed.
+	Pending bool
+}
+
+// inviteView is an invitation waiting on the signed-in person's own answer. Held in
+// its own field rather than folded into Members, because this is the one case where
+// the viewer is the subject of the row rather than its owner.
+type inviteView struct {
+	Owner string // the account inviting them
 }
 
 type permitView struct {
@@ -328,6 +345,12 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 }
 
 func (s *Server) render(w http.ResponseWriter, data dashboardData) {
+	// Take the nonce from the response's own CSP header rather than from the
+	// caller. Every dashboardData is built by a handler (several of which construct
+	// it as a literal), so anything the caller had to remember would eventually be
+	// forgotten on one page — and a missing nonce means every inline script on it
+	// silently stops running.
+	data.Nonce = scriptNonce(w)
 	// Execute into a buffer first: writing straight to w means a mid-render
 	// failure (a nil pointer in a view model) ships a truncated page with a 200
 	// that looks like success. Pages are small; the copy is negligible.

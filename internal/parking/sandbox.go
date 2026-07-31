@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -50,7 +51,7 @@ func (sb *councilSandbox) applyLater(id, reg string) {
 // ---- Client hooks (each public method short-circuits here in sandbox mode) ----
 
 func (c *Client) sandboxLink(ctx context.Context, owner, username string) error {
-	cookie, err := c.box.Seal("sandbox-session")
+	cookie, err := c.box.SealCtx(secretbox.CouncilCookie(owner), "sandbox-session")
 	if err != nil {
 		return err
 	}

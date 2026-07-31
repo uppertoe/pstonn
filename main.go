@@ -74,6 +74,16 @@ func run() error {
 	var sessions *session.Manager
 	if len(cfg.SessionSecret) > 0 {
 		sessions = session.New(cfg.SessionSecret, cfg.CookieSecure)
+		// Seed the revocation generations so cookies issued before someone lost access
+		// (or had their account deleted) are refused across a restart too. Only people
+		// who have actually had something revoked have a row, so this is tiny.
+		if epochs, err := st.AllSessionEpochs(context.Background()); err != nil {
+			// Failing open here would silently un-revoke every past revocation, so refuse
+			// to start rather than serve sessions we cannot vouch for.
+			return fmt.Errorf("load session epochs: %w", err)
+		} else {
+			sessions.SetEpochs(epochs)
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -103,10 +113,6 @@ func run() error {
 	if from, app, mismatch := cfg.MailDomainMismatch(); mismatch {
 		log.Printf("WARNING: mail is sent from %q but the app is served at %q. Receivers judge DMARC alignment on the From domain, "+
 			"and mail whose sender is unrelated to the links inside it is scored as phishing. Prefer a From on %s, and publish SPF/DKIM/DMARC for the sending domain.", from, app, app)
-	}
-	if cfg.StatusToken != "" && len(cfg.RosterKey) == 0 {
-		log.Print("WARNING: STATUS_TOKEN is set but ROSTER_KEY is not, so /status returns every user's email and push topic in PLAINTEXT. " +
-			"Set ROSTER_KEY (64 hex chars) here and in the watchdog to encrypt it; the watchdog must then request the roster with ?roster=1.")
 	}
 	if !cfg.SESHookEnabled() && mail.Enabled() {
 		log.Print("NOTE: SES_SNS_TOPIC_ARN not set, so bounce/complaint feedback is not wired up. " +
@@ -176,24 +182,40 @@ func run() error {
 		}
 	}()
 
+	// joinLoops waits for the worker loops to return so the deferred st.Close() does
+	// not land under an in-flight DB call or a half-applied council write. It takes
+	// its OWN deadline rather than sharing the HTTP drain's: a slow drain used to
+	// consume nearly all of a single budget and leave the loops a fraction of a
+	// second, which tripped the "did not stop in time" path during entirely normal
+	// shutdowns. A reconcile pass legitimately sleeps seconds between permits.
+	joinLoops := func() {
+		joinCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		for i := 0; i < cap(loopsDone); i++ {
+			select {
+			case <-loopsDone:
+			case <-joinCtx.Done():
+				log.Print("shutdown: worker loops did not stop in time; closing the store anyway")
+				return
+			}
+		}
+	}
+
 	select {
 	case err := <-errCh:
+		// The listener failed (a port clash after a config edit is the usual cause).
+		// This path used to return immediately, running the deferred st.Close() while
+		// the startup reconcile could still be mid-council-write. Stop the loops first,
+		// then let the deferred close run.
+		stop()
+		joinLoops()
 		return err
 	case <-ctx.Done():
 		log.Print("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err := httpServer.Shutdown(shutdownCtx)
-		// Join the scheduler and outbox loops (bounded by the same deadline)
-		// before the deferred st.Close() runs.
-		for i := 0; i < cap(loopsDone); i++ {
-			select {
-			case <-loopsDone:
-			case <-shutdownCtx.Done():
-				log.Print("shutdown: worker loops did not stop in time")
-				return err
-			}
-		}
+		joinLoops()
 		return err
 	}
 }

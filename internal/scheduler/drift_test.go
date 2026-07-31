@@ -1,0 +1,172 @@
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/uppertoe/pstonn/internal/store"
+)
+
+// checkDrift is how the app notices that a permit was changed OUTSIDE p.stonn —
+// someone editing it in the council portal directly. Until now no test executed it at
+// all, because the fake council always reported an empty current plate, so the drift
+// branch could not be reached. That matters more than most untested code: drift
+// detection is the only thing that recovers the state where the DB and the council
+// disagree, and while they disagree the car actually parked outside is not the car on
+// the permit.
+
+// driftSetup builds an owner with one active permit whose roster wants rosterReg and
+// whose recorded belief is believedReg, plus a council reporting councilReg.
+func driftSetup(t *testing.T, owner, councilID, rosterReg, believedReg, councilReg string) (*store.Store, *fakeCouncil, *fakeNotifier, *Scheduler, int64) {
+	t.Helper()
+	st := newStore(t)
+	pid, _ := seedActivePermit(t, st, owner, councilID, rosterReg, believedReg)
+	fc := &fakeCouncil{}
+	fc.setCurrent(councilID, councilReg)
+	nf := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+	return st, fc, nf, s, pid
+}
+
+// The core case: the council shows a plate the app did not put there. The app must
+// record what the council actually shows (so the activity log tells the truth, and so
+// the re-assertion is not deduped away as a no-op against the pre-drift row) and then
+// re-assert the schedule over it.
+func TestCheckDriftRecordsAndReasserts(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "drift@example.com", "drift-1"
+	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "MEDDLED1")
+
+	s.checkDrift(ctx, owner)
+
+	// The DB now believes what the council reports, not what it wished were true.
+	p, err := st.GetPermit(ctx, pid)
+	if err != nil {
+		t.Fatalf("get permit: %v", err)
+	}
+	if p.ActiveRegistration != "MEDDLED1" {
+		t.Fatalf("recorded plate = %q, want the council's MEDDLED1 — otherwise the next reconcile sees no work to do", p.ActiveRegistration)
+	}
+
+	// The external change is in the activity log, attributed as external.
+	logs, err := st.ListApplyLogFor(ctx, owner, 10)
+	if err != nil {
+		t.Fatalf("list apply log: %v", err)
+	}
+	var found *store.ApplyRecord
+	for i := range logs {
+		if logs[i].Source == "external" {
+			found = &logs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no external row in the activity log: %+v", logs)
+	}
+	if found.Registration != "MEDDLED1" || found.Status != "changed" {
+		t.Errorf("external row = reg %q status %q, want MEDDLED1/changed", found.Registration, found.Status)
+	}
+
+	// And a reconcile now puts the roster back on the permit.
+	s.reconcileAll(ctx)
+	p, _ = st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "ROSTER1" {
+		t.Errorf("after re-assertion the permit holds %q, want the rostered ROSTER1", p.ActiveRegistration)
+	}
+}
+
+// A case- or spacing-only difference is the SAME plate — the council echoes plates
+// back in whatever form they were typed. Treating that as drift would write an
+// "changed directly at the council portal" row and a council write for nothing, which
+// is both a false statement about the user's account and pointless traffic.
+func TestCheckDriftIgnoresCaseAndSpacingVariants(t *testing.T) {
+	ctx := context.Background()
+	for _, variant := range []string{"roster1", "ROSTER 1", "  ROSTER1  ", "RoStEr1"} {
+		t.Run(variant, func(t *testing.T) {
+			const owner, councilID = "same@example.com", "same-1"
+			st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", variant)
+
+			s.checkDrift(ctx, owner)
+
+			if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
+				t.Errorf("a %q variant was recorded as external drift (%d rows, err=%v)", variant, len(logs), err)
+			}
+			if calls := fc.callSnap(); len(calls) != 0 {
+				t.Errorf("a %q variant drove a council write: %v", variant, calls)
+			}
+			p, _ := st.GetPermit(ctx, pid)
+			if p.ActiveRegistration != "ROSTER1" {
+				t.Errorf("the recorded plate was rewritten to %q for a mere spelling difference", p.ActiveRegistration)
+			}
+		})
+	}
+}
+
+// A council READ failure must be silent and harmless. It is not evidence of drift, and
+// treating it as "the council shows nothing" would blank the permit's recorded plate
+// and then claim in the activity log that someone changed it in the portal.
+func TestCheckDriftIgnoresReadFailures(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "err@example.com", "err-1"
+	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
+	fc.currentErr = errors.New("council unreachable")
+
+	s.checkDrift(ctx, owner)
+
+	p, _ := st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "ROSTER1" {
+		t.Errorf("a failed council read changed the recorded plate to %q", p.ActiveRegistration)
+	}
+	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
+		t.Errorf("a failed council read wrote %d activity rows (err=%v)", len(logs), err)
+	}
+}
+
+// The council reporting an EMPTY plate is real drift: somebody cleared the permit, and
+// the app must notice rather than keep believing its own cached value.
+func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "cleared@example.com", "cleared-1"
+	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
+
+	s.checkDrift(ctx, owner)
+
+	p, _ := st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "" {
+		t.Errorf("recorded plate = %q, want empty to match the cleared permit", p.ActiveRegistration)
+	}
+	// And the schedule is re-asserted over the clearing.
+	s.reconcileAll(ctx)
+	p, _ = st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "ROSTER1" {
+		t.Errorf("after re-assertion the permit holds %q, want ROSTER1", p.ActiveRegistration)
+	}
+}
+
+// An expired permit must not be read at all: it is a council request per permit per
+// warm cycle for something the app no longer acts on, and the app is deliberately
+// frugal with council traffic.
+func TestCheckDriftSkipsInactivePermits(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "expired@example.com", "expired-1"
+	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "MEDDLED1")
+
+	// Retire the permit: an end date whose local day is well past.
+	if err := st.UpdatePermitMeta(ctx, owner, councilID, "Approved", "", "", time.Now().AddDate(0, 0, -10)); err != nil {
+		t.Fatalf("set expiry: %v", err)
+	}
+	if p, err := st.GetPermit(ctx, pid); err != nil || !p.Inactive(time.Now(), time.UTC) {
+		t.Fatalf("fixture is not actually inactive (err=%v)", err)
+	}
+
+	s.checkDrift(ctx, owner)
+
+	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
+		t.Errorf("an inactive permit was drift-checked (%d rows, err=%v)", len(logs), err)
+	}
+	if calls := fc.callSnap(); len(calls) != 0 {
+		t.Errorf("an inactive permit drove council traffic: %v", calls)
+	}
+}

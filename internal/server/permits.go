@@ -47,7 +47,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	// the scarcest resource the app has.
 	if !s.councilRead.allow("cr:" + owner) {
 		s.message(w, http.StatusTooManyRequests,
-			"You've refreshed the permit list a lot in the last few minutes. Please wait a moment before trying again — p.stonn keeps its requests to the council deliberately light.")
+			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again. p.stonn deliberately limits how often it contacts the council.")
 		return
 	}
 	permits, err := s.council.ListPermits(ctx, owner)
@@ -246,6 +246,14 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Forget the council's last plate reading for this permit. The council client
+	// caches it to keep the dashboard's "on permit now" honest without a live read,
+	// and a household permit is often visible to two council logins — so "stop
+	// managing" here followed by "manage" from the other resident's account is the
+	// ordinary way a permit changes hands. Nothing else evicts the entry, and a
+	// plate shown to the wrong household is how someone parks on a permit that no
+	// longer says what they think it says.
+	s.council.ForgetPermit(owner, p.CouncilPermitID)
 	label := permitLabel(p)
 	s.logChange(r.Context(), owner, user, store.ActionPermitRemove, label, "")
 	s.notifyDestructive(r.Context(), owner, user,

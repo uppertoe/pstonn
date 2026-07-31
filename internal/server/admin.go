@@ -1,11 +1,14 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/secretbox"
@@ -15,6 +18,49 @@ import (
 // schedulerStaleAfter is how long without a completed reconcile pass counts as a
 // wedged work loop (the reconcile loop ticks every minute, so this is generous).
 const schedulerStaleAfter = 10 * time.Minute
+
+// ---- CDN-proxy detection ----
+//
+// The app is served DNS-only: Caddy faces clients directly, so clientIP sees the
+// real peer and every per-IP throttle in the app keys on one visitor. Putting a
+// CDN proxy in front of that hostname breaks all of them at once and silently —
+// requests then arrive from a small pool of edge addresses, so the guest-pass,
+// contact-form, confirm and /status limiters collapse onto a handful of buckets
+// and stop limiting individuals at all. That exact regression shipped once and
+// went unnoticed for weeks, because nothing looked wrong from the outside.
+//
+// These headers are the tell: a CDN adds them on the way through and nothing else
+// does. Observing one is proof the deployment has changed shape underneath the
+// app, so latch it and say so — once in the log, and on every /status poll, which
+// is the one thing an operator is already watching.
+var edgeProxyHeaders = []string{"CF-Connecting-IP", "CF-Ray", "CF-IPCountry"}
+
+var (
+	edgeProxyWarn sync.Once
+	edgeProxySeen atomic.Value // string: the header name that gave it away
+)
+
+// noteEdgeProxy records and returns the CDN forwarding header seen on this
+// request, or the one seen on any earlier request in this process. It is
+// deliberately sticky: the check runs only on the handlers in this file, and a
+// single proxied request is enough to prove the misconfiguration, so a later
+// unproxied poll must not clear the finding.
+func noteEdgeProxy(r *http.Request) string {
+	for _, h := range edgeProxyHeaders {
+		if r.Header.Get(h) == "" {
+			continue
+		}
+		edgeProxySeen.Store(h)
+		edgeProxyWarn.Do(func() {
+			log.Printf("WARNING: request carried %s, so a CDN proxy now sits in front of this app. "+
+				"Every per-IP rate limit is keyed on the address the app sees, which is now an edge address shared by "+
+				"all visitors, so the throttles no longer limit anyone. Set the DNS record back to DNS-only (grey cloud).", h)
+		})
+		return h
+	}
+	seen, _ := edgeProxySeen.Load().(string)
+	return seen
+}
 
 // ---- admin dashboard (human, admin-gated) ----
 
@@ -65,6 +111,11 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// An admin loading this page is a request that came the whole way through the
+	// proxy chain, so it is a free chance to notice a CDN in front of the app. The
+	// finding is latched and reported on /status; the dashboard is not the place to
+	// explain it.
+	noteEdgeProxy(r)
 	accounts, err := s.store.AdminAccounts(r.Context())
 	if err != nil {
 		s.serverError(w, err)
@@ -154,14 +205,28 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 // ---- machine status endpoint (outage watchdog, bearer-token gated) ----
 
 type statusResponse struct {
-	Time      string              `json:"time"`
-	Scheduler schedulerStatus     `json:"scheduler"`
-	Sessions  sessionCounts       `json:"sessions"`
-	Roster    []store.RosterEntry `json:"roster,omitempty"`
+	Time      string          `json:"time"`
+	Scheduler schedulerStatus `json:"scheduler"`
+	Sessions  sessionCounts   `json:"sessions"`
+	// Client reports what the app believes about the caller of this very request.
+	// It is here so the watchdog's ordinary poll doubles as an assertion about the
+	// deployment's shape: the throttles that protect every public route key on this
+	// address, and if it stops being a real client address nothing else notices.
+	Client clientObservation `json:"client"`
 	// RosterSealed is the roster as AES-256-GCM ciphertext (base64, 12-byte nonce
 	// prefix — the same construction as internal/secretbox), under ROSTER_KEY. The
-	// watchdog holds that key; a leaked STATUS_TOKEN alone yields only this.
+	// watchdog holds that key; a leaked STATUS_TOKEN alone yields only this. There
+	// is no plaintext counterpart field on purpose: a struct with nowhere to put an
+	// unsealed roster cannot regress into serving one.
 	RosterSealed string `json:"roster_sealed,omitempty"`
+}
+
+type clientObservation struct {
+	IP string `json:"ip"` // what every per-IP throttle keys on for this request
+	// EdgeProxy names a CDN forwarding header seen on this or an earlier request.
+	// Non-empty means the per-IP throttles are no longer per-client; the watchdog
+	// should treat it as an alert, not a note.
+	EdgeProxy string `json:"edge_proxy,omitempty"`
 }
 
 type schedulerStatus struct {
@@ -191,18 +256,23 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
 	}
-	presented := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if subtle.ConstantTimeCompare([]byte(presented), []byte(s.cfg.StatusToken)) != 1 {
+	presented, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok || !secretEqual(presented, s.cfg.StatusToken) {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	// The roster — every consented account's email plus their push topic — is the
 	// sensitive half of this endpoint. The watchdog needs it only to reach users
-	// during an outage, and needs it rarely, so it is served ONLY when asked for
-	// and encrypted when a key is configured. The frequent health poll then carries
-	// nothing worth stealing.
-	wantRoster := r.URL.Query().Get("roster") == "1" || len(s.cfg.RosterKey) == 0
+	// during an outage, and needs it rarely, so it is served ONLY when asked for,
+	// and only sealed. The frequent health poll then carries nothing worth stealing.
+	//
+	// Asking is the whole condition. This used to also serve the roster whenever no
+	// ROSTER_KEY was configured, which inverted the intent: the deployment with no
+	// key was the one shipping every user's address in the clear on every poll, and
+	// there was no way — not even ?roster=0 — to stop it. STATUS_TOKEN without
+	// ROSTER_KEY is now a startup error, so the key is always present here.
+	wantRoster := r.URL.Query().Get("roster") == "1"
 	var roster []store.RosterEntry
 	if wantRoster {
 		var rerr error
@@ -235,21 +305,21 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 			Stale: last.IsZero() || now.Sub(last) > schedulerStaleAfter,
 		},
 		Sessions: sessionCounts{Linked: linked, Warm: warm},
+		Client: clientObservation{
+			IP:        clientIP(r),
+			EdgeProxy: noteEdgeProxy(r),
+		},
 	}
-	switch {
-	case !wantRoster:
-		// Health-only poll: nothing sensitive in the response at all.
-	case len(s.cfg.RosterKey) > 0:
+	if wantRoster {
+		// A missing or malformed ROSTER_KEY makes this fail, which is the correct
+		// outcome: the watchdog gets a 500 it will report rather than a roster it
+		// should never receive unsealed. Startup already refuses that combination.
 		sealed, serr := sealRoster(s.cfg.RosterKey, roster)
 		if serr != nil {
 			s.serverError(w, serr)
 			return
 		}
 		resp.RosterSealed = sealed
-	default:
-		// No key configured: keep the historical plaintext shape so an existing
-		// watchdog keeps working until it is updated (main warns at startup).
-		resp.Roster = roster
 	}
 	if !last.IsZero() {
 		resp.Scheduler.LastReconcile = last.UTC().Format(time.RFC3339)
@@ -257,6 +327,37 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// bearerToken extracts the credential from an Authorization header, requiring the
+// Bearer scheme that deploy/.env.example documents.
+//
+// The previous TrimPrefix accepted a bare `Authorization: <token>` as well, which
+// is laxer than the documented contract for no benefit: nothing legitimate sends
+// it, and a gate that quietly accepts more shapes than its documentation is a gate
+// nobody can reason about. The scheme name is compared case-insensitively because
+// RFC 7235 defines it that way, and refusing `bearer` would be a self-inflicted
+// outage of the watchdog rather than a security property.
+func bearerToken(header string) (string, bool) {
+	const scheme = "bearer "
+	if len(header) < len(scheme) || !strings.EqualFold(header[:len(scheme)], scheme) {
+		return "", false
+	}
+	return strings.TrimSpace(header[len(scheme):]), true
+}
+
+// secretEqual compares a presented credential against the expected one without
+// leaking either through timing.
+//
+// It digests both sides first because subtle.ConstantTimeCompare is only constant
+// time for equal-length inputs — on a length mismatch it returns immediately, so
+// comparing the raw strings tells an attacker the length of STATUS_TOKEN, which is
+// the first thing you would want to know before guessing it. Hashing makes every
+// comparison the same fixed width regardless of what was sent.
+func secretEqual(presented, want string) bool {
+	a := sha256.Sum256([]byte(presented))
+	b := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
 }
 
 // sealRoster encrypts the roster for transport to the outage watchdog, using the

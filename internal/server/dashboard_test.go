@@ -93,15 +93,21 @@ func TestTemplatesRender(t *testing.T) {
 	}{
 		{"landing", dashboardData{State: "landing", Loc: loc}, "Schedule your City of Stonnington"},
 		{"landing-signedin", dashboardData{State: "landing", SignedIn: true, Loc: loc}, "Open the app"},
-		{"about", dashboardData{State: "about", Loc: loc}, "security model"},
-		{"why", dashboardData{State: "why", Loc: loc}, "get a Stonnington ePermit"},
-		{"why-demos", dashboardData{State: "why", Loc: loc}, "data-demo=\"roster\""},
+		{"security", dashboardData{State: "security", Loc: loc}, "security model"},
+		{"how", dashboardData{State: "how", Loc: loc}, "get a Stonnington ePermit"},
+		{"how-demos", dashboardData{State: "how", Loc: loc}, "data-demo=\"roster\""},
 		{"contact", dashboardData{State: "contact", Contact: true, Loc: loc}, "Send message"},
 		{"contact-sent", dashboardData{State: "contact", Contact: true, Flash: "Thanks. Your message has been sent.", Loc: loc}, "has been sent"},
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
+		// On a FIRST link the box is TICKED. Without a saved password the schedule
+		// stops the first time the council ends the session — which happens whenever
+		// the resident signs in to ePermits themselves — and it stops silently, which
+		// is how a car ends up on the wrong permit. The stored value is a
+		// parking-permit login, sealed at rest and recoverable by the council's own
+		// forgot-password email.
 		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
 		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
 		{"relink-savepw-respects-opton", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: true, Loc: loc}, `name="save_password" value="1" checked>`},
@@ -141,8 +147,8 @@ func TestTemplatesRender(t *testing.T) {
 		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: false}, "Your password isn't saved"},
 		{"settings-last-reconnect", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true, LastReconnect: "14 Jul 2026, 3:04pm"}, "14 Jul 2026, 3:04pm"},
 		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "hasn't been needed yet"},
-		{"about-data-promise", dashboardData{State: "about", Loc: loc}, "never sold"},
-		{"about-council-note", dashboardData{State: "about", Contact: true, Loc: loc}, "For the City of Stonnington"},
+		{"security-data-promise", dashboardData{State: "security", Loc: loc}, "never sold"},
+		{"security-council-note", dashboardData{State: "security", Contact: true, Loc: loc}, "For the City of Stonnington"},
 		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc}, "Add person"},
 		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
 			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}}, "nanny@example.com"},
@@ -386,16 +392,21 @@ func TestOverrideEndsDefault(t *testing.T) {
 	loc := time.FixedZone("AEST", 10*3600)
 	start := time.Date(2026, 8, 4, 9, 30, 0, 0, loc) // a Tuesday morning
 
+	// F6: the end is the day BOUNDARY (midnight starting the next day), because
+	// model.Resolve treats it as exclusive — a 23:59 end left the last minute of the
+	// day to the weekly roster, costing two council writes and two notifications
+	// where one was intended. So "ends the day it starts" reads as the next date at
+	// 00:00.
 	cases := []struct {
 		ends string
 		want string // "" = indefinite
 		why  string
 	}{
-		{"day", "2026-08-04T23:59", "ends the day it starts"},
-		{"nextday", "2026-08-05T23:59", "overnight runs to the end of the next day"},
+		{"day", "2026-08-05T00:00", "ends the day it starts"},
+		{"nextday", "2026-08-06T00:00", "overnight runs to the end of the next day"},
 		{"open", "", "the only way to get an indefinite booking"},
-		{"", "2026-08-04T23:59", "a missing field must fall back to the SAFE default, not to forever"},
-		{"nonsense", "2026-08-04T23:59", "an unexpected value must not resurrect forever-by-accident"},
+		{"", "2026-08-05T00:00", "a missing field must fall back to the SAFE default, not to forever"},
+		{"nonsense", "2026-08-05T00:00", "an unexpected value must not resurrect forever-by-accident"},
 	}
 	for _, c := range cases {
 		var got *time.Time
@@ -427,7 +438,7 @@ func TestEndOfDayUsesStartDay(t *testing.T) {
 	loc := time.FixedZone("AEST", 10*3600)
 	future := time.Date(2026, 9, 15, 8, 0, 0, 0, loc)
 	got := endOfDay(future, loc)
-	if want := "2026-09-15T23:59"; got.Format("2006-01-02T15:04") != want {
+	if want := "2026-09-16T00:00"; got.Format("2006-01-02T15:04") != want { // the boundary that closes 15 Sep; see F6
 		t.Fatalf("endOfDay = %s, want %s", got.Format("2006-01-02T15:04"), want)
 	}
 	if !got.After(future) {

@@ -252,3 +252,28 @@ DELETE FROM override
 WHERE id = ? AND permit_id IN (SELECT id FROM permit WHERE owner = ?)`, id, owner)
 	return err
 }
+
+// DeleteOverrideOnPermit deletes a booking that belongs to BOTH the owner and the
+// named permit, and reports whether a row actually went.
+//
+// The permit predicate matters even though the owner one already prevents any
+// cross-account reach: the delete route is /permits/{id}/overrides/{oid}/delete, and
+// with only the owner check an {oid} from a DIFFERENT permit of the same account was
+// happily deleted while the response re-rendered permit {id} — so the booking
+// vanished from a card the user was not looking at, with nothing on screen to say so.
+//
+// The bool is what lets the caller stay silent about a no-op. DeleteOverride returns
+// nil whether or not it matched, so the handler used to write an audit row and kick
+// the scheduler for an id that never existed — replayable to bury a household's real
+// activity under invented entries.
+func (s *Store) DeleteOverrideOnPermit(ctx context.Context, owner string, permitID, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+DELETE FROM override
+WHERE id = ? AND permit_id = ? AND permit_id IN (SELECT id FROM permit WHERE owner = ?)`,
+		id, permitID, owner)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}

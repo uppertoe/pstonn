@@ -76,7 +76,7 @@
   {{end}}
   {{if .Permits}}
   <button class="fab" type="button"
-          onclick="window.dispatchEvent(new CustomEvent('open-oneoff'))">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
+          data-dispatch="open-oneoff">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
   {{end}}
 
 {{end}}
@@ -221,7 +221,11 @@
     {{/* Name whoever booked it. The account is shared, so "who decided this?" is
          a real question — and an open-ended booking beats the roster indefinitely,
          which is worth being able to attribute. */}}
-    <span class="when">{{localTime .StartsAt $.Loc}} → {{if .EndsAt}}{{localTime .EndsAt $.Loc}}{{else}}open-ended{{end}}{{if .CreatedBy}} · by {{.CreatedBy}}{{end}}</span>
+    {{/* Each timestamp is its own nowrap unit so a date never splits mid-way, but the
+         line may break at the arrow and before the attribution. Wrapping the whole
+         start→end as one unit sets the row's minimum width to both dates combined,
+         which is what pushed a long booking past its card. */}}
+    <span class="when"><span class="nb">{{localTime .StartsAt $.Loc}}</span> → <span class="nb">{{if .EndsAt}}{{localEnd .EndsAt $.Loc}}{{else}}open-ended{{end}}</span>{{if .CreatedBy}} <span class="by">· by {{.CreatedBy}}</span>{{end}}</span>
     <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#permit-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
       <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking">{{template "ic-x"}}</button>
     </form>

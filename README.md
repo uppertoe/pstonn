@@ -56,7 +56,7 @@ encrypted at rest with AES-256-GCM.
 (if you saved it) your council password. The rest of your data — number plates,
 your schedule, permit details, email addresses, the activity log — is stored
 unencrypted in the app's SQLite database on the server. Anyone with the server or
-its database can read it. See [/about](https://p.stonn.org/about) for what that
+its database can read it. See [/security](https://p.stonn.org/security) for what that
 means and what is stored.
 
 **How long does a link last?** As long as the account is in use. The connection
@@ -149,7 +149,7 @@ while a journald host usually caps them already; see the note in
 `deploy/docker-compose.yml`. Backup retention comes from the
 platform's restic runner (see `deploy/backup-service.env.example`); whatever it
 is set to is the real upper bound on how long deleted data stays recoverable, and
-/about states that bound to users.
+/security states that bound to users.
 
 ## Run locally
 
@@ -164,8 +164,15 @@ COUNCIL_SANDBOX=1 DEV_IDENTITY_EMAIL=you@example.com \
 go test ./...
 ```
 
-Both escape hatches refuse to start alongside production settings, so neither
-can leak into a real deployment.
+Both escape hatches refuse to start alongside any setting that means "real
+deployment" — `DATA_ENCRYPTION_KEY`, `APP_OIDC_ISSUER`, `DOMAIN`, or a
+non-loopback `PUBLIC_BASE_URL`. Be clear about what that is and isn't: it is a
+tripwire on the settings a deployment happens to carry, not a proof of
+environment. `DEV_IDENTITY_EMAIL` authenticates **every** request as that
+address with the admin group, so on a host where none of those are set — a
+staging box, a VM someone left reachable — setting it is still a wide-open app.
+Treat it as a local-only tool and not as something the config will save you
+from.
 
 ## Deploy (self-hosting)
 
@@ -185,10 +192,18 @@ The `deploy/` directory contains a complete example for the
 2. Add `- apps/pstonn/docker-compose.yml` to the root compose `include:` list
    and re-render the Caddy routes.
 3. Create `apps/pstonn/.env` (mode 600) from the example. `DATA_ENCRYPTION_KEY`
-   is **required** — the app refuses to start in production without it. Set the
+   is **required** — the app refuses to start in production without it. An
+   absolute public base is required too: set `DOMAIN` (the root `.env` normally
+   supplies it, and `https://p.<DOMAIN>` is derived from it) or
+   `PUBLIC_BASE_URL` directly, because every link the app mails — the
+   re-authorise confirm link, guest passes, the door QR — is absolute. Set the
    SMTP and ntfy settings, `ADMIN_EMAIL` / `ADMIN_NTFY_TOPIC` for operator
-   alerts, and `CONTACT_TO` if you want the public contact form.
-4. Add DNS for `p.<domain>` and deploy. Pin the image by `@sha256` digest.
+   alerts, and `CONTACT_TO` if you want the public contact form. If you run the
+   outage watchdog, `STATUS_TOKEN` and `ROSTER_KEY` go together — the app will
+   not start with one and not the other.
+4. Add DNS for `p.<domain>` and deploy, **DNS-only** (no CDN proxy in front of
+   Caddy: it replaces every client address with an edge address, which silently
+   disables all per-IP rate limiting). Pin the image by `@sha256` digest.
 5. On SES, wire up bounce/complaint feedback so the app stops emailing dead
    addresses (see above): `python3 deploy/aws-ses-hook-setup.py --domain
    <sending-domain> --app-url https://p.<domain>`. Run it twice — the first pass

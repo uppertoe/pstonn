@@ -2,10 +2,45 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"time"
 )
+
+// hashConfirmToken is what actually goes in the confirm_token column.
+//
+// The token is a bearer capability: clicking its link extends a council session
+// by another full SessionMaxAge. Every other secret in the row is sealed, and this
+// one additionally rides in a GET query string, so it lands in proxy access logs
+// and browser history as well as the database. Storing only the hash means a
+// read-only leak of either the DB or those logs no longer yields something
+// replayable — the column holds a value that cannot be turned back into a link.
+//
+// A plain SHA-256 is the right primitive here rather than a password hash: the
+// token is 32 bytes of randToken output, so there is no dictionary to attack, and
+// the lookup sits on the single shared SQLite connection where a deliberately slow
+// KDF would be a self-inflicted denial of service.
+//
+// Tokens minted BEFORE this change stop working: their column holds the plaintext,
+// which no longer matches the hash of what arrives. That is acceptable — they are
+// short-lived by design (ClearStaleConfirmTokens sweeps them, ConfirmSession
+// bounds them by maxAge), a click on one lands on the same reassuring
+// already-handled copy as any expired token, and the next reminder cycle mints a
+// fresh one.
+//
+// The empty string is preserved as-is, never hashed: it is the "no token
+// outstanding" marker that the partial index (confirm_token not empty) and both
+// expiry paths key on, and a hex hash is never empty, so that distinction still
+// holds.
+func hashConfirmToken(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
 
 // CouncilSession is one app-user's linked council login. The council issues no
 // refresh tokens, so durability rests on the IdentityServer session cookie; the
@@ -21,7 +56,7 @@ type CouncilSession struct {
 	UpdatedAt    time.Time // last renew/save; slides as keep-warm refreshes
 	LinkedAt     time.Time // last interactive link/re-link; the re-authorise clock
 	ReminderSent time.Time // when the approaching-expiry email was sent (zero = not this cycle)
-	ConfirmToken string    // single-use token for the email confirm link (empty = none outstanding)
+	ConfirmToken string    // hex SHA-256 of the single-use email-confirm token (empty = none outstanding)
 	Password     string    // sealed council password for opt-in auto-reconnect (empty = not saved)
 	// ReconnectedAt is when the saved password was last replayed to sign back in
 	// (zero = never). Surfaced in Settings so credential use is visible to the
@@ -89,11 +124,13 @@ FROM council_session`)
 }
 
 // MarkReminderSent records that the approaching-expiry email was sent and stores
-// the single-use token embedded in its confirm link.
+// the single-use token embedded in its confirm link — as a hash, so the row cannot
+// be read for a working link. The caller keeps the plaintext only long enough to
+// put it in the email.
 func (s *Store) MarkReminderSent(ctx context.Context, owner, token string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE council_session SET reminder_sent_at = ?, confirm_token = ? WHERE owner = ?`,
-		nowUTC(), token, owner)
+		nowUTC(), hashConfirmToken(token), owner)
 	return err
 }
 
@@ -112,8 +149,11 @@ func (s *Store) ConfirmSession(ctx context.Context, token string, maxAge time.Du
 		return "", ErrNotFound
 	}
 	var owner, sentAt string
+	// Matched on the hash: the column stores hashConfirmToken(token), so the
+	// plaintext from the link is hashed here rather than compared directly.
 	err := s.db.QueryRowContext(ctx,
-		`SELECT owner, reminder_sent_at FROM council_session WHERE confirm_token = ?`, token).Scan(&owner, &sentAt)
+		`SELECT owner, reminder_sent_at FROM council_session WHERE confirm_token = ?`,
+		hashConfirmToken(token)).Scan(&owner, &sentAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

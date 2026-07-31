@@ -9,22 +9,30 @@
 <link rel="apple-touch-icon" href="{{asset "icon-180.png"}}">
 <meta name="theme-color" content="#0d9488">
 {{if eq .State "guest"}}{{/* Make a bookmarked/installed guest link feel like an app on the home screen (PNG icons + per-recipient manifest so it opens straight to their menu). */}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/{{.Guest.Token}}">{{end}}
-<script>
-  // Apply the saved theme before first paint (no flash), and expose the toggle.
+<script{{with .Nonce}} nonce="{{.}}"{{end}}>
+  // Apply the saved theme before first paint (no flash), and wire the toggle.
   (function () {
     var KEY = 'pstonn-theme', saved = localStorage.getItem(KEY);
     if (saved) document.documentElement.setAttribute('data-theme', saved);
-    window.toggleTheme = function () {
+    function toggle() {
       var cur = document.documentElement.getAttribute('data-theme');
       var sysDark = matchMedia('(prefers-color-scheme:dark)').matches;
       var isDark = cur ? cur === 'dark' : sysDark;
       var next = isDark ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
       localStorage.setItem(KEY, next);
-    };
+    }
+    // Delegated from document rather than bound to the button, and not exposed as a
+    // global for an onclick= to call: the CSP carries a script nonce, which browsers
+    // cannot extend to attribute handlers, so on* attributes would simply never fire.
+    // Delegation is also what this needs anyway — the toggle lives in the app bar,
+    // which every boosted navigation replaces, while this head script runs once.
+    document.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('[data-theme-toggle]')) toggle();
+    });
   })();
 </script>
-<script>
+<script{{with .Nonce}} nonce="{{.}}"{{end}}>
   // htmx starts a view transition for every swap (globalViewTransitions above) but
   // never handles ViewTransition.ready, and that promise REJECTS whenever the
   // browser skips a transition — which it routinely does for an hx-boost
@@ -90,17 +98,17 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="{{asset "htmx.min.js"}}"></script>
-<script defer src="{{asset "alpine.min.js"}}"></script>
-{{if or (eq .State "landing") (eq .State "why")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
-<script defer src="{{asset "demos.js"}}"></script>{{end}}
+<script{{with .Nonce}} nonce="{{.}}"{{end}} src="{{asset "htmx.min.js"}}"></script>
+<script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "alpine.min.js"}}"></script>
+{{if or (eq .State "landing") (eq .State "how")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
+<script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "demos.js"}}"></script>{{end}}
 {{template "styles" .}}
 </head>
 <body hx-boost="true">
 <a href="#main" class="skip-link">Skip to content</a>
 <div id="htmx-bar" aria-hidden="true"></div>
 <div id="toast" role="status" aria-live="polite"></div>
-<script>
+<script{{with .Nonce}} nonce="{{.}}"{{end}}>
   // Show the top loading bar during any htmx request (incl. boosted navigation).
   addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
   addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
@@ -156,8 +164,8 @@
 </script>
 
 {{if eq .State "landing"}}{{template "page-landing" .}}
-{{- else if eq .State "about"}}{{template "page-about" .}}
-{{- else if eq .State "why"}}{{template "page-why" .}}
+{{- else if eq .State "security"}}{{template "page-security" .}}
+{{- else if eq .State "how"}}{{template "page-how" .}}
 {{- else if eq .State "contact"}}{{template "page-contact" .}}
 {{- else if eq .State "guest"}}{{template "page-guest" .}}
 {{- else if eq .State "guest-wait"}}{{template "page-guest-wait" .}}
@@ -184,7 +192,7 @@
     </div>
   </div>
 </dialog>
-<script>
+<script{{with .Nonce}} nonce="{{.}}"{{end}}>
 {{/* Keep a schedule popover on-screen: it opens centred on its cell, so ones
      anchored near a viewport edge overhang it and get clipped (overflow-x is
      hidden). Measure after open and pull it back via --pop-shift, then scroll
@@ -227,6 +235,20 @@ window.popClamp = window.popClamp || function (el) {
   document.addEventListener('cancel', function (e) { // Esc: dialog closes itself
     if (e.target === dlg() && pending) { var res = pending; pending = null; res(false); }
   }, true);
+  {{/* Two buttons only poke a browser API or fan out an app-wide event, and used to
+       do it from an onclick= attribute. A CSP nonce authorises elements, not
+       attributes, so under the nonced policy those handlers would never fire at
+       all — the behaviour is declared with a data- attribute and dispatched here
+       instead. Delegated from document, so it survives the htmx swaps that replace
+       the buttons, and registered inside this once-only closure so a boosted
+       navigation re-running body scripts does not stack duplicates. */}}
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest ? e.target.closest('[data-print],[data-dispatch]') : null;
+    if (!el) return;
+    if (el.hasAttribute('data-print')) window.print();
+    var name = el.getAttribute('data-dispatch');
+    if (name) window.dispatchEvent(new CustomEvent(name));
+  });
   {{/* Capture phase so this runs (and stops htmx's own element handler) before
        any boosted submit; the __confirmed pass-through lets the re-submit
        continue down the normal path. */}}

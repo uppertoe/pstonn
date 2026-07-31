@@ -10,8 +10,12 @@ package identity
 
 import (
 	"context"
+	"log"
+	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 type ctxKey struct{}
@@ -35,36 +39,92 @@ func (u User) IsAdmin() bool {
 
 // Decoder resolves a User from a request (e.g. from the app's signed session
 // cookie). It reports ok=false when no valid identity is present.
-type Decoder func(*http.Request) (User, bool)
+//
+// It receives the ResponseWriter so an implementation can renew the credential it
+// just validated — a stateless signed cookie has no other moment at which to slide
+// its expiry forward, and without renewal an active user is signed out abruptly
+// when the fixed TTL elapses.
+type Decoder func(http.ResponseWriter, *http.Request) (User, bool)
+
+// fromTrustedProxy reports whether the identity headers on this request may be
+// believed, judged by the peer being loopback or a private/link-local address —
+// which is what the far end of a container network looks like.
+//
+// Without this check the headers are trusted from ANY peer, and the consequence
+// is total: an operator who publishes the container port directly (a documented
+// posture) while leaving APP_OIDC_ISSUER unset gets an app where any caller on
+// the internet becomes any user, or an admin, by sending two headers. Caddy
+// strips client-supplied copies, but that only helps while Caddy is the only way
+// in. This is the same peer test clientIP already applies to X-Forwarded-For, and
+// the more dangerous header deserves it at least as much.
+//
+// An unparseable peer is untrusted. Failing closed here costs a sign-in outage,
+// which is loud; failing open costs the whole authorization model, silently.
+func fromTrustedProxy(remoteAddr string) bool {
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// lastSpoofLog throttles the warning below. A rejected identity header is either
+// a misconfigured deployment or someone probing for exactly this hole, and both
+// are worth a log line — but neither is worth one per request under a flood.
+var lastSpoofLog atomic.Int64
+
+const spoofLogEvery = int64(time.Minute)
+
+func warnUntrustedIdentity(remoteAddr string) {
+	now := time.Now().UnixNano()
+	prev := lastSpoofLog.Load()
+	if now-prev < spoofLogEvery || !lastSpoofLog.CompareAndSwap(prev, now) {
+		return
+	}
+	log.Printf("SECURITY: ignoring Remote-* identity headers from untrusted peer %s. "+
+		"These are only believed from a loopback/private peer (the reverse proxy). If sign-in is "+
+		"broken, the app is reachable other than through the proxy — do not expose its port directly.",
+		remoteAddr)
+}
 
 // Middleware resolves the request identity.
 //
 // trustForwardAuth MUST be true only when the app runs behind the platform's
 // forward_auth layer (its own OIDC login disabled). In that mode the Remote-*
 // headers are authoritative (Caddy strips any client-supplied copies and
-// re-injects the verified values). When the app runs its OWN OIDC login instead,
-// trustForwardAuth is false and Remote-* headers are ignored entirely, so an
-// attacker cannot present a Remote-Email header to override the verified session
-// cookie.
+// re-injects the verified values) — but only when they actually arrive from the
+// proxy, which fromTrustedProxy checks. When the app runs its OWN OIDC login
+// instead, trustForwardAuth is false and Remote-* headers are ignored entirely,
+// so an attacker cannot present a Remote-Email header to override the verified
+// session cookie.
 //
-// Precedence: (1) Remote-* headers when trustForwardAuth; (2) the app's signed
-// session cookie via decode (OIDC login); (3) devEmail, a local/standalone
-// fallback that MUST be empty in production. decode may be nil.
+// Precedence: (1) Remote-* headers when trustForwardAuth AND the peer is the
+// proxy; (2) the app's signed session cookie via decode (OIDC login); (3)
+// devEmail, a local/standalone fallback that MUST be empty in production. decode
+// may be nil.
 func Middleware(devEmail string, decode Decoder, trustForwardAuth bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var u User
 			if trustForwardAuth {
 				if email := strings.ToLower(strings.TrimSpace(r.Header.Get("Remote-Email"))); email != "" {
-					u = User{
-						Email:  email,
-						Name:   strings.TrimSpace(r.Header.Get("Remote-User")),
-						Groups: splitGroups(r.Header.Get("Remote-Groups")),
+					if fromTrustedProxy(r.RemoteAddr) {
+						u = User{
+							Email:  email,
+							Name:   strings.TrimSpace(r.Header.Get("Remote-User")),
+							Groups: splitGroups(r.Header.Get("Remote-Groups")),
+						}
+					} else {
+						warnUntrustedIdentity(r.RemoteAddr)
 					}
 				}
 			}
 			if u.Email == "" && decode != nil {
-				if du, ok := decode(r); ok {
+				if du, ok := decode(w, r); ok {
 					u = du
 				}
 			}

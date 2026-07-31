@@ -23,19 +23,56 @@ func isStateChanging(r *http.Request) bool {
 	}
 }
 
+// requestScheme is the scheme the client actually used. TLS terminates at the
+// reverse proxy, so r.TLS is nil for every real request and X-Forwarded-Proto is
+// the only evidence — trusted on the same terms as X-Forwarded-For (see
+// clientIP), because off-proxy a caller writes its own headers.
+func requestScheme(r *http.Request) string {
+	if fromProxy(peerHost(r)) {
+		if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+			// Multi-hop proxies comma-join; the first entry is the client's own scheme.
+			if first, _, ok := strings.Cut(proto, ","); ok {
+				proto = first
+			}
+			if s := strings.ToLower(strings.TrimSpace(proto)); s != "" {
+				return s
+			}
+		}
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
 // sameOrigin is a CSRF defence for state-changing requests: it requires the
 // Origin (or, failing that, Referer) host to match the request's own host. A
 // cross-site form/fetch cannot forge a matching Origin, and browsers always send
 // one on cross-origin POSTs. A state-changing request with neither header is
 // rejected. This does not depend on cookie SameSite alone.
+//
+// The scheme is checked too, but only in the direction that can be proven: when
+// we know the request arrived over https, an http Origin on the same host is a
+// different origin and is refused, so a plaintext foothold on the same name
+// cannot post to the secure site. We deliberately do NOT require https when the
+// request itself is plaintext — that is the local/dev case, and rejecting it
+// would break development without protecting anything.
 func sameOrigin(r *http.Request) bool {
+	check := func(raw string) bool {
+		u, err := url.Parse(raw)
+		if err != nil || !strings.EqualFold(u.Host, r.Host) {
+			return false
+		}
+		if requestScheme(r) == "https" && !strings.EqualFold(u.Scheme, "https") {
+			return false
+		}
+		return true
+	}
 	if o := r.Header.Get("Origin"); o != "" {
-		u, err := url.Parse(o)
-		return err == nil && strings.EqualFold(u.Host, r.Host)
+		return check(o)
 	}
 	if ref := r.Header.Get("Referer"); ref != "" {
-		u, err := url.Parse(ref)
-		return err == nil && strings.EqualFold(u.Host, r.Host)
+		return check(ref)
 	}
 	return false
 }
@@ -157,11 +194,17 @@ func (rl *rateLimiter) allow(key string) bool {
 // limiter key per request and switch off every per-IP throttle in the app. In this
 // deployment nothing reaches the app except through Caddy, but a self-hoster
 // exposing the port directly should not silently lose their rate limits.
-func clientIP(r *http.Request) string {
-	peer := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(peer); err == nil {
-		peer = host
+// peerHost is the immediate peer's address with any port stripped — the socket we
+// actually accepted, never anything the caller can set.
+func peerHost(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
+	return r.RemoteAddr
+}
+
+func clientIP(r *http.Request) string {
+	peer := peerHost(r)
 	if fromProxy(peer) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")

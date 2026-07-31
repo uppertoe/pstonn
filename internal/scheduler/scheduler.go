@@ -99,13 +99,38 @@ type Scheduler struct {
 
 	trigger chan struct{}
 
-	// lastReconcile is the unix-nanos of the last completed reconcile pass; the
-	// watchdog alerts the operator if it goes stale (a stuck/hung loop).
+	// lastReconcile is the unix-nanos of the last completed reconcile pass, read by
+	// an external watchdog. lastProgress is stamped as the pass WORKS (once per
+	// permit), and is what the internal dead-man's switch measures: a pass that
+	// legitimately runs long — ~100 changing permits spaced by rateDelay each — takes
+	// far longer than any fixed multiple of the tick interval, so a completion-only
+	// clock made "reconcile stalled" a fleet-size-dependent false alarm.
 	lastReconcile atomic.Int64
+	lastProgress  atomic.Int64
 	// alertMu guards lastAlert, a coarse per-key throttle so a repeating systemic
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
 	lastAlert map[string]time.Time
+
+	// applyMu guards applying, and applying holds one entry per permit that has a
+	// council plate-write in flight right now (the channel is closed on release, so
+	// a waiter can block on it without polling). See AcquireApply.
+	applyMu  sync.Mutex
+	applying map[int64]chan struct{}
+
+	// unscheduled remembers, per permit, the last "nothing to apply" state we
+	// reported, so entering that state is announced once instead of every tick.
+	// Only touched from the reconcile goroutine, so it needs no lock.
+	unscheduled map[int64]string
+
+	// reconciling is true for the duration of a reconcile pass, so the housekeeping
+	// loop can keep its stop-the-world snapshot off the top of one (see maybeSnapshot).
+	reconciling atomic.Bool
+
+	// snapshotting is true while the daily VACUUM INTO is running. It holds the
+	// store's single connection for its whole duration, so the watchdog uses this to
+	// name the likely cause rather than reporting an unexplained stall.
+	snapshotting atomic.Bool
 
 	// retryMu guards nextTry: per-permit earliest-next-council-attempt deadlines.
 	// A persistently failing SetVehicle would otherwise issue a real council
@@ -165,6 +190,8 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
 		nextTry:       make(map[int64]time.Time),
+		applying:      make(map[int64]chan struct{}),
+		unscheduled:   make(map[int64]string),
 		snapshotPath:  opts.SnapshotPath,
 	}
 }
@@ -239,6 +266,78 @@ func (s *Scheduler) clearRetry(permitID int64) {
 	s.retryMu.Unlock()
 }
 
+// AcquireApply claims the exclusive right to change ONE permit's plate at the
+// council, and returns the function that releases it. ok is false only when ctx
+// is cancelled while waiting, in which case the caller must not apply.
+//
+// A council write and the active_registration write that records it are one
+// decision, and two of them interleaving loses: the guest handler and the
+// reconcile loop both call SetVehicle, so the council could end up holding the
+// roster plate while the database recorded the guest's. Every later tick then
+// compares its target against that (wrong) belief, concludes there is nothing to
+// do, and leaves a car uncovered until checkDrift re-reads the portal — up to the
+// ~105-minute keep-warm interval later, which for the driver is a fine.
+//
+// The claim is PER PERMIT, and deliberately no wider. Reconcile calls the council
+// once per permit inside its own claim; a global lock would serialise the whole
+// pass behind whichever household happens to be mid-activation, and the pass
+// already paces itself with rateDelay. Nothing takes this lock while holding a
+// database transaction (both callers claim it, then talk to the council, then
+// write) so it cannot deadlock against the store's single connection.
+//
+// Handlers WAIT here rather than skipping: a visitor who taps a car must not
+// silently get nothing because a reconcile pass happened to be mid-write on their
+// permit. Reconcile does the opposite — see tryApply.
+func (s *Scheduler) AcquireApply(ctx context.Context, permitID int64) (release func(), ok bool) {
+	for {
+		if release, ok := s.tryApply(permitID); ok {
+			return release, true
+		}
+		s.applyMu.Lock()
+		busy := s.applying[permitID]
+		s.applyMu.Unlock()
+		if busy == nil {
+			continue // released between the two locks; try to claim it again
+		}
+		select {
+		case <-busy:
+		case <-ctx.Done():
+			return func() {}, false
+		}
+	}
+}
+
+// tryApply is AcquireApply without the wait: ok is false when another apply for
+// this permit is already in flight. Reconcile uses this and skips the permit,
+// because by the time a wait finished its `want` would have been computed before
+// the other writer's decision — re-applying a stale target is precisely the
+// clobber the exclusion exists to prevent. The next tick recomputes and heals.
+//
+// The returned release is idempotent, so a caller can both defer it (a panic must
+// never leak a claim: a permit whose claim is held forever is a permit whose plate
+// is never corrected again) and call it early to keep the claim off work that has
+// nothing to do with the write.
+func (s *Scheduler) tryApply(permitID int64) (release func(), ok bool) {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+	if _, busy := s.applying[permitID]; busy {
+		return nil, false
+	}
+	done := make(chan struct{})
+	s.applying[permitID] = done
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.applyMu.Lock()
+			if s.applying[permitID] == done {
+				delete(s.applying, permitID) // keeps the map to in-flight applies only
+			}
+			s.applyMu.Unlock()
+			close(done) // wake every waiter
+		})
+	}, true
+}
+
 // LastReconcile is the time the scheduler last completed a clean reconcile pass
 // (zero if none yet). An external watchdog uses this to tell a live-but-wedged
 // process from a healthy one: the HTTP server can answer while the work loop is
@@ -257,11 +356,12 @@ func (s *Scheduler) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
-	// Seed lastReconcile with the start time so the watchdog can detect a FIRST
-	// pass that wedges (hangs before ever stamping a completion). Without this seed
-	// lastReconcile stays 0 and the watchdog's "no pass yet" guard would never fire
-	// — exactly the boot-time hang the dead-man's switch exists to catch.
+	// Seed both clocks with the start time so the watchdog can detect a FIRST pass
+	// that wedges (hangs before ever stamping anything). Without this seed they stay
+	// 0 and the watchdog's "no pass yet" guard would never fire — exactly the
+	// boot-time hang the dead-man's switch exists to catch.
 	s.lastReconcile.CompareAndSwap(0, time.Now().UnixNano())
+	s.lastProgress.CompareAndSwap(0, time.Now().UnixNano())
 
 	// Join the helper loops before returning, so a caller that waits on Run can
 	// safely close the store afterwards (nothing is left mid-DB-call).
@@ -295,6 +395,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 // permit can't kill the loop and silently stop all plate changes) and alerting
 // the operator when it does. It stamps lastReconcile on a clean pass.
 func (s *Scheduler) safeReconcile(ctx context.Context) {
+	s.progress()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: reconcile panicked (recovered): %v", r)
@@ -307,10 +408,30 @@ func (s *Scheduler) safeReconcile(ctx context.Context) {
 	s.reconcileAll(ctx)
 }
 
-// watchdog is an internal dead-man's switch: if no reconcile pass has completed
-// for well over the tick interval, it alerts the operator (a hung loop the panic
-// recover can't catch). A fully dead process is caught separately by the Docker
-// healthcheck.
+// progress stamps the reconcile loop's liveness clock. Called at the start of a
+// pass and after each permit it considers, so "the loop is alive" is measured by
+// WORK DONE rather than by passes completed.
+func (s *Scheduler) progress() {
+	s.lastProgress.Store(time.Now().UnixNano())
+}
+
+// stallThreshold is how long the reconcile loop may go without touching a single
+// permit before the operator is told it has wedged.
+//
+// Measured against progress, not against pass completion, so it does not have to
+// bound the duration of a whole pass: a midnight rollover on a large fleet writes
+// every permit, each spaced by rateDelay and each waiting on a council round trip,
+// which is legitimately many minutes of work and used to false-alarm as a stall.
+// What cannot happen legitimately is minutes of NOTHING between two permits, since
+// the council client bounds its own calls. Kept a comfortable multiple of the tick
+// interval so an idle-but-healthy loop (nothing to do, one pass a minute) is never
+// mistaken for a wedged one.
+const stallThreshold = 5 * time.Minute
+
+// watchdog is an internal dead-man's switch: if the reconcile loop stops making
+// progress for well over the tick interval, it alerts the operator (a hung loop
+// the panic recover can't catch). A fully dead process is caught separately by the
+// Docker healthcheck.
 func (s *Scheduler) watchdog(ctx context.Context) {
 	t := time.NewTicker(2 * time.Minute)
 	defer t.Stop()
@@ -319,15 +440,28 @@ func (s *Scheduler) watchdog(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			last := s.lastReconcile.Load()
+			last := s.lastProgress.Load()
 			if last == 0 {
-				continue // no pass has completed yet
+				continue // the loop has not started yet
 			}
-			if age := time.Since(time.Unix(0, last)); age > 5*s.interval {
-				s.systemAlert(ctx, "reconcile-stall", "Scheduler reconcile stalled",
-					fmt.Sprintf("No reconcile pass has completed for %s (interval is %s). Users' permits may not be updating.",
-						age.Round(time.Second), s.interval))
+			age := time.Since(time.Unix(0, last))
+			threshold := stallThreshold
+			if 5*s.interval > threshold {
+				threshold = 5 * s.interval // an unusually slow tick sets its own floor
 			}
+			if age <= threshold {
+				continue
+			}
+			cause := ""
+			if s.snapshotting.Load() {
+				// The daily VACUUM INTO holds the store's single connection, so the loop
+				// is blocked on its first query rather than wedged. Say so: an alert that
+				// names the wrong cause costs the operator the whole investigation.
+				cause = " A database backup snapshot is running, which holds the single database connection and can block the loop until it finishes."
+			}
+			s.systemAlert(ctx, "reconcile-stall", "Scheduler reconcile stalled",
+				fmt.Sprintf("The reconcile loop has not touched a permit for %s (interval is %s). Users' permits may not be updating.%s",
+					age.Round(time.Second), s.interval, cause))
 		}
 	}
 }
@@ -471,18 +605,44 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
 		log.Printf("scheduler: prune change log: %v", err)
 	}
-	if s.snapshotPath != "" && time.Since(s.lastSnapshot) > 24*time.Hour {
-		if err := s.store.Snapshot(ctx, s.snapshotPath); err != nil {
-			log.Printf("scheduler: backup snapshot: %v", err)
-			// A silently failing backup is exactly the operator condition systemAlert
-			// exists for (its per-key throttle keeps the retry loop from spamming).
-			s.systemAlert(ctx, "backup-snapshot", "Backup snapshot is failing",
-				fmt.Sprintf("The daily database snapshot to %s failed: %v. File-level backups are stale until this succeeds.", s.snapshotPath, err))
-		} else {
-			s.lastSnapshot = time.Now()
-			log.Printf("scheduler: wrote backup snapshot %s", s.snapshotPath)
-		}
+	s.maybeSnapshot(ctx)
+}
+
+// maybeSnapshot writes the daily backup snapshot, at most once a day.
+//
+// VACUUM INTO holds the store's single connection for its whole duration, so
+// while it runs every handler and both loops block on their next query. Two things
+// follow. First, it must not start on top of a reconcile pass that is mid-flight:
+// a pass blocked between deciding a plate change and performing it is the one
+// moment where the delay is measured in fines rather than in latency, so a pass in
+// progress defers the snapshot to the next housekeeping tick (15 minutes) instead
+// of forcing it. Second, its duration is the number an operator needs when
+// something else in the process looks stalled, so it is always logged — a silent
+// multi-second stop-the-world is indistinguishable from a bug elsewhere.
+func (s *Scheduler) maybeSnapshot(ctx context.Context) {
+	if s.snapshotPath == "" || time.Since(s.lastSnapshot) <= 24*time.Hour {
+		return
 	}
+	if s.reconcileInFlight() {
+		log.Printf("scheduler: deferring backup snapshot: a reconcile pass is in flight")
+		return
+	}
+	s.snapshotting.Store(true)
+	start := time.Now()
+	err := s.store.Snapshot(ctx, s.snapshotPath)
+	took := time.Since(start)
+	s.snapshotting.Store(false)
+	if err != nil {
+		log.Printf("scheduler: backup snapshot failed after %s: %v", took.Round(time.Millisecond), err)
+		// A silently failing backup is exactly the operator condition systemAlert
+		// exists for (its per-key throttle keeps the retry loop from spamming).
+		s.systemAlert(ctx, "backup-snapshot", "Backup snapshot is failing",
+			fmt.Sprintf("The daily database snapshot to %s failed after %s: %v. File-level backups are stale until this succeeds.",
+				s.snapshotPath, took.Round(time.Millisecond), err))
+		return
+	}
+	s.lastSnapshot = time.Now()
+	log.Printf("scheduler: wrote backup snapshot %s in %s", s.snapshotPath, took.Round(time.Millisecond))
 }
 
 // warmAction is what keep-warm should do with one session this pass.
@@ -801,7 +961,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 		if err != nil {
 			continue
 		}
-		if !strings.EqualFold(actual, p.ActiveRegistration) {
+		if !model.SamePlate(actual, p.ActiveRegistration) {
 			log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
 			// Record the external change durably so it appears in the activity log
 			// (nothing p.stonn does to the permit should be invisible) and so the
@@ -852,7 +1012,13 @@ func (s *Scheduler) syncPermitExpiry(ctx context.Context, owner string) {
 			continue
 		}
 		// Warn once we're inside the lead window, up until the permit has expired.
-		if now.Before(p.EndDate.Add(-s.expiryLead)) || now.After(p.EndDate) {
+		// "Expired" has to mean the end of EndDate's local DAY (model.ExpiryDeadline),
+		// the same boundary Permit.Inactive uses: EndDate is a zoneless council date
+		// parsed as UTC midnight, so comparing `now` against the bare instant closed
+		// the warning window at ~10-11am local on the permit's final valid day. A
+		// notifier that was down through the lead window would then never warn at all,
+		// which is the outage this reminder exists to survive.
+		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.loc)) {
 			continue
 		}
 		if s.notifier == nil || !s.notifier.Enabled() {
@@ -1017,7 +1183,12 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// reconcileInFlight reports whether a reconcile pass is running right now.
+func (s *Scheduler) reconcileInFlight() bool { return s.reconciling.Load() }
+
 func (s *Scheduler) reconcileAll(ctx context.Context) {
+	s.reconciling.Store(true)
+	defer s.reconciling.Store(false)
 	permits, err := s.store.ListPermits(ctx)
 	if err != nil {
 		log.Printf("scheduler: list permits: %v", err)
@@ -1056,6 +1227,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		}
 		active++
 		activeOwners[p.Owner] = true
+		s.progress() // per-permit liveness, so a long legitimate pass is not a stall
 		if s.reconcilePermit(ctx, p, vehByOwnerID, now, stats) && s.rateDelay > 0 {
 			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
 				return
@@ -1102,6 +1274,79 @@ func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []m
 	return model.FindDisplaced(overrides, vehicles, prev, actor, members, now)
 }
 
+// settle ends any failure or council-block episode for a permit that needs no
+// council write this tick, whether that is because the permit already shows the
+// target or because there is no target to apply.
+//
+// The streak previously only ever reset on a SCHEDULER apply success, and then
+// only when a target resolved: an episode that ended any other way — a guest's
+// inline apply (which writes active_registration itself), the roster changing to
+// match what is already on the permit, or the target becoming unresolvable when
+// its vehicle was deleted — left the counter inflated PERMANENTLY. A single
+// one-minute blip weeks later would then land straight on the alert threshold,
+// alarming the user instantly instead of after the intended grace, and take the
+// maximum 30-minute backoff on the first failure of a fresh episode. Gated on the
+// loaded value so the common already-correct pass stays read-only on the shared
+// SQLite connection.
+func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
+	if p.FailStreak == 0 {
+		return
+	}
+	s.clearFailStreak(ctx, p.ID)
+	s.clearRetry(p.ID)
+}
+
+// noteUnscheduled reports whether this is the first tick on which a permit has
+// been in the given "nothing to apply" state, remembering it so later ticks stay
+// quiet. These states persist for as long as the gap in the schedule does — a
+// whole weekend on a weekday-only roster — so anything that speaks every tick is a
+// firehose, and the thing worth reporting is the TRANSITION into the state.
+func (s *Scheduler) noteUnscheduled(permitID int64, state string) bool {
+	if s.unscheduled[permitID] == state {
+		return false
+	}
+	s.unscheduled[permitID] = state
+	return true
+}
+
+// clearUnscheduled re-arms the notice once the permit has a target again, so a
+// second gap later is reported afresh.
+func (s *Scheduler) clearUnscheduled(permitID int64) {
+	delete(s.unscheduled, permitID)
+}
+
+// reportUnresolvable makes a schedule that points at a car we cannot find
+// visible: a log line, a row in the user-facing activity log, and one
+// notification. Only on entry into the state (noteUnscheduled), so a condition
+// that does not clear itself cannot turn into a per-tick alert — and so the
+// activity-log read logApply does to dedup is not paid every tick either.
+//
+// The registration on the row is the plate the permit is STILL showing, because
+// that is the fact the household needs: the car they think is covered is not, and
+// the car that is covered may not be there.
+func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res model.Resolution) {
+	if !s.noteUnscheduled(p.ID, fmt.Sprintf("unresolved|%d|%s", res.VehicleID, model.NormPlate(p.ActiveRegistration))) {
+		return
+	}
+	log.Printf("scheduler: permit %s: the %s points at vehicle %d, which is not one of %s's saved cars; permit still shows %q",
+		p.CouncilPermitID, res.Source, res.VehicleID, p.Owner, p.ActiveRegistration)
+	const reason = "The car this permit is scheduled to use is no longer saved, so p.stonn has not changed the permit."
+	const action = "Open p.stonn and choose a car for today, or add the car back."
+	s.logApply(ctx, p.ID, p.ActiveRegistration, string(res.Source), "error", reason)
+	s.notifyUser(ctx, p, notify.ApplyOutcome{
+		Owner:       p.Owner,
+		PermitLabel: permitLabel(p),
+		Reg:         p.ActiveRegistration,
+		OK:          false,
+		CurrentReg:  p.ActiveRegistration,
+		Reason:      reason,
+		Action:      action,
+		// Transient, so this respects quiet hours: it is a schedule to fix in the
+		// morning, not the kind of hard failure that justifies a 3am push.
+		Transient: true,
+	}, fmt.Sprintf("unscheduled|%d|%s", res.VehicleID, p.ActiveRegistration))
+}
+
 // reconcilePermit applies any needed plate change for one permit. It returns
 // true when it actually contacted the council (so the caller can space bursts).
 func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, now time.Time, stats *passStats) (hitCouncil bool) {
@@ -1117,7 +1362,15 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	}
 	res := model.Resolve(now, rules, overrides)
 	if res.Source == model.SourceNone {
-		return false // nothing scheduled right now; leave the permit as-is
+		// Nothing scheduled right now; leave the permit as-is. It keeps whatever plate
+		// was last put on it, which is worth saying once — but only once, because the
+		// gap lasts as long as the gap in the schedule does.
+		if s.noteUnscheduled(p.ID, "none|"+model.NormPlate(p.ActiveRegistration)) && p.ActiveRegistration != "" {
+			log.Printf("scheduler: permit %s has nothing scheduled now; it still shows %s",
+				p.CouncilPermitID, p.ActiveRegistration)
+		}
+		s.settle(ctx, p)
+		return false
 	}
 	want := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}].Registration
 	wantName := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}].Label
@@ -1125,33 +1378,64 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		want = res.Registration
 		wantName = ""
 	}
-	if want == "" || want == p.ActiveRegistration {
-		// The permit already shows what the schedule wants, so whatever failure or
-		// council-block episode was running has ended — even though this pass applies
-		// nothing. Clearing here matters because the streak previously only ever reset
-		// on a SCHEDULER apply success: an episode that ended any other way (a guest's
-		// inline apply, which writes active_registration itself, or the roster simply
-		// changing to match what is already on the permit) left the counter inflated
-		// permanently. A single one-minute blip weeks later would then land above the
-		// alert threshold, alarming the user instantly instead of after the intended
-		// grace, and taking the maximum retry backoff on the first failure of a fresh
-		// episode. Gated on the loaded value so the common already-correct pass stays
-		// read-only on the shared SQLite connection.
-		if want != "" && p.FailStreak != 0 {
-			s.clearFailStreak(ctx, p.ID)
-			s.clearRetry(p.ID)
-		}
-		return false // already correct (or unknown/foreign vehicle)
+	if want == "" {
+		// The schedule points at a vehicle we cannot turn into a plate: the row was
+		// deleted under us, or it belongs to another owner (vehByOwnerID is
+		// owner-keyed precisely so that can never resolve). This used to be a fully
+		// silent no-op — no log, no activity row, no notification — so the permit sat
+		// holding whatever plate it had, indefinitely, while the household believed
+		// their schedule was running. Reported once per state, never per tick: the
+		// condition does not clear itself, and an alert that repeats every minute is
+		// one people learn to ignore.
+		s.reportUnresolvable(ctx, p, res)
+		s.settle(ctx, p)
+		return false
+	}
+	s.clearUnscheduled(p.ID) // the schedule is resolvable again; re-arm the notice
+	if model.SamePlate(want, p.ActiveRegistration) {
+		s.settle(ctx, p)
+		return false // already correct
 	}
 	if s.retryDeferred(p.ID, time.Now()) {
 		return false // failing lately; inside its stretched retry window
 	}
 
+	// From here the council write and the active_registration write that records it
+	// are one decision, so take this permit's apply claim first. Skipping (rather
+	// than waiting) is deliberate: `want` was computed above, so by the time a wait
+	// returned we would be applying a target decided BEFORE the other writer's, which
+	// is the clobber the claim exists to prevent. The next tick recomputes and heals.
+	release, claimed := s.tryApply(p.ID)
+	if !claimed {
+		log.Printf("scheduler: permit %s skipped this tick: another plate change is in flight", p.CouncilPermitID)
+		return false
+	}
+	defer release() // idempotent; a panic must never leave a permit claimed forever
+	// p came from the snapshot ListPermits took at the start of the pass, and a
+	// handler's inline apply may have landed since. Re-read the permit's own belief
+	// under the claim so we neither re-apply a plate that is already on (a real
+	// council write plus a "your permit was updated" notice for a no-op) nor act on a
+	// stale failure streak.
+	if fresh, ferr := s.store.GetPermit(ctx, p.ID); ferr == nil {
+		p.ActiveRegistration, p.FailStreak = fresh.ActiveRegistration, fresh.FailStreak
+		if model.SamePlate(want, p.ActiveRegistration) {
+			s.settle(ctx, p)
+			return false
+		}
+	}
+
 	prev := p.ActiveRegistration // the plate we're changing away from
 	err = s.council.SetVehicle(ctx, p.Owner, p, want)
+	if err == nil {
+		_ = s.store.SetPermitActive(ctx, p.ID, want)
+	}
+	// The decision is recorded, so drop the claim before the bookkeeping below: the
+	// activity row, the notifications and (on an expired session) a full headless
+	// re-login are none of them this permit's plate write, and a household tapping a
+	// guest link must not wait out a 20-second reconnect to get their car on.
+	release()
 	switch {
 	case err == nil:
-		_ = s.store.SetPermitActive(ctx, p.ID, want)
 		s.clearFailStreak(ctx, p.ID)
 		s.clearRetry(p.ID)
 		s.logApply(ctx, p.ID, want, string(res.Source), "success", "")

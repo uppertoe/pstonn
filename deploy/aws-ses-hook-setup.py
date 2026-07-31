@@ -148,6 +148,26 @@ def main() -> None:
                              AttributeValue=json.dumps(policy))
     ok("topic policy allows ses.amazonaws.com to publish")
 
+    # Sign notifications with SHA-256 (SignatureVersion 2) rather than the SHA-1
+    # default. The webhook verifies whatever the message claims to be signed with, so
+    # while the topic emits version 1 the endpoint's trust rests on SHA-1 over a
+    # payload that includes remote-influenced text (a bounce's diagnostic code comes
+    # from the receiving mail server).
+    #
+    # The app copes with either and pins itself to v2 for the rest of the process once
+    # it has verified a genuine v2 message — deliberately, because hard-pinning before
+    # the topic was reconfigured would have silently stopped all bounce and complaint
+    # processing, and an app that stops learning about dead addresses keeps mailing
+    # them until the sending domain is blacklisted. Setting this here is what lets the
+    # v1 branch eventually be deleted.
+    try:
+        sns.set_topic_attributes(TopicArn=topic_arn, AttributeName="SignatureVersion",
+                                 AttributeValue="2")
+        ok("topic signs with SHA-256 (SignatureVersion 2)")
+    except Exception as exc:  # older regions/endpoints may not accept the attribute
+        warn(f"could not set SignatureVersion=2 ({exc}); the topic will keep signing "
+             "with SHA-1 and the app will keep accepting it")
+
     # 2) Configuration set emitting BOUNCE + COMPLAINT, set as the identity
     #    default so every send from this domain is covered with no app change.
     section("SES configuration set")

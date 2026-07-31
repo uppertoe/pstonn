@@ -116,10 +116,18 @@ func changeText(c store.Change) string {
 	case store.ActionVehicleDelete:
 		// Target can be empty when the plate could not be read at delete time; the
 		// row is still worth writing, so degrade to "a car" rather than a gap.
-		if c.Target == "" {
-			return "deleted a car (any roster days and bookings using it went too)"
+		named := "a car"
+		if c.Target != "" {
+			named = "the car " + c.Target
 		}
-		return "deleted the car " + c.Target + " (any roster days and bookings using it went too)"
+		// Detail carries which roster days were emptied, captured before the delete
+		// cascaded them away. This row is the ONLY durable record of that — the flash
+		// on the vehicles page sends people here for it — so prefer it over the
+		// generic sentence whenever it is present.
+		if c.Detail != "" {
+			return "deleted " + named + ". " + c.Detail
+		}
+		return "deleted " + named + " (any roster days and bookings using it went too)"
 	case store.ActionVehicleEmail:
 		return "changed the driver email for " + c.Target
 	case store.ActionGuestCreate:

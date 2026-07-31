@@ -3,10 +3,143 @@ package store
 import (
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
+// schemaVersion is the migration set this build knows how to apply. It is
+// RECORDED after a successful run, for the operator and for a future "this file
+// was written by a newer binary" check — it is deliberately NOT used to skip the
+// migrations. Skipping on a version match would mean that forgetting to bump this
+// constant silently stops a newly added ALTER from ever reaching an existing
+// database, which is a far worse failure than re-running statements that are all
+// idempotent and cost microseconds on an already-migrated file.
+const schemaVersion = 1
+
+// migrationLockTTL bounds how long a dead migrator keeps the next start out. A
+// process killed mid-migration leaves the row claimed, and with no takeover window
+// the app could never boot again without manual surgery on the database — so the
+// lock expires. It is set well above a real migration (milliseconds) and well
+// below any plausible restart loop.
+const migrationLockTTL = 5 * time.Minute
+
+// migrationLockWait is how long to wait for another process to finish migrating
+// before giving up. Losing the race is normal and harmless (the winner's work is
+// what this process needs); waiting forever is not, because a stuck peer would
+// turn into a container that never reports healthy and never says why.
+const migrationLockWait = 30 * time.Second
+
+// migratorSeq distinguishes migration-lock holders within one process; see
+// lockMigrations.
+var migratorSeq atomic.Uint64
+
+// migrate brings the schema up to date, holding an exclusive migration lock for
+// the whole run.
+//
+// The lock is the point. Two processes can share a data volume — a rolling deploy
+// that overlaps by a second, a stray `docker compose run`, an operator's one-off
+// container — and several migrations here are read-then-write: they probe with
+// columnExists and then act. rebuildOverrideTable is the dangerous one, because
+// acting means PRAGMA foreign_keys=OFF followed by DROP and RENAME on a live
+// table. Two processes that both pass the probe run that twice, and the second one
+// copies rows out of a table the first has already replaced.
+//
+// The lock is a claimed row rather than BEGIN EXCLUSIVE for two reasons: the pool
+// is capped at one connection, so holding a transaction open would deadlock every
+// statement below it (see the invariant in OpenSQLite), and PRAGMA foreign_keys is
+// a no-op inside a transaction, which rebuildOverrideTable depends on. A single
+// conditional UPDATE is atomic in SQLite, which is all mutual exclusion needs.
 func (s *Store) migrate() error {
+	release, err := s.lockMigrations()
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.applyMigrations(); err != nil {
+		return err
+	}
+	// Recorded only on success, so a failed boot does not leave the file claiming a
+	// version it never reached.
+	if _, err := s.db.Exec(
+		`UPDATE schema_migration SET version = ?, applied_at = ? WHERE id = 1`,
+		schemaVersion, nowUTC()); err != nil {
+		return fmt.Errorf("migrate: record schema version: %w", err)
+	}
+	return nil
+}
+
+// lockMigrations claims the single migration lock row, waiting for a concurrent
+// migrator to finish. The returned function releases the claim and must always be
+// called, including on failure: a migration that errors takes the app down anyway,
+// and leaving the row claimed would add migrationLockTTL of confusion to the next
+// attempt.
+func (s *Store) lockMigrations() (func(), error) {
+	// The lock table has to exist before it can be claimed, so this one statement
+	// is necessarily unsynchronised. It is safe to race on: CREATE TABLE IF NOT
+	// EXISTS and INSERT OR IGNORE are both no-ops for the loser, and neither
+	// touches any other table.
+	const bootstrap = `
+CREATE TABLE IF NOT EXISTS schema_migration (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),  -- one row, ever
+    version    INTEGER NOT NULL DEFAULT 0,          -- last schemaVersion applied
+    applied_at TEXT NOT NULL DEFAULT '',
+    locked_by  TEXT NOT NULL DEFAULT '',            -- host/pid currently migrating ('' = free)
+    locked_at  TEXT NOT NULL DEFAULT ''             -- RFC3339 UTC; the claim expires after migrationLockTTL
+);
+INSERT OR IGNORE INTO schema_migration (id, version) VALUES (1, 0);
+`
+	if _, err := s.db.Exec(bootstrap); err != nil {
+		return nil, fmt.Errorf("migrate: schema_migration table: %w", err)
+	}
+	// Host and pid identify the migrator for a human reading the row. The sequence
+	// number is what makes it UNIQUE: without it two Store instances in one process
+	// (tests today, an in-process second store tomorrow) would share a holder
+	// string, and the release below — which only clears a claim it owns — could clear
+	// the other one's.
+	host, _ := os.Hostname()
+	holder := fmt.Sprintf("%s/%d/%d", host, os.Getpid(), migratorSeq.Add(1))
+
+	deadline := time.Now().Add(migrationLockWait)
+	for {
+		// One conditional UPDATE decides it: SQLite serialises writers, so of two
+		// processes reaching this at the same instant exactly one matches the WHERE
+		// clause and exactly one gets RowsAffected == 1.
+		now := time.Now().UTC()
+		res, err := s.db.Exec(
+			`UPDATE schema_migration SET locked_by = ?, locked_at = ?
+			   WHERE id = 1 AND (locked_by = '' OR locked_at <= ?)`,
+			holder, now.Format(time.RFC3339), now.Add(-migrationLockTTL).Format(time.RFC3339))
+		if err != nil {
+			return nil, fmt.Errorf("migrate: claim migration lock: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("migrate: claim migration lock: %w", err)
+		}
+		if n == 1 {
+			return func() {
+				if _, err := s.db.Exec(
+					`UPDATE schema_migration SET locked_by = '', locked_at = '' WHERE id = 1 AND locked_by = ?`,
+					holder); err != nil {
+					log.Printf("migrate: could not release the migration lock: %v", err)
+				}
+			}, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("migrate: another process has held the migration lock for over %s; "+
+				"check for a second container on this data volume", migrationLockWait)
+		}
+		log.Printf("migrate: another process is migrating this database; waiting")
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// applyMigrations is the migration set itself. Every statement in it is written to
+// be safe to re-run against an already-migrated database, because it runs on every
+// start (see schemaVersion).
+func (s *Store) applyMigrations() error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS council_session (
     owner                TEXT PRIMARY KEY,        -- app-user email
@@ -122,6 +255,21 @@ CREATE TABLE IF NOT EXISTS account_member (
 );
 CREATE INDEX IF NOT EXISTS idx_member_owner ON account_member(owner);
 
+-- Per-person session generation. The app's own login issues a stateless signed
+-- cookie, so there is nothing server-side to invalidate: removing someone's admin
+-- group, revoking their shared access, or deleting their account left their existing
+-- cookie fully valid — admin and all — until it aged out. Bumping the epoch here
+-- makes every cookie issued before the bump fail to decode, which is the only way a
+-- stateless session can be revoked at all.
+--
+-- Absent row means epoch 0, so a person who has never had anything revoked needs no
+-- row and the common case costs nothing.
+CREATE TABLE IF NOT EXISTS session_epoch (
+    email      TEXT PRIMARY KEY,
+    epoch      INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS oauth_state (
     state      TEXT PRIMARY KEY,
     verifier   TEXT NOT NULL,
@@ -129,6 +277,11 @@ CREATE TABLE IF NOT EXISTS oauth_state (
     kind       TEXT NOT NULL DEFAULT '',   -- "app" (the OIDC provider login) | "council" (permit link)
     created_at TEXT NOT NULL
 );
+-- Every login sweeps expired states by created_at before inserting a new one. The
+-- state primary key does not help that scan, so without this index an anonymous
+-- hit on the login route costs a full table scan on the single shared connection —
+-- the one every handler and both work loops queue behind.
+CREATE INDEX IF NOT EXISTS idx_oauth_state_created ON oauth_state(created_at);
 
 -- Guest passes: a link that lets a non-account person put one of a permitted set
 -- of the account's registered cars onto a permit, for the day (or overnight).
@@ -290,6 +443,19 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 		// Recipients with no account (a guest, a displaced driver) otherwise have no
 		// idea who we are or how we got their address.
 		`ALTER TABLE outbox ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
+		// Whether this membership is still awaiting the invited person's own consent. A
+		// pending row grants NOTHING: adding a member used to bind an arbitrary address
+		// to an account on one person's say-so, which showed the invitee someone else's
+		// household, blocked them from linking their own council account, and filed
+		// everything they then created under the inviter's ownership.
+		//
+		// The flag is "pending" rather than "accepted" deliberately, so its DEFAULT 0
+		// makes every membership that predates this column active. Those people already
+		// have working access; making them re-accept would revoke a household's shared
+		// access on deploy. Expressing it this way needs no backfill, which matters
+		// because a backfill here would re-run on every startup and silently accept
+		// invites nobody had answered.
+		`ALTER TABLE account_member ADD COLUMN invite_pending INTEGER NOT NULL DEFAULT 0`,
 		// The re-authorise clock is now IDLE-based: it measures time since anyone on
 		// the account last used the app, not time since a password was typed. The
 		// point of the bound is to stop serving households that have left, and a

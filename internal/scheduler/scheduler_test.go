@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,16 +27,88 @@ type fakeCouncil struct {
 	reconnectHadDeadline bool // recoverOrRetire must pass a bounded context
 	permits              []parking.PermitInfo
 	permitsErr           error
-	setCalls             []string // council_permit_id per SetVehicle call
 	setErr               error
+	setDelay             time.Duration // how long a council write takes, to widen races
+
+	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
+	// from a handler-style goroutine and the reconcile loop at the same time.
+	mu       sync.Mutex
+	setCalls []string        // council_permit_id per SetVehicle call
+	setRegs  []string        // registration per SetVehicle call, in order
+	inFlight map[string]bool // council permit ids with a write in flight right now
+	overlaps int             // times two writes to the SAME permit were in flight together
+
+	// current is what the council REPORTS is on each permit, keyed by council permit
+	// id, and currentErr is a read failure. This used to be hardcoded empty, which
+	// meant checkDrift — the whole external-change detection path — was never once
+	// executed by a test.
+	current    map[string]string
+	currentErr error
 }
 
-func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, _ string) error {
-	f.setCalls = append(f.setCalls, p.CouncilPermitID)
-	return f.setErr
+// setCurrent makes the council report reg on a permit, as if someone had changed it
+// in the portal directly.
+func (f *fakeCouncil) setCurrent(councilPermitID, reg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.current == nil {
+		f.current = map[string]string{}
+	}
+	f.current[councilPermitID] = reg
 }
-func (f *fakeCouncil) CurrentVehicle(context.Context, string, model.Permit) (string, error) {
-	return "", nil
+
+func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, reg string) error {
+	f.mu.Lock()
+	f.setCalls = append(f.setCalls, p.CouncilPermitID)
+	f.setRegs = append(f.setRegs, reg)
+	if f.inFlight == nil {
+		f.inFlight = map[string]bool{}
+	}
+	if f.inFlight[p.CouncilPermitID] {
+		f.overlaps++
+	}
+	f.inFlight[p.CouncilPermitID] = true
+	delay, err := f.setDelay, f.setErr
+	f.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay) // hold the "connection" open so an overlap is observable
+	}
+
+	f.mu.Lock()
+	delete(f.inFlight, p.CouncilPermitID)
+	f.mu.Unlock()
+	return err
+}
+
+func (f *fakeCouncil) callSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.setCalls...)
+}
+
+// lastReg is the registration the council was last asked to hold.
+func (f *fakeCouncil) lastReg() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.setRegs) == 0 {
+		return ""
+	}
+	return f.setRegs[len(f.setRegs)-1]
+}
+
+func (f *fakeCouncil) overlapCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.overlaps
+}
+func (f *fakeCouncil) CurrentVehicle(_ context.Context, _ string, p model.Permit) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.currentErr != nil {
+		return "", f.currentErr
+	}
+	return f.current[p.CouncilPermitID], nil
 }
 func (f *fakeCouncil) Refresh(_ context.Context, owner string) error {
 	f.refreshed = append(f.refreshed, owner)
@@ -400,8 +473,8 @@ func TestReconcileSkipsInactivePermits(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour})
 	s.reconcileAll(ctx)
 
-	if len(fc.setCalls) != 1 || fc.setCalls[0] != "active-1" {
-		t.Fatalf("SetVehicle calls = %v, want [active-1] only (expired skipped)", fc.setCalls)
+	if calls := fc.callSnap(); len(calls) != 1 || calls[0] != "active-1" {
+		t.Fatalf("SetVehicle calls = %v, want [active-1] only (expired skipped)", calls)
 	}
 }
 
@@ -660,9 +733,11 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	})
 	s.keepWarm(ctx)
 
-	if sent := fn.sentSnap(); len(sent) != 1 {
+	sent := fn.sentSnap()
+	if len(sent) != 1 {
 		t.Fatalf("expected exactly one reminder, got %d", len(sent))
-	} else if sent[0].to != "soon@example.com" || !strings.Contains(sent[0].url, "/council/confirm?token=") {
+	}
+	if sent[0].to != "soon@example.com" || !strings.Contains(sent[0].url, "/council/confirm?token=") {
 		t.Fatalf("bad reminder: %+v", sent[0])
 	}
 	cs, _ := st.GetCouncilSession(ctx, "soon@example.com")
@@ -675,8 +750,17 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 		t.Fatalf("reminder re-sent: %d", n)
 	}
 	// Clicking the link clears the reminder cycle (deadline-extension precision is
-	// verified in the store test with a backdated link time).
-	owner, err := st.ConfirmSession(ctx, cs.ConfirmToken, 0)
+	// verified in the store test with a backdated link time). The token comes from
+	// the EMAIL, not from the row: the column stores only its hash, so a link cannot
+	// be reconstructed from a database read.
+	_, token, _ := strings.Cut(sent[0].url, "token=")
+	if token == "" {
+		t.Fatalf("no token in the reminder link: %q", sent[0].url)
+	}
+	if token == cs.ConfirmToken {
+		t.Fatal("the emailed token equals the stored column, so it is stored in plaintext")
+	}
+	owner, err := st.ConfirmSession(ctx, token, 0)
 	if err != nil || owner != "soon@example.com" {
 		t.Fatalf("ConfirmSession = %q, %v", owner, err)
 	}
@@ -926,4 +1010,305 @@ func countFailures(os []notify.ApplyOutcome) int {
 		}
 	}
 	return n
+}
+
+// seedActivePermit gives an owner one permit rostered to one car for TODAY, with
+// the council currently holding something else — so a reconcile pass has a real
+// change to make. Returns the permit id and the rostered plate.
+func seedActivePermit(t *testing.T, st *store.Store, owner, councilID, reg, active string) (int64, string) {
+	t.Helper()
+	ctx := context.Background()
+	seedSession(t, st, owner)
+	veh, err := st.CreateVehicle(ctx, owner, reg, "Rostered car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := st.UpsertPermit(ctx, owner, councilID, "14", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The scheduler resolves the roster from time.Now() in its own location (UTC in
+	// these tests), so the rule has to be for today's UTC weekday.
+	if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), veh); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPermitActive(ctx, pid, active); err != nil {
+		t.Fatal(err)
+	}
+	return pid, reg
+}
+
+// TestApplyExclusion (F3, I8) is the anti-lost-update test. A guest tapping a car
+// runs the same three steps the reconcile loop does — claim, council write, record
+// the plate — and if the two interleave the council can end up holding one plate
+// while the database records another. Every later tick then compares its target
+// against that wrong belief, concludes there is nothing to do, and leaves a car
+// uncovered until the next drift check ~105 minutes later.
+//
+// Two invariants: no two writes to one permit are ever in flight together, and
+// when the dust settles the stored belief IS the plate the council was last given.
+// Run under -race, which also covers the shared scheduler state both sides touch.
+func TestApplyExclusion(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "race@example.com"
+	pid, _ := seedActivePermit(t, st, owner, "race-1", "ROSTER1", "OLD999")
+
+	fc := &fakeCouncil{setDelay: time.Millisecond}
+	s := New(st, fc, time.UTC, Options{})
+	handlerPermit := model.Permit{ID: pid, Owner: owner, CouncilPermitID: "race-1"}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { // the handler side (guestActivate / guestRevert / decideRequest)
+		defer wg.Done()
+		for i := 0; i < 40; i++ {
+			reg := fmt.Sprintf("GUEST%02d", i)
+			release, ok := s.AcquireApply(ctx, pid)
+			if !ok {
+				release()
+				return
+			}
+			if err := fc.SetVehicle(ctx, owner, handlerPermit, reg); err == nil {
+				if err := st.SetPermitActive(ctx, pid, reg); err != nil {
+					t.Errorf("record applied plate: %v", err)
+				}
+			}
+			release()
+		}
+	}()
+	go func() { // the reconcile loop
+		defer wg.Done()
+		for i := 0; i < 40; i++ {
+			s.reconcileAll(ctx)
+		}
+	}()
+	wg.Wait()
+
+	if n := fc.overlapCount(); n != 0 {
+		t.Fatalf("%d council write(s) overlapped on one permit: the handler and the reconcile loop are not serialised", n)
+	}
+	p, err := st.GetPermit(ctx, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := fc.lastReg(); !model.SamePlate(p.ActiveRegistration, last) {
+		t.Fatalf("the council was last given %q but the permit records %q — a car is uncovered and no tick will notice", last, p.ActiveRegistration)
+	}
+}
+
+// TestReconcileSkipsPermitWithApplyInFlight: the reconcile loop must not WAIT on a
+// handler's claim, because `want` was computed before that handler's decision — it
+// would apply a stale target, which is the clobber the claim exists to prevent. It
+// skips the permit (and does not count as a council hit), and the next tick heals.
+func TestReconcileSkipsPermitWithApplyInFlight(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "held@example.com"
+	pid, _ := seedActivePermit(t, st, owner, "held-1", "ROSTER1", "OLD999")
+
+	fc := &fakeCouncil{}
+	s := New(st, fc, time.UTC, Options{})
+
+	release, ok := s.AcquireApply(ctx, pid)
+	if !ok {
+		t.Fatal("AcquireApply on a free permit must succeed")
+	}
+	s.reconcileAll(ctx)
+	if calls := fc.callSnap(); len(calls) != 0 {
+		t.Fatalf("reconcile wrote to the council while a handler held the permit: %v", calls)
+	}
+	release()
+
+	s.reconcileAll(ctx)
+	if calls := fc.callSnap(); len(calls) != 1 {
+		t.Fatalf("the next tick must heal the skipped permit; SetVehicle calls = %v", calls)
+	}
+}
+
+// TestCaseVariantPlateIsNotAChange (F5, I8): the portal echoes plates back in
+// whatever case they were entered with, and a case-only difference must not look
+// like a change. It used to drive a real council write, a "your permit was updated"
+// notification and a displaced-driver email for a no-op.
+func TestCaseVariantPlateIsNotAChange(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "case@example.com"
+	pid, reg := seedActivePermit(t, st, owner, "case-1", "ABC123", "abc123")
+
+	fc := &fakeCouncil{}
+	nf := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+	s.reconcileAll(ctx)
+	time.Sleep(20 * time.Millisecond) // notifications fire from goroutines
+
+	if calls := fc.callSnap(); len(calls) != 0 {
+		t.Fatalf("a case variant of %s drove a real council write: %v", reg, calls)
+	}
+	if applied := nf.appliedSnap(); len(applied) != 0 {
+		t.Fatalf("a case variant notified the household of a change that changed nothing: %+v", applied)
+	}
+	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
+		t.Fatalf("a case variant wrote an activity row (%d rows, err=%v)", len(logs), err)
+	}
+	// Spacing is the same class of difference, and the council echoes that back too.
+	if err := st.SetPermitActive(ctx, pid, "abc 123"); err != nil {
+		t.Fatal(err)
+	}
+	s.reconcileAll(ctx)
+	if calls := fc.callSnap(); len(calls) != 0 {
+		t.Fatalf("a spacing variant of %s drove a real council write: %v", reg, calls)
+	}
+}
+
+// TestFailStreakClearsWithoutATarget (F4, I8): a busy/failing episode that ends by
+// the target becoming UNRESOLVABLE (the rostered car was deleted, which cascades
+// its rules away) has still ended. The old gate only cleared the streak when a
+// target resolved, so the counter stayed inflated permanently — and a single
+// transient blip weeks later landed straight on the notify threshold and took the
+// maximum 30-minute backoff on the first failure of a fresh episode.
+func TestFailStreakClearsWithoutATarget(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "streak@example.com"
+	pid, _ := seedActivePermit(t, st, owner, "streak-1", "ROSTER1", "OLD999")
+
+	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy}
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+
+	// Build a real episode: several consecutive blocked ticks.
+	for i := 0; i < 4; i++ {
+		s.reconcileAll(ctx)
+	}
+	p, err := st.GetPermit(ctx, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.FailStreak == 0 {
+		t.Fatal("blocked ticks should have built a fail streak")
+	}
+
+	// The episode ends the other way: the car is deleted, so there is no target at
+	// all (weekly_rule cascades with the vehicle).
+	vehicles, err := st.ListVehiclesFor(ctx, owner)
+	if err != nil || len(vehicles) != 1 {
+		t.Fatalf("expected one saved vehicle, got %d (err=%v)", len(vehicles), err)
+	}
+	if err := st.DeleteVehicle(ctx, owner, vehicles[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	fc.setErr = nil
+	s.reconcileAll(ctx)
+
+	p, err = st.GetPermit(ctx, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.FailStreak != 0 {
+		t.Fatalf("fail streak = %d, want 0: a settled permit with no target still ends the episode", p.FailStreak)
+	}
+	if s.retryDeferred(pid, time.Now()) {
+		t.Fatal("a settled permit must not stay inside its stretched retry window")
+	}
+}
+
+// TestUnresolvableTargetIsReported (F8): a schedule that points at a car we cannot
+// turn into a plate used to be a fully silent no-op — no log, no activity row, no
+// notification — while the permit kept whatever plate it had. It must be reported,
+// and reported ONCE: the condition does not clear itself, so a per-tick alert would
+// be one people learn to ignore.
+func TestUnresolvableTargetIsReported(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "gap@example.com"
+	seedSession(t, st, owner)
+	pid, err := st.UpsertPermit(ctx, owner, "gap-1", "14", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPermitActive(ctx, pid, "STALE11"); err != nil {
+		t.Fatal(err)
+	}
+	// A booking on this permit that points at ANOTHER owner's vehicle: reconcile
+	// resolves vehicles per-owner precisely so a foreign id can never yield a plate,
+	// which is exactly the state this reports.
+	foreign, err := st.CreateVehicle(ctx, "someone@else.example", "BBB222", "Their car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(6 * time.Hour)
+	if _, err := st.CreateOverride(ctx, pid, foreign, time.Now().Add(-time.Hour), &end, "someone@else.example"); err != nil {
+		t.Fatal(err)
+	}
+
+	fc := &fakeCouncil{}
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+	s.reconcileAll(ctx)
+	time.Sleep(40 * time.Millisecond)
+
+	if calls := fc.callSnap(); len(calls) != 0 {
+		t.Fatalf("an unresolvable target must not reach the council: %v", calls)
+	}
+	logs, err := st.ListApplyLogFor(ctx, owner, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].Status != "error" || logs[0].Registration != "STALE11" {
+		t.Fatalf("expected one error row naming the plate still on the permit, got %+v", logs)
+	}
+	out := nf.outcomeSnap()
+	if len(out) != 1 || out[0].OK || out[0].CurrentReg != "STALE11" || out[0].Action == "" {
+		t.Fatalf("expected one actionable notice naming what is still on the permit, got %+v", out)
+	}
+	// Every later tick in the same state stays silent.
+	for i := 0; i < 3; i++ {
+		s.reconcileAll(ctx)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if logs, _ := st.ListApplyLogFor(ctx, owner, 10); len(logs) != 1 {
+		t.Fatalf("the notice repeated: %d activity rows", len(logs))
+	}
+	if n := len(nf.outcomeSnap()); n != 1 {
+		t.Fatalf("the notice repeated: %d notifications", n)
+	}
+}
+
+// TestExpiryWarningRunsToTheEndOfTheLastDay (F7): EndDate is a zoneless council
+// date parsed as UTC midnight and is the INCLUSIVE last valid day, so comparing
+// `now` against the bare instant closed the warning window at ~10-11am local on the
+// permit's final valid day — while the permit was still live and still needed its
+// plate kept right. A notifier that was down through the lead window would then
+// never warn at all.
+func TestExpiryWarningRunsToTheEndOfTheLastDay(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	loc, err := time.LoadLocation("Australia/Melbourne")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	const owner = "lastday@example.com"
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner)
+	cpid := "perm-" + owner
+
+	// The permit's last valid day is TODAY in Melbourne, as the council reports it:
+	// a zoneless date, i.e. UTC midnight — which is 10am local. "A permit whose last
+	// valid day is today still gets its warning" must hold at every hour of the day;
+	// the old bare-instant comparison broke it from 10am local onward, so this test
+	// discriminates in the afternoon and evening and asserts the invariant always.
+	today := time.Now().In(loc)
+	endDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+
+	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: endDate}}}
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, loc, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond,
+		ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(ctx)
+
+	if len(nf.expiries) != 1 {
+		t.Fatalf("a permit still valid until midnight tonight got %d expiry warnings, want 1", len(nf.expiries))
+	}
 }

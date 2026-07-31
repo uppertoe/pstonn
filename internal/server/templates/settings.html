@@ -42,6 +42,22 @@
     <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
     {{end}}
   </section>
+  {{if .Invite}}
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic">{{template "ic-user"}}</span> An invitation for you</h2>
+    <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. Nothing is shared until you accept, and you can decline without anything happening.</p>
+    <p class="empty-note" style="margin-top:12px">If you accept, you will see and manage their permits, vehicles and schedule instead of your own, and they will see what you change. You will not be able to connect your own council account while you share theirs. You can leave at any time.</p>
+    <div class="row" style="margin-top:14px;gap:8px">
+      <form method="post" action="/account/invite/accept" data-confirm="Share {{.Invite.Owner}}'s account? You'll manage their permits instead of your own." data-confirm-ok="Accept">
+        <input type="hidden" name="owner" value="{{.Invite.Owner}}">
+        <button type="submit">{{template "ic-check"}} Accept</button>
+      </form>
+      <form method="post" action="/account/invite/decline">
+        <button type="submit" class="ghost">{{template "ic-x"}} Decline</button>
+      </form>
+    </div>
+  </section>
+  {{end}}
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-user"}}</span> Shared access</h2>
     {{if .IsPrimary}}
@@ -50,10 +66,13 @@
     <ul style="list-style:none;padding:0;margin:14px 0 0;display:grid;gap:8px">
       {{range .Members}}
       <li class="row" style="justify-content:space-between">
-        <span>{{template "ic-user"}} <strong>{{.Email}}</strong> <span class="muted">added {{.Added}}</span></span>
-        <form method="post" action="/account/members/remove" data-confirm="Remove {{.Email}}? They lose access to this account." data-confirm-ok="Remove">
+        <span>{{template "ic-user"}} <strong>{{.Email}}</strong>
+          {{if .Pending}}<span class="muted">invited {{.Added}} — waiting for them to accept</span>
+          {{else}}<span class="muted">added {{.Added}}</span>{{end}}
+        </span>
+        <form method="post" action="/account/members/remove" data-confirm="{{if .Pending}}Withdraw the invitation to {{.Email}}?{{else}}Remove {{.Email}}? They lose access to this account.{{end}}" data-confirm-ok="{{if .Pending}}Withdraw{{else}}Remove{{end}}">
           <input type="hidden" name="email" value="{{.Email}}">
-          <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
+          <button type="submit" class="ghost sm">{{template "ic-x"}} {{if .Pending}}Withdraw{{else}}Remove{{end}}</button>
         </form>
       </li>
       {{end}}
@@ -66,7 +85,7 @@
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit">{{template "ic-plus"}} Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">When you add an email, that person gets access the next time they sign in with it.{{if .Notify.EmailAvailable}} p.stonn sends them a heads-up email.{{end}} They can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Anyone who already has their own p.stonn account cannot be added.</p>
+    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do.{{if .Notify.EmailAvailable}} p.stonn emails them to let them know.{{end}} Once they accept they can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
     {{else}}
     <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
     {{end}}
@@ -97,6 +116,11 @@
     </div>
     <p class="empty-note" style="margin-top:12px">Your login and password are managed by your organisation's sign-in provider, not this app.</p>
     {{if .Terms.Accepted}}<p class="empty-note" style="margin-top:8px">Terms accepted: {{.Terms.Accepted}}.</p>{{end}}
+    {{/* A signed-in person had no way to reach the contact form: it is linked from the
+         public header and from the footer of outgoing mail, neither of which is in
+         front of someone already inside the app. Shown only when contact is
+         configured, matching every other link to it. */}}
+    {{if .Contact}}<p class="empty-note" style="margin-top:8px">Something wrong, or a question? <a href="/contact">Get in touch</a>.</p>{{end}}
   </section>
 
 {{end}}

@@ -54,14 +54,30 @@ func deadStatus(s string) bool {
 	return false
 }
 
+// ExpiryDeadline is the instant a permit with this end date stops being valid:
+// midnight at the START of the day after EndDate, in loc. EndDate is the
+// INCLUSIVE last valid day and the council reports it as a zoneless local date
+// (which we parse as UTC midnight), so anything that compares `now` against the
+// bare instant treats the permit as finished from ~10-11am local on its final
+// valid day — while it is still usable and still needs its plate kept right.
+// Every "has this permit finished?" question must go through here so that
+// off-by-one is fixed in one place. Zero end date has no deadline, so callers
+// must check for it themselves.
+func ExpiryDeadline(endDate time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.Local
+	}
+	end := endDate.In(loc)
+	return time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 1)
+}
+
 // Inactive reports whether a permit should no longer be actively reconciled or
 // shown as a live permit: its status says it's dead, or its expiry day has fully
-// passed. EndDate is treated as the INCLUSIVE last valid day in the council's
-// timezone (loc): a permit is retired only once the day AFTER EndDate has begun
-// there. That is deliberately conservative — the council reports zoneless local
-// dates (parsed as UTC), so a plain instant compare could retire up to ~half a day
-// early and cause a fine; erring late only costs a harmless doomed write. Zero end
-// date + live status = active (we never retire on unknown data).
+// passed. Retiring only once the day AFTER EndDate has begun locally (see
+// ExpiryDeadline) is deliberately conservative — erring early could stop us
+// updating a live permit and cause a fine, while erring late only costs a
+// harmless doomed write. Zero end date + live status = active (we never retire on
+// unknown data).
 func (p Permit) Inactive(now time.Time, loc *time.Location) bool {
 	if deadStatus(p.Status) {
 		return true
@@ -69,12 +85,35 @@ func (p Permit) Inactive(now time.Time, loc *time.Location) bool {
 	if p.EndDate.IsZero() {
 		return false
 	}
-	if loc == nil {
-		loc = time.Local
+	return !now.Before(ExpiryDeadline(p.EndDate, loc))
+}
+
+// NormPlate canonicalises a registration for comparison. The council echoes
+// plates back in whatever case and spacing they were entered with, and no two
+// real cars differ only by case or by a space, so neither may make two spellings
+// of one plate look like two different cars.
+func NormPlate(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			continue
+		}
+		b.WriteRune(r)
 	}
-	end := p.EndDate.In(loc)
-	dayAfterExpiry := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 1)
-	return !now.Before(dayAfterExpiry)
+	return strings.ToUpper(b.String())
+}
+
+// SamePlate reports whether two registrations name the same car.
+//
+// This is the ONLY rule for comparing a permit's active registration against
+// anything, because the sites that decide "is a council write needed?" and "has
+// the plate changed?" must not disagree: when one of them says a case-variant
+// echo from the portal is a different plate, p.stonn performs a real council
+// write, tells the household their permit was updated, and emails a displaced
+// driver — all for a no-op.
+func SamePlate(a, b string) bool {
+	return NormPlate(a) == NormPlate(b)
 }
 
 // WeeklyRule allocates a vehicle to a permit on a given weekday, the building

@@ -10,41 +10,50 @@
 # healthcheck, and the email confirm link are PUBLIC (not behind forward-auth).
 # Everything else (the app) is protected. Once signed in, protected requests
 # carry the Remote-* headers.
+#
+# Keep this hostname DNS-only at the DNS provider -- grey cloud, no CDN proxy in
+# front of Caddy. The app reads the RIGHTMOST X-Forwarded-For entry, which is the
+# only spoof-proof choice when Caddy faces clients directly. Put a CDN in front and
+# that entry becomes the CDN edge node Caddy is talking to, not the visitor: every
+# per-IP throttle in the app then collapses onto the handful of edge addresses
+# serving the region and stops limiting individuals at all, while looking perfectly
+# healthy. That regression shipped once, silently, in July 2026. The app now echoes
+# the client address it actually sees, and flags CDN forwarding headers, in the
+# token-gated GET /status payload -- check it after any DNS change.
 p.{$DOMAIN} {
-	# Public, no login: landing/about/why/contact pages, static assets, healthcheck,
-	# the token-only renewal-confirm link from reminder emails, and the token-only
-	# guest-pass activation links (/g/*). Strip the
-	# shared session cookie even here: it is scoped to .{$DOMAIN}, so the browser
-	# sends it to every path, and the public backend must never receive the
-	# estate-wide bearer.
 	# The landing page. It stays public, but a signed-in visitor is sent straight
-	# to the app instead of the marketing page. Only the auth layer knows whether
-	# the visitor has a session, so it decides here (the public backend is never
-	# told who is signed in): forward_auth checks the session against auth:8080, a
-	# 2xx (signed in) redirects to the app, and anyone else is served the public
-	# landing with identity and the shared cookie stripped. This mirrors the
-	# forward_auth in the (protected) snippet; keep the uri/copy_headers in step.
+	# to the app instead of the marketing page.
+	#
+	# Do NOT reach for forward_auth here, however natural it looks. Its non-2xx
+	# path serves the auth layer's own login page, and taking that over with
+	# handle_response returned an empty 200 for a signed-in GET / -- the home page
+	# came back blank, which is a total outage of the front door for exactly the
+	# people who are signed in. Instead match on the PRESENCE of the estate session
+	# cookie and use plain redir, which is a simple handler whose order the route
+	# wrapper preserves.
+	#
+	# Presence is not validity, and it does not have to be: no access decision is
+	# made here. A stale cookie merely bounces the visitor via /schedule, which is
+	# still forward-auth gated, on to the login page -- the right outcome. Strip the
+	# shared session cookie before the public backend sees it: it is scoped to the
+	# parent domain, so the browser sends it to every path, and the public backend
+	# must never receive the estate-wide bearer.
 	handle / {
 		route {
 			import strip_client_identity
-			forward_auth auth:8080 {
-				uri /verify
-				copy_headers Remote-User Remote-Email Remote-Groups
-				header_up X-Auth-Policy "any"
-
-				@signedin status 2xx
-				handle_response @signedin {
-					redir /schedule 302
-				}
-				handle_response {
-					reverse_proxy pstonn:8080 {
-						import strip_auth_cookie
-					}
-				}
+			@hassession header Cookie *vps_auth_session=*
+			redir @hassession /schedule 302
+			reverse_proxy pstonn:8080 {
+				import strip_auth_cookie
 			}
 		}
 	}
 
+	# Public, no login: the security/how/contact pages, the healthcheck, the token-only
+	# renewal-confirm link from reminder emails, and the token-only guest-pass
+	# activation links (/g/*). The shared session cookie is stripped here too, for
+	# the same reason as on the landing page.
+	#
 	# /status is the machine-readable status the outage watchdog polls. It carries
 	# its own bearer token (the app checks STATUS_TOKEN), so it bypasses login like
 	# the other token-only routes; forward-auth identity is stripped as usual.
@@ -59,7 +68,7 @@ p.{$DOMAIN} {
 	# have no account at all, and an opt-out they cannot reach is not an opt-out.
 	# The link carries a signed per-address token, so it can only ever stop mail to
 	# the one address it was issued for.
-	@public path /about /why /contact /healthz /council/confirm /g/* /status /hooks/ses /u/*
+	@public path /security /how /contact /healthz /council/confirm /g/* /status /hooks/ses /u/*
 	handle @public {
 		route {
 			import strip_client_identity

@@ -586,8 +586,18 @@ func TestReminderAndConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs, _ := s.GetCouncilSession(ctx, owner)
-	if cs.ReminderSent.IsZero() || cs.ConfirmToken != "tok-123" {
+	if cs.ReminderSent.IsZero() {
 		t.Fatalf("reminder not marked: %+v", cs)
+	}
+	// The column holds the token's HASH, never the token. The link is a bearer
+	// capability that extends a council session, and it rides in a GET query string
+	// as well as living here, so a read-only leak of the DB (or of a proxy access
+	// log) must not yield something replayable.
+	if cs.ConfirmToken == "tok-123" {
+		t.Fatal("the confirm token is stored in plaintext, so reading the row yields a working link")
+	}
+	if cs.ConfirmToken != hashConfirmToken("tok-123") {
+		t.Fatalf("confirm_token = %q, want the hash of the emailed token", cs.ConfirmToken)
 	}
 
 	// A bad token confirms nothing.
@@ -626,6 +636,11 @@ func TestReminderAndConfirm(t *testing.T) {
 	}
 	if cs3, _ := s.GetCouncilSession(ctx, owner); cs3.ConfirmToken != "" {
 		t.Fatalf("stale token should be cleared, got %q", cs3.ConfirmToken)
+	}
+	// '' is the "nothing outstanding" marker both expiry paths and the partial index
+	// key on, so it must survive hashing untouched.
+	if hashConfirmToken("") != "" {
+		t.Fatal("an absent token must hash to the empty marker, not to a hash of nothing")
 	}
 	// Within maxAge it still works.
 	if err := s.MarkReminderSent(ctx, owner, "tok-fresh"); err != nil {

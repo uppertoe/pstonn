@@ -57,6 +57,10 @@ func (s *Server) doReq(method, target, email, origin string, form url.Values) *h
 	}
 	r := httptest.NewRequest(method, target, body)
 	r.Host = "app.example.com"
+	// Identity headers are only believed from the reverse proxy, so a test that
+	// injects one has to look like the proxy. httptest's default peer is 192.0.2.1
+	// (TEST-NET-1), which is deliberately NOT private — see TestForwardAuthPeerTrust.
+	r.RemoteAddr = "10.0.0.2:41000"
 	if form != nil {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
@@ -89,7 +93,13 @@ func TestAuthorizationMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Inviting only creates a PENDING offer, which grants nothing; the secondary
+	// becomes a secondary by accepting. Both steps are needed to reach the state this
+	// matrix exercises — see TestPendingInviteGrantsNothing for the half-way state.
 	if err := s.store.AddMemberCapped(ctx, owner, secondary, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.AcceptInvite(ctx, secondary, owner); err != nil {
 		t.Fatal(err)
 	}
 	vehID, err := s.store.CreateVehicle(ctx, owner, "OWN111", "Owner car")
@@ -482,12 +492,16 @@ func TestStatusRosterSealed(t *testing.T) {
 		t.Fatalf("decrypted roster missing the account: %s", plain)
 	}
 
-	// Without a key the historical plaintext shape is preserved, so an existing
-	// watchdog keeps working until it is updated.
+	// There is no plaintext path left at all. The transitional allowance — serve the
+	// roster in the clear when no key is configured — meant every routine health poll
+	// carried every account's email and push topic, and `?roster=0` could not switch
+	// it off. Startup now refuses that combination outright, so reaching this state
+	// requires forcing it, and the request fails rather than falling back to clear.
 	s.cfg.RosterKey = nil
-	if body := get("/status").Body.String(); !strings.Contains(body, "roster@example.com") {
-		t.Fatalf("with no key configured the roster should still be served: %s", body)
+	if w := get("/status?roster=1"); w.Code == http.StatusOK && strings.Contains(w.Body.String(), "roster@example.com") {
+		t.Fatalf("the roster was served in plaintext with no key: %s", w.Body.String())
 	}
+	s.cfg.RosterKey = bytes.Repeat([]byte{9}, 32)
 
 	// A wrong token is refused whether or not a key is set.
 	r := httptest.NewRequest("GET", "/status?roster=1", nil)
@@ -526,6 +540,7 @@ func TestVisitorQRReusesLiveCode(t *testing.T) {
 		r := httptest.NewRequest("POST", "/guests/qr",
 			strings.NewReader(url.Values{"permit_id": {strconv.FormatInt(pid, 10)}}.Encode()))
 		r.Host = "app.example.com"
+		r.RemoteAddr = "10.0.0.2:41000" // must look like the proxy for Remote-* to count
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		r.Header.Set("Origin", "https://app.example.com")
 		r.Header.Set("HX-Request", "true")

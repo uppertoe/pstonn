@@ -22,7 +22,9 @@ func newUnsubServer(t *testing.T) (*Server, *notify.Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	key := notify.DeriveUnsubKey([]byte("test-at-rest-key"))
+	// 32 bytes: DeriveUnsubKey refuses anything shorter, because a key derived from
+	// a short secret is guessable and an unsubscribe link must not be forgeable.
+	key := notify.DeriveUnsubKey([]byte("test-at-rest-key-0123456789abcdef"))
 	svc := notify.New(st, nil, "", "", "https://app.example.com", "", "", time.UTC, key)
 	return &Server{
 		cfg:      &config.Config{DisplayLocation: time.UTC},
@@ -108,10 +110,62 @@ func TestUnsubscribeFlow(t *testing.T) {
 	})
 }
 
+// TestUnsubscribeThrottled: /u/* sits outside the CSRF gate (one-click posts
+// cross-origin) and its token travels in a URL, so the per-IP throttle is the only
+// thing pacing someone walking tokens or replaying one out of a forwarded email.
+func TestUnsubscribeThrottled(t *testing.T) {
+	s, svc := newUnsubServer(t)
+	s.unsubLimit = newRateLimiter(1, time.Minute)
+	path := strings.TrimPrefix(svc.UnsubscribeURL("guest@example.com"), "https://app.example.com")
+
+	do := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "app.example.com"
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := do(); w.Code != http.StatusOK {
+		t.Fatalf("first request = %d, want 200", w.Code)
+	}
+	w := do()
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request = %d, want 429", w.Code)
+	}
+	if w.Header().Get("Retry-After") == "" {
+		t.Error("a shed request should say when to come back")
+	}
+}
+
+// TestUnsubscribeUnsignedVersionedToken: the versioned token carries its own
+// expiry, so an unsigned one is the shape an expired-or-edited link arrives in.
+// It must fail closed with the same neutral wording as a forged one — the page is
+// public, so it must not confirm whether an address is known to us. (The expiry
+// itself is exercised in internal/notify, which owns the clock.)
+func TestUnsubscribeUnsignedVersionedToken(t *testing.T) {
+	s, _ := newUnsubServer(t)
+	const victim = "guest@example.com"
+	p := "/u/" + base64.RawURLEncoding.EncodeToString([]byte(victim)) + "/2.zzzzzzz.AAAAAAAAAAAAAAAAAAAAAA"
+	r := httptest.NewRequest("POST", p, strings.NewReader(""))
+	r.Host = "app.example.com"
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expired token POST = %d, want a 200 refusal page", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "no longer valid") {
+		t.Error("an expired link should get the same neutral message as an invalid one")
+	}
+	if bad, _, _ := s.store.IsSuppressed(context.Background(), victim); bad {
+		t.Fatal("an expired token unsubscribed the address")
+	}
+}
+
 // TestUnsubscribeTokenBinding locks the token's scope at the crypto layer.
 func TestUnsubscribeTokenBinding(t *testing.T) {
-	key := notify.DeriveUnsubKey([]byte("k1"))
-	other := notify.DeriveUnsubKey([]byte("k2"))
+	// Two distinct 32-byte at-rest keys (the only length DeriveUnsubKey accepts).
+	key := notify.DeriveUnsubKey([]byte("k1-0123456789abcdef0123456789abcd"))
+	other := notify.DeriveUnsubKey([]byte("k2-0123456789abcdef0123456789abcd"))
 	svc := notify.New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, key)
 
 	link := svc.UnsubscribeURL("A@Example.com")

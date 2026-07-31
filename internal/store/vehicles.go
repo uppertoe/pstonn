@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 )
@@ -261,3 +262,59 @@ func (s *Store) DeleteVehicle(ctx context.Context, owner string, id int64) error
 // VehiclePaletteForTest exposes the palette so a test can assert the ordering
 // contract (all distinct) without making the palette itself writable.
 func VehiclePaletteForTest() []string { return append([]string(nil), vehiclePalette...) }
+
+// VehicleUsage is what a vehicle is currently holding up: which permit/weekday slots
+// its roster days occupy, and how many live one-off bookings point at it.
+type VehicleUsage struct {
+	Rules         []VehicleRuleUse
+	LiveOverrides int
+}
+
+// VehicleRuleUse is one roster day that would be emptied.
+type VehicleRuleUse struct {
+	PermitLabel string
+	Weekday     time.Weekday
+}
+
+// VehicleUsageFor reports what deleting this vehicle would silently take with it.
+//
+// Deleting a car CASCADES its weekly_rule and override rows away, and a cleared day
+// produces no apply, so nothing downstream notices: the permit simply keeps whatever
+// plate it last had, indefinitely, with the household never told that Tuesday is now
+// unscheduled. Naming the days lets the warning say which ones, so somebody can
+// reassign them instead of discovering it from a parking fine.
+//
+// Owner-scoped, and returns nothing for a vehicle that is not theirs.
+func (s *Store) VehicleUsageFor(ctx context.Context, owner string, vehicleID int64) (VehicleUsage, error) {
+	var u VehicleUsage
+	rows, err := s.db.QueryContext(ctx, `
+SELECT COALESCE(p.label, ''), r.weekday
+FROM weekly_rule r
+JOIN permit p ON p.id = r.permit_id
+WHERE r.vehicle_id = ? AND p.owner = ?
+ORDER BY p.label, r.weekday`, vehicleID, owner)
+	if err != nil {
+		return u, err
+	}
+	for rows.Next() {
+		var use VehicleRuleUse
+		var wd int
+		if err := rows.Scan(&use.PermitLabel, &wd); err != nil {
+			rows.Close()
+			return u, err
+		}
+		use.Weekday = time.Weekday(wd)
+		u.Rules = append(u.Rules, use)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return u, err
+	}
+	// Only bookings that still carry authority matter; a finished one is history.
+	err = s.db.QueryRowContext(ctx, `
+SELECT COUNT(1) FROM override o
+JOIN permit p ON p.id = o.permit_id
+WHERE o.vehicle_id = ? AND p.owner = ? AND (o.ends_at IS NULL OR o.ends_at = '' OR o.ends_at > ?)`,
+		vehicleID, owner, nowUTC()).Scan(&u.LiveOverrides)
+	return u, err
+}

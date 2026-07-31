@@ -114,12 +114,15 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if !isPrimary {
+		// Declining the terms is a withdrawal of consent, so any session issued under
+		// the old acceptance stops here too.
+		defer s.revokeSessions(ctx, user)
 		if _, err := s.store.RemoveMembership(ctx, user); err != nil {
 			s.serverError(w, err)
 			return
 		}
 		log.Printf("secondary %s declined updated terms, left the shared account", user)
-		msg := "You declined the updated terms, so your shared access has been removed. The account owner's data is unaffected."
+		msg := "You declined the terms. Your shared access has been removed. The account owner's data is unaffected."
 		if s.logoutURL() != "" {
 			s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ".")
 			return
@@ -147,10 +150,10 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	// Only claim a disconnection if there was one. A first-time visitor who reads
 	// the terms and declines never linked anything, and telling them their permit
 	// is no longer managed is alarming and false.
-	msg := "You declined the terms, so p.stonn hasn't set anything up and isn't managing any permit for you. Nothing was connected, and nothing has changed with the council."
+	msg := "You declined the terms. Nothing was set up, and nothing has changed with the council."
 	after := ". You can come back and accept any time."
 	if wasLinked {
-		msg = "You declined the updated terms, so your council account has been disconnected and p.stonn is no longer managing your permit. Please check your visitor permit with the council."
+		msg = "You declined the terms. Your council account has been disconnected and p.stonn has stopped managing the permit. Please check its current state with the council."
 		after = ", or accept the terms below to reconnect."
 	}
 	if s.logoutURL() != "" {
