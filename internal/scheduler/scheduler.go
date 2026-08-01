@@ -88,6 +88,11 @@ type Options struct {
 	// every due change is applied on the next tick. See spreadElapsed; the price is
 	// that a permit can show the previous day's plate until its slot comes up.
 	SpreadWindow time.Duration
+	// DriftInterval is how often the owner-grid drift/expiry read runs, on its OWN
+	// per-owner cadence decoupled from keep-warm. It used to piggyback on every warm
+	// (~105 min), doubling keep-warm's council traffic for a check that catches a
+	// rare event (an external portal edit). Default 6h; 0 disables drift reads.
+	DriftInterval time.Duration
 }
 
 // Scheduler reconciles permits on an interval and keeps linked council sessions
@@ -108,6 +113,7 @@ type Scheduler struct {
 	rateDelay     time.Duration
 	jitterFrac    float64
 	spreadWindow  time.Duration
+	driftInterval time.Duration
 
 	// fleetSize is how many permits the last reconcile pass saw, the herd size the
 	// rollover window is scaled against. Written once per pass, read per permit.
@@ -201,6 +207,10 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	if sw < 0 {
 		sw = 0
 	}
+	di := opts.DriftInterval
+	if di < 0 {
+		di = 0
+	}
 	return &Scheduler{
 		store:         st,
 		council:       council,
@@ -215,6 +225,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		rateDelay:     rd,
 		jitterFrac:    jf,
 		spreadWindow:  sw,
+		driftInterval: di,
 		trigger:       make(chan struct{}, 1),
 		lastAlert:     make(map[string]time.Time),
 		nextTry:       make(map[int64]time.Time),
@@ -710,12 +721,44 @@ func decideWarm(now, lastActive, linkedAt, updatedAt time.Time, maxAge, warmInte
 	return warmRenew
 }
 
+// driftThresholdFor is this owner's stable, jittered drift-read interval. Stable
+// per owner (a deterministic hash) so a household's drift reads keep their own
+// phase rather than aligning across the fleet, and phased separately from keep-warm
+// (a "drift:" prefix) so the two cadences don't beat together into a burst.
+func (s *Scheduler) driftThresholdFor(owner string) time.Duration {
+	if s.jitterFrac <= 0 {
+		return s.driftInterval
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("drift:" + owner))
+	u := float64(h.Sum64()>>11) / float64(uint64(1)<<53)
+	return time.Duration(float64(s.driftInterval) * (1 + (u*2-1)*s.jitterFrac))
+}
+
+// driftDue reports whether the owner-grid drift/expiry read is due for this
+// session. A session that has never had one — a fresh link, or a row migrated
+// before the column existed — falls back to the warm clock as its baseline, so it
+// is NOT treated as instantly overdue, which would drift-read the whole fleet at
+// once right after the migrating deploy.
+func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
+	if s.driftInterval <= 0 {
+		return false
+	}
+	baseline := cs.DriftCheckedAt
+	if baseline.IsZero() {
+		baseline = cs.UpdatedAt
+	}
+	return now.Sub(baseline) >= s.driftThresholdFor(cs.Owner)
+}
+
 // keepWarm silent-renews idle-but-valid sessions so their council cookie does not
 // lapse, retires sessions that have reached the re-authorise bound, and emails a
-// confirm link as that bound approaches. To be light on the council it: jitters
-// each session's renew threshold (touches don't align or look mechanical), skips
-// sessions whose owner has no schedule to act on (their dashboard use keeps them
-// warm), and spaces the council calls it does make within a pass (anti-burst).
+// confirm link as that bound approaches. It also runs the owner-grid drift/expiry
+// read on its OWN per-owner cadence (driftDue) — decoupled from warming, which used
+// to trigger a grid read on every renew and so doubled keep-warm's council traffic.
+// To be light on the council it jitters each session's thresholds (touches don't
+// align or look mechanical), skips owners with no schedule to act on (their
+// dashboard use keeps them warm), and spaces the council calls within a pass.
 func (s *Scheduler) keepWarm(ctx context.Context) {
 	sessions, err := s.store.ListCouncilSessions(ctx)
 	if err != nil {
@@ -723,7 +766,16 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		return
 	}
 	now := time.Now()
-	renewed := 0
+	// Anti-burst: space every council call this pass makes — warm or drift — from
+	// the previous one. Returns false if the context is cancelled mid-sleep.
+	calls := 0
+	space := func() bool {
+		if calls > 0 && s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
+			return false
+		}
+		calls++
+		return true
+	}
 	for _, cs := range sessions {
 		if cs.Cookie == "" {
 			continue
@@ -755,33 +807,49 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		}
 		// Approaching-deadline reminder is independent of whether we renew now.
 		s.maybeRemind(ctx, cs, now)
-		if action == warmSkip {
+		// Warm and drift both apply only to owners with a schedule to act on: a
+		// linked user who has not built one needs no live session (their dashboard
+		// use renews it when they visit), and nothing to drift-check against.
+		if has, err := s.store.OwnerHasSchedule(ctx, cs.Owner); err != nil || !has {
 			continue
 		}
-		// warmRenew. A linked user who has not built a schedule needs no live
-		// session, their own dashboard use silently renews it when they visit.
-		if has, err := s.store.OwnerHasSchedule(ctx, cs.Owner); err == nil && !has {
-			continue
-		}
-		// Anti-burst: space out the council calls this pass actually makes.
-		if renewed > 0 && s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
-			return
-		}
-		renewed++
-		switch err := s.council.Refresh(ctx, cs.Owner); {
-		case err == nil:
-			log.Printf("scheduler: kept session for %s warm", cs.Owner)
-			s.checkDrift(ctx, cs.Owner) // piggyback a gentle council-drift check
-		case errors.Is(err, parking.ErrSessionExpired):
-			if s.recoverOrRetire(ctx, cs.Owner) {
-				s.checkDrift(ctx, cs.Owner)
+
+		// Warm the session if it has crossed its (jittered) threshold. warmSkip means
+		// it is still comfortably within its warm window — already alive.
+		alive := action == warmSkip
+		if action == warmRenew {
+			if !space() {
+				return
 			}
-		case errors.Is(err, parking.ErrNotLinked):
-			// Raced with an unlink; nothing to do.
-		case errors.Is(err, parking.ErrCouncilBusy):
-			// Portal pushing back; the client is already backing off. Stay quiet.
-		default:
-			log.Printf("scheduler: keep-warm %s: %v", cs.Owner, err)
+			switch err := s.council.Refresh(ctx, cs.Owner); {
+			case err == nil:
+				alive = true
+				log.Printf("scheduler: kept session for %s warm", cs.Owner)
+			case errors.Is(err, parking.ErrSessionExpired):
+				if s.recoverOrRetire(ctx, cs.Owner) {
+					alive = true
+				}
+			case errors.Is(err, parking.ErrNotLinked):
+				// Raced with an unlink; nothing to do.
+			case errors.Is(err, parking.ErrCouncilBusy):
+				// Portal pushing back; the client is already backing off. Stay quiet.
+			default:
+				log.Printf("scheduler: keep-warm %s: %v", cs.Owner, err)
+			}
+		}
+
+		// Drift/expiry read on its OWN cadence — separate from warming — and only when
+		// the session is alive to serve the read (a warm just succeeded, or it was
+		// already within its warm window). checkDrift updates permit status/expiry and
+		// re-arms reconcile on any external change.
+		if alive && s.driftDue(cs, now) {
+			if !space() {
+				return
+			}
+			s.checkDrift(ctx, cs.Owner)
+			if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
+				log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
+			}
 		}
 	}
 }
@@ -986,10 +1054,8 @@ func describeFailure(kind parking.FailureKind, op string) (reason, action string
 // account held three permits but only one addable one. The win is therefore modest
 // per household; what matters is that permit count leaves the scaling term entirely.
 func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
-	// Anti-burst: space this read from the silent-renew that just ran.
-	if s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
-		return
-	}
+	// The caller (keepWarm) already spaced this call from the previous one, and the
+	// transport governor spaces at the request level, so no extra sleep here.
 	live, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		return // a read failure is not evidence of drift; try again next cycle

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -248,5 +249,39 @@ func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 	}
 	if calls := fc.callSnap(); len(calls) != 0 {
 		t.Errorf("an inactive permit drove council traffic: %v", calls)
+	}
+}
+
+// Drift must run on its OWN cadence, not on every keep-warm. A session that is
+// warm-due but not yet drift-due gets warmed with NO grid read; once drift comes
+// due, a pass does the grid read. This is the decoupling that stops keep-warm from
+// doubling its own council traffic.
+func TestDriftDecoupledFromWarm(t *testing.T) {
+	ctx := context.Background()
+	const owner = "decouple@example.com"
+	st := newStore(t)
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner)
+	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
+	nf := &fakeNotifier{on: true}
+
+	// Warm every tick; drift every 6h (baseline is the just-seeded UpdatedAt, so not
+	// due). A pass should warm the session but make NO grid read.
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour,
+		WarmInterval: time.Nanosecond, DriftInterval: 6 * time.Hour, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(ctx)
+	if len(fc.refreshed) == 0 {
+		t.Fatal("session was not warmed")
+	}
+	if n := fc.listCallCount(); n != 0 {
+		t.Fatalf("drift ran on a warm even though it was not due: %d grid reads", n)
+	}
+
+	// Bring drift due: now a pass should do exactly one grid read.
+	s.driftInterval = time.Nanosecond
+	s.keepWarm(ctx)
+	if n := fc.listCallCount(); n != 1 {
+		t.Fatalf("drift did not run exactly once when due: %d grid reads", n)
 	}
 }

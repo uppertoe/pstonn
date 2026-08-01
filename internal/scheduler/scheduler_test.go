@@ -45,7 +45,8 @@ type fakeCouncil struct {
 	current    map[string]string
 	currentErr error
 
-	blocked bool // fleet breaker "open" for the escalated busy-warning tests
+	blocked   bool // fleet breaker "open" for the escalated busy-warning tests
+	listCalls int  // ListPermits (owner-grid) calls, to prove drift is decoupled from warm
 }
 
 // setCurrent makes the council report reg on a permit, as if someone had changed it
@@ -174,7 +175,14 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listCalls++ // the owner-grid read; drift/expiry uses it, so counting it counts drift
 	return append([]parking.PermitInfo(nil), f.permits...), f.permitsErr
+}
+
+func (f *fakeCouncil) listCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.listCalls
 }
 
 // blocked simulates the fleet circuit breaker being open (a confirmed shared-edge
@@ -473,7 +481,7 @@ func TestPermitExpiryReminder(t *testing.T) {
 	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: soon}}}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond,
-		ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
+		DriftInterval: time.Nanosecond, ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
 
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(ctx)
@@ -1363,7 +1371,7 @@ func TestExpiryWarningRunsToTheEndOfTheLastDay(t *testing.T) {
 	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: endDate}}}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, loc, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond,
-		ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
+		DriftInterval: time.Nanosecond, ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(ctx)
 

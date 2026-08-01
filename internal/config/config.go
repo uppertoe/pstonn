@@ -205,6 +205,22 @@ type CouncilConfig struct {
 	// pass. See scheduler.warmLoop.
 	WarmInterval time.Duration
 
+	// IdleWindow is the ESTIMATED council session idle timeout, used only to compute
+	// warm-margin metrics on /status (how close sessions are to lapsing) so the
+	// watchdog can alert before a council outage near the cliff creates a reconnect
+	// backlog. COUNCIL_IDLE_WINDOW, default 10h — the Duende IdentityServer default
+	// CookieLifetime, and consistent with a live probe that survived a 7h+ gap; set
+	// it to the measured value once the clean idle-timeout run brackets it.
+	IdleWindow time.Duration
+
+	// DriftInterval is how often the owner-grid drift/expiry read runs, on its own
+	// per-owner cadence decoupled from keep-warm. COUNCIL_DRIFT_INTERVAL, default 6h.
+	// It used to piggyback on every keep-warm (~105 min), doubling the auth-warm
+	// traffic for a check that catches a rare event (an external portal edit); the
+	// per-minute reconcile still enforces the desired plate regardless. 0 disables
+	// drift reads entirely.
+	DriftInterval time.Duration
+
 	// RolloverWindow staggers SCHEDULED plate changes across a window opening at
 	// the schedule boundary, capped at this value. COUNCIL_ROLLOVER_WINDOW, default
 	// 60m. The window SCALES with the fleet (see scheduler.effectiveSpread), so this
@@ -291,6 +307,8 @@ func Load() (*Config, error) {
 			SessionMaxAge:  time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
 			WarmInterval:   envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
 			RolloverWindow: envDuration("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
+			DriftInterval:  envDuration("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
+			IdleWindow:     envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
 			Sandbox:        env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
 			ReminderLead:   time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
 			ExpiryLead:     time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,

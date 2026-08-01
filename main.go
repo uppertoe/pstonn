@@ -127,6 +127,7 @@ func run() error {
 		Notifier:      notifier,
 		RateDelay:     3 * time.Second,
 		SpreadWindow:  cfg.Council.RolloverWindow,
+		DriftInterval: cfg.Council.DriftInterval,
 		// A daily consistent snapshot next to the live DB: the restic files-only
 		// backup of the volume can catch the live db + WAL mid-write, but this
 		// file is always a coherent database to restore from.
