@@ -123,10 +123,11 @@ func (c *Client) authorizeWithCookie(ctx context.Context, owner, cookie string) 
 	if code == "" {
 		return "", "", "", ErrSessionExpired
 	}
-	// A clean authorize is the fleet breaker's recovery signal: if the edge were
-	// still blocking our IP this would not have returned a code. This is how a
-	// keep-warm probe closes a half-open circuit even when no API call is in flight.
-	c.noteCouncilSuccess(owner)
+	// The breaker's recovery signal is reported by the OPERATION that owns the permit
+	// (keep-warm via warmLocked, an API call via apiRequest), not here: this authorize
+	// is shared by both the keep-warm and the mid-apiRequest renew, and only the
+	// former holds a probe permit. Feeding it here would let a mid-apiRequest renew
+	// close the circuit with a permit it never took.
 	return code, verifier, newCookie, nil
 }
 
@@ -247,7 +248,8 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
-	if err := c.breakerGate(); err != nil {
+	permit, err := c.breakerGate()
+	if err != nil {
 		return err
 	}
 	jar, err := cookiejar.New(nil)
@@ -387,7 +389,7 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 		return ErrLoginRejected
 	}
 	// A completed login means the edge served the whole flow: recovery signal.
-	c.noteCouncilSuccess(owner)
+	c.noteCouncilSuccess(owner, permit)
 
 	// 5. Seal and store the session cookie. The password is sealed and kept only
 	//    if the user opted in to auto-reconnect; otherwise it is dropped here and

@@ -40,17 +40,17 @@ func TestRollingCounterWindows(t *testing.T) {
 // Three distinct owners pushed back opens the circuit, and the gate then refuses.
 func TestClientBreakerGate(t *testing.T) {
 	c := &Client{breaker: newBreaker(3, 2*time.Minute, 5*time.Minute, 30*time.Second)}
-	if err := c.breakerGate(); err != nil {
+	if _, err := c.breakerGate(); err != nil {
 		t.Fatalf("gate blocked with a fresh breaker: %v", err)
 	}
 	now := time.Now()
 	c.breaker.onPushback(now, "a@x", 0)
 	c.breaker.onPushback(now, "b@x", 0)
-	if err := c.breakerGate(); err != nil {
+	if _, err := c.breakerGate(); err != nil {
 		t.Fatalf("gate tripped on two owners: %v", err)
 	}
 	c.breaker.onPushback(now, "c@x", 0)
-	if err := c.breakerGate(); err == nil {
+	if _, err := c.breakerGate(); err == nil {
 		t.Fatal("gate did not refuse after three distinct owners opened the circuit")
 	}
 }

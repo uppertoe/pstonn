@@ -236,15 +236,16 @@ func (c *Client) penalize(owner string, retryAfter time.Duration) {
 func (c *Client) clearPenalty(owner string) {
 	c.strikes.Delete(owner)
 	c.cooldownUntil.Delete(owner)
-	c.noteCouncilSuccess(owner)
 }
 
-// noteCouncilSuccess feeds the fleet breaker a clean council response and logs the
-// resume if this was the one that closed the circuit. Every success path calls it —
-// the API 2xx (via clearPenalty) and the OIDC renew/login — so a half-open probe on
-// any surface can be the one that brings the fleet back.
-func (c *Client) noteCouncilSuccess(owner string) {
-	if c.breaker.onSuccess(time.Now(), owner) {
+// noteCouncilSuccess feeds the fleet breaker a clean council response, presenting
+// the permit the operation's breakerGate handed out, and logs the resume if this
+// success was the half-open probe that closed the circuit. Called at the OPERATION
+// level (apiRequest 2xx, keep-warm, login) with that operation's permit — never
+// inside the shared authorize step, so an operation's internal renew can't feed the
+// breaker with a permit it never took.
+func (c *Client) noteCouncilSuccess(owner string, permit breakerPermit) {
+	if c.breaker.onSuccess(time.Now(), owner, permit) {
 		log.Printf("parking: fleet circuit closed — the council edge is serving us again; council traffic resumed")
 	}
 }
