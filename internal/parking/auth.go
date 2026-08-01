@@ -273,7 +273,7 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	// every link/reconnect by its 4–6 round trips — an undercount we would not
 	// want to be quoting to the council.
 	lc := &http.Client{Timeout: 30 * time.Second, Jar: jar,
-		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic},
+		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic, gov: c.gov},
 		// Refuse to be walked off the council's hosts. The credential POST target is
 		// resolved against the URL this redirect chain ENDS at, so an open redirect
 		// on the portal would otherwise be enough to move that base off-host and take

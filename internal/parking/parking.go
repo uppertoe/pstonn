@@ -157,6 +157,10 @@ type Client struct {
 	// ALL council traffic when several distinct owners are pushed back at once, the
 	// signature of an Azure-Front-Door block on our shared egress IP (see breaker.go).
 	breaker *breaker
+	// gov bounds the rate and concurrency of outbound requests at the transport, to
+	// keep our shared-IP traffic low and burst-free so a block is less likely to
+	// start (the preventive counterpart to the reactive breaker; see governor.go).
+	gov *governor
 
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
@@ -202,6 +206,8 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		box:         box,
 		breaker: newBreaker(defaultBreakerThreshold, defaultBreakerWindow,
 			defaultBreakerCooldown, defaultBreakerProbe),
+		gov: newGovernor(defaultGovTotalPerMin, defaultGovTotalBurst,
+			defaultGovLoginPerMin, defaultGovLoginBurst, defaultGovConcurrency),
 	}
 	// Track request rate with headroom over the widest window Stats queries (5m):
 	// the extra slots keep each in-window minute in its own bucket even if adds ever
@@ -212,7 +218,7 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		Timeout: 30 * time.Second,
 		// Present as a browser on every request (never Go's default UA), and
 		// tally every outbound council request so traffic is measurable.
-		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic},
+		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic, gov: c.gov},
 		// We inspect 302s ourselves to read the auth code and rotated cookie.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}

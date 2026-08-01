@@ -86,6 +86,7 @@ func councilIdentityBrowser(path string) bool {
 type browserTransport struct {
 	base    http.RoundTripper
 	traffic *trafficCounters // nil-safe: counting is skipped when absent (tests)
+	gov     *governor        // nil-safe: rate/concurrency governor (nil = unbounded)
 }
 
 func (t browserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -98,6 +99,15 @@ func (t browserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	} else {
 		setIfAbsent(req.Header, "User-Agent", honestUA)
 	}
+	// Rate/concurrency ceiling before the request goes out. A wait is bounded by the
+	// request's own context deadline; if it is exceeded the request errors and the
+	// scheduler's job-level retry re-queues it, rather than the burst reaching the
+	// edge. Count AFTER acquiring, so the tally reflects requests actually sent.
+	release, err := t.gov.acquire(req.Context(), req.URL.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if t.traffic != nil {
 		t.traffic.count(req.URL.Path)
 	}
