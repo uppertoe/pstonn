@@ -846,8 +846,11 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 			if !space() {
 				return
 			}
-			s.checkDrift(ctx, cs.Owner)
-			if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
+			if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
+				// The read failed; leave drift_checked_at alone so the next pass retries
+				// instead of standing down for a full interval.
+				log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
+			} else if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
 				log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
 			}
 		}
@@ -1053,12 +1056,16 @@ func describeFailure(kind parking.FailureKind, op string) (reason, action string
 // typically one or two per household rather than the full permit list — the capture
 // account held three permits but only one addable one. The win is therefore modest
 // per household; what matters is that permit count leaves the scaling term entirely.
-func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
+func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 	// The caller (keepWarm) already spaced this call from the previous one, and the
 	// transport governor spaces at the request level, so no extra sleep here.
 	live, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
-		return // a read failure is not evidence of drift; try again next cycle
+		// A read failure is not evidence of drift, and — critically — it is not a
+		// drift check either: report it so the caller does NOT advance
+		// drift_checked_at and suppress the retry for a whole interval. Worst
+		// exactly when the council is degraded and we most want to keep trying.
+		return err
 	}
 	byCouncilID := make(map[string]parking.PermitInfo, len(live))
 	for _, pi := range live {
@@ -1072,7 +1079,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 	// council just reported, not the one we believed a moment ago.
 	permits, err := s.store.ListPermitsFor(ctx, owner)
 	if err != nil {
-		return
+		return err // couldn't compare against our own record; retry rather than mark done
 	}
 	drifted := false
 	now := time.Now()
@@ -1121,6 +1128,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) {
 		s.Kick() // reconcile now: re-apply the schedule over the drift
 	}
 	s.warnExpiring(ctx, owner)
+	return nil // council snapshot received and reconciled: a real drift check happened
 }
 
 // warnExpiring sends the one-time approaching-expiry warning for any permit now
