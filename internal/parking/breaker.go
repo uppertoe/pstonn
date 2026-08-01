@@ -34,11 +34,27 @@ type breaker struct {
 	mu        sync.Mutex
 	openUntil time.Time            // while now < this, all council traffic is paused
 	recent    map[string]time.Time // owner -> last pushback, for the distinct-owner tally
+	// generation is bumped every time the circuit (re)opens. A permit carries the
+	// generation it was admitted under; a success can only close the circuit if its
+	// permit is the half-open probe AND still on the current generation. That is
+	// what stops a request admitted while CLOSED, but returning after the circuit
+	// opened, from wrongly closing it — its 200 says nothing about the block having
+	// cleared.
+	generation uint64
 
 	threshold     int           // distinct owners pushed back within window to open
 	window        time.Duration // how far back the distinct-owner tally reaches
 	cooldown      time.Duration // how long the circuit stays open once tripped
 	probeInterval time.Duration // half-open: at most one probe per this interval
+}
+
+// breakerPermit is handed back by allow() and presented again at onSuccess so the
+// breaker can tell the ONE half-open probe apart from every other in-flight
+// request. Only the probe, still on the generation it was admitted under, may
+// close an open circuit.
+type breakerPermit struct {
+	probe bool   // admitted AS the half-open probe (not merely while closed)
+	gen   uint64 // the open-episode generation at admission
 }
 
 func newBreaker(threshold int, window, cooldown, probeInterval time.Duration) *breaker {
@@ -50,29 +66,28 @@ func newBreaker(threshold int, window, cooldown, probeInterval time.Duration) *b
 	}
 }
 
-// allow reports whether a council request may proceed now, and if not, how long
-// to back off. When the open window has elapsed it lets a SINGLE request through
-// as a half-open probe (nudging openUntil forward by probeInterval so concurrent
-// callers don't all probe at once); the probe's own success or pushback then
-// closes or re-opens the circuit through onSuccess / onPushback. A nil breaker is
-// always-allow, so the feature can be disabled by leaving it unset.
-func (b *breaker) allow(now time.Time) (ok bool, wait time.Duration) {
+// allow reports whether a council request may proceed now, and if not, how long to
+// back off. It returns a permit the caller must present to onSuccess. When the open
+// window has elapsed it admits a SINGLE request as the half-open probe (nudging
+// openUntil forward by probeInterval so concurrent callers don't all probe at
+// once). A nil breaker is always-allow, so the feature disables by staying unset.
+func (b *breaker) allow(now time.Time) (permit breakerPermit, ok bool, wait time.Duration) {
 	if b == nil {
-		return true, 0
+		return breakerPermit{}, true, 0
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.openUntil.IsZero() {
-		return true, 0 // closed
+		return breakerPermit{gen: b.generation}, true, 0 // closed
 	}
 	if now.Before(b.openUntil) {
-		return false, b.openUntil.Sub(now) // open: paused
+		return breakerPermit{}, false, b.openUntil.Sub(now) // open: paused
 	}
-	// Half-open: the open window has elapsed. Let this one through as a probe, but
-	// hold the line for probeInterval so a burst of waiting callers doesn't all
-	// stampede the edge the instant the window lifts.
+	// Half-open: the open window has elapsed. Admit this one as the probe, but hold
+	// the line for probeInterval so a burst of waiting callers doesn't all stampede
+	// the edge the instant the window lifts.
 	b.openUntil = now.Add(b.probeInterval)
-	return true, 0
+	return breakerPermit{probe: true, gen: b.generation}, true, 0
 }
 
 // onPushback records that owner was pushed back and opens (or re-opens) the
@@ -108,6 +123,10 @@ func (b *breaker) onPushback(now time.Time, owner string, retryAfter time.Durati
 			cd = retryAfter
 		}
 		b.openUntil = now.Add(cd)
+		// A fresh open episode: invalidate any probe permit admitted under the old
+		// generation, so a slow probe that is about to fail cannot later close a
+		// circuit that has since re-opened.
+		b.generation++
 	}
 	return b.blockedLocked(now) && !wasBlocked
 }
@@ -118,34 +137,49 @@ func (b *breaker) blockedLocked(now time.Time) bool {
 	return !b.openUntil.IsZero() && now.Before(b.openUntil)
 }
 
-// onSuccess is called after a clean council response. When the circuit is open or
-// half-open, a success means the edge is serving us again, so it closes and clears
-// the tally — the half-open probe's happy path. When closed it just drops the
-// owner from the tally, so isolated single-owner blips age out instead of
-// accumulating toward the threshold.
-// onSuccess returns closedNow=true only when this success brought a paused-or-
-// probing circuit back to fully closed, so the caller can log the resume once.
-func (b *breaker) onSuccess(now time.Time, owner string) (closedNow bool) {
+// onSuccess is called after a clean council response, presenting the permit allow()
+// handed out. It always drops the owner from the tally (so isolated single-owner
+// blips age out instead of accumulating toward the threshold). It CLOSES an open
+// circuit only when the permit is the designated half-open probe AND still on the
+// current generation — never on an ordinary success. A request admitted while the
+// circuit was closed but returning after it opened carries probe=false, and a probe
+// from a superseded open episode carries a stale generation; neither may close the
+// circuit, because a 200 from before (or unrelated to) the block proves nothing
+// about the block having cleared. Returns closedNow=true only on the transition, so
+// the caller logs the resume once.
+func (b *breaker) onSuccess(now time.Time, owner string, permit breakerPermit) (closedNow bool) {
 	if b == nil {
 		return false
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.recent, owner)
-	wasSet := !b.openUntil.IsZero()
-	b.openUntil = time.Time{}
-	return wasSet
+	if b.openUntil.IsZero() {
+		return false // already closed; nothing to resume
+	}
+	if permit.probe && permit.gen == b.generation {
+		b.openUntil = time.Time{}
+		return true
+	}
+	return false
 }
 
-// breakerGate returns ErrCouncilBusy when the fleet circuit is open, for use at
-// every council entry point. Nil when traffic may proceed (including the half-open
-// probe, whose slot allow() consumes). Kept separate from the per-owner cooldown
-// check so the two compose: an owner passes only when neither is blocking.
-func (c *Client) breakerGate() error {
-	if open, wait := c.breaker.allow(time.Now()); !open {
-		return fmt.Errorf("%w: the council edge is blocking our address; paused for %s", ErrCouncilBusy, wait.Round(time.Second))
+// breakerGate is the fleet-circuit check at a council entry point. It returns the
+// permit to present at the eventual success, and ErrCouncilBusy when the circuit is
+// open. Kept separate from the per-owner cooldown check so the two compose: an owner
+// passes only when neither is blocking.
+//
+// Gate ONCE per logical operation (apiRequest, warmLocked, Link), not per HTTP
+// request: an operation's internal renew must not take a second permit, or during
+// half-open the operation's own gate would consume the single probe slot and then
+// block its renew. The success is reported at the operation level with this permit;
+// the shared authorize step does not touch the breaker.
+func (c *Client) breakerGate() (breakerPermit, error) {
+	permit, ok, wait := c.breaker.allow(time.Now())
+	if !ok {
+		return permit, fmt.Errorf("%w: the council edge is blocking our address; paused for %s", ErrCouncilBusy, wait.Round(time.Second))
 	}
-	return nil
+	return permit, nil
 }
 
 // state reports whether the circuit is open right now and the remaining pause, for

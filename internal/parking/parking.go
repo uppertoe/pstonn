@@ -297,9 +297,11 @@ func (c *Client) renewLocked(ctx context.Context, owner string, cs store.Council
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return "", fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
-	if err := c.breakerGate(); err != nil {
-		return "", err
-	}
+	// No breakerGate here: renewLocked always runs INSIDE an already-gated operation
+	// (apiRequest, or renewedToken on its 401 retry), and a second gate during
+	// half-open would take the single probe slot and then block this very renew. The
+	// per-owner cooldown above is still ours to check. The operation reports the
+	// breaker success at its own level with the permit it holds.
 	cookie, err := c.openCookie(owner, cs.Cookie)
 	if err != nil {
 		return "", err
@@ -377,7 +379,8 @@ func (c *Client) warmLocked(ctx context.Context, owner string, cs store.CouncilS
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
-	if err := c.breakerGate(); err != nil {
+	permit, err := c.breakerGate()
+	if err != nil {
 		return err
 	}
 	cookie, err := c.openCookie(owner, cs.Cookie)
@@ -388,6 +391,10 @@ func (c *Client) warmLocked(ctx context.Context, owner string, cs store.CouncilS
 	if err != nil {
 		return err
 	}
+	// The keep-warm probe's happy path: an authorize-only warm is the most common
+	// half-open probe (the recovery tick fires it), so its success is what usually
+	// closes the circuit.
+	c.noteCouncilSuccess(owner, permit)
 	// Re-seal and persist even when the cookie did not rotate: the write is what
 	// resets updated_at, keep-warm's freshness clock, so the next pass doesn't renew
 	// again immediately (see store.UpdateCouncilCookie). A Seal failure must surface,
@@ -411,7 +418,8 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return nil, fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
-	if err := c.breakerGate(); err != nil {
+	permit, err := c.breakerGate()
+	if err != nil {
 		return nil, err
 	}
 	at, err := c.accessToken(ctx, owner)
@@ -464,6 +472,7 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		c.clearPenalty(owner)
+		c.noteCouncilSuccess(owner, permit) // closes the circuit only if this was the probe
 		return resp, nil
 	}
 	// Other non-2xx: 5xx is a server-side blip (transient); 4xx is a refusal.
