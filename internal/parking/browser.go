@@ -1,6 +1,7 @@
 package parking
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -108,6 +109,8 @@ func (t browserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // hourly summary). Counted at the transport so no call path can be missed.
 type trafficCounters struct {
 	login, auth, api, other atomic.Uint64
+	pushback                atomic.Uint64   // 403(HTML)/429/503 across all owners
+	rolling                 *rollingCounter // request-rate windows; nil-safe (tests)
 }
 
 func (t *trafficCounters) count(path string) {
@@ -121,6 +124,7 @@ func (t *trafficCounters) count(path string) {
 	default:
 		t.other.Add(1)
 	}
+	t.rolling.add(time.Now())
 }
 
 // classifyCouncilPath buckets a council request path: "login" = the credential
@@ -137,11 +141,6 @@ func classifyCouncilPath(p string) string {
 	default:
 		return "other"
 	}
-}
-
-// Traffic returns cumulative council request counts since process start.
-func (c *Client) Traffic() (login, auth, api, other uint64) {
-	return c.traffic.login.Load(), c.traffic.auth.Load(), c.traffic.api.Load(), c.traffic.other.Load()
 }
 
 func setIfAbsent(h http.Header, key, val string) {
@@ -222,12 +221,32 @@ func (c *Client) penalize(owner string, retryAfter time.Duration) {
 		backoff = 2 * time.Hour
 	}
 	c.cooldownUntil.Store(owner, time.Now().Add(backoff))
+	c.traffic.pushback.Add(1)
+	// Feed the same pushback to the fleet breaker: enough distinct owners pushed
+	// back at once means the block is at the shared edge, not this one account.
+	if c.breaker.onPushback(time.Now(), owner, retryAfter) {
+		_, wait := c.breaker.state(time.Now())
+		log.Printf("parking: FLEET CIRCUIT OPEN — multiple owners pushed back at once (likely an edge/IP block); pausing ALL council traffic for %s", wait.Round(time.Second))
+	}
 }
 
-// clearPenalty resets an owner's backoff after a successful council call.
+// clearPenalty resets an owner's backoff after a successful council call, and
+// tells the fleet breaker the edge is serving us again (its half-open probe's
+// happy path). Called on every clean council response — API and OIDC alike.
 func (c *Client) clearPenalty(owner string) {
 	c.strikes.Delete(owner)
 	c.cooldownUntil.Delete(owner)
+	c.noteCouncilSuccess(owner)
+}
+
+// noteCouncilSuccess feeds the fleet breaker a clean council response and logs the
+// resume if this was the one that closed the circuit. Every success path calls it —
+// the API 2xx (via clearPenalty) and the OIDC renew/login — so a half-open probe on
+// any surface can be the one that brings the fleet back.
+func (c *Client) noteCouncilSuccess(owner string) {
+	if c.breaker.onSuccess(time.Now(), owner) {
+		log.Printf("parking: fleet circuit closed — the council edge is serving us again; council traffic resumed")
+	}
 }
 
 // parseRetryAfter reads a Retry-After header (delta-seconds or HTTP-date form).

@@ -166,18 +166,23 @@ func run() error {
 	go func() {
 		tick := time.NewTicker(time.Hour)
 		defer tick.Stop()
-		var pl, pa, pi, po uint64
+		var pl, pa, pi, po, ppush uint64
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				l, a, api, o := council.Traffic()
+				st := council.Stats()
+				l, a, api, o := st.Login, st.Auth, st.API, st.Other
 				if d := (l - pl) + (a - pa) + (api - pi) + (o - po); d > 0 {
-					log.Printf("council traffic: %d requests last hour (login=%d auth=%d api=%d other=%d); since start: login=%d auth=%d api=%d other=%d",
-						d, l-pl, a-pa, api-pi, o-po, l, a, api, o)
+					// Rolling now/5m windows show the instantaneous rate (the number
+					// that draws edge push-back), not just the hourly total; pushback is
+					// the count of 403/429/503 across all owners, the early-warning that
+					// we are approaching a limit before the breaker ever has to trip.
+					log.Printf("council traffic: %d requests last hour (login=%d auth=%d api=%d other=%d); rate now=%d/min 5m=%d; pushback=%d (+%d); since start: login=%d auth=%d api=%d other=%d",
+						d, l-pl, a-pa, api-pi, o-po, st.LastMinute, st.Last5Min, st.Pushback, st.Pushback-ppush, l, a, api, o)
 				}
-				pl, pa, pi, po = l, a, api, o
+				pl, pa, pi, po, ppush = l, a, api, o, st.Pushback
 			}
 		}
 	}()

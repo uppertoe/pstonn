@@ -153,6 +153,11 @@ type Client struct {
 	strikes       sync.Map   // owner -> int, consecutive soft blocks (backoff growth)
 	strikeMu      sync.Mutex // serialises the strike read-modify-write in penalize
 
+	// breaker is the FLEET-level counterpart to the per-owner cooldown: it pauses
+	// ALL council traffic when several distinct owners are pushed back at once, the
+	// signature of an Azure-Front-Door block on our shared egress IP (see breaker.go).
+	breaker *breaker
+
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
 
@@ -195,7 +200,14 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		origin:      originOf(issuer, apiBase),
 		store:       st,
 		box:         box,
+		breaker: newBreaker(defaultBreakerThreshold, defaultBreakerWindow,
+			defaultBreakerCooldown, defaultBreakerProbe),
 	}
+	// Track request rate with headroom over the widest window Stats queries (5m):
+	// the extra slots keep each in-window minute in its own bucket even if adds ever
+	// arrive slightly out of order, so a just-aged-out minute can't collide with a
+	// live one.
+	c.traffic.rolling = newRollingCounter(8)
 	c.http = &http.Client{
 		Timeout: 30 * time.Second,
 		// Present as a browser on every request (never Go's default UA), and
@@ -285,6 +297,9 @@ func (c *Client) renewLocked(ctx context.Context, owner string, cs store.Council
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return "", fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
+	if err := c.breakerGate(); err != nil {
+		return "", err
+	}
 	cookie, err := c.openCookie(owner, cs.Cookie)
 	if err != nil {
 		return "", err
@@ -361,6 +376,9 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string, query url.Values, body []byte) (*http.Response, error) {
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return nil, fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
+	}
+	if err := c.breakerGate(); err != nil {
+		return nil, err
 	}
 	at, err := c.accessToken(ctx, owner)
 	if err != nil {
