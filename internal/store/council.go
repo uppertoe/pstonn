@@ -248,6 +248,31 @@ SELECT
 	return n > 0, err
 }
 
+// OwnersWithSchedule returns the set of owners with at least one weekly rule or
+// override — the owners keep-warm actually maintains. The warm-margin status
+// metrics use it to ignore intentionally un-warmed sessions (a linked account with
+// no schedule is left to lapse between dashboard visits), which would otherwise
+// read as a perpetual near-expiry alarm. One batched query, not one per session.
+func (s *Store) OwnersWithSchedule(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT DISTINCT p.owner FROM permit p
+WHERE EXISTS (SELECT 1 FROM weekly_rule wr WHERE wr.permit_id = p.id)
+   OR EXISTS (SELECT 1 FROM override o WHERE o.permit_id = p.id)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			return nil, err
+		}
+		out[owner] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
 // SaveCouncilSession upserts a user's session from an interactive link, sealing
 // already done by the caller. It stamps linked_at = now (resetting the
 // re-authorise clock) and clears any stale cached access token (a fresh cookie

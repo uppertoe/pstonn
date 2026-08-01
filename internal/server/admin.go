@@ -241,13 +241,18 @@ type schedulerStatus struct {
 
 type sessionCounts struct {
 	Linked int `json:"linked"`
-	Warm   int `json:"warm"`
+	// Warm counts MAINTAINED sessions still within their warm interval (recently
+	// touched, renew not yet due). Defined off the same interval as OverdueWarm so
+	// the two never overlap: warm = not yet due, overdue = past due.
+	Warm int `json:"warm"`
 	// Warm-margin health, so the watchdog can catch a reconnect-backlog forming
 	// (e.g. a council outage stalling warms near the idle cliff) BEFORE sessions
-	// lapse en masse. OverdueWarm: past their warm deadline. NearExpiry: within a
-	// warm-interval of the estimated idle cliff — 0 in healthy operation. MinMargin:
-	// the worst session's remaining seconds to the cliff (negative = already past
-	// the estimate; omitted when no sessions).
+	// lapse en masse. OverdueWarm: past their warm deadline. NearExpiry: within
+	// expiryWarningMargin of the estimated idle cliff — 0 in healthy operation.
+	// MinMargin: the worst session's remaining seconds to the cliff (negative =
+	// already past the estimate; omitted when no sessions). All four cover only
+	// scheduled (kept-warm) owners — an un-warmed session's expected lapse is not a
+	// fault.
 	OverdueWarm      int  `json:"overdue_warm"`
 	NearExpiry       int  `json:"near_expiry"`
 	MinMarginSeconds *int `json:"min_margin_seconds,omitempty"`
@@ -257,7 +262,14 @@ type sessionCounts struct {
 // estimated_expiry = updated_at + idleWindow, so margin = idleWindow - age. A
 // healthy fleet keeps min-margin near (idleWindow - warmInterval) and NearExpiry at
 // zero; a stalled warm loop makes margins shrink and NearExpiry climb.
-func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmInterval, idleWindow time.Duration) sessionCounts {
+//
+// Only sessions whose owner is in scheduled — the ones keep-warm actually
+// maintains — contribute to the warm-risk figures. A linked owner with no schedule
+// is deliberately left to lapse between dashboard visits, so its (expected) shrinking
+// margin must not read as a perpetual alarm. NearExpiry uses expiryWarningMargin,
+// kept independent of warmInterval so raising the warm interval does not flag healthy
+// sessions hours before their renew is even due.
+func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmInterval, idleWindow, expiryWarningMargin time.Duration, scheduled map[string]struct{}) sessionCounts {
 	sc := sessionCounts{}
 	haveMargin := false
 	var minMargin time.Duration
@@ -266,19 +278,23 @@ func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmIn
 			continue
 		}
 		sc.Linked++
+		if _, ok := scheduled[cs.Owner]; !ok {
+			continue // not kept warm: its lapse is expected, not a fault
+		}
 		if cs.UpdatedAt.IsZero() {
 			continue
 		}
 		age := now.Sub(cs.UpdatedAt)
-		if age < 6*time.Hour {
-			sc.Warm++
-		}
-		if warmInterval > 0 && age > warmInterval {
-			sc.OverdueWarm++
+		if warmInterval > 0 {
+			if age < warmInterval {
+				sc.Warm++
+			} else {
+				sc.OverdueWarm++
+			}
 		}
 		if idleWindow > 0 {
 			margin := idleWindow - age
-			if warmInterval > 0 && margin < warmInterval {
+			if expiryWarningMargin > 0 && margin < expiryWarningMargin {
 				sc.NearExpiry++
 			}
 			if !haveMargin || margin < minMargin {
@@ -358,8 +374,13 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	scheduled, err := s.store.OwnersWithSchedule(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
 	now := time.Now()
-	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow)
+	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, scheduled)
 	last := s.sched.LastReconcile()
 	resp := statusResponse{
 		Time: now.UTC().Format(time.RFC3339),

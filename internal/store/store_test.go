@@ -762,6 +762,52 @@ func TestOwnerHasSchedule(t *testing.T) {
 	}
 }
 
+// OwnersWithSchedule is the batched form the /status warm-risk metrics use to ignore
+// intentionally un-warmed (scheduleless) sessions. It must return exactly the owners
+// with a weekly rule OR an override, and nobody else.
+func TestOwnersWithSchedule(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const ruleOwner, overrideOwner, bareOwner = "rule@example.com", "override@example.com", "bare@example.com"
+
+	rv, _ := s.CreateVehicle(ctx, ruleOwner, "REG1", "car")
+	rp, _ := s.UpsertPermit(ctx, ruleOwner, "rp", "14", "P")
+	if err := s.SetRule(ctx, rp, time.Monday, rv); err != nil {
+		t.Fatal(err)
+	}
+
+	ov, _ := s.CreateVehicle(ctx, overrideOwner, "REG2", "car")
+	op, _ := s.UpsertPermit(ctx, overrideOwner, "op", "14", "P")
+	if _, err := s.CreateOverride(ctx, op, ov, time.Now(), nil, overrideOwner); err != nil {
+		t.Fatal(err)
+	}
+
+	// bareOwner has a linked session and a permit but no rule and no override.
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: bareOwner, Cookie: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertPermit(ctx, bareOwner, "bp", "14", "P"); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err := s.OwnersWithSchedule(ctx)
+	if err != nil {
+		t.Fatalf("OwnersWithSchedule: %v", err)
+	}
+	if _, ok := set[ruleOwner]; !ok {
+		t.Errorf("owner with a weekly rule is missing from the set: %v", set)
+	}
+	if _, ok := set[overrideOwner]; !ok {
+		t.Errorf("owner with an override is missing from the set: %v", set)
+	}
+	if _, ok := set[bareOwner]; ok {
+		t.Errorf("owner with no rule/override must not be in the set: %v", set)
+	}
+	if len(set) != 2 {
+		t.Errorf("set = %v, want exactly the two scheduled owners", set)
+	}
+}
+
 // TestDeleteAllForOwner wipes one user's world without touching another's.
 func TestDeleteAllForOwner(t *testing.T) {
 	ctx := context.Background()
