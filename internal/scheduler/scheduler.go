@@ -40,6 +40,11 @@ type Council interface {
 	Reconnect(ctx context.Context, owner string) error
 	// ListPermits reads the owner's council permits (used to refresh expiry/status).
 	ListPermits(ctx context.Context, owner string) ([]parking.PermitInfo, error)
+	// Blocked reports whether the fleet circuit breaker is open — a CONFIRMED
+	// shared-edge block affecting the whole fleet, not one owner's cooldown. Used
+	// to escalate the user-facing block warning (sooner, firmer) once we know a due
+	// change genuinely will not apply until the block clears.
+	Blocked() bool
 }
 
 // Notifier sends user-facing notifications (the re-authorise reminder, each
@@ -168,6 +173,13 @@ const failNotifyThreshold = 3
 // spaced by a backoff (see the ErrCouncilBusy branch), so this is ~15 minutes of
 // a permit we cannot update. Long enough not to cry wolf, short enough to act on.
 const busyNotifyThreshold = 15
+
+// blockNotifyThreshold is the SHORTER wait used once the fleet circuit breaker is
+// open — a CONFIRMED block. The 15-tick wait exists to avoid crying wolf over a
+// blip, but a confirmed fleet block is not a blip: the change will not apply until
+// it clears, so the household is told within ~4 minutes and firmly (act now),
+// instead of a reassuring "still updating" they might sit on until a fine.
+const blockNotifyThreshold = 4
 
 const systemAlertThrottle = 30 * time.Minute
 
@@ -1663,13 +1675,23 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// fail_streak is shared with real failures — both mean "consecutive ticks we
 		// could not apply" — and a success clears it either way.
 		n := s.bumpFailStreak(ctx, p.ID)
+		// A CONFIRMED fleet block (breaker open) is not a blip: the change will not
+		// apply until it clears, so warn sooner and firmly (act now), not with the
+		// reassuring "still updating" a brief single-owner hiccup gets.
+		confirmed := s.council.Blocked()
+		threshold := busyNotifyThreshold
 		reason, action := describeFailure(parking.FailTransient, "update your permit")
+		if confirmed {
+			threshold = blockNotifyThreshold
+			reason = "The council is refusing p.stonn's connection right now, so your permit cannot be updated."
+			action = "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn will resume automatically once the block clears."
+		}
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
-		if n >= busyNotifyThreshold {
+		if n >= threshold {
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
 				OK: false, CurrentReg: p.ActiveRegistration,
-				Reason: reason, Action: action, Transient: true,
+				Reason: reason, Action: action, Transient: true, Urgent: confirmed,
 			}, "busy|"+want)
 		}
 		return false

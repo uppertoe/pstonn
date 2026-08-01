@@ -416,6 +416,12 @@ type ApplyOutcome struct {
 	Reason      string // one plain sentence: why it failed
 	Action      string // one plain sentence: what the user should do
 	Transient   bool   // failure expected to self-heal → soften wording
+	// Urgent overrides the transient softening for a CONFIRMED, ongoing block: the
+	// change genuinely will not apply until the block clears, so the household must
+	// act now (change the plate manually) rather than be reassured it is "still
+	// updating". It forces the act-now subject and a high-priority push even though
+	// the underlying failure is technically transient.
+	Urgent bool
 
 	// DisplacedReg is the plate of a still-live third-party booking this change
 	// bumped off the permit ("" when nothing of note was displaced), and
@@ -481,12 +487,16 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 			}
 		}
 	} else {
+		// A confirmed ongoing block is transient-but-urgent: soften only when it is
+		// transient AND not urgent, so the act-now subject and high-priority push
+		// fire once we KNOW the change will not apply until the block clears.
+		soft := o.Transient && !o.Urgent
 		switch {
-		case o.CurrentReg != "" && o.Transient:
+		case o.CurrentReg != "" && soft:
 			subject = fmt.Sprintf("Still updating your %s — it shows %s for now", o.PermitLabel, o.CurrentReg)
 		case o.CurrentReg != "":
 			subject = fmt.Sprintf("Action needed: your %s still shows %s", o.PermitLabel, o.CurrentReg)
-		case o.Transient:
+		case soft:
 			subject = fmt.Sprintf("Still updating your %s", o.PermitLabel)
 		default:
 			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
@@ -510,7 +520,7 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 	priority, tags = "default", "white_check_mark"
 	if !o.OK {
 		tags = "warning"
-		if o.Transient {
+		if o.Transient && !o.Urgent {
 			priority = "default"
 		} else {
 			priority = "high"
