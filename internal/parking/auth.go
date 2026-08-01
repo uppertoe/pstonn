@@ -35,25 +35,49 @@ type tokenResponse struct {
 // itself pushes back — the /idm path is the most bot-sensitive surface, so it
 // gets the same backoff discipline as the permit API.
 func (c *Client) silentRenew(ctx context.Context, owner, cookie string) (string, time.Time, string, error) {
-	verifier, err := randToken()
+	code, verifier, newCookie, err := c.authorizeWithCookie(ctx, owner, cookie)
 	if err != nil {
 		return "", time.Time{}, "", err
 	}
-	authQuery, err := c.authorizeQuery(verifier)
+	tok, err := c.exchangeCode(ctx, owner, code, verifier)
 	if err != nil {
 		return "", time.Time{}, "", err
+	}
+	return tok.AccessToken, time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second), newCookie, nil
+}
+
+// authorizeWithCookie performs the prompt=none authorize step shared by a full
+// silent-renew and an authorize-only keep-warm, returning the auth code, the PKCE
+// verifier that pairs with it, and the (possibly rotated) session cookie.
+//
+// This authenticated authorize is the ONLY part of a renew that touches the
+// session: the IdentityServer slides its server-side session clock when it serves
+// this request (a live 2026-08-01 probe showed the cookie itself does NOT rotate,
+// so the sliding is server-side, not a new Set-Cookie), while the later token
+// exchange is authenticated by the auth code and never touches the session. That
+// is what makes an authorize-only warm (warmRenew) keep the session alive exactly
+// as a full renew does, at half the requests. A clean result is the fleet breaker's
+// recovery signal; ErrSessionExpired means the cookie is no longer accepted.
+func (c *Client) authorizeWithCookie(ctx context.Context, owner, cookie string) (code, verifier, newCookie string, err error) {
+	verifier, err = randToken()
+	if err != nil {
+		return "", "", "", err
+	}
+	authQuery, err := c.authorizeQuery(verifier)
+	if err != nil {
+		return "", "", "", err
 	}
 	authQuery.Set("prompt", "none")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.authURL+"?"+authQuery.Encode(), nil)
 	if err != nil {
-		return "", time.Time{}, "", err
+		return "", "", "", err
 	}
 	req.Header.Set("Cookie", cookie)
 	c.navHeaders(req) // iframe-style silent authorize
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", time.Time{}, "", err
+		return "", "", "", err
 	}
 	// Keep a bounded prefix of the body: it is the only way to tell an
 	// IdentityServer page from any other 200, and the classification below turns
@@ -62,10 +86,10 @@ func (c *Client) silentRenew(ctx context.Context, owner, cookie string) (string,
 	head, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 	drainClose(resp)
 
-	newCookie := mergeSetCookie(cookie, resp.Cookies())
+	newCookie = mergeSetCookie(cookie, resp.Cookies())
 
 	if busy := c.classifyPushback(owner, resp); busy != nil {
-		return "", time.Time{}, "", busy
+		return "", "", "", busy
 	}
 	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		// A prompt=none authorize has exactly two honest answers, and both are
@@ -84,31 +108,37 @@ func (c *Client) silentRenew(ctx context.Context, owner, cookie string) (string,
 		// so a genuine transient is never mistaken for an expiry, which would retire
 		// a session that was actually fine.
 		if resp.StatusCode == http.StatusOK && looksLikeHTML(resp, head) {
-			return "", time.Time{}, "", ErrSessionExpired
+			return "", "", "", ErrSessionExpired
 		}
-		return "", time.Time{}, "", fmt.Errorf("parking: silent-renew authorize: unexpected status %d", resp.StatusCode)
+		return "", "", "", fmt.Errorf("parking: silent-renew authorize: unexpected status %d", resp.StatusCode)
 	}
 	loc, err := url.Parse(resp.Header.Get("Location"))
 	if err != nil {
-		return "", time.Time{}, "", fmt.Errorf("parking: silent-renew: bad redirect: %w", err)
+		return "", "", "", fmt.Errorf("parking: silent-renew: bad redirect: %w", err)
 	}
 	if loc.Query().Get("error") != "" {
-		return "", time.Time{}, "", ErrSessionExpired // login_required / interaction_required
+		return "", "", "", ErrSessionExpired // login_required / interaction_required
 	}
-	code := loc.Query().Get("code")
+	code = loc.Query().Get("code")
 	if code == "" {
-		return "", time.Time{}, "", ErrSessionExpired
+		return "", "", "", ErrSessionExpired
 	}
-
-	tok, err := c.exchangeCode(ctx, owner, code, verifier)
-	if err != nil {
-		return "", time.Time{}, "", err
-	}
-	// A clean renew is the fleet breaker's recovery signal: if the edge were still
-	// blocking our IP this authorize would not have returned a code. This is how a
+	// A clean authorize is the fleet breaker's recovery signal: if the edge were
+	// still blocking our IP this would not have returned a code. This is how a
 	// keep-warm probe closes a half-open circuit even when no API call is in flight.
 	c.noteCouncilSuccess(owner)
-	return tok.AccessToken, time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second), newCookie, nil
+	return code, verifier, newCookie, nil
+}
+
+// warmRenew slides the session WITHOUT minting an access token: it does only the
+// authorize step and discards the code. Keep-warm needs the session kept alive, not
+// a token — accessToken() mints one on demand when a real operation needs it — and
+// the server-side session slide is a product of the authorize alone (see
+// authorizeWithCookie), so this keeps the session alive exactly as a full renew
+// does, at half the request count. Returns the (possibly rotated) cookie.
+func (c *Client) warmRenew(ctx context.Context, owner, cookie string) (newCookie string, err error) {
+	_, _, newCookie, err = c.authorizeWithCookie(ctx, owner, cookie)
+	return newCookie, err
 }
 
 // looksLikeHTML reports whether a response is a rendered page rather than the

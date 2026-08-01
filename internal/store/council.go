@@ -285,6 +285,20 @@ WHERE owner = ?`,
 	return err
 }
 
+// UpdateCouncilCookie persists a (re-sealed) session cookie from an authorize-only
+// keep-warm, leaving the access token and its expiry untouched — keep-warm mints no
+// token. updated_at IS bumped because it is keep-warm's freshness clock (see
+// scheduler.decideWarm): without it, every warm pass would judge the session still
+// stale and immediately renew it again.
+func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, sealedCookie string) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE council_session
+SET cookie_sealed = ?, updated_at = ?
+WHERE owner = ?`,
+		sealedCookie, nowUTC(), owner)
+	return err
+}
+
 // ClearCouncilPassword drops a saved (sealed) council password without unlinking
 // the session — used by the settings "stop auto-reconnecting" action. If the
 // session later expires it will require a manual re-link, as if never saved.

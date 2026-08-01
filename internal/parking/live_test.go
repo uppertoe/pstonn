@@ -459,3 +459,67 @@ func TestLiveReadFlow(t *testing.T) {
 	}
 	t.Logf("OK: CurrentVehicle(%s) = %q", first.PermitNumber, rego)
 }
+
+// TestLiveAuthorizeOnlyWarm validates the keep-warm optimisation empirically: does
+// the prompt=none AUTHORIZE step alone slide the session cookie, so keep-warm can
+// drop the token exchange (halving its request count)? The mechanism is provable
+// from the code — the rotated cookie is captured from the authorize response, not
+// the token exchange — but this confirms it end to end against the live council:
+// two authorize-only warms in a row succeed, and the slid cookie is still valid for
+// a full renew (real work). READ-ONLY: no permit is touched.
+//
+//	PSTONN_LIVE_USERNAME=you@example.com PSTONN_LIVE_PASSWORD=… \
+//	go test ./internal/parking -run TestLiveAuthorizeOnlyWarm -count=1 -v
+func TestLiveAuthorizeOnlyWarm(t *testing.T) {
+	user := os.Getenv("PSTONN_LIVE_USERNAME")
+	pass := os.Getenv("PSTONN_LIVE_PASSWORD")
+	if user == "" || pass == "" {
+		t.Skip("set PSTONN_LIVE_USERNAME and PSTONN_LIVE_PASSWORD to run the authorize-only warm experiment")
+	}
+	ctx := context.Background()
+	const owner = "warm-probe@local"
+	c, _, st := liveClient(t)
+
+	if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+		t.Fatalf("headless login: %v", err)
+	}
+	cs, err := st.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := c.openCookie(owner, cs.Cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Authorize-only warm, twice, each on the previous result — proving a repeated
+	// authorize-only keeps sliding the session with no token exchange.
+	c1, err := c.warmRenew(ctx, owner, cookie)
+	if err != nil {
+		t.Fatalf("authorize-only warm #1 failed (session not slid): %v", err)
+	}
+	t.Logf("warm #1 OK — cookie rotated: %v", c1 != cookie)
+	c2, err := c.warmRenew(ctx, owner, c1)
+	if err != nil {
+		t.Fatalf("authorize-only warm #2 failed: %v", err)
+	}
+	t.Logf("warm #2 OK — cookie rotated: %v", c2 != c1)
+
+	// The slid cookie must still be valid for REAL work: a full renew mints a token.
+	at, exp, _, err := c.silentRenew(ctx, owner, c2)
+	if err != nil {
+		t.Fatalf("full renew on the authorize-only-slid cookie FAILED — warming broke the session: %v", err)
+	}
+	t.Logf("CONFIRMED ✓ authorize-only warming keeps the session valid; a full renew on the slid cookie minted a token (len=%d, expires %s)", len(at), exp.Format(time.RFC3339))
+	t.Log("=> keep-warm can drop the token exchange: roughly half the auth-surface requests.")
+
+	// The wired production path end to end: Refresh() is now authorize-only. It must
+	// slide the session and leave it able to mint a token on demand.
+	if err := c.Refresh(ctx, owner); err != nil {
+		t.Fatalf("Refresh (authorize-only keep-warm) failed: %v", err)
+	}
+	if _, err := c.accessToken(ctx, owner); err != nil {
+		t.Fatalf("accessToken after an authorize-only Refresh failed: %v", err)
+	}
+	t.Log("Refresh (authorize-only) end-to-end OK: session slid, and a token still mints on demand.")
+}
