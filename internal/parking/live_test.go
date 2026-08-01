@@ -523,3 +523,101 @@ func TestLiveAuthorizeOnlyWarm(t *testing.T) {
 	}
 	t.Log("Refresh (authorize-only) end-to-end OK: session slid, and a token still mints on demand.")
 }
+
+// TestLiveWarmRenewIdleTimeout empirically brackets the session idle timeout under
+// AUTHORIZE-ONLY keep-warm (warmRenew) — the path Refresh now uses. It answers two
+// questions in one unattended run:
+//
+//  1. Does authorize-only sliding actually hold a session across a real idle
+//     window? (The residual left by the 1-second acceptance probe: that test
+//     proved warmRenew SUCCEEDS, not that it EXTENDS the idle timeout.)
+//  2. How large is that window — i.e. how far COUNCIL_WARM_INTERVAL could grow to
+//     cut warm frequency ON TOP of the per-warm halving.
+//
+// It mirrors TestLiveMeasureIdleTimeout but drives warmRenew directly, threading
+// the (possibly rotated) cookie forward IN MEMORY so the probe is isolated from the
+// store and exercises only the sliding mechanism. Each success resets the sliding
+// clock, so the idle gap grows; the first ErrSessionExpired brackets the window
+// between the last success and the failing gap.
+//
+// Preferred (isolated — survives you using the council site in a browser):
+//
+//	PSTONN_LIVE_USERNAME=you@example.com PSTONN_LIVE_PASSWORD=… \
+//	PSTONN_PROBE_START=1h30m PSTONN_PROBE_FACTOR=1.3 PSTONN_PROBE_MAX=8h \
+//	go test ./internal/parking -run TestLiveWarmRenewIdleTimeout -timeout 0 -v
+//
+// Or seed a fresh cookie instead of credentials (then DON'T touch that browser
+// session while it runs, or it slides independently):
+//
+//	PSTONN_LIVE_COOKIE='idsrv.session=…; Permits.IDM.Identity=…' … same flags
+//
+// Caveat: a failure could be an ABSOLUTE session cap rather than the idle timeout;
+// either way the last-success gap is a SAFE lower bound for the warm interval.
+func TestLiveWarmRenewIdleTimeout(t *testing.T) {
+	user := os.Getenv("PSTONN_LIVE_USERNAME")
+	pass := os.Getenv("PSTONN_LIVE_PASSWORD")
+	seed := os.Getenv("PSTONN_LIVE_COOKIE")
+	if user == "" && seed == "" {
+		t.Skip("set PSTONN_LIVE_USERNAME+PSTONN_LIVE_PASSWORD (preferred) or PSTONN_LIVE_COOKIE, and run with -timeout 0")
+	}
+	start := envDurationTest(t, "PSTONN_PROBE_START", 90*time.Minute)
+	factor := envFloatTest(t, "PSTONN_PROBE_FACTOR", 1.3)
+	maxGap := envDurationTest(t, "PSTONN_PROBE_MAX", 8*time.Hour)
+	if factor <= 1 {
+		factor = 1.3
+	}
+
+	ctx := context.Background()
+	c, _, _ := liveClient(t)
+	const owner = "warm-idle-probe@local"
+
+	// Starting cookie: a fresh isolated headless login (preferred), or the seed.
+	var cookie string
+	if user != "" {
+		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+			t.Fatalf("headless login failed: %v", err)
+		}
+		cs, err := c.store.GetCouncilSession(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cookie, err = c.openCookie(owner, cs.Cookie); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Printf("[%s] fresh headless login OK; probing AUTHORIZE-ONLY warming\n", time.Now().Format("15:04:05"))
+	} else {
+		next, err := c.warmRenew(ctx, owner, seed)
+		if err != nil {
+			t.Fatalf("seed cookie is not valid to begin with: %v", err)
+		}
+		cookie = next
+		fmt.Printf("[%s] seed cookie valid; beginning idle probes\n", time.Now().Format("15:04:05"))
+	}
+
+	var lastGood time.Duration
+	for gap := start; gap <= maxGap; gap = time.Duration(float64(gap) * factor) {
+		fmt.Printf("[%s] idling %s (no activity)…\n", time.Now().Format("15:04:05"), gap)
+		time.Sleep(gap)
+		switch next, err := c.warmRenew(ctx, owner, cookie); {
+		case err == nil:
+			cookie = next // thread the (possibly rotated) cookie forward
+			lastGood = gap
+			fmt.Printf("[%s] OK   after %-8s idle → session ALIVE (authorize-only slide)\n", time.Now().Format("15:04:05"), gap)
+		case errors.Is(err, ErrSessionExpired):
+			fmt.Printf("[%s] DEAD after %-8s idle → session LAPSED. IDLE WINDOW is (%s, %s].\n", time.Now().Format("15:04:05"), gap, lastGood, gap)
+			if lastGood > 0 {
+				fmt.Printf("RESULT: authorize-only warming held the session up to at least %s.\n", lastGood)
+				fmt.Printf("RECOMMENDATION: COUNCIL_WARM_INTERVAL ~= %s (0.7x the proven-safe %s).\n",
+					(lastGood * 7 / 10).Round(time.Minute), lastGood)
+			} else {
+				fmt.Printf("RECOMMENDATION: even %s was too long; re-run with a smaller PSTONN_PROBE_START.\n", gap)
+			}
+			return
+		default:
+			// A push-back or transport error is not a clean expiry; fail loudly rather
+			// than mis-bracket the idle window on an unrelated hiccup.
+			t.Fatalf("probe error (not a clean expiry) after %s idle: %v", gap, err)
+		}
+	}
+	fmt.Printf("reached PROBE_MAX %s with the session still alive at every gap; the idle window under authorize-only warming is at least %s\n", maxGap, lastGood)
+}
