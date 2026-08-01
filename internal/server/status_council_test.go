@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // The /status council section is what the watchdog alerts on, so the mapping from
@@ -35,5 +36,62 @@ func TestCouncilStatusFrom(t *testing.T) {
 	clean := councilStatusFrom(parking.Stats{PersistOK: true})
 	if clean.BreakerOpen || clean.LastPushbackAt != "" || !clean.PersistOK {
 		t.Errorf("clean snapshot should be quiet: %+v", clean)
+	}
+}
+
+// The warm-margin aggregation is what lets the watchdog see a reconnect backlog
+// forming before sessions lapse. estimated margin = idleWindow - age; near_expiry
+// uses a dedicated danger margin (NOT the warm interval); warm and overdue_warm
+// split the fleet at the warm interval with no overlap.
+func TestCouncilSessionCounts(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	const warmInterval, idleWindow, warnMargin = 105 * time.Minute, 10 * time.Hour, 2 * time.Hour
+	mk := func(owner string, age time.Duration) store.CouncilSession {
+		return store.CouncilSession{Owner: owner, Cookie: "c", UpdatedAt: now.Add(-age)}
+	}
+	sessions := []store.CouncilSession{
+		mk("fresh", 10*time.Minute),                                         // freshly warmed: within the interval
+		mk("stale", 2*time.Hour),                                            // past the 105m interval: overdue, margin 8h — not near
+		mk("cliff", 9*time.Hour+30*time.Minute),                             // margin 30m: overdue AND near the cliff (worst)
+		{Owner: "unsched", Cookie: "c", UpdatedAt: now.Add(-3 * time.Hour)}, // linked but NO schedule
+		{Cookie: ""}, // unlinked: ignored entirely
+	}
+	scheduled := map[string]struct{}{"fresh": {}, "stale": {}, "cliff": {}}
+	sc := councilSessionCounts(sessions, now, warmInterval, idleWindow, warnMargin, scheduled)
+	if sc.Linked != 4 { // every cookie'd session, including the unscheduled one
+		t.Errorf("linked = %d, want 4", sc.Linked)
+	}
+	if sc.Warm != 1 { // only "fresh" is within the 105m interval
+		t.Errorf("warm = %d, want 1", sc.Warm)
+	}
+	if sc.OverdueWarm != 2 { // "stale" and "cliff" are past 105m; "unsched" excluded
+		t.Errorf("overdue_warm = %d, want 2", sc.OverdueWarm)
+	}
+	if sc.NearExpiry != 1 { // only "cliff" has margin < the 2h danger margin
+		t.Errorf("near_expiry = %d, want 1", sc.NearExpiry)
+	}
+	if sc.MinMarginSeconds == nil || *sc.MinMarginSeconds != 30*60 {
+		t.Errorf("min_margin_seconds = %v, want 1800 (30m)", sc.MinMarginSeconds)
+	}
+
+	// A longer warm interval must NOT drag near_expiry up: the danger margin is
+	// independent, so a healthy session whose renew simply isn't due yet is not "near".
+	scLong := councilSessionCounts(sessions, now, 6*time.Hour, idleWindow, warnMargin, scheduled)
+	if scLong.NearExpiry != 1 {
+		t.Errorf("near_expiry = %d with a 6h warm interval, want 1 (still only the cliff session)", scLong.NearExpiry)
+	}
+
+	// An intentionally un-warmed session (no schedule) must not raise an alarm even
+	// when it is well past the danger margin — its lapse is expected.
+	cold := []store.CouncilSession{{Owner: "cold", Cookie: "c", UpdatedAt: now.Add(-9*time.Hour - 45*time.Minute)}}
+	scCold := councilSessionCounts(cold, now, warmInterval, idleWindow, warnMargin, map[string]struct{}{})
+	if scCold.Linked != 1 || scCold.NearExpiry != 0 || scCold.OverdueWarm != 0 || scCold.MinMarginSeconds != nil {
+		t.Errorf("an unscheduled session must not drive warm-risk metrics: %+v", scCold)
+	}
+
+	// No linked sessions: no margin reported at all.
+	empty := councilSessionCounts([]store.CouncilSession{{Cookie: ""}}, now, warmInterval, idleWindow, warnMargin, scheduled)
+	if empty.Linked != 0 || empty.MinMarginSeconds != nil {
+		t.Errorf("empty fleet should report nothing: %+v", empty)
 	}
 }

@@ -67,6 +67,12 @@ type CouncilSession struct {
 	// to stop serving households that have left; a household that opens the app
 	// has plainly not left, so their visit resets it. Zero falls back to LinkedAt.
 	LastActive time.Time
+	// DriftCheckedAt is when the owner-grid drift/expiry read last ran. It has its
+	// own cadence (hours), decoupled from keep-warm (which slides UpdatedAt every
+	// ~105 min): a warm keeps the SESSION alive, a drift read is a separate, much
+	// rarer question — did the permit change outside p.stonn — and coupling them
+	// doubled keep-warm's council traffic for no session-survival benefit.
+	DriftCheckedAt time.Time
 }
 
 // ---- Council session (per app user) ----
@@ -75,11 +81,11 @@ type CouncilSession struct {
 // ErrNotFound.
 func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSession, error) {
 	var cs CouncilSession
-	var expiry, updated, linked, reminded, reconnected, lastActive string
+	var expiry, updated, linked, reminded, reconnected, lastActive, driftChecked string
 	err := s.db.QueryRowContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at, drift_checked_at
 FROM council_session WHERE owner = ?`, owner).
-		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive)
+		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive, &driftChecked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
 	}
@@ -92,6 +98,7 @@ FROM council_session WHERE owner = ?`, owner).
 	cs.ReminderSent, _ = time.Parse(time.RFC3339, reminded)
 	cs.ReconnectedAt, _ = time.Parse(time.RFC3339, reconnected)
 	cs.LastActive, _ = time.Parse(time.RFC3339, lastActive)
+	cs.DriftCheckedAt, _ = time.Parse(time.RFC3339, driftChecked)
 	return cs, nil
 }
 
@@ -100,7 +107,7 @@ FROM council_session WHERE owner = ?`, owner).
 // secrets are included so callers can renew without a second lookup.
 func (s *Store) ListCouncilSessions(ctx context.Context) ([]CouncilSession, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at
 FROM council_session`)
 	if err != nil {
 		return nil, err
@@ -109,8 +116,8 @@ FROM council_session`)
 	var out []CouncilSession
 	for rows.Next() {
 		var cs CouncilSession
-		var expiry, updated, linked, reminded, lastActive string
-		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive); err != nil {
+		var expiry, updated, linked, reminded, lastActive, driftChecked string
+		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive, &driftChecked); err != nil {
 			return nil, err
 		}
 		cs.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
@@ -118,9 +125,18 @@ FROM council_session`)
 		cs.LinkedAt, _ = time.Parse(time.RFC3339, linked)
 		cs.ReminderSent, _ = time.Parse(time.RFC3339, reminded)
 		cs.LastActive, _ = time.Parse(time.RFC3339, lastActive)
+		cs.DriftCheckedAt, _ = time.Parse(time.RFC3339, driftChecked)
 		out = append(out, cs)
 	}
 	return out, rows.Err()
+}
+
+// MarkDriftChecked records that the owner-grid drift/expiry read just ran, so its
+// own cadence (see scheduler.driftDue) can pace it independently of keep-warm.
+func (s *Store) MarkDriftChecked(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET drift_checked_at = ? WHERE owner = ?`, nowUTC(), owner)
+	return err
 }
 
 // MarkReminderSent records that the approaching-expiry email was sent and stores
@@ -230,6 +246,31 @@ SELECT
   (SELECT COUNT(*) FROM override o     JOIN permit p ON o.permit_id  = p.id WHERE p.owner = ?)`,
 		owner, owner).Scan(&n)
 	return n > 0, err
+}
+
+// OwnersWithSchedule returns the set of owners with at least one weekly rule or
+// override — the owners keep-warm actually maintains. The warm-margin status
+// metrics use it to ignore intentionally un-warmed sessions (a linked account with
+// no schedule is left to lapse between dashboard visits), which would otherwise
+// read as a perpetual near-expiry alarm. One batched query, not one per session.
+func (s *Store) OwnersWithSchedule(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT DISTINCT p.owner FROM permit p
+WHERE EXISTS (SELECT 1 FROM weekly_rule wr WHERE wr.permit_id = p.id)
+   OR EXISTS (SELECT 1 FROM override o WHERE o.permit_id = p.id)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			return nil, err
+		}
+		out[owner] = struct{}{}
+	}
+	return out, rows.Err()
 }
 
 // SaveCouncilSession upserts a user's session from an interactive link, sealing

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -248,5 +249,78 @@ func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 	}
 	if calls := fc.callSnap(); len(calls) != 0 {
 		t.Errorf("an inactive permit drove council traffic: %v", calls)
+	}
+}
+
+// Drift must run on its OWN cadence, not on every keep-warm. A session that is
+// warm-due but not yet drift-due gets warmed with NO grid read; once drift comes
+// due, a pass does the grid read. This is the decoupling that stops keep-warm from
+// doubling its own council traffic.
+func TestDriftDecoupledFromWarm(t *testing.T) {
+	ctx := context.Background()
+	const owner = "decouple@example.com"
+	st := newStore(t)
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner)
+	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
+	nf := &fakeNotifier{on: true}
+
+	// Warm every tick; drift every 6h (baseline is the just-seeded UpdatedAt, so not
+	// due). A pass should warm the session but make NO grid read.
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour,
+		WarmInterval: time.Nanosecond, DriftInterval: 6 * time.Hour, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(ctx)
+	if len(fc.refreshed) == 0 {
+		t.Fatal("session was not warmed")
+	}
+	if n := fc.listCallCount(); n != 0 {
+		t.Fatalf("drift ran on a warm even though it was not due: %d grid reads", n)
+	}
+
+	// Bring drift due: now a pass should do exactly one grid read.
+	s.driftInterval = time.Nanosecond
+	s.keepWarm(ctx)
+	if n := fc.listCallCount(); n != 1 {
+		t.Fatalf("drift did not run exactly once when due: %d grid reads", n)
+	}
+}
+
+// A FAILED grid read must NOT advance drift_checked_at. Otherwise a single failed
+// read — most likely during a council outage, exactly when we most want to keep
+// re-reading — stands the drift check down for a whole interval instead of retrying
+// on the next pass. The warm itself still succeeds (it uses a different call), so
+// the session is alive and drift is due: the exact path that used to mark the check
+// done regardless of the read's outcome.
+func TestFailedDriftDoesNotMarkChecked(t *testing.T) {
+	ctx := context.Background()
+	const owner = "driftfail@example.com"
+	st := newStore(t)
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner)
+	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
+	nf := &fakeNotifier{on: true}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour,
+		WarmInterval: time.Nanosecond, DriftInterval: time.Nanosecond, Notifier: nf})
+	time.Sleep(2 * time.Millisecond)
+
+	// The grid read fails while the warm succeeds.
+	fc.permitsErr = errors.New("council unreachable")
+	s.keepWarm(ctx)
+
+	cs, err := st.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !cs.DriftCheckedAt.IsZero() {
+		t.Fatalf("a failed drift read advanced drift_checked_at to %v — the retry is now suppressed for a full interval", cs.DriftCheckedAt)
+	}
+
+	// Recovery: the next pass reads the grid successfully and only now marks it done.
+	fc.permitsErr = nil
+	s.keepWarm(ctx)
+	cs, _ = st.GetCouncilSession(ctx, owner)
+	if cs.DriftCheckedAt.IsZero() {
+		t.Fatal("a successful drift read did not advance drift_checked_at")
 	}
 }

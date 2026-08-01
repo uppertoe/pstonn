@@ -195,15 +195,52 @@ type CouncilConfig struct {
 	SessionMaxAge time.Duration
 
 	// WarmInterval is how stale a still-valid session may get before keep-warm
-	// silent-renews it (sliding the council cookie so an idle, set-and-forget
-	// user's session does not lapse). COUNCIL_WARM_INTERVAL, default 1h45m ≈ 0.7×
-	// the measured proven-safe idle window of ~2h32m (session dies by ~3h48m).
-	// The 0.7 ratio (vs a more cautious 0.5) trades ~30% fewer council touches for
-	// less headroom; the keep-warm loop compensates by retrying a failed or
-	// pushback-deferred renew every few minutes rather than once per interval, so
-	// the narrower margin to the ~3h48m cliff is never exposed to a single missed
-	// pass. See scheduler.warmLoop.
+	// silent-renews it (sliding the council cookie so an idle, set-and-forget user's
+	// session does not lapse). COUNCIL_WARM_INTERVAL, default 1h45m. Fewer touches
+	// means a longer interval, and the scheduler makes that safe rather than
+	// dangerous: the effective threshold is jittered only DOWNWARD and hard-clamped
+	// to IdleWindow-WarmSafetyMargin, so it can be raised toward the idle window
+	// without ever letting a session lapse before its first renew, and the keep-warm
+	// loop retries a failed or pushback-deferred renew every few minutes (not once
+	// per interval) so the remaining margin is never spent on a single missed pass.
+	// See scheduler.warmThresholdFor and scheduler.warmLoop. Raise it once the clean
+	// idle-timeout measurement brackets the real window.
 	WarmInterval time.Duration
+
+	// IdleWindow is the ESTIMATED council session idle timeout. It is the anchor for
+	// two things: the warm-margin metrics on /status (how close sessions are to
+	// lapsing, so the watchdog can alert before a council outage near the cliff
+	// creates a reconnect backlog), AND the keep-warm safety clamp — the scheduler
+	// never lets a session's warm threshold sit within WarmSafetyMargin of this, so
+	// COUNCIL_WARM_INTERVAL can be raised toward the window without risking a lapse
+	// before the first renew attempt. COUNCIL_IDLE_WINDOW, default 10h — the Duende
+	// IdentityServer default CookieLifetime, consistent with a live probe that
+	// survived a 7h+ gap; set it to the measured value once the clean run brackets it.
+	IdleWindow time.Duration
+
+	// WarmSafetyMargin is the minimum gap the scheduler guarantees between a
+	// session's warm threshold and IdleWindow: the effective threshold is capped at
+	// IdleWindow - WarmSafetyMargin however high WarmInterval is set. This is the
+	// runway the fast recovery tick (every ~3 min) has to retry a failed renew before
+	// the cookie would actually lapse, so it must comfortably exceed a few ticks.
+	// COUNCIL_WARM_SAFETY_MARGIN, default 1h (≈20 recovery attempts at a 10h window).
+	WarmSafetyMargin time.Duration
+
+	// ExpiryWarningMargin is the danger zone for the /status near_expiry metric: a
+	// maintained session whose estimated margin (IdleWindow - age) falls below this
+	// is counted, so the watchdog can alert on a forming backlog. Kept SEPARATE from
+	// WarmInterval — coupling them meant a longer warm interval would flag healthy
+	// sessions hours before their renew was even due. COUNCIL_EXPIRY_WARNING_MARGIN,
+	// default 2h (should stay above WarmSafetyMargin so the alert precedes the clamp).
+	ExpiryWarningMargin time.Duration
+
+	// DriftInterval is how often the owner-grid drift/expiry read runs, on its own
+	// per-owner cadence decoupled from keep-warm. COUNCIL_DRIFT_INTERVAL, default 6h.
+	// It used to piggyback on every keep-warm (~105 min), doubling the auth-warm
+	// traffic for a check that catches a rare event (an external portal edit); the
+	// per-minute reconcile still enforces the desired plate regardless. 0 disables
+	// drift reads entirely.
+	DriftInterval time.Duration
 
 	// RolloverWindow staggers SCHEDULED plate changes across a window opening at
 	// the schedule boundary, capped at this value. COUNCIL_ROLLOVER_WINDOW, default
@@ -283,17 +320,21 @@ func Load() (*Config, error) {
 		DevIdentityEmail: strings.ToLower(strings.TrimSpace(os.Getenv("DEV_IDENTITY_EMAIL"))),
 		CookieSecure:     env("COOKIE_SECURE", "true") != "false",
 		Council: CouncilConfig{
-			Issuer:         env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
-			ClientID:       env("COUNCIL_CLIENT_ID", "ePermits.ssp.web"),
-			RedirectURI:    env("COUNCIL_REDIRECT_URI", "https://parkingpermits.stonnington.vic.gov.au/ssp/callback"),
-			Scopes:         strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
-			APIBase:        env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
-			SessionMaxAge:  time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
-			WarmInterval:   envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
-			RolloverWindow: envDuration("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
-			Sandbox:        env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
-			ReminderLead:   time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
-			ExpiryLead:     time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
+			Issuer:              env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
+			ClientID:            env("COUNCIL_CLIENT_ID", "ePermits.ssp.web"),
+			RedirectURI:         env("COUNCIL_REDIRECT_URI", "https://parkingpermits.stonnington.vic.gov.au/ssp/callback"),
+			Scopes:              strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
+			APIBase:             env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
+			SessionMaxAge:       time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
+			WarmInterval:        envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
+			RolloverWindow:      envDuration("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
+			DriftInterval:       envDuration("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
+			IdleWindow:          envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
+			WarmSafetyMargin:    envDuration("COUNCIL_WARM_SAFETY_MARGIN", time.Hour),
+			ExpiryWarningMargin: envDuration("COUNCIL_EXPIRY_WARNING_MARGIN", 2*time.Hour),
+			Sandbox:             env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
+			ReminderLead:        time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
+			ExpiryLead:          time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
 		},
 		AuthLogoutURL: strings.TrimSpace(os.Getenv("AUTH_LOGOUT_URL")),
 		TermsPath:     strings.TrimSpace(os.Getenv("TERMS_PATH")),
