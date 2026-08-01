@@ -464,6 +464,12 @@ func TestStatusRosterSealed(t *testing.T) {
 	if strings.Contains(body, "roster@example.com") || strings.Contains(body, "roster_sealed") {
 		t.Fatalf("the plain health poll should carry no roster: %s", body)
 	}
+	// ...but it DOES carry the council-health section the watchdog alerts on.
+	for _, key := range []string{`"council"`, `"requests_1m"`, `"breaker_open"`, `"breaker_persist_ok"`} {
+		if !strings.Contains(body, key) {
+			t.Fatalf("status payload missing watchdog key %s: %s", key, body)
+		}
+	}
 
 	// Asked for explicitly, it comes back encrypted — never in the clear.
 	body = get("/status?roster=1").Body.String()

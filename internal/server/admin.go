@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -208,6 +209,10 @@ type statusResponse struct {
 	Time      string          `json:"time"`
 	Scheduler schedulerStatus `json:"scheduler"`
 	Sessions  sessionCounts   `json:"sessions"`
+	// Council reports the outbound-traffic health the watchdog needs to alert on a
+	// developing edge block: the real request rate, pushback count/diagnostics, the
+	// fleet circuit state, and whether restart-protection persistence is intact.
+	Council councilStatus `json:"council"`
 	// Client reports what the app believes about the caller of this very request.
 	// It is here so the watchdog's ordinary poll doubles as an assertion about the
 	// deployment's shape: the throttles that protect every public route key on this
@@ -237,6 +242,23 @@ type schedulerStatus struct {
 type sessionCounts struct {
 	Linked int `json:"linked"`
 	Warm   int `json:"warm"`
+}
+
+// councilStatus is the outbound-council health for the watchdog. The rate windows
+// answer "what rate was the council seeing when it began refusing us"; the pushback
+// fields say WHICH control fired; the breaker fields say whether we are paused; and
+// persist_ok says whether a restart would still honour that pause.
+type councilStatus struct {
+	Requests1m         int    `json:"requests_1m"`
+	Requests5m         int    `json:"requests_5m"`
+	PushbacksTotal     uint64 `json:"pushbacks_total"`
+	BreakerOpen        bool   `json:"breaker_open"`
+	BreakerRemainingS  int    `json:"breaker_remaining_seconds,omitempty"`
+	LastPushbackAt     string `json:"last_pushback_at,omitempty"`
+	LastPushbackStatus int    `json:"last_pushback_status,omitempty"`
+	LastPushbackRef    string `json:"last_pushback_ref,omitempty"`
+	PersistOK          bool   `json:"breaker_persist_ok"`
+	PersistError       string `json:"breaker_persist_error,omitempty"`
 }
 
 // statusJSON is the read-only status the external outage watchdog polls. It is
@@ -309,6 +331,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 			IP:        clientIP(r),
 			EdgeProxy: noteEdgeProxy(r),
 		},
+		Council: s.councilSnapshot(),
 	}
 	if wantRoster {
 		// A missing or malformed ROSTER_KEY makes this fail, which is the correct
@@ -327,6 +350,36 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// councilSnapshot returns the council-health section, nil-safe for tests that
+// construct a Server without a council client (production always has one).
+func (s *Server) councilSnapshot() councilStatus {
+	if s.council == nil {
+		return councilStatus{PersistOK: true}
+	}
+	return councilStatusFrom(s.council.Stats())
+}
+
+// councilStatusFrom maps the council client's Stats snapshot onto the /status
+// shape, converting the breaker's remaining pause to whole seconds and rendering
+// timestamps as RFC3339.
+func councilStatusFrom(st parking.Stats) councilStatus {
+	cs := councilStatus{
+		Requests1m:         st.LastMinute,
+		Requests5m:         st.Last5Min,
+		PushbacksTotal:     st.Pushback,
+		BreakerOpen:        st.BreakerOpen,
+		BreakerRemainingS:  int(st.BreakerFor.Round(time.Second) / time.Second),
+		LastPushbackStatus: st.LastPushbackStatus,
+		LastPushbackRef:    st.LastPushbackRef,
+		PersistOK:          st.PersistOK,
+		PersistError:       st.PersistError,
+	}
+	if !st.LastPushbackAt.IsZero() {
+		cs.LastPushbackAt = st.LastPushbackAt.UTC().Format(time.RFC3339)
+	}
+	return cs
 }
 
 // bearerToken extracts the credential from an Authorization header, requiring the

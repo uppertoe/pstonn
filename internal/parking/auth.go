@@ -157,6 +157,17 @@ func looksLikeHTML(resp *http.Response, head []byte) bool {
 
 // classifyPushback records a per-owner penalty and returns ErrCouncilBusy when
 // the response is Azure Front Door/rate-limit push-back (429/403/503); nil otherwise.
+//
+// Unlike the permit API (apiRequest), this does NOT split a 403 into JSON-refusal
+// vs HTML-pushback, because the OIDC endpoints it guards do not return a structured
+// 403 in our flows: a prompt=none authorize answers a session problem with a 302
+// carrying error=login_required (handled as ErrSessionExpired upstream, never
+// reaching here), and the token endpoint answers a bad grant with 400, not 403. So
+// a 403 on these surfaces is an edge/WAF response, which is exactly what should feed
+// the fleet breaker. RESIDUAL: if the token endpoint were ever to return a
+// structured 403 for a client/grant fault, three owners hitting it could contribute
+// to opening the breaker; confirming the real 403 shapes needs a live capture, and
+// until one exists this treats every auth-surface 403 as edge push-back by design.
 func (c *Client) classifyPushback(owner string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests, http.StatusForbidden, http.StatusServiceUnavailable:
