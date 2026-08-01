@@ -161,6 +161,13 @@ type Client struct {
 	// keep our shared-IP traffic low and burst-free so a block is less likely to
 	// start (the preventive counterpart to the reactive breaker; see governor.go).
 	gov *governor
+	// loginFlow serialises whole CREDENTIAL LOGIN flows (Link, and Reconnect which
+	// calls it) to one at a time. The transport governor bounds individual requests,
+	// but the risk pattern is many DISTINCT authentication flows from one IP at once
+	// — several reconnects interleaving their login-page / credential-POST / callback
+	// requests. A capacity-1 channel makes a headless login an atomic operation on
+	// the wire: the next flow waits for the current one to finish.
+	loginFlow chan struct{}
 
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
@@ -208,6 +215,7 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 			defaultBreakerCooldown, defaultBreakerProbe),
 		gov: newGovernor(defaultGovTotalPerMin, defaultGovTotalBurst,
 			defaultGovLoginPerMin, defaultGovLoginBurst, defaultGovConcurrency),
+		loginFlow: make(chan struct{}, 1),
 	}
 	// Track request rate with headroom over the widest window Stats queries (5m):
 	// the extra slots keep each in-window minute in its own bucket even if adds ever
@@ -234,6 +242,24 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	return c
+}
+
+// acquireLoginFlow blocks until no other credential login flow is running, then
+// claims the single slot; the returned release frees it (deferred, so it survives
+// panics and every error path). A nil channel (tests constructing a bare Client)
+// is a no-op. Bounded by ctx so a waiting flow fails cleanly rather than hanging,
+// and never deadlocks a user link behind a stuck reconnect — the loser just waits
+// its turn or times out.
+func (c *Client) acquireLoginFlow(ctx context.Context) (func(), error) {
+	if c.loginFlow == nil {
+		return func() {}, nil
+	}
+	select {
+	case c.loginFlow <- struct{}{}:
+		return func() { <-c.loginFlow }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // persistBreaker writes the breaker's current pause to the store so a restart
