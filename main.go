@@ -119,15 +119,17 @@ func run() error {
 			"Hard SMTP rejections are still learned at send time, but provider-reported bounces are not. See deploy/aws-ses-hook-setup.py")
 	}
 	sched := scheduler.New(st, council, cfg.DisplayLocation, scheduler.Options{
-		SessionMaxAge: cfg.Council.SessionMaxAge,
-		WarmInterval:  cfg.Council.WarmInterval,
-		ReminderLead:  cfg.Council.ReminderLead,
-		ExpiryLead:    cfg.Council.ExpiryLead,
-		PublicBaseURL: cfg.PublicBaseURL,
-		Notifier:      notifier,
-		RateDelay:     3 * time.Second,
-		SpreadWindow:  cfg.Council.RolloverWindow,
-		DriftInterval: cfg.Council.DriftInterval,
+		SessionMaxAge:    cfg.Council.SessionMaxAge,
+		WarmInterval:     cfg.Council.WarmInterval,
+		ReminderLead:     cfg.Council.ReminderLead,
+		ExpiryLead:       cfg.Council.ExpiryLead,
+		PublicBaseURL:    cfg.PublicBaseURL,
+		Notifier:         notifier,
+		RateDelay:        3 * time.Second,
+		SpreadWindow:     cfg.Council.RolloverWindow,
+		DriftInterval:    cfg.Council.DriftInterval,
+		IdleWindow:       cfg.Council.IdleWindow,
+		WarmSafetyMargin: cfg.Council.WarmSafetyMargin,
 		// A daily consistent snapshot next to the live DB: the restic files-only
 		// backup of the volume can catch the live db + WAL mid-write, but this
 		// file is always a coherent database to restore from.

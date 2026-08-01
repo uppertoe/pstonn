@@ -93,6 +93,14 @@ type Options struct {
 	// (~105 min), doubling keep-warm's council traffic for a check that catches a
 	// rare event (an external portal edit). Default 6h; 0 disables drift reads.
 	DriftInterval time.Duration
+	// IdleWindow is the estimated council idle-expiry window. When >0 it anchors the
+	// warm safety clamp: a session's warm threshold is never allowed within
+	// WarmSafetyMargin of it, so WarmInterval can be raised toward the window without
+	// risking a lapse before the first renew attempt. 0 disables the clamp.
+	IdleWindow time.Duration
+	// WarmSafetyMargin is the minimum gap kept between the warm threshold and
+	// IdleWindow (the recovery-tick runway to retry a failed renew). Default 1h.
+	WarmSafetyMargin time.Duration
 }
 
 // Scheduler reconciles permits on an interval and keeps linked council sessions
@@ -104,16 +112,18 @@ type Scheduler struct {
 	loc      *time.Location
 	interval time.Duration
 
-	sessionMaxAge time.Duration
-	warmInterval  time.Duration
-	reminderLead  time.Duration
-	expiryLead    time.Duration
-	publicBaseURL string
-	notifier      Notifier
-	rateDelay     time.Duration
-	jitterFrac    float64
-	spreadWindow  time.Duration
-	driftInterval time.Duration
+	sessionMaxAge    time.Duration
+	warmInterval     time.Duration
+	reminderLead     time.Duration
+	expiryLead       time.Duration
+	publicBaseURL    string
+	notifier         Notifier
+	rateDelay        time.Duration
+	jitterFrac       float64
+	spreadWindow     time.Duration
+	driftInterval    time.Duration
+	idleWindow       time.Duration // estimated council idle expiry; anchors the warm safety clamp (0 disables it)
+	warmSafetyMargin time.Duration // minimum guaranteed gap between the warm threshold and idleWindow
 
 	// fleetSize is how many permits the last reconcile pass saw, the herd size the
 	// rollover window is scaled against. Written once per pass, read per permit.
@@ -211,27 +221,37 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	if di < 0 {
 		di = 0
 	}
+	iw := opts.IdleWindow
+	if iw < 0 {
+		iw = 0
+	}
+	wsm := opts.WarmSafetyMargin
+	if wsm <= 0 {
+		wsm = time.Hour
+	}
 	return &Scheduler{
-		store:         st,
-		council:       council,
-		loc:           loc,
-		interval:      time.Minute,
-		sessionMaxAge: opts.SessionMaxAge,
-		warmInterval:  warm,
-		reminderLead:  opts.ReminderLead,
-		expiryLead:    opts.ExpiryLead,
-		publicBaseURL: strings.TrimRight(opts.PublicBaseURL, "/"),
-		notifier:      opts.Notifier,
-		rateDelay:     rd,
-		jitterFrac:    jf,
-		spreadWindow:  sw,
-		driftInterval: di,
-		trigger:       make(chan struct{}, 1),
-		lastAlert:     make(map[string]time.Time),
-		nextTry:       make(map[int64]time.Time),
-		applying:      make(map[int64]chan struct{}),
-		unscheduled:   make(map[int64]string),
-		snapshotPath:  opts.SnapshotPath,
+		store:            st,
+		council:          council,
+		loc:              loc,
+		interval:         time.Minute,
+		sessionMaxAge:    opts.SessionMaxAge,
+		warmInterval:     warm,
+		reminderLead:     opts.ReminderLead,
+		expiryLead:       opts.ExpiryLead,
+		publicBaseURL:    strings.TrimRight(opts.PublicBaseURL, "/"),
+		notifier:         opts.Notifier,
+		rateDelay:        rd,
+		jitterFrac:       jf,
+		spreadWindow:     sw,
+		driftInterval:    di,
+		idleWindow:       iw,
+		warmSafetyMargin: wsm,
+		trigger:          make(chan struct{}, 1),
+		lastAlert:        make(map[string]time.Time),
+		nextTry:          make(map[int64]time.Time),
+		applying:         make(map[int64]chan struct{}),
+		unscheduled:      make(map[int64]string),
+		snapshotPath:     opts.SnapshotPath,
 	}
 }
 
@@ -842,7 +862,13 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		// the session is alive to serve the read (a warm just succeeded, or it was
 		// already within its warm window). checkDrift updates permit status/expiry and
 		// re-arms reconcile on any external change.
-		if alive && s.driftDue(cs, now) {
+		//
+		// Suspend drift entirely while the fleet breaker is open: a confirmed shared
+		// block is exactly when to spend nothing on the low-value read and reserve all
+		// recovering capacity for warming endangered sessions and due writes. driftDue
+		// stays true (the timestamp is not advanced), so the read resumes the moment
+		// the block clears.
+		if alive && !s.council.Blocked() && s.driftDue(cs, now) {
 			if !space() {
 				return
 			}
@@ -1393,18 +1419,32 @@ func (s *Scheduler) jittered(d time.Duration) time.Duration {
 	return j
 }
 
-// warmThresholdFor is the renew threshold for one session: warmInterval nudged by
-// a small per-session offset that is STABLE within a warm cycle (deterministic in
-// owner + updatedAt) but re-derives each cycle (updatedAt slides on every renew).
-// Deterministic-not-random matters under the fast recovery tick: a fresh random
-// draw every pass would let a session renew on whichever pass happened to roll the
-// low end of the band, biasing every renewal toward warmInterval×(1-jitterFrac)
-// and quietly raising traffic. A stable per-owner offset also gives better
-// desync — each session keeps its own consistent phase — which is the anti-mechanical
-// point of the jitter in the first place.
+// warmThresholdFor is the renew threshold for one session: the configured
+// warmInterval, first clamped so it never sits within warmSafetyMargin of the
+// estimated idle window, then nudged DOWNWARD by a small per-session offset.
+//
+// The clamp is what makes a long warm interval safe. At warmInterval near the idle
+// window, a session that renewed at the interval would have almost no headroom, and
+// a single failed pass could let the cookie lapse before the next attempt. Capping
+// the threshold at idleWindow-warmSafetyMargin guarantees the fast recovery tick a
+// fixed runway to retry, however high an operator sets COUNCIL_WARM_INTERVAL.
+//
+// The jitter is one-sided (only ever EARLIER than the base, never later): symmetric
+// jitter would push the upper half of the band ABOVE the base and could cross the
+// safety ceiling — exactly the lapse the clamp exists to prevent. It stays stable
+// within a warm cycle (deterministic in owner + updatedAt, re-derived each cycle as
+// updatedAt slides) so the fast recovery tick can't bias renewals low by re-rolling
+// every pass, while still desyncing the fleet — each session keeps a consistent
+// phase in [base*(1-jitterFrac), base].
 func (s *Scheduler) warmThresholdFor(owner string, updatedAt time.Time) time.Duration {
+	base := s.warmInterval
+	if s.idleWindow > 0 {
+		if ceil := s.idleWindow - s.warmSafetyMargin; ceil > 0 && base > ceil {
+			base = ceil
+		}
+	}
 	if s.jitterFrac <= 0 {
-		return s.warmInterval
+		return base
 	}
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(owner))
@@ -1412,7 +1452,7 @@ func (s *Scheduler) warmThresholdFor(owner string, updatedAt time.Time) time.Dur
 	binary.LittleEndian.PutUint64(b[:], uint64(updatedAt.Unix()))
 	_, _ = h.Write(b[:])
 	u := float64(h.Sum64()>>11) / float64(uint64(1)<<53) // uniform in [0,1)
-	return time.Duration(float64(s.warmInterval) * (1 + (u*2-1)*s.jitterFrac))
+	return time.Duration(float64(base) * (1 - u*s.jitterFrac))
 }
 
 // randToken returns a 256-bit URL-safe random token for the confirm link.
