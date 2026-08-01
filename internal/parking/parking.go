@@ -169,6 +169,14 @@ type Client struct {
 	// the wire: the next flow waits for the current one to finish.
 	loginFlow chan struct{}
 
+	// persist-health of the breaker-state write, surfaced on /status so the operator
+	// knows whether restart-protection is intact during an incident (a failing write
+	// means a restart could clear the pause). Nil error = last write succeeded (or
+	// none needed yet).
+	persistMu  sync.Mutex
+	persistErr error
+	persistAt  time.Time
+
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
 
@@ -274,10 +282,14 @@ func (c *Client) persistBreaker() {
 	openUntil, lastPushback, gen := c.breaker.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := c.store.SaveBreakerState(ctx, store.BreakerState{
+	err := c.store.SaveBreakerState(ctx, store.BreakerState{
 		OpenUntil: openUntil, LastPushback: lastPushback, Generation: gen,
-	}); err != nil {
-		log.Printf("parking: persist breaker state: %v", err)
+	})
+	c.persistMu.Lock()
+	c.persistErr, c.persistAt = err, time.Now()
+	c.persistMu.Unlock()
+	if err != nil {
+		log.Printf("parking: persist breaker state: %v (restart-protection degraded)", err)
 	}
 }
 

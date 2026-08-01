@@ -117,6 +117,10 @@ type Stats struct {
 	LastPushbackSurface string
 	LastPushbackStatus  int
 	LastPushbackRef     string
+	// Breaker-state persistence health: is restart-protection intact? PersistOK is
+	// false only if the LAST write failed.
+	PersistOK    bool
+	PersistError string
 }
 
 // Blocked reports whether the fleet circuit breaker is currently open — a
@@ -136,6 +140,13 @@ func (c *Client) Stats() Stats {
 	c.traffic.pbMu.Lock()
 	pb := c.traffic.lastPB
 	c.traffic.pbMu.Unlock()
+	c.persistMu.Lock()
+	pErr := c.persistErr
+	c.persistMu.Unlock()
+	persistError := ""
+	if pErr != nil {
+		persistError = pErr.Error()
+	}
 	return Stats{
 		Login:               c.traffic.login.Load(),
 		Auth:                c.traffic.auth.Load(),
@@ -150,5 +161,7 @@ func (c *Client) Stats() Stats {
 		LastPushbackSurface: pb.Surface,
 		LastPushbackStatus:  pb.Status,
 		LastPushbackRef:     pb.AzureRef,
+		PersistOK:           pErr == nil,
+		PersistError:        persistError,
 	}
 }
