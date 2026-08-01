@@ -214,6 +214,17 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 	// arrive slightly out of order, so a just-aged-out minute can't collide with a
 	// live one.
 	c.traffic.rolling = newRollingCounter(8)
+	// Restore a persisted breaker pause: if a block was in force when this process
+	// last stopped, resume paused rather than resuming full traffic into the block
+	// (which a container restart would otherwise do — the escalation this prevents).
+	if bs, err := st.LoadBreakerState(context.Background()); err == nil {
+		c.breaker.restore(bs.OpenUntil, bs.LastPushback, bs.Generation)
+		if bs.OpenUntil.After(time.Now()) {
+			log.Printf("parking: fleet circuit restored OPEN from persisted state (paused %s) — a block survived a restart", time.Until(bs.OpenUntil).Round(time.Second))
+		}
+	} else {
+		log.Printf("parking: load persisted breaker state: %v (starting closed)", err)
+	}
 	c.http = &http.Client{
 		Timeout: 30 * time.Second,
 		// Present as a browser on every request (never Go's default UA), and
@@ -223,6 +234,25 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	return c
+}
+
+// persistBreaker writes the breaker's current pause to the store so a restart
+// resumes from it. Called on every open/close/pushback transition; breaker
+// transitions are rare (only during a real block), so the write cost is negligible.
+// Best-effort: a failed write is logged, not fatal — the in-memory breaker still
+// works, we just lose the restart-survival guarantee for that one transition.
+func (c *Client) persistBreaker() {
+	if c.store == nil {
+		return
+	}
+	openUntil, lastPushback, gen := c.breaker.snapshot()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := c.store.SaveBreakerState(ctx, store.BreakerState{
+		OpenUntil: openUntil, LastPushback: lastPushback, Generation: gen,
+	}); err != nil {
+		log.Printf("parking: persist breaker state: %v", err)
+	}
 }
 
 // originOf returns the scheme://host to use as the browser Origin/Referer for
@@ -472,6 +502,7 @@ func (c *Client) apiRequest(ctx context.Context, owner, method, path, op string,
 		fallthrough
 	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
 		ra := parseRetryAfter(resp)
+		c.recordPushback(resp)
 		drainClose(resp)
 		c.penalize(owner, ra)
 		return nil, fmt.Errorf("%w: council returned %d", ErrCouncilBusy, resp.StatusCode)

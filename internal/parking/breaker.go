@@ -42,6 +42,8 @@ type breaker struct {
 	// cleared.
 	generation uint64
 
+	lastPushback time.Time // most recent pushback, for persistence/diagnostics
+
 	threshold     int           // distinct owners pushed back within window to open
 	window        time.Duration // how far back the distinct-owner tally reaches
 	cooldown      time.Duration // how long the circuit stays open once tripped
@@ -105,6 +107,7 @@ func (b *breaker) onPushback(now time.Time, owner string, retryAfter time.Durati
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	wasBlocked := b.blockedLocked(now)
+	b.lastPushback = now
 	if b.recent == nil {
 		b.recent = make(map[string]time.Time)
 	}
@@ -180,6 +183,37 @@ func (c *Client) breakerGate() (breakerPermit, error) {
 		return permit, fmt.Errorf("%w: the council edge is blocking our address; paused for %s", ErrCouncilBusy, wait.Round(time.Second))
 	}
 	return permit, nil
+}
+
+// snapshot returns the persistable state (the open deadline, last pushback, and
+// generation), so a restart can resume from the real pause rather than a clean
+// slate. Zero openUntil means closed.
+func (b *breaker) snapshot() (openUntil, lastPushback time.Time, generation uint64) {
+	if b == nil {
+		return time.Time{}, time.Time{}, 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.openUntil, b.lastPushback, b.generation
+}
+
+// restore seeds the breaker from persisted state on boot. It adopts openUntil ONLY
+// if it is still in the future — a pause a restart must not clear — and always
+// carries the generation forward so it stays monotonic across restarts. An expired
+// or absent pause leaves the breaker closed.
+func (b *breaker) restore(openUntil, lastPushback time.Time, generation uint64) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if openUntil.After(time.Now()) {
+		b.openUntil = openUntil
+	}
+	b.lastPushback = lastPushback
+	if generation > b.generation {
+		b.generation = generation
+	}
 }
 
 // state reports whether the circuit is open right now and the remaining pause, for

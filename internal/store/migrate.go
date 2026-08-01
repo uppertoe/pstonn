@@ -16,7 +16,7 @@ import (
 // constant silently stops a newly added ALTER from ever reaching an existing
 // database, which is a far worse failure than re-running statements that are all
 // idempotent and cost microseconds on an already-migrated file.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // migrationLockTTL bounds how long a dead migrator keeps the next start out. A
 // process killed mid-migration leaves the row claimed, and with no takeover window
@@ -400,6 +400,21 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
     last_seen  TEXT NOT NULL,
     hits       INTEGER NOT NULL DEFAULT 1       -- times we've been told
 );
+
+-- The fleet circuit breaker's pause, persisted so a restart cannot clear it. If
+-- Azure Front Door blocks our egress IP the breaker opens; a deploy that recreates
+-- the container would otherwise wipe that in-memory state and resume full traffic
+-- straight into the block — escalating it. One row: on boot, if open_until is still
+-- in the future the breaker starts paused. generation is carried forward so it stays
+-- monotonic across restarts.
+CREATE TABLE IF NOT EXISTS breaker_state (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),  -- one row, ever
+    open_until    TEXT NOT NULL DEFAULT '',            -- RFC3339 UTC; while now < this, traffic is paused
+    generation    INTEGER NOT NULL DEFAULT 0,
+    last_pushback TEXT NOT NULL DEFAULT '',            -- RFC3339 UTC of the most recent pushback
+    updated_at    TEXT NOT NULL DEFAULT ''
+);
+INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

@@ -183,3 +183,25 @@ func TestNilBreakerAllows(t *testing.T) {
 	b.onPushback(time.Now(), "a@x", 0)              // must not panic
 	b.onSuccess(time.Now(), "a@x", breakerPermit{}) // must not panic
 }
+
+// restore must re-pause the breaker when a persisted block is still in force (a
+// restart must not clear it), and stay closed when the persisted pause has expired.
+func TestBreakerRestore(t *testing.T) {
+	// In-force pause → restored open (refuses traffic).
+	b := testBreaker()
+	b.restore(time.Now().Add(5*time.Minute), time.Now(), 9)
+	if _, ok, _ := b.allow(time.Now()); ok {
+		t.Fatal("a restored in-force pause should refuse traffic")
+	}
+	// Generation carried forward, so a stale probe from before the restart can't close.
+	if _, _, gen := b.snapshot(); gen != 9 {
+		t.Fatalf("restore did not carry the generation forward: got %d", gen)
+	}
+
+	// Expired pause → restored closed (allows traffic).
+	b2 := testBreaker()
+	b2.restore(time.Now().Add(-time.Minute), time.Time{}, 3)
+	if _, ok, _ := b2.allow(time.Now()); !ok {
+		t.Fatal("a restored EXPIRED pause should not keep the circuit open")
+	}
+}
