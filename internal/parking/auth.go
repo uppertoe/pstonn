@@ -244,6 +244,16 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	if c.sandbox != nil {
 		return c.sandboxLink(ctx, owner, username) // any credentials link in sandbox mode
 	}
+	// Serialise the whole credential flow: only one login (or auto-reconnect, which
+	// calls Link) may run at a time, so a reconnect storm cannot put many distinct
+	// authentication flows on our shared IP at once. Acquired before the cooldown /
+	// breaker checks so the entire real flow — including its breaker probe — is the
+	// atomic unit, not each of its constituent HTTP requests.
+	releaseFlow, err := c.acquireLoginFlow(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseFlow()
 	// Honour an existing push-back cooldown: retrying the login while Azure Front Door is
 	// already refusing this owner is how a soft block escalates to a hard one.
 	if d, blocked := c.cooldownFor(owner); blocked {
