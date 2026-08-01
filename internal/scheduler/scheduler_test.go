@@ -44,6 +44,8 @@ type fakeCouncil struct {
 	// executed by a test.
 	current    map[string]string
 	currentErr error
+
+	blocked bool // fleet breaker "open" for the escalated busy-warning tests
 }
 
 // setCurrent makes the council report reg on a permit, as if someone had changed it
@@ -173,6 +175,14 @@ func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.Pe
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]parking.PermitInfo(nil), f.permits...), f.permitsErr
+}
+
+// blocked simulates the fleet circuit breaker being open (a confirmed shared-edge
+// block), which escalates the user-facing busy warning.
+func (f *fakeCouncil) Blocked() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.blocked
 }
 
 type sentMail struct {

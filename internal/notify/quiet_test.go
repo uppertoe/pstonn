@@ -120,4 +120,28 @@ func TestComposeApplyCopy(t *testing.T) {
 	if pri != "high" || tag != "warning" {
 		t.Fatalf("hard failure should be high/warning, got %s/%s", pri, tag)
 	}
+
+	// A plain transient hiccup softens: reassuring "still updating" subject, default
+	// push priority (don't cry wolf on a blip that self-heals).
+	ts, _, tp, _ := composeApply(ApplyOutcome{PermitLabel: "VPP1", CurrentReg: "OLD", OK: false, Transient: true, Reason: "trouble reaching the council", Action: "it will keep trying"})
+	if !strings.Contains(ts, "Still updating") || strings.Contains(ts, "Action needed") {
+		t.Fatalf("a transient blip should soften the subject, got %q", ts)
+	}
+	if tp != "default" {
+		t.Fatalf("a transient blip should be default priority, got %s", tp)
+	}
+
+	// A CONFIRMED block is transient-but-urgent: the act-now subject and high-
+	// priority push must fire even though Transient is set, so a household isn't
+	// reassured while the change genuinely will not apply.
+	us, ub2, up, _ := composeApply(ApplyOutcome{PermitLabel: "VPP1", CurrentReg: "OLD", OK: false, Transient: true, Urgent: true, Reason: "The council is refusing p.stonn's connection.", Action: "Change it yourself now to avoid a fine."})
+	if !strings.Contains(us, "Action needed") || !strings.Contains(us, "still shows OLD") {
+		t.Fatalf("an urgent block must use the act-now subject, got %q", us)
+	}
+	if up != "high" {
+		t.Fatalf("an urgent block must be high priority, got %s", up)
+	}
+	if !strings.Contains(ub2, "avoid a fine") || !strings.Contains(ub2, councilPortalURL) {
+		t.Fatalf("urgent block body must carry the act-now action and portal: %q", ub2)
+	}
 }

@@ -75,6 +75,16 @@ type Stats struct {
 	BreakerFor              time.Duration
 }
 
+// Blocked reports whether the fleet circuit breaker is currently open — a
+// CONFIRMED shared-edge block (several distinct owners refused at once), not one
+// owner's isolated cooldown. The scheduler uses it to escalate the user-facing
+// warning: when we KNOW the change won't apply, the household should be told to act
+// sooner and more firmly than for an ordinary brief hiccup.
+func (c *Client) Blocked() bool {
+	open, _ := c.breaker.state(time.Now())
+	return open
+}
+
 // Stats snapshots current council load and breaker state.
 func (c *Client) Stats() Stats {
 	now := time.Now()
