@@ -343,16 +343,19 @@ func (c *Client) renewedToken(ctx context.Context, owner string) (string, error)
 	return c.renewLocked(ctx, owner, cs)
 }
 
-// Refresh forces a silent-renew against the stored cookie even when the cached
-// access token is still valid, sliding the council session cookie so an idle
-// user's session does not lapse (keep-warm). Returns ErrNotLinked if there is no
+// Refresh slides the council session so an idle user's session does not lapse
+// (keep-warm). It does an AUTHORIZE-ONLY renew: the authenticated authorize is the
+// only request that touches the session (the IdentityServer slides it server-side),
+// so warming needs neither the token exchange nor a token — one request instead of
+// two, roughly halving the fleet's steady-state auth traffic. A real operation
+// mints its token on demand via accessToken(). Returns ErrNotLinked if there is no
 // session and ErrSessionExpired if the cookie is no longer accepted.
 func (c *Client) Refresh(ctx context.Context, owner string) error {
 	if c.sandbox != nil {
 		return nil // sandbox sessions never lapse
 	}
 	// Serialise with accessToken so keep-warm and a reconcile write never renew
-	// the same cookie concurrently.
+	// the same session concurrently.
 	lock := c.ownerLock(owner)
 	lock.Lock()
 	defer lock.Unlock()
@@ -361,8 +364,39 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 	if err != nil || cs.Cookie == "" {
 		return ErrNotLinked
 	}
-	_, err = c.renewLocked(ctx, owner, cs)
-	return err
+	return c.warmLocked(ctx, owner, cs)
+}
+
+// warmLocked performs an authorize-only keep-warm and persists the (re-sealed)
+// cookie, bumping the freshness clock but leaving the access token untouched. The
+// caller must hold ownerLock(owner). Like renewLocked it honours the per-owner
+// cooldown and the fleet breaker: the /connect authorize is the surface most prone
+// to edge push-back, so warming while blocked is exactly the escalation the backoff
+// exists to prevent.
+func (c *Client) warmLocked(ctx context.Context, owner string, cs store.CouncilSession) error {
+	if d, blocked := c.cooldownFor(owner); blocked {
+		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
+	}
+	if err := c.breakerGate(); err != nil {
+		return err
+	}
+	cookie, err := c.openCookie(owner, cs.Cookie)
+	if err != nil {
+		return err
+	}
+	newCookie, err := c.warmRenew(ctx, owner, cookie)
+	if err != nil {
+		return err
+	}
+	// Re-seal and persist even when the cookie did not rotate: the write is what
+	// resets updated_at, keep-warm's freshness clock, so the next pass doesn't renew
+	// again immediately (see store.UpdateCouncilCookie). A Seal failure must surface,
+	// not silently skip the freshness bump.
+	sealed, err := c.box.SealCtx(secretbox.CouncilCookie(owner), newCookie)
+	if err != nil {
+		return err
+	}
+	return c.store.UpdateCouncilCookie(ctx, owner, sealed)
 }
 
 // apiRequest issues an authenticated request to the permit API as the app user.
