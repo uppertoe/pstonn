@@ -242,6 +242,55 @@ type schedulerStatus struct {
 type sessionCounts struct {
 	Linked int `json:"linked"`
 	Warm   int `json:"warm"`
+	// Warm-margin health, so the watchdog can catch a reconnect-backlog forming
+	// (e.g. a council outage stalling warms near the idle cliff) BEFORE sessions
+	// lapse en masse. OverdueWarm: past their warm deadline. NearExpiry: within a
+	// warm-interval of the estimated idle cliff — 0 in healthy operation. MinMargin:
+	// the worst session's remaining seconds to the cliff (negative = already past
+	// the estimate; omitted when no sessions).
+	OverdueWarm      int  `json:"overdue_warm"`
+	NearExpiry       int  `json:"near_expiry"`
+	MinMarginSeconds *int `json:"min_margin_seconds,omitempty"`
+}
+
+// councilSessionCounts aggregates warm/expiry-margin health from the live sessions.
+// estimated_expiry = updated_at + idleWindow, so margin = idleWindow - age. A
+// healthy fleet keeps min-margin near (idleWindow - warmInterval) and NearExpiry at
+// zero; a stalled warm loop makes margins shrink and NearExpiry climb.
+func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmInterval, idleWindow time.Duration) sessionCounts {
+	sc := sessionCounts{}
+	haveMargin := false
+	var minMargin time.Duration
+	for _, cs := range sessions {
+		if cs.Cookie == "" {
+			continue
+		}
+		sc.Linked++
+		if cs.UpdatedAt.IsZero() {
+			continue
+		}
+		age := now.Sub(cs.UpdatedAt)
+		if age < 6*time.Hour {
+			sc.Warm++
+		}
+		if warmInterval > 0 && age > warmInterval {
+			sc.OverdueWarm++
+		}
+		if idleWindow > 0 {
+			margin := idleWindow - age
+			if warmInterval > 0 && margin < warmInterval {
+				sc.NearExpiry++
+			}
+			if !haveMargin || margin < minMargin {
+				minMargin, haveMargin = margin, true
+			}
+		}
+	}
+	if haveMargin {
+		secs := int(minMargin / time.Second)
+		sc.MinMarginSeconds = &secs
+	}
+	return sc
 }
 
 // councilStatus is the outbound-council health for the watchdog. The rate windows
@@ -310,23 +359,14 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	var linked, warm int
-	for _, cs := range sessions {
-		if cs.Cookie == "" {
-			continue
-		}
-		linked++
-		if !cs.UpdatedAt.IsZero() && now.Sub(cs.UpdatedAt) < 6*time.Hour {
-			warm++
-		}
-	}
+	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow)
 	last := s.sched.LastReconcile()
 	resp := statusResponse{
 		Time: now.UTC().Format(time.RFC3339),
 		Scheduler: schedulerStatus{
 			Stale: last.IsZero() || now.Sub(last) > schedulerStaleAfter,
 		},
-		Sessions: sessionCounts{Linked: linked, Warm: warm},
+		Sessions: counts,
 		Client: clientObservation{
 			IP:        clientIP(r),
 			EdgeProxy: noteEdgeProxy(r),
