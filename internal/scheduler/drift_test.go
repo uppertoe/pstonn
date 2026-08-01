@@ -147,6 +147,40 @@ func TestCheckDriftDoesNotTrustAnEmptyGridRego(t *testing.T) {
 	}
 }
 
+// The grid can disagree with the authoritative managedVehicle read in the other
+// direction too: the grid OMITS a rego that managedVehicle still reports. That
+// non-empty authoritative value is a real external change and must be adopted. An
+// earlier version corroborated the blank but then discarded ANY non-empty
+// confirmation, so a grid that persistently omitted a rego could never detect
+// drift — the confirming call was paid for and its answer thrown away.
+func TestCheckDriftAdoptsAuthoritativePlateWhenGridIsBlank(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "omit@example.com", "omit-1"
+	// cached OLD123; managedVehicle reports NEW456; the grid omits the rego (blank).
+	st, fc, _, s, pid := driftSetup(t, owner, councilID, "OLD123", "OLD123", "NEW456")
+	fc.setGridRego(councilID, "") // grid blank; managedVehicle still shows NEW456
+
+	s.checkDrift(ctx, owner)
+
+	p, _ := st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "NEW456" {
+		t.Fatalf("recorded plate = %q, want the authoritative NEW456 the grid omitted", p.ActiveRegistration)
+	}
+	logs, err := st.ListApplyLogFor(ctx, owner, 10)
+	if err != nil {
+		t.Fatalf("list apply log: %v", err)
+	}
+	var ext *store.ApplyRecord
+	for i := range logs {
+		if logs[i].Source == "external" {
+			ext = &logs[i]
+		}
+	}
+	if ext == nil || ext.Registration != "NEW456" {
+		t.Fatalf("no external drift row for the grid-omitted NEW456: %+v", logs)
+	}
+}
+
 // The mirror of the above: when BOTH views agree the permit is empty, it really was
 // cleared and the app must record it. This is what keeps the corroboration guard
 // from quietly disabling clearing detection altogether.

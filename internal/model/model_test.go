@@ -278,3 +278,52 @@ func TestExpiryDeadline(t *testing.T) {
 		t.Fatal("a permit must be inactive from its deadline onward")
 	}
 }
+
+// The rollover spread delays only CLOCK-driven changes; a change someone is
+// waiting on must never be delayed. Resolve draws that line via Scheduled/Since,
+// and the equality boundary — a booking whose start time is exactly when it was
+// created ("start now") — must land on the immediate side.
+func TestResolveScheduledClassification(t *testing.T) {
+	monday := mustTime(t, "2026-07-20 09:00 +1000")
+	rules := []WeeklyRule{{ID: 1, Weekday: time.Monday, VehicleID: 10}}
+
+	t.Run("roster is scheduled from local midnight", func(t *testing.T) {
+		got := Resolve(monday, rules, nil)
+		if !got.Scheduled {
+			t.Fatal("a roster day is clock-driven and must be Scheduled")
+		}
+		if midnight := mustTime(t, "2026-07-20 00:00 +1000"); !got.Since.Equal(midnight) {
+			t.Fatalf("roster Since = %s, want local midnight %s", got.Since, midnight)
+		}
+	})
+
+	t.Run("advance booking is scheduled from its start", func(t *testing.T) {
+		start := mustTime(t, "2026-07-20 08:00 +1000")
+		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: start, CreatedAt: mustTime(t, "2026-07-19 10:00 +1000")}}
+		got := Resolve(monday, rules, ovr)
+		if !got.Scheduled || !got.Since.Equal(start) {
+			t.Fatalf("advance booking: Scheduled=%v Since=%s, want true from %s", got.Scheduled, got.Since, start)
+		}
+	})
+
+	t.Run("start == created is immediate, not scheduled (the boundary)", func(t *testing.T) {
+		now := mustTime(t, "2026-07-20 08:00 +1000")
+		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: now, CreatedAt: now}}
+		got := Resolve(monday, rules, ovr)
+		if got.Scheduled {
+			t.Fatal("a booking that starts exactly when it was made is immediate — someone is waiting — and must NOT be spread")
+		}
+		if !got.Since.Equal(now) {
+			t.Fatalf("immediate booking Since = %s, want the creation time %s", got.Since, now)
+		}
+	})
+
+	t.Run("backdated booking (start before created) is immediate", func(t *testing.T) {
+		created := mustTime(t, "2026-07-20 08:00 +1000")
+		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: mustTime(t, "2026-07-20 06:00 +1000"), CreatedAt: created}}
+		got := Resolve(monday, rules, ovr)
+		if got.Scheduled || !got.Since.Equal(created) {
+			t.Fatalf("backdated booking: Scheduled=%v Since=%s, want immediate from %s", got.Scheduled, got.Since, created)
+		}
+	})
+}
