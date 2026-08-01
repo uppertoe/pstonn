@@ -1,9 +1,48 @@
 package parking
 
 import (
+	"log"
+	"net/http"
 	"sync"
 	"time"
 )
+
+// PushbackEvent is a privacy-safe diagnostic snapshot of the last time the council
+// edge refused us (a 403 HTML challenge, 429, or 503). If we are ever blocked, this
+// is what tells us WHICH control fired — a rate limit, a bot rule, a managed WAF
+// rule, or platform throttling — since the client cannot see the edge's config.
+// The X-Azure-Ref correlation id is the single most useful field: it is what the
+// council (or Microsoft) would look the incident up by.
+type PushbackEvent struct {
+	At          time.Time
+	Surface     string // login / auth / api
+	Status      int
+	ContentType string
+	RetryAfter  time.Duration
+	AzureRef    string // X-Azure-Ref: the Azure Front Door correlation id
+}
+
+// recordPushback captures the diagnostic fields of an edge refusal and logs them,
+// so a block leaves a trail the operator can act on. Called at every pushback site.
+func (c *Client) recordPushback(resp *http.Response) {
+	surface := "other"
+	if resp.Request != nil && resp.Request.URL != nil {
+		surface = classifyCouncilPath(resp.Request.URL.Path)
+	}
+	ev := PushbackEvent{
+		At:          time.Now(),
+		Surface:     surface,
+		Status:      resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		RetryAfter:  parseRetryAfter(resp),
+		AzureRef:    resp.Header.Get("X-Azure-Ref"),
+	}
+	c.traffic.pbMu.Lock()
+	c.traffic.lastPB = ev
+	c.traffic.pbMu.Unlock()
+	log.Printf("parking: council pushback %s %d (content-type=%q retry-after=%s x-azure-ref=%q)",
+		surface, ev.Status, safeExcerpt(ev.ContentType), ev.RetryAfter.Round(time.Second), safeExcerpt(ev.AzureRef))
+}
 
 // The cumulative per-surface counters answer "how much have we ever asked of the
 // council". They cannot answer the question that matters at fleet scale: "how hard
@@ -73,6 +112,11 @@ type Stats struct {
 	LastMinute, Last5Min    int    // rolling request totals
 	BreakerOpen             bool   // the fleet circuit is currently paused
 	BreakerFor              time.Duration
+	// Most recent edge refusal, for the operator status/watchdog. Zero At = none seen.
+	LastPushbackAt      time.Time
+	LastPushbackSurface string
+	LastPushbackStatus  int
+	LastPushbackRef     string
 }
 
 // Blocked reports whether the fleet circuit breaker is currently open — a
@@ -89,15 +133,22 @@ func (c *Client) Blocked() bool {
 func (c *Client) Stats() Stats {
 	now := time.Now()
 	open, wait := c.breaker.state(now)
+	c.traffic.pbMu.Lock()
+	pb := c.traffic.lastPB
+	c.traffic.pbMu.Unlock()
 	return Stats{
-		Login:       c.traffic.login.Load(),
-		Auth:        c.traffic.auth.Load(),
-		API:         c.traffic.api.Load(),
-		Other:       c.traffic.other.Load(),
-		Pushback:    c.traffic.pushback.Load(),
-		LastMinute:  c.traffic.rolling.window(now, 1),
-		Last5Min:    c.traffic.rolling.window(now, 5),
-		BreakerOpen: open,
-		BreakerFor:  wait,
+		Login:               c.traffic.login.Load(),
+		Auth:                c.traffic.auth.Load(),
+		API:                 c.traffic.api.Load(),
+		Other:               c.traffic.other.Load(),
+		Pushback:            c.traffic.pushback.Load(),
+		LastMinute:          c.traffic.rolling.window(now, 1),
+		Last5Min:            c.traffic.rolling.window(now, 5),
+		BreakerOpen:         open,
+		BreakerFor:          wait,
+		LastPushbackAt:      pb.At,
+		LastPushbackSurface: pb.Surface,
+		LastPushbackStatus:  pb.Status,
+		LastPushbackRef:     pb.AzureRef,
 	}
 }

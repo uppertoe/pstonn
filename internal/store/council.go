@@ -350,3 +350,46 @@ WHERE owner = ?
 	n, err := res.RowsAffected()
 	return n > 0, err
 }
+
+// BreakerState is the persisted fleet-circuit-breaker pause. OpenUntil in the
+// future on boot means the breaker should start paused (a block that a restart
+// must not clear); Generation is carried forward to stay monotonic.
+type BreakerState struct {
+	OpenUntil    time.Time
+	Generation   uint64
+	LastPushback time.Time
+}
+
+// LoadBreakerState reads the persisted breaker pause (zero-value times when never
+// set). Errors are returned so a boot can log and proceed closed rather than crash.
+func (s *Store) LoadBreakerState(ctx context.Context) (BreakerState, error) {
+	var openUntil, lastPushback string
+	var gen int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT open_until, generation, last_pushback FROM breaker_state WHERE id = 1`).
+		Scan(&openUntil, &gen, &lastPushback)
+	if err != nil {
+		return BreakerState{}, err
+	}
+	bs := BreakerState{Generation: uint64(gen)}
+	bs.OpenUntil, _ = time.Parse(time.RFC3339, openUntil)
+	bs.LastPushback, _ = time.Parse(time.RFC3339, lastPushback)
+	return bs, nil
+}
+
+// SaveBreakerState persists the breaker pause on every open/close/pushback
+// transition, so a restart resumes from the real state rather than a clean slate.
+func (s *Store) SaveBreakerState(ctx context.Context, bs BreakerState) error {
+	ou, lp := "", ""
+	if !bs.OpenUntil.IsZero() {
+		ou = bs.OpenUntil.UTC().Format(time.RFC3339)
+	}
+	if !bs.LastPushback.IsZero() {
+		lp = bs.LastPushback.UTC().Format(time.RFC3339)
+	}
+	_, err := s.db.ExecContext(ctx, `
+UPDATE breaker_state SET open_until = ?, generation = ?, last_pushback = ?, updated_at = ?
+WHERE id = 1`,
+		ou, int64(bs.Generation), lp, nowUTC())
+	return err
+}

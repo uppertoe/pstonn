@@ -121,6 +121,8 @@ type trafficCounters struct {
 	login, auth, api, other atomic.Uint64
 	pushback                atomic.Uint64   // 403(HTML)/429/503 across all owners
 	rolling                 *rollingCounter // request-rate windows; nil-safe (tests)
+	pbMu                    sync.Mutex
+	lastPB                  PushbackEvent // most recent pushback, for /status + operator log
 }
 
 func (t *trafficCounters) count(path string) {
@@ -238,6 +240,8 @@ func (c *Client) penalize(owner string, retryAfter time.Duration) {
 		_, wait := c.breaker.state(time.Now())
 		log.Printf("parking: FLEET CIRCUIT OPEN — multiple owners pushed back at once (likely an edge/IP block); pausing ALL council traffic for %s", wait.Round(time.Second))
 	}
+	// Persist the (possibly extended) pause so a restart can't clear it.
+	c.persistBreaker()
 }
 
 // clearPenalty resets an owner's backoff after a successful council call, and
@@ -257,6 +261,7 @@ func (c *Client) clearPenalty(owner string) {
 func (c *Client) noteCouncilSuccess(owner string, permit breakerPermit) {
 	if c.breaker.onSuccess(time.Now(), owner, permit) {
 		log.Printf("parking: fleet circuit closed — the council edge is serving us again; council traffic resumed")
+		c.persistBreaker() // clear the persisted pause so a restart doesn't re-pause
 	}
 }
 

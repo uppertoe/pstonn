@@ -1,6 +1,8 @@
 package parking
 
 import (
+	"net/http"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -52,5 +54,35 @@ func TestClientBreakerGate(t *testing.T) {
 	c.breaker.onPushback(now, "c@x", 0)
 	if _, err := c.breakerGate(); err == nil {
 		t.Fatal("gate did not refuse after three distinct owners opened the circuit")
+	}
+}
+
+// A pushback must be captured for the operator: the X-Azure-Ref correlation id, the
+// status, and the surface, surfaced through Stats() for the status endpoint.
+func TestRecordPushbackDiagnostics(t *testing.T) {
+	c := &Client{}
+	resp := &http.Response{
+		StatusCode: 429,
+		Header: http.Header{
+			"X-Azure-Ref":  {"20260801T000000Z-abc123"},
+			"Content-Type": {"text/html"},
+			"Retry-After":  {"120"},
+		},
+		Request: &http.Request{URL: &url.URL{Path: "/idm/connect/authorize"}},
+	}
+	c.recordPushback(resp)
+
+	s := c.Stats()
+	if s.LastPushbackRef != "20260801T000000Z-abc123" {
+		t.Errorf("X-Azure-Ref not captured: %q", s.LastPushbackRef)
+	}
+	if s.LastPushbackStatus != 429 {
+		t.Errorf("status not captured: %d", s.LastPushbackStatus)
+	}
+	if s.LastPushbackSurface != "auth" { // /connect/ → auth surface
+		t.Errorf("surface = %q, want auth", s.LastPushbackSurface)
+	}
+	if s.LastPushbackAt.IsZero() {
+		t.Error("pushback timestamp not set")
 	}
 }

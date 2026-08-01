@@ -160,6 +160,7 @@ func looksLikeHTML(resp *http.Response, head []byte) bool {
 func (c *Client) classifyPushback(owner string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests, http.StatusForbidden, http.StatusServiceUnavailable:
+		c.recordPushback(resp)
 		c.penalize(owner, parseRetryAfter(resp))
 		return fmt.Errorf("%w: council returned %d", ErrCouncilBusy, resp.StatusCode)
 	}
