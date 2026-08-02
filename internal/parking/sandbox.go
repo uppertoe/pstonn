@@ -11,7 +11,6 @@ package parking
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"time"
 
@@ -72,7 +71,7 @@ func (c *Client) sandboxCurrentVehicle(p model.Permit) (string, error) {
 
 func (c *Client) sandboxSetVehicle(p model.Permit, registration string) error {
 	const op = "change the vehicle on your permit"
-	if cur, ok := c.sandbox.current(p.CouncilPermitID); ok && strings.EqualFold(cur, registration) {
+	if cur, ok := c.sandbox.current(p.CouncilPermitID); ok && model.SamePlate(cur, registration) {
 		return nil // the fake council's own record confirms the plate
 	}
 	c.sandbox.applyLater(p.CouncilPermitID, registration)

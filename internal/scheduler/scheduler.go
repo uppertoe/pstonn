@@ -188,6 +188,10 @@ type Scheduler struct {
 	churnMu     sync.Mutex
 	churnExpiry []churnEvent // scheduler-observed session expiries, last hour
 	churnReconn []churnEvent // successful auto-reconnects, last hour
+
+	// commitActive persists a confirmed plate change (defaults to store.SetPermitActive;
+	// see New). A field so tests can inject a commit failure.
+	commitActive func(ctx context.Context, id int64, registration string) error
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -240,7 +244,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	if wsm <= 0 {
 		wsm = time.Hour
 	}
-	return &Scheduler{
+	sc := &Scheduler{
 		store:            st,
 		council:          council,
 		loc:              loc,
@@ -264,6 +268,11 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		unscheduled:      make(map[int64]string),
 		snapshotPath:     opts.SnapshotPath,
 	}
+	// commitActive persists a confirmed plate change. Held as a field, not a direct
+	// store call, purely so a test can inject a commit failure and exercise the
+	// "council applied but local commit failed" recovery path.
+	sc.commitActive = sc.store.SetPermitActive
+	return sc
 }
 
 // Kick requests an immediate reconcile (e.g. after a roster/override edit).
@@ -1822,8 +1831,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 
 	prev := p.ActiveRegistration // the plate we're changing away from
 	err = s.council.SetVehicle(ctx, p.Owner, p, want)
+	var commitErr error
 	if err == nil {
-		_ = s.store.SetPermitActive(ctx, p.ID, want)
+		commitErr = s.commitActive(ctx, p.ID, want)
 	}
 	// The decision is recorded, so drop the claim before the bookkeeping below: the
 	// activity row, the notifications and (on an expired session) a full headless
@@ -1831,6 +1841,19 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// guest link must not wait out a 20-second reconnect to get their car on.
 	release()
 	switch {
+	case err == nil && commitErr != nil:
+		// The council confirmed the change (SetVehicle re-reads to verify), so the car
+		// IS on the permit — this is not a failure to tell the user about. But we must
+		// not book it as a clean success either: the stale ActiveRegistration would
+		// drive a duplicate apply + "updated" notice on the next pass, and be wrong
+		// across a restart. Alert the operator and Kick a reconcile; the healing pass's
+		// pre-read sees the plate already present and records it, notifying exactly once.
+		log.Printf("scheduler: permit %s applied at the council but local commit failed: %v", p.CouncilPermitID, commitErr)
+		s.systemAlert(ctx, "commit-after-apply",
+			"Council change applied but not recorded locally",
+			fmt.Sprintf("Permit %s was set to %q at the council (confirmed), but writing that to the local database failed: %v. The car is on the permit; a reconcile will re-record it. If this repeats, the database may be failing.", p.CouncilPermitID, want, commitErr))
+		s.Kick()
+		return true
 	case err == nil:
 		s.clearFailStreak(ctx, p.ID)
 		s.clearRetry(p.ID)

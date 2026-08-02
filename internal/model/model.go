@@ -297,7 +297,7 @@ func FindDisplaced(overrides []Override, vehicles map[int64]VehicleInfo, prevReg
 		if reg == "" {
 			reg = vehicles[o.VehicleID].Registration
 		}
-		if !strings.EqualFold(reg, prevReg) {
+		if !SamePlate(reg, prevReg) {
 			continue
 		}
 		if best == nil || o.CreatedAt.After(best.CreatedAt) ||

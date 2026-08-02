@@ -747,7 +747,11 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	err := error(errApplyBusy)
 	if claimed {
 		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
-			_ = s.store.SetPermitActive(bg, permit.ID, reg)
+			if e := s.store.SetPermitActive(bg, permit.ID, reg); e != nil {
+				// Council confirmed the change; only the local record failed. The Kick
+				// below drives a reconcile that re-records it (and alerts if it persists).
+				log.Printf("guest: applied %q at council for permit %d but local commit failed: %v", reg, permit.ID, e)
+			}
 		}
 	}
 	release()
@@ -848,7 +852,9 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	err := error(errApplyBusy)
 	if claimed {
 		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, target); err == nil {
-			_ = s.store.SetPermitActive(bg, permit.ID, target)
+			if e := s.store.SetPermitActive(bg, permit.ID, target); e != nil {
+				log.Printf("guest: reverted permit %d to %q at council but local commit failed: %v", permit.ID, target, e)
+			}
 		}
 	}
 	release()
@@ -2210,7 +2216,9 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	applyErr := error(errApplyBusy)
 	if claimed {
 		if applyErr = s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
-			_ = s.store.SetPermitActive(bg, permit.ID, req.Plate)
+			if e := s.store.SetPermitActive(bg, permit.ID, req.Plate); e != nil {
+				log.Printf("guest: approved plate %q for permit %d at council but local commit failed: %v", req.Plate, permit.ID, e)
+			}
 		}
 	}
 	release()

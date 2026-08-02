@@ -49,14 +49,19 @@ func main() {
 }
 
 // councilOpDrain models how long one scheduled plate change occupies the transport
-// governor at its sustained rate: a change costs ~modelReqsPerOp council requests
-// (authorize/token as needed, read, write, confirm), and the governor admits
-// govRatePerMin requests/minute. It is used ONLY to size the rollover spread window,
-// so the window derives from the SAME throughput knob as everything else — raising
-// COUNCIL_GOV_RATE for a larger fleet shrinks the window with no separate tuning.
-// There is no per-operation sleep; the governor is the sole pacer.
+// governor at its sustained rate, to size the rollover spread window off the SAME
+// throughput knob as everything else — raising COUNCIL_GOV_RATE for a larger fleet
+// shrinks the window with no separate tuning. There is no per-operation sleep; the
+// governor is the sole pacer, and it enforces the REAL request count regardless of
+// this estimate — so a low model here never risks the rate limit, it only makes the
+// rollover convergence bound (RolloverBound / the startup log) optimistic.
+//
+// modelReqsPerOp is a deliberately CONSERVATIVE estimate: the steady-state cost is 3
+// (read current, write, confirm), but an operation that also renews a stale access
+// token (authorize + token) costs ~5, so 4 keeps the convergence estimate honest
+// under a token-renewal-heavy rollover rather than optimistic.
 func councilOpDrain(govRatePerMin int) time.Duration {
-	const modelReqsPerOp = 3
+	const modelReqsPerOp = 4
 	if govRatePerMin <= 0 {
 		govRatePerMin = 60 // mirror the governor's built-in default (see parking.govOr)
 	}
