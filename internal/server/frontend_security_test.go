@@ -236,3 +236,34 @@ func TestMessageWithLinkRefusesUnsafeHref(t *testing.T) {
 		}
 	}
 }
+
+// An inline script inside the hx-boost'd <body> is blocked by the CSP on every
+// boosted navigation, even though it carries the nonce in the template.
+//
+// hx-boost swaps the body's innerHTML, and htmx RE-CREATES any script element it
+// finds in swapped content. A re-created script cannot inherit the nonce: browsers
+// deliberately hide the nonce value from the DOM once the document is parsed, so the
+// copied attribute is empty and the CSP refuses it. The page still works only by
+// luck — both current scripts merely register globals that survive the swap — so the
+// failure is silent, shows up as console noise, and would bite the first script that
+// actually needs to run per-swap. Keep inline scripts in <head>, above the boost.
+func TestNoInlineScriptInsideBoostedBody(t *testing.T) {
+	b, err := templateFS.ReadFile("templates/layout.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	// Match the real body TAG, not the first "<body" (a script in <head> mentions one
+	// inside a JS string literal, and matching that made this test skip silently).
+	loc := regexp.MustCompile(`<body\b[^>]*hx-boost`).FindStringIndex(src)
+	if loc == nil {
+		t.Skip("body is no longer hx-boosted; the re-creation hazard does not apply")
+	}
+	body := loc[0]
+	for _, tag := range scriptTagRe.FindAllStringIndex(src, -1) {
+		if tag[0] > body {
+			t.Errorf("inline script at offset %d is inside the hx-boost'd body; htmx re-creates it on every boosted navigation and the CSP blocks it (move it into <head>):\n\t%s",
+				tag[0], src[tag[0]:min(tag[1]+60, len(src))])
+		}
+	}
+}
