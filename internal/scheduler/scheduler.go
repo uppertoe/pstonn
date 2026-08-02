@@ -177,6 +177,17 @@ type Scheduler struct {
 	// (only touched from the warm loop, so no lock needed).
 	snapshotPath string
 	lastSnapshot time.Time
+
+	// churnMu guards the session-lifecycle churn windows. A healthy fleet
+	// re-authenticates almost never (prod ran days of keep-warm with zero organic
+	// re-auths), so a rising expiry/reconnect rate is the fingerprint of a
+	// council-side DEFAULT change — a shortened idle window, cookie rotation, or
+	// silent-renew disabled — none of which alter response SHAPE, so the
+	// shape/pushback detectors cannot see them. In-memory only: a restart zeroes the
+	// window, which is fine, since the canary is about a sustained rate, not history.
+	churnMu     sync.Mutex
+	churnExpiry []churnEvent // scheduler-observed session expiries, last hour
+	churnReconn []churnEvent // successful auto-reconnects, last hour
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -883,6 +894,71 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 	}
 }
 
+// churnEvent records one session-lifecycle event (an expiry, or a successful
+// reconnect) with the owner it happened to, so a window can be counted by DISTINCT
+// owner — several different owners is systemic; one owner flapping is not.
+type churnEvent struct {
+	owner string
+	at    time.Time
+}
+
+const (
+	churnWindow = time.Hour
+	// sessionChurnAlertOwners is how many DISTINCT owners must re-authenticate within
+	// the window before it is treated as systemic. Mirrors the multi-user-fail
+	// threshold; a healthy fleet sits at 0, so 3 is already a strong signal.
+	sessionChurnAlertOwners = 3
+)
+
+// pruneChurn drops events older than churnWindow, in place.
+func pruneChurn(events []churnEvent, now time.Time) []churnEvent {
+	cutoff := now.Add(-churnWindow)
+	kept := events[:0]
+	for _, e := range events {
+		if e.at.After(cutoff) {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
+func distinctOwners(events []churnEvent) int {
+	seen := make(map[string]struct{}, len(events))
+	for _, e := range events {
+		seen[e.owner] = struct{}{}
+	}
+	return len(seen)
+}
+
+// noteSessionExpiry records a scheduler-observed expiry and returns how many
+// DISTINCT owners have expired within the last hour.
+func (s *Scheduler) noteSessionExpiry(owner string) int {
+	s.churnMu.Lock()
+	defer s.churnMu.Unlock()
+	s.churnExpiry = append(pruneChurn(s.churnExpiry, time.Now()), churnEvent{owner, time.Now()})
+	return distinctOwners(s.churnExpiry)
+}
+
+// noteReconnect records a successful auto-reconnect.
+func (s *Scheduler) noteReconnect(owner string) {
+	s.churnMu.Lock()
+	defer s.churnMu.Unlock()
+	s.churnReconn = append(pruneChurn(s.churnReconn, time.Now()), churnEvent{owner, time.Now()})
+}
+
+// SessionChurn reports session-lifecycle activity over the last hour for /status:
+// expiries the scheduler observed, successful auto-reconnects, and the number of
+// DISTINCT owners among the expiries (the systemic signal). All near zero on a
+// healthy fleet — a rise is the canary for a council-side session-lifetime change.
+func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h int) {
+	s.churnMu.Lock()
+	defer s.churnMu.Unlock()
+	now := time.Now()
+	s.churnExpiry = pruneChurn(s.churnExpiry, now)
+	s.churnReconn = pruneChurn(s.churnReconn, now)
+	return len(s.churnExpiry), len(s.churnReconn), distinctOwners(s.churnExpiry)
+}
+
 // recoverOrRetire handles an expired council session. It first tries a
 // saved-password auto-reconnect. On success it returns true (session restored).
 // If there is no saved password, or the saved password is genuinely rejected, it
@@ -892,6 +968,16 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 // must not permanently disable auto-reconnect. Returns true only when the session
 // is usable now.
 func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
+	// Feed the churn canary: this is the single funnel for a scheduler-observed
+	// session expiry (keep-warm and the apply path both route dead sessions here).
+	// Several different owners re-authing within the hour is the fingerprint of a
+	// council-side session-lifetime/idle-window/cookie change rather than user
+	// activity, and it changes no response SHAPE, so nothing else would catch it.
+	if distinct := s.noteSessionExpiry(owner); distinct >= sessionChurnAlertOwners {
+		s.systemAlert(ctx, "session-churn",
+			"Council sessions are expiring unusually often",
+			fmt.Sprintf("%d different accounts have had their council session expire within the last hour. A healthy fleet almost never re-authenticates, so this points at a council-side change — a shortened session/idle window, cookie rotation, or silent-renew disabled — not user activity. If /status shows no breaker/pushback, the edge is not refusing us, which narrows it to a session-lifetime change. Investigate before it becomes a reconnect backlog.", distinct))
+	}
 	// A reconnect is a full headless login (several sequential round trips), so
 	// bound it well under one loop pass: a slow portal must not stall keep-warm or
 	// reconcile. A timeout surfaces as a non-terminal error and falls through to
@@ -901,12 +987,23 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
 	defer cancel()
 	switch rerr := s.council.Reconnect(rctx, owner); {
 	case rerr == nil:
+		s.noteReconnect(owner)
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", owner)
 		return true
 	case errors.Is(rerr, parking.ErrNoSavedPassword):
 		// No credentials to retry with → retire and prompt a manual re-link.
 	case errors.Is(rerr, parking.ErrLoginRejected):
 		log.Printf("scheduler: auto-reconnect for %s rejected (saved password no longer valid)", owner)
+	case errors.Is(rerr, parking.ErrLoginFormUnrecognised):
+		// The sign-in page shape changed: this breaks reconnect AND interactive
+		// re-link for EVERY user, and retrying cannot fix it. Alert as systemic and
+		// KEEP the session + saved password so recovery resumes on its own once the
+		// login flow is repaired — a forced mass re-link would only send users at the
+		// same broken form.
+		s.systemAlert(ctx, "login-shape",
+			"Council sign-in page shape changed (login/reconnect broken)",
+			fmt.Sprintf("Reconnect for %s returned ErrLoginFormUnrecognised: the portal's sign-in HTML no longer matches the login replay, so it could not find the form it must submit. This blocks ALL reconnects and re-links until the parser is updated. Investigate promptly.", owner))
+		return false
 	default:
 		// Transient — keep the session + saved password and retry on a later pass.
 		log.Printf("scheduler: auto-reconnect for %s deferred (transient): %v", owner, rerr)

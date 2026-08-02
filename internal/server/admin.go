@@ -256,6 +256,15 @@ type sessionCounts struct {
 	OverdueWarm      int  `json:"overdue_warm"`
 	NearExpiry       int  `json:"near_expiry"`
 	MinMarginSeconds *int `json:"min_margin_seconds,omitempty"`
+	// Session-lifecycle churn over the last hour, scheduler-observed. A healthy fleet
+	// re-authenticates almost never, so a nonzero — and especially a rising — value is
+	// the canary for a council-side DEFAULT change (a shortened idle window, cookie
+	// rotation, or silent-renew disabled): none of those alter response shape, so no
+	// other metric would surface them. ExpiredOwners1h is the DISTINCT-owner count,
+	// the systemic signal the operator alert also fires on.
+	Expiries1h      int `json:"expiries_1h"`
+	Reconnects1h    int `json:"reconnects_1h"`
+	ExpiredOwners1h int `json:"expired_owners_1h"`
 }
 
 // councilSessionCounts aggregates warm/expiry-margin health from the live sessions.
@@ -381,6 +390,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, scheduled)
+	counts.Expiries1h, counts.Reconnects1h, counts.ExpiredOwners1h = s.sched.SessionChurn()
 	last := s.sched.LastReconcile()
 	resp := statusResponse{
 		Time: now.UTC().Format(time.RFC3339),
