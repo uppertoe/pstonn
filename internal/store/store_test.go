@@ -348,7 +348,8 @@ func TestSaveCouncilSessionStampsLinkedAt(t *testing.T) {
 		t.Fatal("linked_at not stamped on save")
 	}
 	// A token renewal must NOT move the re-authorise clock.
-	if err := s.UpdateCouncilToken(ctx, "u@example.com", "sealed2", "at", time.Now().Add(time.Hour)); err != nil {
+	curGen, _ := s.GetCouncilSession(ctx, "u@example.com")
+	if err := s.UpdateCouncilToken(ctx, "u@example.com", "sealed2", "at", time.Now().Add(time.Hour), curGen.Generation); err != nil {
 		t.Fatal(err)
 	}
 	cs2, _ := s.GetCouncilSession(ctx, "u@example.com")
@@ -377,7 +378,8 @@ func TestCouncilPasswordRoundTrip(t *testing.T) {
 		t.Fatalf("password not persisted, got %q", cs.Password)
 	}
 	// A token renewal must preserve the saved password.
-	if err := s.UpdateCouncilToken(ctx, owner, "c2", "at", time.Now().Add(time.Hour)); err != nil {
+	pwGen, _ := s.GetCouncilSession(ctx, owner)
+	if err := s.UpdateCouncilToken(ctx, owner, "c2", "at", time.Now().Add(time.Hour), pwGen.Generation); err != nil {
 		t.Fatal(err)
 	}
 	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "sealed-pw" {
@@ -1637,6 +1639,7 @@ func TestActiveGuestOverridePlate(t *testing.T) {
 	}
 
 	// This link's live override is reported.
+	seedGuestToken(t, s, owner, pid, 42)
 	if _, err := s.CreateGuestPlateOverride(ctx, pid, "GST111", now.Add(-time.Minute), &end, "visitor", 42); err != nil {
 		t.Fatal(err)
 	}
@@ -1759,6 +1762,7 @@ func TestMigrateLegacyOverrideTableKeepsGuestTokenID(t *testing.T) {
 	// And a guest override must be insertable in THIS process, not just after
 	// another restart.
 	end := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	seedGuestToken(t, s, "legacy@example.com", 1, 7)
 	if _, err := s.CreateGuestPlateOverride(ctx, 1, "BBB222", time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), &end, "guest", 7); err != nil {
 		t.Fatalf("guest override insert after legacy migration: %v", err)
 	}
@@ -2649,5 +2653,105 @@ func TestCreateOverrideCappedEnforcesLimit(t *testing.T) {
 	}
 	if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", time.Now(), nil, owner, 3); !errors.Is(err, ErrOverrideLimit) {
 		t.Fatalf("over the limit should be ErrOverrideLimit, got %v", err)
+	}
+}
+
+// seedGuestToken creates a live grant + token for permitID and returns the token id,
+// so tests that need a guest-attributed override construct valid state (a guest create
+// is refused when its link does not exist or has been revoked — see
+// createOverrideGuarded).
+func seedGuestToken(t *testing.T, s *Store, owner string, permitID, tokenID int64) int64 {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_grant (id, owner, permit_id, enabled, created_at) VALUES (?, ?, ?, 1, ?)`,
+		tokenID, owner, permitID, nowUTC()); err != nil {
+		t.Fatalf("seed guest grant: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_token (id, grant_id, token_hash, created_at) VALUES (?, ?, ?, ?)`,
+		tokenID, tokenID, "hash-"+owner+"-"+time.Now().Format("150405.000000000"), nowUTC()); err != nil {
+		t.Fatalf("seed guest token: %v", err)
+	}
+	return tokenID
+}
+
+// A renew/keep-warm write that started before an interactive re-link must NOT land:
+// it carries the OLD cookie, and overwriting the fresh session with it would silently
+// undo the user's re-link (and keep the stale cookie alive indefinitely).
+func TestSessionWritesAreGenerationConditioned(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "cas@example.com"
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.GetCouncilSession(ctx, owner)
+
+	// The user re-links: fresh cookie, generation moves on.
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "fresh"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both in-flight writes, started at the pre-relink generation, must be refused.
+	if err := s.UpdateCouncilCookie(ctx, owner, "stale-warm", before.Generation); !errors.Is(err, ErrSessionSuperseded) {
+		t.Fatalf("stale keep-warm write = %v, want ErrSessionSuperseded", err)
+	}
+	if err := s.UpdateCouncilToken(ctx, owner, "stale-renew", "at", time.Now().Add(time.Hour), before.Generation); !errors.Is(err, ErrSessionSuperseded) {
+		t.Fatalf("stale renew write = %v, want ErrSessionSuperseded", err)
+	}
+	if got, _ := s.GetCouncilSession(ctx, owner); got.Cookie != "fresh" {
+		t.Fatalf("the user's re-linked cookie was overwritten: %q", got.Cookie)
+	}
+}
+
+// An unlink+relink must not restart the generation counter, or work bound to the OLD
+// row's generation could match the recreated row (ABA) and act on a session it never
+// observed.
+func TestGenerationDoesNotResetAcrossRelink(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "aba@example.com"
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.GetCouncilSession(ctx, owner)
+	if err := s.DeleteCouncilSession(ctx, owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c2"}); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := s.GetCouncilSession(ctx, owner)
+	if second.Generation <= first.Generation {
+		t.Fatalf("generation restarted across relink (%d -> %d): stale work could match the new row",
+			first.Generation, second.Generation)
+	}
+	// And the stale generation must not delete the recreated session.
+	if deleted, err := s.DeleteCouncilSessionIfGen(ctx, owner, first.Generation); err != nil || deleted {
+		t.Fatalf("stale-generation delete matched the recreated session (deleted=%v err=%v)", deleted, err)
+	}
+}
+
+// A guest override must not land if the link was revoked between resolving it and the
+// insert — otherwise the revoked guest's plate steers the permit until its window ends.
+func TestGuestOverrideRefusedAfterRevoke(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "revoke@example.com"
+	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
+	tok := seedGuestToken(t, s, owner, pid, 900)
+	end := time.Now().Add(6 * time.Hour)
+
+	// While live, the create succeeds.
+	if _, err := s.CreateGuestPlateOverride(ctx, pid, "AAA111", time.Now(), &end, "visitor", tok); err != nil {
+		t.Fatalf("live link should be able to book: %v", err)
+	}
+	// Revoked mid-flight: the next create must be refused, not silently applied.
+	if _, err := s.db.ExecContext(ctx, `UPDATE guest_token SET revoked_at = ? WHERE id = ?`, nowUTC(), tok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateGuestPlateOverride(ctx, pid, "BBB222", time.Now(), &end, "visitor", tok); !errors.Is(err, ErrGuestOverrideRefused) {
+		t.Fatalf("revoked link create = %v, want ErrGuestOverrideRefused", err)
 	}
 }

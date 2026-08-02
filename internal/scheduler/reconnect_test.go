@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // Under a mass expiry, keep-warm must NOT reconnect inline (which would block the pass
@@ -54,8 +55,9 @@ func TestReconnectLoopDrainsQueue(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 	ctx := context.Background()
 
-	s.enqueueReconnect(ctx, owner)
-	s.enqueueReconnect(ctx, owner) // dedup: still one entry
+	g := genOf(t, st, owner)
+	s.enqueueReconnect(ctx, owner, g)
+	s.enqueueReconnect(ctx, owner, g) // dedup: still one entry
 	s.reconnectMu.Lock()
 	q := len(s.reconnectQ)
 	s.reconnectMu.Unlock()
@@ -108,4 +110,15 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
 		t.Fatalf("the fresh session must survive a stale reconnect task: %v", err)
 	}
+}
+
+// genOf returns an owner's current session generation — what a real discovery would
+// have captured at the moment of failure.
+func genOf(t *testing.T, st *store.Store, owner string) int64 {
+	t.Helper()
+	cs, err := st.GetCouncilSession(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("read session generation for %s: %v", owner, err)
+	}
+	return cs.Generation
 }

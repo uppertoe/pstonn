@@ -685,7 +685,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			createdBy = "visitor (QR)"
 		}
 		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy, gc.TokenID); err != nil {
-			s.renderGuestMenu(w, r, gc, permit, current, "", "Something went wrong saving your plate. Please try again.")
+			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your plate. Please try again."))
 			return
 		}
 	} else {
@@ -703,7 +703,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		}
 		reg, name, createdBy = chosen.Registration, chosen.Label, gc.Recipient
 		if _, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID); err != nil {
-			s.renderGuestMenu(w, r, gc, permit, current, "", "Something went wrong saving your choice. Please try again.")
+			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your choice. Please try again."))
 			return
 		}
 	}
@@ -831,7 +831,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	} else {
 		end := revertPinEnd(now, gc.BaselineUntil)
 		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", guestCreateMessage(err, "Something went wrong. Please try again."))
 			return
 		}
 	}
@@ -2251,4 +2251,15 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		q.Set("approving", req.Plate)
 	}
 	http.Redirect(w, r, "/guests?"+q.Encode(), http.StatusSeeOther)
+}
+
+// guestCreateMessage turns a refused guest-override insert into something true for the
+// visitor. A refusal means the link was revoked or disabled between opening the page
+// and submitting (or the permit is at its booking cap) — "please try again" would have
+// them retrying a link that will never work again.
+func guestCreateMessage(err error, fallback string) string {
+	if errors.Is(err, store.ErrGuestOverrideRefused) {
+		return "This link is no longer active, so the permit wasn't changed. Please ask the household for a new one."
+	}
+	return fallback
 }

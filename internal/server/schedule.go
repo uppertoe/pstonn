@@ -434,11 +434,6 @@ func combineDateTime(date, timeStr, defaultTime string) string {
 	return date + "T" + t
 }
 
-// maxLiveOverridesPerPermit caps simultaneously-active bookings on one permit, so the
-// never-pruned override table cannot grow without bound. Generous — far above any
-// real household's use.
-const maxLiveOverridesPerPermit = 50
-
 func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	user, owner, _, ok := s.accountForWrite(w, r)
 	if !ok {
@@ -527,7 +522,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 			s.formError(w, r, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
 			return
 		}
-		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, 0, plate, startsAt, endsAt, user, maxLiveOverridesPerPermit); err != nil {
+		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, 0, plate, startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
 			if !overLimit(err) {
 				s.serverError(w, err)
 			}
@@ -537,7 +532,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		if !s.ownsVehicle(w, r, owner, vehicleID) {
 			return
 		}
-		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, vehicleID, "", startsAt, endsAt, user, maxLiveOverridesPerPermit); err != nil {
+		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, vehicleID, "", startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
 			if !overLimit(err) {
 				s.serverError(w, err)
 			}

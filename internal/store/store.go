@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"modernc.org/sqlite"
@@ -35,6 +36,11 @@ var ErrDuplicate = errors.New("already exists")
 type Store struct {
 	db   *sql.DB
 	path string // the DB file path, for opening a separate snapshot connection
+
+	// genMu/lastGen make freshly-seeded session generations strictly increasing
+	// within this process; see newSessionGeneration.
+	genMu   sync.Mutex
+	lastGen int64
 }
 
 // OpenSQLite opens (creating if needed) the database and runs migrations.
