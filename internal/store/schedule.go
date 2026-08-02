@@ -113,16 +113,50 @@ func (s *Store) CreateOverride(ctx context.Context, permitID, vehicleID int64, s
 	return s.CreateGuestOverride(ctx, permitID, vehicleID, startsAt, endsAt, createdBy, 0)
 }
 
-// CountLiveOverrides counts a permit's overrides still in effect (no end, or ending
-// in the future) — the ones ListOverrides returns and both the reconcile loop and
-// the dashboard walk on every pass/render. Used to cap runaway or open-ended
-// accumulation of a hot-path table that is otherwise never pruned.
-func (s *Store) CountLiveOverrides(ctx context.Context, permitID int64) (int, error) {
+// ErrOverrideLimit is returned by CreateOverrideCapped when a permit already holds
+// the maximum number of simultaneously-live overrides.
+var ErrOverrideLimit = errors.New("store: permit has too many live overrides")
+
+// CreateOverrideCapped creates an override only if the permit is below `limit` live
+// overrides (no end, or ending in the future) — doing the count and the insert in ONE
+// transaction so two concurrent creates cannot both slip past the cap (each statement
+// otherwise releases the single connection between them). A non-zero vehicleID uses a
+// saved vehicle; vehicleID 0 with a non-empty registration is a one-off plate. Returns
+// ErrOverrideLimit when full.
+func (s *Store) CreateOverrideCapped(ctx context.Context, permitID, vehicleID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, limit int) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
-		permitID, nowUTC()).Scan(&n)
-	return n, err
+		permitID, nowUTC()).Scan(&n); err != nil {
+		return 0, err
+	}
+	if n >= limit {
+		return 0, ErrOverrideLimit
+	}
+	var vid any // NULL for a plate booking
+	if vehicleID != 0 {
+		vid = vehicleID
+	}
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+		permitID, vid, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // CreateGuestOverride is CreateOverride tagged with the guest link that made it,
