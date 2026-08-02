@@ -100,6 +100,10 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logChange(r.Context(), user, user, store.ActionCouncilLink, "", "")
+	// Drop any queued auto-reconnect for the OLD session: the user just established a
+	// fresh one, and stale recovery work must not act on it (the scheduler's generation
+	// check is the hard guard; this is the fast path).
+	s.sched.CancelReconnect(user)
 	// A fresh link plausibly fixes every permit on this account, so clear their
 	// failure backoffs and reconcile now rather than making the user wait out a
 	// stretched retry window they just made obsolete. Scoped to this owner.
@@ -123,6 +127,7 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.sched.CancelReconnect(user) // no session to reconnect; drop any queued attempt
 	s.logChange(r.Context(), user, user, store.ActionCouncilUnlink, "", "")
 	redirectHome(w, r)
 }

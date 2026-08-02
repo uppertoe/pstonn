@@ -36,7 +36,7 @@ func TestKeepWarmEnqueuesReconnectsWithoutBlocking(t *testing.T) {
 		t.Fatalf("keepWarm reconnected inline (%d) instead of enqueuing", len(fc.reconnected))
 	}
 	s.reconnectMu.Lock()
-	queued := len(s.reconnectAt)
+	queued := len(s.reconnectQ)
 	s.reconnectMu.Unlock()
 	if queued != n {
 		t.Fatalf("queued %d owners, want %d", queued, n)
@@ -57,7 +57,7 @@ func TestReconnectLoopDrainsQueue(t *testing.T) {
 	s.enqueueReconnect(ctx, owner)
 	s.enqueueReconnect(ctx, owner) // dedup: still one entry
 	s.reconnectMu.Lock()
-	q := len(s.reconnectAt)
+	q := len(s.reconnectQ)
 	s.reconnectMu.Unlock()
 	if q != 1 {
 		t.Fatalf("queue holds %d, want 1 (deduped by owner)", q)
@@ -70,7 +70,7 @@ func TestReconnectLoopDrainsQueue(t *testing.T) {
 	deadline := time.After(2 * time.Second)
 	for {
 		s.reconnectMu.Lock()
-		q := len(s.reconnectAt)
+		q := len(s.reconnectQ)
 		s.reconnectMu.Unlock()
 		if q == 0 {
 			break
@@ -83,5 +83,29 @@ func TestReconnectLoopDrainsQueue(t *testing.T) {
 	}
 	if len(fc.reconnected) == 0 {
 		t.Fatal("reconnect worker did not attempt the reconnect")
+	}
+}
+
+// The high-severity regression: a queued reconnect whose generation no longer matches
+// the current session (the user manually relinked in the meantime) must do NOTHING —
+// not attempt a login, and above all not delete the fresh session.
+func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "relink@example.com"
+	seedSession(t, st, owner)
+	cur, _ := st.GetCouncilSession(ctx, owner)
+	fc := &fakeCouncil{reconnectSet: true} // would "succeed" if it ever ran
+	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+
+	stale := cur.LinkedAt.Add(-time.Hour) // the generation from before a relink
+	if got := s.recoverOrRetire(ctx, owner, stale); got != reconnectRetired {
+		t.Fatalf("a stale-generation task should be discarded, got %v", got)
+	}
+	if len(fc.reconnected) != 0 {
+		t.Fatal("a stale reconnect must not attempt a login on the fresh session")
+	}
+	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
+		t.Fatalf("the fresh session must survive a stale reconnect task: %v", err)
 	}
 }

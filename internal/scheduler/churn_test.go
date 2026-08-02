@@ -47,6 +47,9 @@ func TestSessionChurnAlertsOnDistinctOwners(t *testing.T) {
 	fc := &fakeCouncil{reconnectSet: true, reconnectErr: errors.New("503 busy")}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 	ctx := context.Background()
+	for _, o := range []string{"flap@example.com", "a@example.com", "b@example.com", "c@example.com"} {
+		seedSession(t, st, o) // enqueueReconnect reads the session for its generation
+	}
 
 	// The same owner three times must NOT alert (the queue dedups by owner, so the
 	// churn is noted once — one flapping account is not systemic).
@@ -89,7 +92,8 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 	fc := &fakeCouncil{reconnectSet: true, reconnectErr: parking.ErrLoginFormUnrecognised}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
-	if got := s.recoverOrRetire(ctx, owner); got != reconnectDeferred {
+	cs, _ := st.GetCouncilSession(ctx, owner)
+	if got := s.recoverOrRetire(ctx, owner, cs.LinkedAt); got != reconnectDeferred {
 		t.Fatalf("a login-shape failure should defer (keep the session), got %v", got)
 	}
 	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
@@ -105,12 +109,13 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 func TestReconnectCounted(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
+	seedSession(t, st, "ok@example.com")
 	fc := &fakeCouncil{reconnectSet: true} // reconnectErr nil = success
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
 	s.enqueueReconnect(ctx, "ok@example.com") // discovery notes the expiry
-	if got := s.recoverOrRetire(ctx, "ok@example.com"); got != reconnectRecovered {
-		t.Fatalf("a nil reconnect error should report recovery, got %v", got)
+	if !s.drainOneReconnect(ctx) {            // the worker reconnects
+		t.Fatal("expected a queued reconnect to process")
 	}
 	exp, reconns, _ := s.SessionChurn()
 	if reconns != 1 {
