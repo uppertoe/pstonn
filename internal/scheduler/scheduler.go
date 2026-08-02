@@ -1557,11 +1557,18 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		return err
 	}
 	byCouncilID := make(map[string]parking.PermitInfo, len(live))
+	// A drift round is only "done" if every required write landed. Recording a partial
+	// round as complete stands the check down for the whole drift interval (hours),
+	// which is exactly when it should retry soonest.
+	var incomplete error
 	for _, pi := range live {
 		byCouncilID[pi.CouncilPermitID] = pi
 		// Refresh expiry/status/type from the same response. Owner-scoped, so it
 		// only touches rows this account manages.
-		_ = s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate)
+		if err := s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate); err != nil {
+			log.Printf("scheduler: drift meta write for permit %s: %v", pi.CouncilPermitID, err)
+			incomplete = err
+		}
 	}
 
 	// Re-read AFTER the meta write so Inactive below is judged on the expiry the
@@ -1596,7 +1603,10 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 			// drift at all, even though the confirming call had already been paid for.
 			confirmed, cerr := s.council.CurrentVehicle(ctx, owner, p)
 			if cerr != nil {
-				continue // couldn't confirm; believe nothing
+				// Couldn't confirm; believe nothing — but this round did NOT answer the
+				// question it was for, so it must not be recorded as a completed check.
+				incomplete = cerr
+				continue
 			}
 			actual = confirmed
 		}
@@ -1618,6 +1628,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		if e != nil || !swapped {
 			if e != nil {
 				log.Printf("scheduler: drift adopt for permit %s: %v", p.CouncilPermitID, e)
+				incomplete = e // detected drift we failed to record: retry soon, not in 6h
 			}
 			continue
 		}
@@ -1628,7 +1639,8 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		s.Kick() // reconcile now: re-apply the schedule over the drift
 	}
 	s.warnExpiring(ctx, owner)
-	return nil // council snapshot received and reconciled: a real drift check happened
+	// Only a fully-applied round counts as a drift check (see MarkDriftChecked).
+	return incomplete
 }
 
 // warnExpiring sends the one-time approaching-expiry warning for any permit now

@@ -318,6 +318,9 @@ func Load() (*Config, error) {
 		}
 		return n
 	}
+	// envDuration parses a positive duration. envDurationOff is for the settings whose
+	// documentation says "0 disables" — the shared parser rejected <= 0, so those
+	// settings could not actually be switched off the way they are documented.
 	envDuration := func(key string, def time.Duration) time.Duration {
 		v := strings.TrimSpace(os.Getenv(key))
 		if v == "" {
@@ -327,6 +330,20 @@ func Load() (*Config, error) {
 		if err != nil || d <= 0 {
 			if envErr == nil {
 				envErr = fmt.Errorf("%s: need a positive Go duration (e.g. \"75m\"), got %q", key, v)
+			}
+			return def
+		}
+		return d
+	}
+	envDurationOff := func(key string, def time.Duration) time.Duration {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			return def
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			if envErr == nil {
+				envErr = fmt.Errorf("%s: need a Go duration, 0 to disable (e.g. \"6h\" or \"0\"), got %q", key, v)
 			}
 			return def
 		}
@@ -346,8 +363,8 @@ func Load() (*Config, error) {
 			APIBase:             env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
 			SessionMaxAge:       time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
 			WarmInterval:        envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
-			RolloverWindow:      envDuration("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
-			DriftInterval:       envDuration("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
+			RolloverWindow:      envDurationOff("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
+			DriftInterval:       envDurationOff("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
 			IdleWindow:          envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
 			WarmSafetyMargin:    envDuration("COUNCIL_WARM_SAFETY_MARGIN", time.Hour),
 			ExpiryWarningMargin: envDuration("COUNCIL_EXPIRY_WARNING_MARGIN", 2*time.Hour),

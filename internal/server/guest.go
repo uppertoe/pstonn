@@ -1257,7 +1257,10 @@ func agoText(now, t time.Time) string {
 // createGuestGrant creates a grant + a per-recipient token, emails each link, and
 // re-renders the page showing the links once (the only time we hold the raw token).
 func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.formError(w, r, "Could not read the form. Please try again.")
 		return
@@ -1372,7 +1375,10 @@ func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
 // have. The original link can't be re-sent (only its hash is stored), so this
 // mints a new token and supersedes the old one. Owner-only.
 func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	recipient := strings.TrimSpace(r.FormValue("recipient"))
 	if recipient == "" {
 		s.formError(w, r, "No recipient to re-send to.")
@@ -1424,7 +1430,10 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 // updateGuestGrant edits a grant's label, cars, and overnight option, and adds
 // any new recipients (each getting a fresh emailed link). The permit is fixed.
 func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	id := pathInt(r, "id")
 	if err := r.ParseForm(); err != nil {
 		s.formError(w, r, "Could not read the form. Please try again.")
@@ -1647,7 +1656,10 @@ func (s *Server) mintVisitorQR(ctx context.Context, owner, user string, permit m
 // so the same action works from the permit card and from the guests page.
 func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 	noStore(w) // the response embeds a live activation token; keep it out of caches
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	permit, err := s.store.GetPermit(r.Context(), atoi64(r.FormValue("permit_id")))
 	if err != nil || permit.Owner != owner {
 		s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
@@ -1684,7 +1696,10 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	// Name it before deleting, so the log and the notice can say which pass died.
 	label := s.grantLabel(r.Context(), owner, pathInt(r, "id"))
 	// A missing row is tolerated (a double-submitted form, a stale page) but must
@@ -1715,7 +1730,10 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	// Name the recipient before their link dies, so the audit row says whose access
 	// was taken away rather than merely that some access was.
 	recipient, _ := s.store.GuestTokenRecipient(r.Context(), owner, pathInt(r, "tid"))
@@ -1750,7 +1768,10 @@ func (s *Server) kickScheduler() {
 }
 
 func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	enabled := r.FormValue("enabled") != ""
 	// Pausing is a revocation across every permit on the account: claim them all (in a
 	// stable order) so no guest apply can be in flight as the switch flips.
@@ -1786,7 +1807,10 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	if email != "" && !looksLikeEmail(email) {
 		s.formError(w, r, "Enter a valid email address, or leave it blank.")
@@ -2105,7 +2129,10 @@ func (s *Server) mintPrintedGrant(ctx context.Context, owner, createdBy string, 
 // permit already has a door QR it reopens that (same code) rather than rotating the
 // token, so a copy already on the fridge keeps working.
 func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	permitID := atoi64(r.FormValue("permit_id"))
 	if g, err := s.store.PrintedGrantForPermit(r.Context(), owner, permitID); err == nil {
 		http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", g.GrantID), http.StatusSeeOther)
@@ -2166,7 +2193,10 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 
 // revokeDoorQR retires a door QR for good (its code stops working).
 func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	label := s.grantLabel(r.Context(), owner, atoi64(r.PathValue("id")))
 	// As in deleteGuestGrant: a no-op must not announce itself to the household.
 	err := s.store.RevokePrintedGrant(r.Context(), owner, atoi64(r.PathValue("id")))
@@ -2193,7 +2223,10 @@ func (s *Server) denyGuestRequest(w http.ResponseWriter, r *http.Request) {
 // decideRequest approves or denies a pending printed-QR request. On approval it
 // puts the plate on the permit (end of day) and applies it best-effort.
 func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve bool) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	id := pathInt(r, "id")
 	now := time.Now().In(s.cfg.DisplayLocation)
 

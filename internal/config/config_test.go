@@ -363,3 +363,23 @@ func TestCouncilWarnings(t *testing.T) {
 		t.Fatalf("a healthy council config should warn nothing, got %v", ws)
 	}
 }
+
+// The settings documented as "0 disables" must actually accept 0; the shared parser
+// used to reject every duration <= 0, so the documented off-switch did not work.
+func TestZeroDisablesDurationsAreAccepted(t *testing.T) {
+	t.Setenv("DOMAIN", "example.com")
+	t.Setenv("COUNCIL_DRIFT_INTERVAL", "0")
+	t.Setenv("COUNCIL_ROLLOVER_WINDOW", "0")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("0 should disable these, not fail to load: %v", err)
+	}
+	if cfg.Council.DriftInterval != 0 || cfg.Council.RolloverWindow != 0 {
+		t.Fatalf("drift=%v rollover=%v, want both 0 (disabled)", cfg.Council.DriftInterval, cfg.Council.RolloverWindow)
+	}
+	// A negative value is still a mistake, not an off-switch.
+	t.Setenv("COUNCIL_DRIFT_INTERVAL", "-5m")
+	if _, err := Load(); err == nil {
+		t.Fatal("a negative duration should still be refused")
+	}
+}

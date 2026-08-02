@@ -201,6 +201,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	var claims struct {
 		Email             string   `json:"email"`
+		EmailVerified     *bool    `json:"email_verified"`
 		Name              string   `json:"name"`
 		PreferredUsername string   `json:"preferred_username"`
 		Groups            []string `json:"groups"`
@@ -217,6 +218,18 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if u.Email == "" {
 		http.Error(w, "no email claim; ensure the 'email' scope is granted", http.StatusUnauthorized)
+		return
+	}
+	// The email IS the account key here — every permit, vehicle and council session is
+	// scoped by it, and invites are addressed to it. An unverified (or provider-mutable)
+	// address therefore means account takeover: sign up as someone else's address at a
+	// provider that does not verify, and you land inside their account. Accept only an
+	// explicitly verified claim; a provider that omits email_verified is refused rather
+	// than trusted, since silence is not a guarantee.
+	if claims.EmailVerified == nil || !*claims.EmailVerified {
+		log.Printf("oidc: refusing sign-in for %q: email_verified is %v (the email is the account key, so it must be verified)",
+			u.Email, claims.EmailVerified)
+		http.Error(w, "your identity provider did not confirm this email address is verified, so sign-in was refused", http.StatusUnauthorized)
 		return
 	}
 	if err := a.sessions.Issue(w, u); err != nil {
