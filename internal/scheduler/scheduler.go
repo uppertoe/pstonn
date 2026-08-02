@@ -255,12 +255,14 @@ const (
 	reconnectPoll       = 3 * time.Second
 )
 
-// reconnectItem is one queued reconnect: when to next attempt it, the generation (the
-// expired session's linked_at) it belongs to, and how many transient failures it has
-// had (for exponential backoff).
+// reconnectItem is one queued reconnect: when to next attempt it, when it first
+// entered the queue (for the backlog-age metric), the session generation it belongs
+// to (the compare-and-swap token), and how many transient failures it has had (for
+// exponential backoff).
 type reconnectItem struct {
 	next     time.Time
-	gen      time.Time
+	queuedAt time.Time
+	gen      int64
 	attempts int
 }
 
@@ -1086,10 +1088,11 @@ func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string) {
 	if err != nil {
 		return
 	}
+	now := time.Now()
 	s.reconnectMu.Lock()
 	_, already := s.reconnectQ[owner]
 	if !already {
-		s.reconnectQ[owner] = reconnectItem{next: time.Now(), gen: cs.LinkedAt}
+		s.reconnectQ[owner] = reconnectItem{next: now, queuedAt: now, gen: cs.Generation}
 	}
 	s.reconnectMu.Unlock()
 	if already {
@@ -1116,7 +1119,7 @@ func (s *Scheduler) CancelReconnect(owner string) {
 
 // nextDueReconnect returns the queued owner with the earliest next-attempt time (ties
 // broken by owner for determinism), its generation, and how long until it is due.
-func (s *Scheduler) nextDueReconnect() (owner string, gen time.Time, wait time.Duration, ok bool) {
+func (s *Scheduler) nextDueReconnect() (owner string, gen int64, wait time.Duration, ok bool) {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
 	var best reconnectItem
@@ -1126,7 +1129,7 @@ func (s *Scheduler) nextDueReconnect() (owner string, gen time.Time, wait time.D
 		}
 	}
 	if owner == "" {
-		return "", time.Time{}, 0, false
+		return "", 0, 0, false
 	}
 	if now := time.Now(); best.next.After(now) {
 		return owner, best.gen, best.next.Sub(now), true
@@ -1163,14 +1166,14 @@ func (s *Scheduler) ReconnectBacklog() (queued, due, oldestSeconds int) {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
 	now := time.Now()
-	var oldest time.Time
+	var oldest time.Time // earliest queuedAt — actual backlog age, not next-retry time
 	for _, it := range s.reconnectQ {
 		queued++
 		if !it.next.After(now) {
 			due++
 		}
-		if oldest.IsZero() || it.next.Before(oldest) {
-			oldest = it.next
+		if oldest.IsZero() || it.queuedAt.Before(oldest) {
+			oldest = it.queuedAt
 		}
 	}
 	if !oldest.IsZero() && now.After(oldest) {
@@ -1205,6 +1208,7 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 	if !ok || wait > 0 {
 		return false
 	}
+	processed = true // we have an item; a panic below is still "processed" (it gets a backoff)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: reconnect worker panicked on %s (recovered): %v", owner, r)
@@ -1233,11 +1237,12 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 // row was actually removed). Anything transient (council busy, a network blip, a
 // systemic login-shape break, or a FAILED delete) keeps the task and retries later
 // (reconnectDeferred).
-func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen time.Time) reconnectResult {
-	// Skip stale work: if the session was relinked, reconnected, or unlinked since this
-	// was queued, its generation no longer matches (or it is gone) — do nothing.
-	if cur, err := s.store.GetCouncilSession(ctx, owner); err != nil || !cur.LinkedAt.Equal(gen) {
-		return reconnectRetired // discard the task; the current session (if any) is not ours to touch
+func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64) reconnectResult {
+	// Skip stale work: if the session was relinked, reconnected, renewed, or unlinked
+	// since this was queued, its generation no longer matches (or it is gone) — this
+	// recovery task is not ours to act on.
+	if cur, err := s.store.GetCouncilSession(ctx, owner); err != nil || cur.Generation != gen {
+		return reconnectRetired // discard the task; the current session (if any) is untouched
 	}
 	// A reconnect is a full headless login (several sequential round trips); bound it
 	// so a slow portal can't wedge the drain worker.
@@ -1248,6 +1253,12 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen time.
 		s.noteReconnect(owner)
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", owner)
 		return reconnectRecovered
+	case errors.Is(rerr, store.ErrSessionSuperseded):
+		// The login succeeded at the council but the generation-conditioned save landed
+		// nowhere — the session changed under us (a relink or a password opt-out during
+		// the attempt). Discard; the current session is correct as it stands.
+		log.Printf("scheduler: reconnect for %s superseded by a concurrent session change; discarding", owner)
+		return reconnectRetired
 	case errors.Is(rerr, parking.ErrNoSavedPassword):
 		// No credentials to retry with → retire and prompt a manual re-link.
 	case errors.Is(rerr, parking.ErrLoginRejected):

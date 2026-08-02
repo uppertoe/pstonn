@@ -98,7 +98,7 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	fc := &fakeCouncil{reconnectSet: true} // would "succeed" if it ever ran
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
-	stale := cur.LinkedAt.Add(-time.Hour) // the generation from before a relink
+	stale := cur.Generation + 1 // a generation that no longer matches (a session change happened)
 	if got := s.recoverOrRetire(ctx, owner, stale); got != reconnectRetired {
 		t.Fatalf("a stale-generation task should be discarded, got %v", got)
 	}

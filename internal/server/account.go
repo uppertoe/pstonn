@@ -79,7 +79,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	// (the user can retry) instead of a dropped connection.
 	linkCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	if err := s.council.Link(linkCtx, user, user, password, savePassword, true); err != nil {
+	if err := s.council.Link(linkCtx, user, user, password, savePassword, true, 0); err != nil {
 		log.Printf("council link for %s: %v", user, err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
@@ -166,6 +166,11 @@ func (s *Server) councilForgetPassword(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Drop any queued reconnect: the user just opted out of saved-password recovery.
+	// ClearCouncilPassword also bumped the session generation, so an ALREADY-running
+	// reconnect's generation-conditioned save lands nowhere and can't restore the
+	// password — this only cancels not-yet-started work.
+	s.sched.CancelReconnect(user)
 	s.logChange(r.Context(), user, user, store.ActionCouncilForget, "", "")
 	if r.Header.Get("HX-Request") != "" {
 		s.settingsPage(w, r)
@@ -191,6 +196,10 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Cancel any queued auto-reconnect: the council row is gone, and an in-flight
+	// attempt must not keep replaying the third-party password for a deleted account.
+	// (The generation-conditioned save also lands nowhere now the row is gone.)
+	s.sched.CancelReconnect(user)
 	// The account is gone, so any session still holding it must go too — otherwise a
 	// signed cookie keeps asserting an identity whose data no longer exists.
 	s.revokeSessions(r.Context(), user)
