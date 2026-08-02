@@ -217,7 +217,14 @@ func (b *breaker) restore(openUntil, lastPushback time.Time, generation uint64) 
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if openUntil.After(time.Now()) {
+	// Keep the persisted deadline whether or not it has elapsed. In the future it means
+	// "still paused"; in the PAST it is exactly how half-open is represented (see
+	// allow), so an episode whose cooldown lapsed while we were down comes back
+	// half-open — one probe — rather than fully closed. Discarding an expired deadline
+	// let a restart turn "admit one probe" into "admit the whole burst" straight back
+	// into a block that may well still be in force, which is invisible to us until a
+	// probe tests it.
+	if !openUntil.IsZero() {
 		b.openUntil = openUntil
 	}
 	b.lastPushback = lastPushback

@@ -198,11 +198,20 @@ func TestBreakerRestore(t *testing.T) {
 		t.Fatalf("restore did not carry the generation forward: got %d", gen)
 	}
 
-	// Expired pause → restored closed (allows traffic).
+	// Expired pause → restored HALF-OPEN, not fully closed: exactly one probe is
+	// admitted. Restoring closed would let a restart near cooldown expiry resume the
+	// whole burst straight back into a block that may still be in force.
 	b2 := testBreaker()
 	b2.restore(time.Now().Add(-time.Minute), time.Time{}, 3)
-	if _, ok, _ := b2.allow(time.Now()); !ok {
-		t.Fatal("a restored EXPIRED pause should not keep the circuit open")
+	permit, ok, _ := b2.allow(time.Now())
+	if !ok {
+		t.Fatal("a restored EXPIRED pause should admit the probe, not stay paused")
+	}
+	if !permit.probe {
+		t.Fatal("the request admitted after an expired restore should BE the half-open probe")
+	}
+	if _, ok, _ := b2.allow(time.Now()); ok {
+		t.Fatal("only one probe may be admitted; the next caller must wait out the lease")
 	}
 }
 

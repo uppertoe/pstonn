@@ -56,14 +56,22 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	// restart the service they were already using. HasOwnData covers that: a session,
 	// a permit, or a vehicle all mean this is a re-link, not a signup.
 	if s.cfg.MaxAccounts > 0 {
+		// FAIL CLOSED on a read error. Logging and proceeding meant database trouble
+		// silently lifted the cap — exactly when the service is least able to absorb
+		// new households. An existing user is never affected: HasOwnData short-circuits
+		// them before any counting.
 		known, kerr := s.store.HasOwnData(r.Context(), user)
 		if kerr != nil {
 			log.Printf("capacity check for %s: %v", user, kerr)
+			s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
+			return
 		}
-		if !known && kerr == nil {
+		if !known {
 			n, cerr := s.store.CountLinkedAccounts(r.Context())
 			if cerr != nil {
 				log.Printf("capacity check for %s: %v", user, cerr)
+				s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
+				return
 			} else if n >= s.cfg.MaxAccounts {
 				log.Printf("capacity: refused a new link for %s (%d/%d accounts)", user, n, s.cfg.MaxAccounts)
 				s.message(w, http.StatusServiceUnavailable,
@@ -314,11 +322,27 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		redirectHome(w, r)
 		return
 	}
-	if isP, _ := s.store.IsPrimary(ctx, u.Email); isP {
+	// Both prerequisites FAIL CLOSED. Discarding these errors meant a transient
+	// database fault could let someone with their own permits (or their own
+	// dependants) join another account — which hides their data behind a different
+	// owner and is not something the accept flow can undo cleanly.
+	isP, err := s.store.IsPrimary(ctx, u.Email)
+	if err != nil {
+		log.Printf("acceptInvite: cannot check primary status for %s: %v", u.Email, err)
+		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
+		return
+	}
+	if isP {
 		s.message(w, http.StatusConflict, "You already share your own account with someone else, so you cannot also join another. Remove them first, or decline this invitation.")
 		return
 	}
-	if has, _ := s.store.HasOwnData(ctx, u.Email); has {
+	has, err := s.store.HasOwnData(ctx, u.Email)
+	if err != nil {
+		log.Printf("acceptInvite: cannot check own data for %s: %v", u.Email, err)
+		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
+		return
+	}
+	if has {
 		s.message(w, http.StatusConflict, "You already have your own permits in p.stonn, and joining another account would hide them. Decline this invitation, or remove your own account first if you would rather share.")
 		return
 	}

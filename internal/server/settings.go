@@ -134,7 +134,10 @@ func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user strin
 // saveNotify auto-saves the user's channel choices on every toggle, requiring at
 // least one channel to stay on (else it reverts and warns).
 func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
-	user, _, _ := s.resolveAccount(r.Context())
+	user, _, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	pref, err := s.store.GetNotifyPref(r.Context(), user)
 	if err != nil {
 		s.serverError(w, err)
@@ -195,7 +198,10 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 
 // regenTopic gives the signed-in user a fresh personal ntfy topic (live), enabling ntfy.
 func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
-	user, _, _ := s.resolveAccount(r.Context())
+	user, _, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	pref, err := s.store.GetNotifyPref(r.Context(), user)
 	if err != nil {
 		s.serverError(w, err)
@@ -211,7 +217,10 @@ func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
 
 // testNotify sends a test message on the signed-in user's own enabled channels.
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
-	user, _, _ := s.resolveAccount(r.Context())
+	user, _, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	// Throttled: it is the one authenticated button that sends mail on demand, so
 	// leaving it unbounded lets one account burn shared SMTP quota by holding it
 	// down. Their own address, so a low limit costs nothing legitimate.
