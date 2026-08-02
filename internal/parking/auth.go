@@ -1,6 +1,7 @@
 package parking
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -108,7 +109,19 @@ func (c *Client) authorizeWithCookie(ctx context.Context, owner, cookie string) 
 		// so a genuine transient is never mistaken for an expiry, which would retire
 		// a session that was actually fine.
 		if resp.StatusCode == http.StatusOK && looksLikeHTML(resp, head) {
-			return "", "", "", ErrSessionExpired
+			// Distinguish IdentityServer's OWN sign-in/consent page (a genuine expiry)
+			// from an EDGE challenge page (Azure Front Door / WAF), which also arrives as
+			// 200 HTML: only the former carries the ASP.NET antiforgery field. Without
+			// that positive marker, treat it as a transient unexpected response rather
+			// than retiring the session — which, for a no-saved-password user, would
+			// wrongly prompt a re-link over what may be a passing edge event. A genuine
+			// IdentityServer form reliably carries the token, so real expiries are still
+			// caught; a marker-less 200 HTML that PERSISTS keeps failing as transient and
+			// is visible in the logs/metrics.
+			if bytes.Contains(head, []byte(fieldAntiforgery)) {
+				return "", "", "", ErrSessionExpired
+			}
+			return "", "", "", fmt.Errorf("parking: silent-renew authorize: 200 HTML without a login-form marker (edge challenge?)")
 		}
 		return "", "", "", fmt.Errorf("parking: silent-renew authorize: unexpected status %d", resp.StatusCode)
 	}

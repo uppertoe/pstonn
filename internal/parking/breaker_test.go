@@ -205,3 +205,22 @@ func TestBreakerRestore(t *testing.T) {
 		t.Fatal("a restored EXPIRED pause should not keep the circuit open")
 	}
 }
+
+// A huge Retry-After from the edge must NOT pause the whole fleet for hours. The
+// value floors the cooldown (a real backoff is honoured) but is capped, so a single
+// 429 carrying Retry-After: 24h cannot create a day-long, restart-surviving outage.
+func TestBreakerCooldownCappedAgainstHugeRetryAfter(t *testing.T) {
+	b := testBreaker()
+	t0 := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	const huge = 24 * time.Hour
+	b.onPushback(t0, "a@x", huge)
+	b.onPushback(t0.Add(time.Second), "b@x", huge)
+	b.onPushback(t0.Add(2*time.Second), "c@x", huge)
+	_, allowed, wait := b.allow(t0.Add(3 * time.Second))
+	if allowed {
+		t.Fatal("three distinct owners with a huge Retry-After should have tripped the breaker")
+	}
+	if wait <= 0 || wait > maxBreakerCooldown {
+		t.Fatalf("fleet pause = %s — want >0 and capped at %s, not the raw Retry-After", wait, maxBreakerCooldown)
+	}
+}

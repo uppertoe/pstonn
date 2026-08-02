@@ -785,6 +785,14 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 		return "", councilErr(FailUnexpected, opReadVehicle,
 			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
 	}
+	if strings.TrimSpace(mv.PermitVehicles[0].RegistrationNumber) == "" {
+		// A PRESENT vehicle record with a blank plate is not the same as "no vehicle":
+		// returning "" here would cache and display an uncorroborated clearing (and the
+		// empty-vs-missing guards above deliberately never reach this point for a
+		// genuine empty). Treat it as an unexpected shape rather than a false clearing.
+		return "", councilErr(FailUnexpected, opReadVehicle,
+			errors.New("a managed vehicle record has an empty registration: API shape change?"))
+	}
 	return mv.PermitVehicles[0].RegistrationNumber, nil
 }
 

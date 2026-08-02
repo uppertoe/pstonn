@@ -94,3 +94,17 @@ func TestForgetPermitInvalidatesInFlightRefresh(t *testing.T) {
 		t.Fatalf("a current-generation write should store, got %v (ok=%v)", v, ok)
 	}
 }
+
+// A PRESENT vehicle record with a blank registration is not "no vehicle": returning
+// "" would cache and display an uncorroborated clearing. It must be an unexpected shape.
+func TestCurrentVehicleRejectsBlankRegoOnPresentVehicle(t *testing.T) {
+	const owner = "blank@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	p := model.Permit{CouncilPermitID: "1"}
+	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"permitVehicles":[{"PKPermitVehicleDetailID":1,"RegistrationNumber":"   ","FKVehicleStateID":"1"}]}`)
+	if _, err := c.CurrentVehicle(context.Background(), owner, p); err == nil {
+		t.Fatal("a present vehicle with a blank registration must be unexpected, not an empty permit")
+	}
+}
