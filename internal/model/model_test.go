@@ -338,3 +338,18 @@ func TestResolveScheduledClassification(t *testing.T) {
 		}
 	})
 }
+
+// If the data ever holds two roster rules for one weekday, the winner must be
+// deterministic (highest ID), not dependent on query row order.
+func TestRosterTieBreakIsDeterministic(t *testing.T) {
+	now := mustTime(t, "2026-07-20 12:00 +1000")
+	wd := now.Weekday()
+	rules := []WeeklyRule{{ID: 1, Weekday: wd, VehicleID: 10}, {ID: 2, Weekday: wd, VehicleID: 20}}
+	if res := Resolve(now, rules, nil); res.Source != SourceRoster || res.VehicleID != 20 {
+		t.Fatalf("tie-break picked vehicle %d (source %v), want the highest-ID rule's 20", res.VehicleID, res.Source)
+	}
+	// Order-independent: the reversed slice yields the same winner.
+	if res := Resolve(now, []WeeklyRule{{ID: 2, Weekday: wd, VehicleID: 20}, {ID: 1, Weekday: wd, VehicleID: 10}}, nil); res.VehicleID != 20 {
+		t.Fatalf("winner depended on slice order: got %d", res.VehicleID)
+	}
+}

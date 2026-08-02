@@ -113,6 +113,18 @@ func (s *Store) CreateOverride(ctx context.Context, permitID, vehicleID int64, s
 	return s.CreateGuestOverride(ctx, permitID, vehicleID, startsAt, endsAt, createdBy, 0)
 }
 
+// CountLiveOverrides counts a permit's overrides still in effect (no end, or ending
+// in the future) — the ones ListOverrides returns and both the reconcile loop and
+// the dashboard walk on every pass/render. Used to cap runaway or open-ended
+// accumulation of a hot-path table that is otherwise never pruned.
+func (s *Store) CountLiveOverrides(ctx context.Context, permitID int64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
+		permitID, nowUTC()).Scan(&n)
+	return n, err
+}
+
 // CreateGuestOverride is CreateOverride tagged with the guest link that made it,
 // so a guest's revert can remove exactly their own changes.
 func (s *Store) CreateGuestOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
