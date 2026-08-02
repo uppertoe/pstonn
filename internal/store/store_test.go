@@ -2755,3 +2755,59 @@ func TestGuestOverrideRefusedAfterRevoke(t *testing.T) {
 		t.Fatalf("revoked link create = %v, want ErrGuestOverrideRefused", err)
 	}
 }
+
+// The guarded insert proves the link was live at insert time; the council write
+// happens seconds later. A revocation in that gap must make the pre-write
+// re-authorisation check fail, so a revoked guest's plate never reaches the permit.
+func TestGuestOverrideAuthorisationRevokedBeforeApply(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "reauth@example.com"
+	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
+	tok := seedGuestToken(t, s, owner, pid, 901)
+	end := time.Now().Add(6 * time.Hour)
+
+	ovID, err := s.CreateGuestPlateOverride(ctx, pid, "AAA111", time.Now(), &end, "visitor", tok)
+	if err != nil {
+		t.Fatalf("live link should book: %v", err)
+	}
+	if ok, err := s.GuestOverrideStillAuthorised(ctx, ovID, tok); err != nil || !ok {
+		t.Fatalf("a live link must still authorise its own override (ok=%v err=%v)", ok, err)
+	}
+
+	// The owner revokes while the activation is between its insert and the council write.
+	if _, err := s.db.ExecContext(ctx, `UPDATE guest_token SET revoked_at = ? WHERE id = ?`, nowUTC(), tok); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.GuestOverrideStillAuthorised(ctx, ovID, tok); err != nil || ok {
+		t.Fatalf("a revoked link must not authorise the council write (ok=%v err=%v)", ok, err)
+	}
+}
+
+// Adopting a council reading must not regress a newer local belief committed while
+// the (seconds-long) read was in flight.
+func TestSetPermitActiveIfUnchangedRejectsStaleAdoption(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "cas@example.com"
+	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
+	if err := s.SetPermitActive(ctx, pid, "OLD111"); err != nil {
+		t.Fatal(err)
+	}
+	// A drift/dashboard read started here, observing OLD111...
+	observed := "OLD111"
+	// ...and meanwhile an apply committed a newer plate.
+	if err := s.SetPermitActive(ctx, pid, "NEW222"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.SetPermitActiveIfUnchanged(ctx, pid, observed, "STALE333"); err != nil || ok {
+		t.Fatalf("a stale adoption must not land (ok=%v err=%v)", ok, err)
+	}
+	if p, _ := s.GetPermit(ctx, pid); p.ActiveRegistration != "NEW222" {
+		t.Fatalf("the newer belief was overwritten: %q", p.ActiveRegistration)
+	}
+	// The uncontended case still works.
+	if ok, err := s.SetPermitActiveIfUnchanged(ctx, pid, "NEW222", "NEWER444"); err != nil || !ok {
+		t.Fatalf("an uncontended adoption should land (ok=%v err=%v)", ok, err)
+	}
+}

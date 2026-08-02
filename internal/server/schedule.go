@@ -201,8 +201,14 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// so it performs a real council write and tells the household their permit was
 		// updated (and emails a displaced driver) for a change that changes nothing.
 		if !model.SamePlate(actual, p.ActiveRegistration) {
-			p.ActiveRegistration = actual
-			_ = s.store.SetPermitActive(ctx, p.ID, actual)
+			// Compare-and-swap: this reading may be up to maxAge old, and an apply can
+			// commit a newer plate while a render is in flight (the card self-polls
+			// exactly while applies settle). A blind write would regress the record to a
+			// plate the council no longer holds. Only adopt our belief locally if the
+			// stored one is still what we based the comparison on.
+			if ok, _ := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, p.ActiveRegistration, actual); ok {
+				p.ActiveRegistration = actual
+			}
 		}
 	} else {
 		plateRefreshing = true // nothing cached yet; a background fetch is running

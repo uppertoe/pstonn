@@ -1405,6 +1405,13 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	}
 	go func() {
 		defer s.releaseNotify(claim)
+		// Re-read the durable key now that we hold the claim. The check above ran BEFORE
+		// claiming, so an in-flight delivery of this same outcome could have finished and
+		// written the key in between — then released its claim, letting us take it and
+		// send the user a duplicate of a notice they already had.
+		if k, _, _ := s.store.PermitNotify(ctx, p.ID); k == key {
+			return
+		}
 		// Bound how many deliveries run at once. A fleet-wide event (a mass rejection
 		// or an API-shape change) can call notifyUser for ~every permit on one tick;
 		// without this each would open its own SMTP connection and read the DB
@@ -1599,10 +1606,21 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		// (nothing p.stonn does to the permit should be invisible) and so the
 		// re-assertion the kicked reconcile is about to perform isn't deduped
 		// away as a no-op against the pre-drift apply row.
-		s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
-		if e := s.store.SetPermitActive(ctx, p.ID, actual); e == nil {
-			drifted = true
+		// Compare-and-swap against the belief this drift round READ, not a blind write:
+		// the grid read above took seconds, and a guest or reconcile apply may have
+		// committed a newer plate meanwhile. Writing over that would regress the record
+		// to a plate the council no longer holds — a false "changed at the portal" row
+		// and a duplicate "updated" notice on the way back. If it lost the race, the
+		// other writer's value is the fresh one; drop ours and skip the drift row.
+		swapped, e := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, p.ActiveRegistration, actual)
+		if e != nil || !swapped {
+			if e != nil {
+				log.Printf("scheduler: drift adopt for permit %s: %v", p.CouncilPermitID, e)
+			}
+			continue
 		}
+		s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
+		drifted = true
 	}
 	if drifted {
 		s.Kick() // reconcile now: re-apply the schedule over the drift
