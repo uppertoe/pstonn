@@ -25,6 +25,11 @@ import (
 // Deliberately NOT adaptive yet: an AIMD rate needs production pushback data to tune,
 // and we have none. A generous fixed ceiling plus a tight login sub-limit plus a
 // concurrency cap is the safe, tunable starting point.
+//
+// Since it is the SINGLE throughput authority (no separate per-operation pacing —
+// see the scheduler, which no longer sleeps between calls), the values below are the
+// one knob to turn for a larger fleet. They are the built-in defaults; each is
+// overridable via COUNCIL_GOV_* (config.CouncilConfig), and 0/unset falls back here.
 
 // Governor rate defaults (per minute; converted to per-second internally). The
 // total sits ~6x above the 500-user floor so it never throttles normal operation;
@@ -37,6 +42,22 @@ const (
 	defaultGovLoginBurst  = 6
 	defaultGovConcurrency = 4 // max simultaneous council requests
 )
+
+// govOr / govIntOr resolve a configured limit, falling back to the built-in default
+// when it is unset or nonsensical (<=0) — the governor must never run wide open.
+func govOr(v, def int) float64 {
+	if v <= 0 {
+		return float64(def)
+	}
+	return float64(v)
+}
+
+func govIntOr(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	return v
+}
 
 // tokenBucket is a lazy token bucket: tokens accrue at perSec up to burst, and a
 // request takes one. The clock is passed in so the core is deterministic under test.

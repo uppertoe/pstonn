@@ -16,7 +16,7 @@ import (
 // n permits. The fleet matters: the effective window scales with it, so a test
 // that forgot to set it would be exercising a disabled spread.
 func spreadScheduler(window time.Duration, n int64) *Scheduler {
-	s := &Scheduler{spreadWindow: window, rateDelay: 3 * time.Second, interval: time.Minute}
+	s := &Scheduler{spreadWindow: window, opDrain: 3 * time.Second, interval: time.Minute}
 	s.fleetSize.Store(n)
 	return s
 }
@@ -118,7 +118,7 @@ func TestSpreadIsSafeOnOddInputs(t *testing.T) {
 }
 
 // The bound is what the operator is told at startup, so it has to be right about
-// which limit is binding: below permits*rateDelay the serial drain dominates and
+// which limit is binding: below permits*opDrain the serial drain dominates and
 // the window is smoothing nothing.
 func TestRolloverBoundReportsTheBindingLimit(t *testing.T) {
 	s := spreadScheduler(60*time.Minute, 500)
@@ -167,7 +167,7 @@ func TestSpreadRespectsTheConfiguredCap(t *testing.T) {
 // Before any pass has counted the fleet there is no herd size to scale against,
 // and guessing one would delay changes on the strength of nothing.
 func TestSpreadInactiveUntilTheFleetIsCounted(t *testing.T) {
-	s := &Scheduler{spreadWindow: time.Hour, rateDelay: 3 * time.Second, interval: time.Minute}
+	s := &Scheduler{spreadWindow: time.Hour, opDrain: 3 * time.Second, interval: time.Minute}
 	if got := s.effectiveSpread(); got != 0 {
 		t.Errorf("window %s before any reconcile pass; want 0", got)
 	}

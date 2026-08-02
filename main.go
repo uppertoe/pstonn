@@ -48,6 +48,21 @@ func main() {
 	}
 }
 
+// councilOpDrain models how long one scheduled plate change occupies the transport
+// governor at its sustained rate: a change costs ~modelReqsPerOp council requests
+// (authorize/token as needed, read, write, confirm), and the governor admits
+// govRatePerMin requests/minute. It is used ONLY to size the rollover spread window,
+// so the window derives from the SAME throughput knob as everything else — raising
+// COUNCIL_GOV_RATE for a larger fleet shrinks the window with no separate tuning.
+// There is no per-operation sleep; the governor is the sole pacer.
+func councilOpDrain(govRatePerMin int) time.Duration {
+	const modelReqsPerOp = 3
+	if govRatePerMin <= 0 {
+		govRatePerMin = 60 // mirror the governor's built-in default (see parking.govOr)
+	}
+	return time.Duration(float64(modelReqsPerOp) * 60 / float64(govRatePerMin) * float64(time.Second))
+}
+
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -125,7 +140,7 @@ func run() error {
 		ExpiryLead:       cfg.Council.ExpiryLead,
 		PublicBaseURL:    cfg.PublicBaseURL,
 		Notifier:         notifier,
-		RateDelay:        3 * time.Second,
+		OpDrain:          councilOpDrain(cfg.Council.GovRatePerMin),
 		SpreadWindow:     cfg.Council.RolloverWindow,
 		DriftInterval:    cfg.Council.DriftInterval,
 		IdleWindow:       cfg.Council.IdleWindow,

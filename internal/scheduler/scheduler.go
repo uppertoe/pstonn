@@ -79,7 +79,7 @@ type Options struct {
 	ExpiryLead    time.Duration // how far before a permit's expiry to warn the account (0 = no reminder)
 	PublicBaseURL string        // absolute base for the email confirm link
 	Notifier      Notifier      // nil/disabled = no emails
-	RateDelay     time.Duration // minimum pause between council calls within a warm pass (anti-burst)
+	OpDrain       time.Duration // modelled time one council operation occupies the governor at its sustained rate; used ONLY to size the rollover spread (no per-call sleep — the governor paces)
 	JitterFrac    float64       // ± fraction to randomise thresholds/delays (default 0.2)
 	SnapshotPath  string        // where to write the daily consistent DB backup snapshot ("" disables)
 	// SpreadWindow staggers SCHEDULED plate changes across a window opening at the
@@ -118,7 +118,7 @@ type Scheduler struct {
 	expiryLead       time.Duration
 	publicBaseURL    string
 	notifier         Notifier
-	rateDelay        time.Duration
+	opDrain          time.Duration // rollover-sizing unit (see Options.OpDrain); NOT a sleep
 	jitterFrac       float64
 	spreadWindow     time.Duration
 	driftInterval    time.Duration
@@ -134,8 +134,8 @@ type Scheduler struct {
 	// lastReconcile is the unix-nanos of the last completed reconcile pass, read by
 	// an external watchdog. lastProgress is stamped as the pass WORKS (once per
 	// permit), and is what the internal dead-man's switch measures: a pass that
-	// legitimately runs long — ~100 changing permits spaced by rateDelay each — takes
-	// far longer than any fixed multiple of the tick interval, so a completion-only
+	// legitimately runs long — ~100 changing permits drained at the governor's rate —
+	// takes far longer than any fixed multiple of the tick interval, so a completion-only
 	// clock made "reconcile stalled" a fleet-size-dependent false alarm.
 	lastReconcile atomic.Int64
 	lastProgress  atomic.Int64
@@ -220,9 +220,9 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	if jf <= 0 {
 		jf = 0.2
 	}
-	rd := opts.RateDelay
-	if rd < 0 {
-		rd = 0
+	od := opts.OpDrain
+	if od < 0 {
+		od = 0
 	}
 	sw := opts.SpreadWindow
 	if sw < 0 {
@@ -251,7 +251,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		expiryLead:       opts.ExpiryLead,
 		publicBaseURL:    strings.TrimRight(opts.PublicBaseURL, "/"),
 		notifier:         opts.Notifier,
-		rateDelay:        rd,
+		opDrain:          od,
 		jitterFrac:       jf,
 		spreadWindow:     sw,
 		driftInterval:    di,
@@ -350,8 +350,8 @@ func (s *Scheduler) clearRetry(permitID int64) {
 //
 // The claim is PER PERMIT, and deliberately no wider. Reconcile calls the council
 // once per permit inside its own claim; a global lock would serialise the whole
-// pass behind whichever household happens to be mid-activation, and the pass
-// already paces itself with rateDelay. Nothing takes this lock while holding a
+// pass behind whichever household happens to be mid-activation, and the governor
+// already paces the council calls. Nothing takes this lock while holding a
 // database transaction (both callers claim it, then talk to the council, then
 // write) so it cannot deadlock against the store's single connection.
 //
@@ -490,8 +490,8 @@ func (s *Scheduler) progress() {
 //
 // Measured against progress, not against pass completion, so it does not have to
 // bound the duration of a whole pass: a midnight rollover on a large fleet writes
-// every permit, each spaced by rateDelay and each waiting on a council round trip,
-// which is legitimately many minutes of work and used to false-alarm as a stall.
+// every permit, drained at the governor's rate and each waiting on a council round
+// trip, which is legitimately many minutes of work and used to false-alarm as a stall.
 // What cannot happen legitimately is minutes of NOTHING between two permits, since
 // the council client bounds its own calls. Kept a comfortable multiple of the tick
 // interval so an idle-but-healthy loop (nothing to do, one pass a minute) is never
@@ -797,17 +797,13 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		return
 	}
 	now := time.Now()
-	// Anti-burst: space every council call this pass makes — warm or drift — from
-	// the previous one. Returns false if the context is cancelled mid-sleep.
-	calls := 0
-	space := func() bool {
-		if calls > 0 && s.rateDelay > 0 && !sleepCtx(ctx, s.jittered(s.rateDelay)) {
-			return false
-		}
-		calls++
-		return true
-	}
 	for _, cs := range sessions {
+		// The governor paces the actual council requests this pass makes (warm and
+		// drift), so there is no per-call sleep here; we only need to stop promptly
+		// on shutdown rather than issue a fresh renew into a cancelled context.
+		if ctx.Err() != nil {
+			return
+		}
 		if cs.Cookie == "" {
 			continue
 		}
@@ -849,9 +845,6 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		// it is still comfortably within its warm window — already alive.
 		alive := action == warmSkip
 		if action == warmRenew {
-			if !space() {
-				return
-			}
 			switch err := s.council.Refresh(ctx, cs.Owner); {
 			case err == nil:
 				alive = true
@@ -880,9 +873,6 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		// stays true (the timestamp is not advanced), so the read resumes the moment
 		// the block clears.
 		if alive && !s.council.Blocked() && s.driftDue(cs, now) {
-			if !space() {
-				return
-			}
 			if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
 				// The read failed; leave drift_checked_at alone so the next pass retries
 				// instead of standing down for a full interval.
@@ -1394,12 +1384,12 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 // this single IP in the minutes after it.
 //
 // What that actually looks like on the wire is worth being precise about, because
-// it decides what spreading can and cannot fix. reconcileAll already pauses
-// rateDelay after each permit it touches, so a shared boundary is NOT a
-// back-to-back burst: it is a sustained stream at one permit (three requests) per
-// rateDelay, lasting permits*rateDelay. Spreading does not remove a spike that was
-// never there. What it does is lower that sustained RATE, by making permits become
-// eligible over a window instead of all at the boundary.
+// it decides what spreading can and cannot fix. The transport governor already caps
+// the request RATE, so a shared boundary is NOT a back-to-back burst: it is a
+// sustained stream at the governor's ceiling, lasting roughly permits*opDrain (one
+// operation's worth of requests per opDrain). Spreading does not remove a spike that
+// was never there. What it does is lower that sustained rate further, by making
+// permits become eligible over a window instead of all at the boundary.
 //
 // That only works while the window is WIDER than the serial drain. Below it the
 // loop is saturated either way and the window changes nothing — which is what
@@ -1435,14 +1425,16 @@ func (s *Scheduler) spreadElapsed(permitID int64, res model.Resolution, now time
 	return elapsed >= s.spreadOffset(permitID, window)
 }
 
-// spreadSpacingFactor sets the target pace as a multiple of rateDelay: at 2, a
-// shared boundary is retired at half the rate the loop could manage, so the
-// council sees a stream at half saturation instead of a saturated one.
+// spreadSpacingFactor sets the target pace as a multiple of the per-operation drain:
+// at 2, a shared boundary is retired at half the rate the governor would allow, so
+// the council sees a stream at half saturation instead of a saturated one.
 const spreadSpacingFactor = 2
 
 // effectiveSpread is how wide the rollover window actually is right now: enough to
-// pace THIS fleet at spreadSpacingFactor*rateDelay, capped by the configured
-// maximum delay.
+// pace THIS fleet at spreadSpacingFactor*opDrain, capped by the configured maximum.
+// opDrain is the time one operation occupies the governor at its sustained rate, so
+// the window tracks the SAME throughput knob as everything else — raise the governor
+// rate and this shrinks with no separate tuning.
 //
 // It scales with the fleet because a fixed window is wrong at both ends. A small
 // deployment has no herd to smooth — a handful of changes drain in seconds — so a
@@ -1452,14 +1444,14 @@ const spreadSpacingFactor = 2
 // deployment of five permits a window of seconds and a deployment of five hundred
 // the full configured cap, with no operator retuning in between.
 func (s *Scheduler) effectiveSpread() time.Duration {
-	if s.spreadWindow <= 0 || s.rateDelay <= 0 {
+	if s.spreadWindow <= 0 || s.opDrain <= 0 {
 		return 0
 	}
 	n := s.fleetSize.Load()
 	if n <= 0 {
 		return 0 // no pass has counted the fleet yet; spread nothing on a guess
 	}
-	want := time.Duration(n) * s.rateDelay * spreadSpacingFactor
+	want := time.Duration(n) * s.opDrain * spreadSpacingFactor
 	if want > s.spreadWindow {
 		return s.spreadWindow
 	}
@@ -1483,16 +1475,16 @@ func (s *Scheduler) spreadOffset(permitID int64, window time.Duration) time.Dura
 // fully converged, and whether spreading is doing anything for that fleet.
 //
 // Two limits apply and the larger wins: the window staggers when each permit
-// becomes ELIGIBLE, and the pass then retires eligible permits serially at one per
-// rateDelay. A window at or below n*rateDelay is not smoothing — the serial drain
-// is already the constraint — and saying so is the point of the second return
+// becomes ELIGIBLE, and the governor then drains eligible permits at one operation
+// per opDrain. A window at or below n*opDrain is not smoothing — the governor-paced
+// drain is already the constraint — and saying so is the point of the second return
 // value.
 func (s *Scheduler) RolloverBound(n int) (bound time.Duration, spreading bool) {
 	if n <= 0 {
 		return 0, false
 	}
-	drain := time.Duration(n) * s.rateDelay
-	window := time.Duration(n) * s.rateDelay * spreadSpacingFactor
+	drain := time.Duration(n) * s.opDrain
+	window := time.Duration(n) * s.opDrain * spreadSpacingFactor
 	if window > s.spreadWindow {
 		window = s.spreadWindow
 	}
@@ -1610,10 +1602,12 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 
 	now := time.Now().In(s.loc)
 	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}, busyOwners: map[string]bool{}}
-	// Space out the council writes: when many permits change at the same wall-clock
-	// boundary (a midnight/9am roster rollover), applying them back-to-back is a
-	// burst from one IP that rate heuristics notice. We pause a jittered rateDelay
-	// after each permit that actually hit the council.
+	// When many permits change at the same wall-clock boundary (a midnight/9am roster
+	// rollover), applying them back-to-back would be a burst from one IP that rate
+	// heuristics notice. Two things prevent that now: the rollover spread staggers
+	// when each permit becomes ELIGIBLE (spreadElapsed), and the transport governor
+	// caps the request RATE — so this loop makes governed calls with no per-permit
+	// sleep of its own.
 	active := 0
 	activeOwners := map[string]bool{}
 	for _, p := range permits {
@@ -1626,10 +1620,11 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		active++
 		activeOwners[p.Owner] = true
 		s.progress() // per-permit liveness, so a long legitimate pass is not a stall
-		if s.reconcilePermit(ctx, p, vehByOwnerID, now, stats) && s.rateDelay > 0 {
-			if !sleepCtx(ctx, s.jittered(s.rateDelay)) {
-				return
-			}
+		s.reconcilePermit(ctx, p, vehByOwnerID, now, stats)
+		// The governor paced the writes; we only need to abandon the pass promptly on
+		// shutdown instead of driving doomed writes into a cancelled context.
+		if ctx.Err() != nil {
+			return
 		}
 	}
 	s.detectSystemic(ctx, stats, len(activeOwners))
