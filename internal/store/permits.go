@@ -216,3 +216,24 @@ func (s *Store) CountPermits(ctx context.Context) (int, error) {
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM permit`).Scan(&n)
 	return n, err
 }
+
+// SetPermitActiveIfUnchanged records the plate the permit now holds, but ONLY if our
+// belief has not moved since `from` was read. Returns whether the write landed.
+//
+// For adopting a COUNCIL READING (drift, the dashboard's cached plate): those reads
+// take seconds and run outside the per-permit apply claim, so a guest or reconcile
+// apply can commit a newer plate while one is in flight. A blind write then regresses
+// the local belief to a value the council no longer holds — costing a spurious
+// "changed at the portal" row, a duplicate "updated" notice, and a needless council
+// round trip before it heals. A compare-and-swap discards the stale read instead, and
+// unlike taking the apply claim it holds no lock across the network call.
+func (s *Store) SetPermitActiveIfUnchanged(ctx context.Context, id int64, from, to string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET active_registration = ?, updated_at = ? WHERE id = ? AND active_registration = ?`,
+		to, nowUTC(), id, from)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}

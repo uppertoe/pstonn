@@ -674,6 +674,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// visitor QR) or one of the grant's saved cars. Each becomes a fresh override,
 	// created now, so it wins the resolution tie-break for its window.
 	var reg, name, createdBy string
+	var overrideID int64
 	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
 		if !validRego(plate) {
 			s.renderGuestMenu(w, r, gc, permit, current, "", "Enter a valid number plate (letters and numbers, e.g. ABC123).")
@@ -684,10 +685,12 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		if createdBy == "" {
 			createdBy = "visitor (QR)"
 		}
-		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy, gc.TokenID); err != nil {
+		id, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy, gc.TokenID)
+		if err != nil {
 			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your plate. Please try again."))
 			return
 		}
+		overrideID = id
 	} else {
 		vid := atoi64(r.FormValue("vehicle_id"))
 		var chosen *model.Vehicle
@@ -702,10 +705,12 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reg, name, createdBy = chosen.Registration, chosen.Label, gc.Recipient
-		if _, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID); err != nil {
+		id, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID)
+		if err != nil {
 			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your choice. Please try again."))
 			return
 		}
+		overrideID = id
 	}
 
 	// Capture (or extend) the revert baseline: the plate that was on the permit
@@ -746,6 +751,21 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
 	err := error(errApplyBusy)
 	if claimed {
+		// Re-check authorisation HERE, under the claim and immediately before the
+		// council write. The guarded insert proved the link was live at insert time,
+		// but a revocation landing in the gap since then deletes the override and tells
+		// the owner the pass has stopped working — this stops us then putting the
+		// revoked guest's plate on the real permit anyway.
+		if ok, cerr := s.store.GuestOverrideStillAuthorised(applyCtx, overrideID, gc.TokenID); cerr != nil || !ok {
+			release()
+			if cerr != nil {
+				log.Printf("guest: re-authorisation check for permit %d: %v", permit.ID, cerr)
+			}
+			s.sched.Kick() // let reconcile restore the correct target
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "",
+				"This link was turned off just now, so the permit wasn't changed.")
+			return
+		}
 		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, reg); e != nil {
 				// Council confirmed the change; only the local record failed. The Kick
@@ -2148,7 +2168,15 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	now := time.Now().In(s.cfg.DisplayLocation)
 
 	if !approve {
-		if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, false, "", user, time.Time{}); err != nil && !errors.Is(err, store.ErrNotFound) {
+		switch _, err := s.store.DecideGuestRequest(r.Context(), owner, id, false, "", user, time.Time{}); {
+		case errors.Is(err, store.ErrNotFound):
+			// The row is no longer pending — another member approved (or it expired)
+			// first. Record NOTHING: the change log is the household's account of who
+			// authorised a plate change, so logging a decline that never happened would
+			// misattribute a plate that is in fact going ON the permit.
+			http.Redirect(w, r, "/guests?alreadydecided=1", http.StatusSeeOther)
+			return
+		case err != nil:
 			s.serverError(w, err)
 			return
 		}

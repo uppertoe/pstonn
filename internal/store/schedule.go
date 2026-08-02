@@ -361,3 +361,26 @@ WHERE id = ? AND permit_id = ? AND permit_id IN (SELECT id FROM permit WHERE own
 	n, err := res.RowsAffected()
 	return n > 0, err
 }
+
+// GuestOverrideStillAuthorised reports whether a guest-created override is STILL
+// authorised to be applied: the row survives (every revocation path sweeps live
+// overrides by token) and its link is still live.
+//
+// The guarded insert proves the link was live at INSERT time, but the council write
+// happens seconds later. Without this second check a revocation landing in that gap
+// lets a revoked guest's plate reach the real permit — after the owner has been told
+// the pass stopped working. Called under the permit apply claim, immediately before
+// the council write, so the answer cannot go stale while the write is decided.
+func (s *Store) GuestOverrideStillAuthorised(ctx context.Context, overrideID, guestTokenID int64) (bool, error) {
+	if overrideID == 0 || guestTokenID == 0 {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM override o
+JOIN guest_token t ON t.id = o.guest_token_id
+JOIN guest_grant g ON g.id = t.grant_id
+WHERE o.id = ? AND o.guest_token_id = ? AND t.revoked_at = '' AND g.enabled = 1`,
+		overrideID, guestTokenID).Scan(&n)
+	return n > 0, err
+}
