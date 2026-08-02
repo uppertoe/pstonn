@@ -131,14 +131,18 @@ type Scheduler struct {
 
 	trigger chan struct{}
 
-	// lastReconcile is the unix-nanos of the last completed reconcile pass, read by
-	// an external watchdog. lastProgress is stamped as the pass WORKS (once per
-	// permit), and is what the internal dead-man's switch measures: a pass that
-	// legitimately runs long — ~100 changing permits drained at the governor's rate —
-	// takes far longer than any fixed multiple of the tick interval, so a completion-only
-	// clock made "reconcile stalled" a fleet-size-dependent false alarm.
-	lastReconcile atomic.Int64
-	lastProgress  atomic.Int64
+	// lastReconcile is the unix-nanos of the last COMPLETED reconcile pass, read by
+	// an external watchdog. lastReconcileAttempt is stamped at the START of every pass,
+	// so the two together distinguish "a clean pass just ran" from "a pass ran but
+	// bailed on a database read" — which the completion clock alone cannot show.
+	// lastProgress is stamped as the pass WORKS (once per permit), and is what the
+	// internal dead-man's switch measures: a pass that legitimately runs long — ~100
+	// changing permits drained at the governor's rate — takes far longer than any fixed
+	// multiple of the tick interval, so a completion-only clock made "reconcile stalled"
+	// a fleet-size-dependent false alarm.
+	lastReconcile        atomic.Int64
+	lastReconcileAttempt atomic.Int64
+	lastProgress         atomic.Int64
 	// alertMu guards lastAlert, a coarse per-key throttle so a repeating systemic
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
@@ -444,6 +448,17 @@ func (s *Scheduler) LastReconcile() time.Time {
 	return time.Unix(0, ns)
 }
 
+// LastReconcileAttempt is when the most recent pass STARTED (zero if none yet).
+// Compared with LastReconcile it shows a pass that ran but bailed on a database read:
+// attempt recent, completion stale.
+func (s *Scheduler) LastReconcileAttempt() time.Time {
+	ns := s.lastReconcileAttempt.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
+}
+
 // Run drives the reconcile loop and a slower keep-warm loop until ctx is
 // cancelled.
 func (s *Scheduler) Run(ctx context.Context) {
@@ -487,9 +502,13 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 // safeReconcile runs one reconcile pass, recovering from a panic (so one bad
 // permit can't kill the loop and silently stop all plate changes) and alerting
-// the operator when it does. It stamps lastReconcile on a clean pass.
+// the operator when it does. It records every ATTEMPT, but stamps lastReconcile
+// (the "last clean pass" a watchdog trusts) only when the pass actually completed —
+// not when it bailed on a database read or panicked.
 func (s *Scheduler) safeReconcile(ctx context.Context) {
 	s.progress()
+	s.lastReconcileAttempt.Store(time.Now().UnixNano())
+	completed := false
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: reconcile panicked (recovered): %v", r)
@@ -497,9 +516,11 @@ func (s *Scheduler) safeReconcile(ctx context.Context) {
 				fmt.Sprintf("The reconcile loop panicked and was recovered. Plate changes may be affected until fixed.\n\n%v", r))
 			return
 		}
-		s.lastReconcile.Store(time.Now().UnixNano())
+		if completed {
+			s.lastReconcile.Store(time.Now().UnixNano())
+		}
 	}()
-	s.reconcileAll(ctx)
+	completed = s.reconcileAll(ctx)
 }
 
 // progress stamps the reconcile loop's liveness clock. Called at the start of a
@@ -846,82 +867,96 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if cs.Cookie == "" {
-			continue
-		}
-		action := decideWarm(now, cs.LastActive, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.warmThresholdFor(cs.Owner, cs.UpdatedAt))
-		if action == warmRetire {
-			// Nobody on this account has used the app for the whole bound: stop
-			// renewing, drop the session, and let the dashboard prompt a re-link.
-			// Re-check the idle clock inside the delete. This pass sleeps between
-			// council calls, so the decision above can be minutes old by now — an
-			// unconditional delete retired people who came back mid-pass, seconds
-			// after they used the app. A no-op also means someone else (the reconcile
-			// loop's recoverOrRetire) got there first, so the alert is theirs to send,
-			// not ours to duplicate.
-			retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, now.Add(-s.sessionMaxAge))
-			switch {
-			case err != nil:
-				log.Printf("scheduler: retire session %s: %v", cs.Owner, err)
-			case retired:
-				log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", cs.Owner)
-				// The renewal reminder (maybeRemind) is email-only and best-effort, so
-				// it must not be the sole signal: tell the user their permit just
-				// stopped being managed, exactly as the expired-cookie path does.
-				s.alertRelink(cs.Owner)
-			default:
-				log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", cs.Owner)
-			}
-			continue
-		}
-		// Approaching-deadline reminder is independent of whether we renew now.
-		s.maybeRemind(ctx, cs, now)
-		// Warm and drift both apply only to owners with a schedule to act on: a
-		// linked user who has not built one needs no live session (their dashboard
-		// use renews it when they visit), and nothing to drift-check against.
-		if has, err := s.store.OwnerHasSchedule(ctx, cs.Owner); err != nil || !has {
-			continue
-		}
+		s.warmOne(ctx, cs, now)
+	}
+}
 
-		// Warm the session if it has crossed its (jittered) threshold. warmSkip means
-		// it is still comfortably within its warm window — already alive.
-		alive := action == warmSkip
-		if action == warmRenew {
-			switch err := s.council.Refresh(ctx, cs.Owner); {
-			case err == nil:
+// warmOne processes ONE session under panic recovery, so a deterministic panic on a
+// single session cannot abort the rest of the warm pass and starve every session
+// after it (which, with stable ordering, would repeat forever).
+func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", cs.Owner, r)
+			s.systemAlert(ctx, "panic-keepwarm-session", "A session panicked during keep-warm",
+				fmt.Sprintf("Keep-warm for %s panicked and was skipped so the rest of the pass could continue: %v", cs.Owner, r))
+		}
+	}()
+	if cs.Cookie == "" {
+		return
+	}
+	action := decideWarm(now, cs.LastActive, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.warmThresholdFor(cs.Owner, cs.UpdatedAt))
+	if action == warmRetire {
+		// Nobody on this account has used the app for the whole bound: stop
+		// renewing, drop the session, and let the dashboard prompt a re-link.
+		// Re-check the idle clock inside the delete. This pass sleeps between
+		// council calls, so the decision above can be minutes old by now — an
+		// unconditional delete retired people who came back mid-pass, seconds
+		// after they used the app. A no-op also means someone else (the reconcile
+		// loop's recoverOrRetire) got there first, so the alert is theirs to send,
+		// not ours to duplicate.
+		retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, now.Add(-s.sessionMaxAge))
+		switch {
+		case err != nil:
+			log.Printf("scheduler: retire session %s: %v", cs.Owner, err)
+		case retired:
+			log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", cs.Owner)
+			// The renewal reminder (maybeRemind) is email-only and best-effort, so
+			// it must not be the sole signal: tell the user their permit just
+			// stopped being managed, exactly as the expired-cookie path does.
+			s.alertRelink(cs.Owner)
+		default:
+			log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", cs.Owner)
+		}
+		return
+	}
+	// Approaching-deadline reminder is independent of whether we renew now.
+	s.maybeRemind(ctx, cs, now)
+	// Warm and drift both apply only to owners with a schedule to act on: a
+	// linked user who has not built one needs no live session (their dashboard
+	// use renews it when they visit), and nothing to drift-check against.
+	if has, err := s.store.OwnerHasSchedule(ctx, cs.Owner); err != nil || !has {
+		return
+	}
+
+	// Warm the session if it has crossed its (jittered) threshold. warmSkip means
+	// it is still comfortably within its warm window — already alive.
+	alive := action == warmSkip
+	if action == warmRenew {
+		switch err := s.council.Refresh(ctx, cs.Owner); {
+		case err == nil:
+			alive = true
+			log.Printf("scheduler: kept session for %s warm", cs.Owner)
+		case errors.Is(err, parking.ErrSessionExpired):
+			if s.recoverOrRetire(ctx, cs.Owner) {
 				alive = true
-				log.Printf("scheduler: kept session for %s warm", cs.Owner)
-			case errors.Is(err, parking.ErrSessionExpired):
-				if s.recoverOrRetire(ctx, cs.Owner) {
-					alive = true
-				}
-			case errors.Is(err, parking.ErrNotLinked):
-				// Raced with an unlink; nothing to do.
-			case errors.Is(err, parking.ErrCouncilBusy):
-				// Portal pushing back; the client is already backing off. Stay quiet.
-			default:
-				log.Printf("scheduler: keep-warm %s: %v", cs.Owner, err)
 			}
+		case errors.Is(err, parking.ErrNotLinked):
+			// Raced with an unlink; nothing to do.
+		case errors.Is(err, parking.ErrCouncilBusy):
+			// Portal pushing back; the client is already backing off. Stay quiet.
+		default:
+			log.Printf("scheduler: keep-warm %s: %v", cs.Owner, err)
 		}
+	}
 
-		// Drift/expiry read on its OWN cadence — separate from warming — and only when
-		// the session is alive to serve the read (a warm just succeeded, or it was
-		// already within its warm window). checkDrift updates permit status/expiry and
-		// re-arms reconcile on any external change.
-		//
-		// Suspend drift entirely while the fleet breaker is open: a confirmed shared
-		// block is exactly when to spend nothing on the low-value read and reserve all
-		// recovering capacity for warming endangered sessions and due writes. driftDue
-		// stays true (the timestamp is not advanced), so the read resumes the moment
-		// the block clears.
-		if alive && !s.council.Blocked() && s.driftDue(cs, now) {
-			if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
-				// The read failed; leave drift_checked_at alone so the next pass retries
-				// instead of standing down for a full interval.
-				log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
-			} else if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
-				log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
-			}
+	// Drift/expiry read on its OWN cadence — separate from warming — and only when
+	// the session is alive to serve the read (a warm just succeeded, or it was
+	// already within its warm window). checkDrift updates permit status/expiry and
+	// re-arms reconcile on any external change.
+	//
+	// Suspend drift entirely while the fleet breaker is open: a confirmed shared
+	// block is exactly when to spend nothing on the low-value read and reserve all
+	// recovering capacity for warming endangered sessions and due writes. driftDue
+	// stays true (the timestamp is not advanced), so the read resumes the moment
+	// the block clears.
+	if alive && !s.council.Blocked() && s.driftDue(cs, now) {
+		if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
+			// The read failed; leave drift_checked_at alone so the next pass retries
+			// instead of standing down for a full interval.
+			log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
+		} else if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
+			log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
 		}
 	}
 }
@@ -1102,7 +1137,14 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 		defer cancel()
 		delivered, err := s.notifier.NotifyApply(nctx, o)
 		if delivered != 0 { // >0 delivered, or -1 intentionally suppressed
-			_ = s.store.SetPermitNotifiedKey(nctx, p.ID, key)
+			if e := s.store.SetPermitNotifiedKey(nctx, p.ID, key); e != nil {
+				// The notice went out but recording it as sent failed, so the next pass
+				// would re-send. Surface it rather than discarding: a persistent failure
+				// here means repeated messages to the user.
+				log.Printf("scheduler: delivered notice to %s but could not persist its dedup key for permit %d (may re-send): %v", o.Owner, p.ID, e)
+				s.systemAlert(nctx, "notify-dedup", "Notification sent but not recorded",
+					fmt.Sprintf("A permit notification for %s was delivered, but saving it as sent failed: %v. If this persists the same notice may be delivered repeatedly.", o.Owner, e))
+			}
 			return
 		}
 		if err != nil {
@@ -1610,7 +1652,10 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func (s *Scheduler) reconcileAll(ctx context.Context) {
+// reconcileAll runs one reconcile pass, returning true only if it COMPLETED — false
+// if it bailed early on a database read failure (so the caller does not stamp a clean
+// "last reconcile" that a watchdog would mistake for a healthy pass).
+func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	// Held shared for the whole pass: the daily snapshot takes this exclusively, so a
 	// VACUUM INTO can never begin in the window between "no reconcile running" and the
 	// pass actually starting (both contend for SQLite's single connection).
@@ -1623,14 +1668,14 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		log.Printf("scheduler: list permits: %v", err)
 		s.systemAlert(ctx, "db-permits", "Scheduler database error",
 			fmt.Sprintf("Reconcile could not read permits: %v. No plate changes are being applied until this clears.", err))
-		return
+		return false
 	}
 	vehicles, err := s.store.ListVehicleRefs(ctx)
 	if err != nil {
 		log.Printf("scheduler: list vehicles: %v", err)
 		s.systemAlert(ctx, "db-vehicles", "Scheduler database error",
 			fmt.Sprintf("Reconcile could not read vehicles: %v. No plate changes are being applied until this clears.", err))
-		return
+		return false
 	}
 	// Key by (owner, id): a permit's scheduled vehicle_id is resolved ONLY among
 	// its owner's vehicles, so a rule/override that somehow references a foreign
@@ -1664,14 +1709,30 @@ func (s *Scheduler) reconcileAll(ctx context.Context) {
 		active++
 		activeOwners[p.Owner] = true
 		s.progress() // per-permit liveness, so a long legitimate pass is not a stall
-		s.reconcilePermit(ctx, p, vehByOwnerID, now, stats)
+		s.safeReconcilePermit(ctx, p, vehByOwnerID, now, stats)
 		// The governor paced the writes; we only need to abandon the pass promptly on
 		// shutdown instead of driving doomed writes into a cancelled context.
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 	}
 	s.detectSystemic(ctx, stats, len(activeOwners))
+	return true
+}
+
+// safeReconcilePermit reconciles ONE permit under panic recovery, so a deterministic
+// panic on a single bad record cannot abort the pass and starve every permit ordered
+// after it (which, with stable DB ordering, would repeat forever). The outer
+// safeReconcile recover remains a backstop.
+func (s *Scheduler) safeReconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, now time.Time, stats *passStats) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("scheduler: permit %s panicked (recovered); skipping it: %v", p.CouncilPermitID, r)
+			s.systemAlert(ctx, "panic-permit", "A permit panicked during reconcile",
+				fmt.Sprintf("Reconciling permit %s panicked and was skipped so the rest of the pass could continue: %v\n\nIt will be retried next pass; if it keeps panicking that record needs attention.", p.CouncilPermitID, r))
+		}
+	}()
+	s.reconcilePermit(ctx, p, vehByOwnerID, now, stats)
 }
 
 type ownerVehicle struct {

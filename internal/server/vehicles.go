@@ -44,7 +44,10 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	reg := normalizeReg(r.FormValue("registration"))
 	// Cap the nickname by rune, exactly as renamePermit caps a permit label. The
 	// form's maxlength is a client-side courtesy, not a limit: a crafted POST can
@@ -73,7 +76,10 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	// Name the car before it goes, and warn the household: deleting a vehicle
 	// cascade-deletes every roster day and booking that used it, which is silent
 	// otherwise (a cleared day produces no apply, so nothing is notified).

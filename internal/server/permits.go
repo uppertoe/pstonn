@@ -131,7 +131,10 @@ func isVisitorPermit(permitType string) bool {
 }
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	// Bounded well inside the server's 20s WriteTimeout: the council authorization
 	// read below must fail with a rendered error, not a dropped connection.
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
@@ -232,7 +235,10 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 // household member legitimately needs (roster, one-offs, guest passes, vehicles)
 // stays open to them; retiring a permit is account-structural, like unlinking.
 func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
-	user, owner, isPrimary := s.resolveAccount(r.Context())
+	user, owner, isPrimary, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	if !isPrimary {
 		s.message(w, http.StatusForbidden,
 			"Only the account owner can stop managing a permit. Ask them if this permit should be removed.")
@@ -271,7 +277,10 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 // of the account's permits onto this one — the "I renewed my permit, put my
 // schedule back" flow. Any account member may do it (it's schedule management).
 func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	dst, ok := s.ownedPermit(w, r, owner) // target = permit in the path
 	if !ok {
 		return
@@ -321,7 +330,10 @@ func cleanLabel(s string) string {
 // shown everywhere it appears — schedule, guest passes, door QRs. It's purely a
 // display label; the council record is untouched.
 func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return

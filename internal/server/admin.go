@@ -235,8 +235,12 @@ type clientObservation struct {
 }
 
 type schedulerStatus struct {
-	LastReconcile string `json:"last_reconcile,omitempty"` // RFC3339 UTC, "" if never
-	Stale         bool   `json:"stale"`
+	LastReconcile string `json:"last_reconcile,omitempty"` // RFC3339 UTC of the last COMPLETED pass, "" if never
+	// LastAttempt is when the most recent pass STARTED. If it is recent but
+	// LastReconcile is stale, a pass is running but bailing (e.g. a failing database
+	// read) — which the completion clock alone hides.
+	LastAttempt string `json:"last_attempt,omitempty"`
+	Stale       bool   `json:"stale"`
 }
 
 type sessionCounts struct {
@@ -417,6 +421,9 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	if !last.IsZero() {
 		resp.Scheduler.LastReconcile = last.UTC().Format(time.RFC3339)
+	}
+	if att := s.sched.LastReconcileAttempt(); !att.IsZero() {
+		resp.Scheduler.LastAttempt = att.UTC().Format(time.RFC3339)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

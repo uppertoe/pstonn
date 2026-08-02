@@ -74,6 +74,10 @@ func run() error {
 		return fmt.Errorf("config: %w", err)
 	}
 
+	for _, w := range cfg.Council.CouncilWarnings() {
+		log.Printf("WARNING: %s", w)
+	}
+
 	box, err := buildSecretBox(cfg)
 	if err != nil {
 		return fmt.Errorf("secretbox: %w", err)

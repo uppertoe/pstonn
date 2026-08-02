@@ -290,6 +290,15 @@ func TestInvalidEnvValuesFailFast(t *testing.T) {
 			t.Fatalf("values not applied: %+v", cfg.Council)
 		}
 	})
+	t.Run("warm safety margin at or above idle window is refused", func(t *testing.T) {
+		t.Setenv("DOMAIN", "example.com")
+		t.Setenv("COUNCIL_IDLE_WINDOW", "30m")
+		t.Setenv("COUNCIL_WARM_SAFETY_MARGIN", "1h") // clamp ceiling would be negative
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "COUNCIL_WARM_SAFETY_MARGIN") {
+			t.Fatalf("want a warm-safety-margin cross-field error, got %v", err)
+		}
+	})
 	t.Run("governor defaults and override", func(t *testing.T) {
 		t.Setenv("DOMAIN", "example.com")
 		cfg, err := Load()
@@ -337,5 +346,20 @@ func TestSharesParentDomain(t *testing.T) {
 		if got := sharesParentDomain(c.a, c.b); got != c.want {
 			t.Errorf("sharesParentDomain(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+// CouncilWarnings surfaces legal-but-likely-wrong field relationships for the log.
+func TestCouncilWarnings(t *testing.T) {
+	bad := CouncilConfig{IdleWindow: 10 * time.Hour, WarmSafetyMargin: 2 * time.Hour, ExpiryWarningMargin: time.Hour}
+	if ws := bad.CouncilWarnings(); len(ws) == 0 || !strings.Contains(strings.Join(ws, ";"), "EXPIRY_WARNING_MARGIN") {
+		t.Fatalf("expected an expiry-margin warning, got %v", ws)
+	}
+	healthy := CouncilConfig{
+		IdleWindow: 10 * time.Hour, WarmSafetyMargin: time.Hour, ExpiryWarningMargin: 2 * time.Hour,
+		GovBurst: 10, GovLoginBurst: 6, ReminderLead: 7 * 24 * time.Hour, SessionMaxAge: 90 * 24 * time.Hour,
+	}
+	if ws := healthy.CouncilWarnings(); len(ws) != 0 {
+		t.Fatalf("a healthy council config should warn nothing, got %v", ws)
 	}
 }
