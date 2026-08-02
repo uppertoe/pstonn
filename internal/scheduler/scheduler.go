@@ -204,11 +204,19 @@ type Scheduler struct {
 	// can't spawn a fleet-sized burst of SMTP dials + single-connection DB reads.
 	notifyConc chan struct{}
 
-	// maintenanceMu gives the daily VACUUM INTO snapshot REAL exclusion against a
-	// reconcile pass, not the observational reconciling-atomic check it used to have
-	// (which had a check-then-act race). Reconcile holds it shared (RLock) for a pass;
-	// the snapshot needs it exclusively and TryLock's it, deferring if a pass holds it.
-	maintenanceMu sync.RWMutex
+	// reconnectAt is the owner-deduplicated reconnect queue: owner -> earliest next
+	// attempt. EVERY ErrSessionExpired discovery (keep-warm, reconcile, drift) enqueues
+	// here instead of reconnecting inline; the single reconnectLoop worker drains it,
+	// so recovery never blocks a convergence loop and a mass expiry can't stall it for
+	// hours. Guarded by reconnectMu.
+	reconnectMu sync.Mutex
+	reconnectAt map[string]time.Time
+
+	// notifyInFlight claims a permit+outcome key while its delivery goroutine is
+	// queued/running, so a fleet-wide event can't re-launch duplicate deliveries every
+	// pass before the first has written its durable dedup key. Guarded by notifyMu.
+	notifyMu       sync.Mutex
+	notifyInFlight map[string]struct{}
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -234,6 +242,23 @@ const systemAlertThrottle = 30 * time.Minute
 // maxNotifyConcurrency bounds simultaneous user-notification deliveries (SMTP dials
 // + DB reads) so a mass-notification tick paces rather than spikes. See notifyUser.
 const maxNotifyConcurrency = 8
+
+// Reconnect-queue pacing. reconnectBackoff is the per-owner gap after a transient
+// reconnect failure; reconnectPoll is how often the drain worker rechecks for work.
+const (
+	reconnectBackoff = 5 * time.Minute
+	reconnectPoll    = 3 * time.Second
+)
+
+// reconnectResult is what one reconnect attempt did, so the drain worker knows
+// whether to dequeue (recovered or gave up) or retry later (transient).
+type reconnectResult int
+
+const (
+	reconnectRecovered reconnectResult = iota // session usable now
+	reconnectRetired                          // gave up; session dropped, re-link prompted
+	reconnectDeferred                         // transient; keep and retry after a backoff
+)
 
 // systemAlertRetry is the short window a systemic alert is suppressed for after a
 // FAILED delivery, so a transient outbound failure retries soon instead of muting
@@ -289,6 +314,8 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		warmSafetyMargin: wsm,
 		trigger:          make(chan struct{}, 1),
 		notifyConc:       make(chan struct{}, maxNotifyConcurrency),
+		reconnectAt:      make(map[string]time.Time),
+		notifyInFlight:   make(map[string]struct{}),
 		lastAlert:        make(map[string]time.Time),
 		alertRetry:       systemAlertRetry,
 		nextTry:          make(map[int64]time.Time),
@@ -484,7 +511,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	// Join the helper loops before returning, so a caller that waits on Run can
 	// safely close the store afterwards (nothing is left mid-DB-call).
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	defer wg.Wait()
 	go func() { // keep-warm + reminders on their own cadence, so their
 		// rate-limit pauses never stall reconcile
@@ -494,6 +521,10 @@ func (s *Scheduler) Run(ctx context.Context) {
 	go func() { // alert the operator if reconcile goes stale
 		defer wg.Done()
 		s.watchdog(ctx)
+	}()
+	go func() { // the sole owner of automatic reconnects (out of the convergence loops)
+		defer wg.Done()
+		s.reconnectLoop(ctx)
 	}()
 
 	s.safeReconcile(ctx) // reconcile once at startup
@@ -746,29 +777,16 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	s.maybeSnapshot(ctx)
 }
 
-// maybeSnapshot writes the daily backup snapshot, at most once a day.
-//
-// VACUUM INTO holds the store's single connection for its whole duration, so
-// while it runs every handler and both loops block on their next query. Two things
-// follow. First, it must not start on top of a reconcile pass that is mid-flight:
-// a pass blocked between deciding a plate change and performing it is the one
-// moment where the delay is measured in fines rather than in latency, so a pass in
-// progress defers the snapshot to the next housekeeping tick (15 minutes) instead
-// of forcing it. Second, its duration is the number an operator needs when
-// something else in the process looks stalled, so it is always logged — a silent
-// multi-second stop-the-world is indistinguishable from a bug elsewhere.
+// maybeSnapshot writes the daily backup snapshot, at most once a day. The snapshot
+// runs VACUUM INTO on its OWN connection (see store.Snapshot), so it no longer holds
+// the primary connection and no longer needs to exclude a reconcile pass — a WAL
+// reader and the writer run concurrently. The single housekeeping loop is the only
+// caller, so two snapshots cannot overlap. Its duration is still logged, as the
+// number an operator needs when something else in the process looks slow.
 func (s *Scheduler) maybeSnapshot(ctx context.Context) {
 	if s.snapshotPath == "" || time.Since(s.lastSnapshot) <= 24*time.Hour {
 		return
 	}
-	// Exclusive against reconcile, non-blocking: if a pass holds the shared lock, defer
-	// to the next housekeeping tick rather than blocking the housekeeping loop (and
-	// there is no point queuing behind a pass that itself contends for the connection).
-	if !s.maintenanceMu.TryLock() {
-		log.Printf("scheduler: deferring backup snapshot: a reconcile pass is in flight")
-		return
-	}
-	defer s.maintenanceMu.Unlock()
 	s.snapshotting.Store(true)
 	start := time.Now()
 	err := s.store.Snapshot(ctx, s.snapshotPath)
@@ -868,15 +886,6 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		log.Printf("scheduler: list council sessions: %v", err)
 		return
 	}
-	now := time.Now()
-	// A per-pass reconnect budget. Reconnects are full headless logins serialized
-	// globally on the login flow, so under a MASS expiry (a shortened council idle
-	// window — the exact churn incident) an unbounded serial loop would spend ~20s
-	// per contended session and take a pass of many minutes/hours, during which
-	// healthy sessions crossing their warm threshold are never re-warmed — the one
-	// place the system could amplify rather than damp. Capping reconnects per pass
-	// keeps every pass short; the backlog drains across passes at the login-flow rate.
-	reconnectBudget := maxReconnectsPerPass
 	for _, cs := range sessions {
 		// The governor paces the actual council requests this pass makes (warm and
 		// drift), so there is no per-call sleep here; we only need to stop promptly
@@ -884,20 +893,17 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		s.warmOne(ctx, cs, now, &reconnectBudget)
+		s.warmOne(ctx, cs)
 	}
 }
 
-// maxReconnectsPerPass bounds how many expired sessions one keep-warm pass will try
-// to reconnect, so a mass expiry cannot make a pass block for minutes on the
-// serialized login flow and starve healthy re-warming. See keepWarm.
-const maxReconnectsPerPass = 20
-
 // warmOne processes ONE session under panic recovery, so a deterministic panic on a
 // single session cannot abort the rest of the warm pass and starve every session
-// after it (which, with stable ordering, would repeat forever). reconnectBudget is
-// the pass's remaining reconnect allowance (see keepWarm), decremented here.
-func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now time.Time, reconnectBudget *int) {
+// after it (which, with stable ordering, would repeat forever). It never reconnects
+// inline — an expired session is handed to the reconnect worker — so the pass is
+// always fast; the clock is read here (not once for the whole pass) so a session
+// evaluated late still uses a current time.
+func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", cs.Owner, r)
@@ -908,6 +914,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now ti
 	if cs.Cookie == "" {
 		return
 	}
+	now := time.Now()
 	action := decideWarm(now, cs.LastActive, cs.LinkedAt, cs.UpdatedAt, s.sessionMaxAge, s.warmThresholdFor(cs.Owner, cs.UpdatedAt))
 	if action == warmRetire {
 		// Nobody on this account has used the app for the whole bound: stop
@@ -951,16 +958,10 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now ti
 			alive = true
 			log.Printf("scheduler: kept session for %s warm", cs.Owner)
 		case errors.Is(err, parking.ErrSessionExpired):
-			if *reconnectBudget <= 0 {
-				// This pass's reconnect budget is spent; leave the expired session for a
-				// later pass rather than block on the serialized login flow. Recovery
-				// drains across passes without starving healthy re-warming.
-				return
-			}
-			*reconnectBudget--
-			if s.recoverOrRetire(ctx, cs.Owner) {
-				alive = true
-			}
+			// Hand recovery to the reconnect worker and move on — never reconnect inline
+			// in the warm pass. alive stays false; the worker re-warms via a kick on a
+			// successful reconnect.
+			s.enqueueReconnect(ctx, cs.Owner)
 		case errors.Is(err, parking.ErrNotLinked):
 			// Raced with an unlink; nothing to do.
 		case errors.Is(err, parking.ErrCouncilBusy):
@@ -1056,17 +1057,22 @@ func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h in
 	return len(s.churnExpiry), len(s.churnReconn), distinctOwners(s.churnExpiry)
 }
 
-// recoverOrRetire handles an expired council session. It first tries a
-// saved-password auto-reconnect. On success it returns true (session restored).
-// If there is no saved password, or the saved password is genuinely rejected, it
-// retires the session (unlink + prompt a manual re-link). But a TRANSIENT failure
-// (council busy, network blip, a wrong/rotated encryption key) leaves the session
-// AND the saved password in place so a later pass can retry — one unlucky hiccup
-// must not permanently disable auto-reconnect. Returns true only when the session
-// is usable now.
-func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
-	// Feed the churn canary: this is the single funnel for a scheduler-observed
-	// session expiry (keep-warm and the apply path both route dead sessions here).
+// enqueueReconnect records that owner's expired session needs a reconnect,
+// deduplicated by owner. Every ErrSessionExpired discovery (keep-warm, reconcile,
+// drift) calls this and returns immediately, handing the work to the single
+// reconnectLoop worker rather than reconnecting inline and blocking the convergence
+// loop. The churn canary is fed HERE, at discovery — once per owner while queued — so
+// it counts real distinct expiries, not repeated attempts.
+func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string) {
+	s.reconnectMu.Lock()
+	_, already := s.reconnectAt[owner]
+	if !already {
+		s.reconnectAt[owner] = time.Now()
+	}
+	s.reconnectMu.Unlock()
+	if already {
+		return
+	}
 	// Several different owners re-authing within the hour is the fingerprint of a
 	// council-side session-lifetime/idle-window/cookie change rather than user
 	// activity, and it changes no response SHAPE, so nothing else would catch it.
@@ -1075,18 +1081,98 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
 			"Council sessions are expiring unusually often",
 			fmt.Sprintf("%d different accounts have had their council session expire within the last hour. A healthy fleet almost never re-authenticates, so this points at a council-side change — a shortened session/idle window, cookie rotation, or silent-renew disabled — not user activity. If /status shows no breaker/pushback, the edge is not refusing us, which narrows it to a session-lifetime change. Investigate before it becomes a reconnect backlog.", distinct))
 	}
-	// A reconnect is a full headless login (several sequential round trips), so
-	// bound it well under one loop pass: a slow portal must not stall keep-warm or
-	// reconcile. A timeout surfaces as a non-terminal error and falls through to
-	// the transient branch below — session and saved password are kept, and a
-	// later pass retries — exactly as a network blip would.
+}
+
+// nextDueReconnect returns the queued owner with the earliest next-attempt time. ok
+// is false when the queue is empty; wait is how long until the returned owner is due
+// (0 if already due).
+func (s *Scheduler) nextDueReconnect() (owner string, wait time.Duration, ok bool) {
+	s.reconnectMu.Lock()
+	defer s.reconnectMu.Unlock()
+	var bestAt time.Time
+	for o, at := range s.reconnectAt {
+		if owner == "" || at.Before(bestAt) {
+			owner, bestAt = o, at
+		}
+	}
+	if owner == "" {
+		return "", 0, false
+	}
+	if now := time.Now(); bestAt.After(now) {
+		return owner, bestAt.Sub(now), true
+	}
+	return owner, 0, true
+}
+
+func (s *Scheduler) dequeueReconnect(owner string) {
+	s.reconnectMu.Lock()
+	delete(s.reconnectAt, owner)
+	s.reconnectMu.Unlock()
+}
+
+func (s *Scheduler) backoffReconnect(owner string) {
+	s.reconnectMu.Lock()
+	s.reconnectAt[owner] = time.Now().Add(reconnectBackoff)
+	s.reconnectMu.Unlock()
+}
+
+// reconnectLoop is the SINGLE owner of automatic reconnects. Draining the queue one
+// owner at a time — naturally paced by the globally serialized login flow — keeps
+// recovery entirely out of the keep-warm and reconcile passes, so neither can be
+// stalled for minutes/hours by a correlated mass expiry, and healthy warming and
+// convergence continue throughout. A recovered owner is kicked so any due change
+// applies at once.
+func (s *Scheduler) reconnectLoop(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		owner, wait, ok := s.nextDueReconnect()
+		if !ok {
+			if !sleepCtx(ctx, reconnectPoll) {
+				return
+			}
+			continue
+		}
+		if wait > 0 {
+			if wait > reconnectPoll {
+				wait = reconnectPoll // recheck periodically so a newly-due owner isn't missed
+			}
+			if !sleepCtx(ctx, wait) {
+				return
+			}
+			continue
+		}
+		switch s.recoverOrRetire(ctx, owner) {
+		case reconnectRecovered:
+			s.dequeueReconnect(owner)
+			s.KickOwner(ctx, owner)
+		case reconnectRetired:
+			s.dequeueReconnect(owner)
+		case reconnectDeferred:
+			s.backoffReconnect(owner)
+		}
+	}
+}
+
+// recoverOrRetire attempts ONE saved-password reconnect for an expired session and
+// reports the outcome. Called only by reconnectLoop. On success the session is usable
+// (reconnectRecovered). With no saved password or a genuinely rejected one it retires
+// the session (unlink + prompt a re-link, reconnectRetired). A TRANSIENT failure
+// (council busy, network blip, a wrong/rotated key, a systemic login-shape break)
+// keeps the session AND saved password and asks to retry later (reconnectDeferred) —
+// one unlucky hiccup must not permanently disable auto-reconnect.
+func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) reconnectResult {
+	// A reconnect is a full headless login (several sequential round trips); bound it
+	// so a slow portal can't wedge the drain worker. A timeout falls through to the
+	// transient branch — session and saved password kept, retried later.
 	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	switch rerr := s.council.Reconnect(rctx, owner); {
 	case rerr == nil:
 		s.noteReconnect(owner)
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", owner)
-		return true
+		return reconnectRecovered
 	case errors.Is(rerr, parking.ErrNoSavedPassword):
 		// No credentials to retry with → retire and prompt a manual re-link.
 	case errors.Is(rerr, parking.ErrLoginRejected):
@@ -1100,11 +1186,11 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
 		s.systemAlert(ctx, "login-shape",
 			"Council sign-in page shape changed (login/reconnect broken)",
 			fmt.Sprintf("Reconnect for %s returned ErrLoginFormUnrecognised: the portal's sign-in HTML no longer matches the login replay, so it could not find the form it must submit. This blocks ALL reconnects and re-links until the parser is updated. Investigate promptly.", owner))
-		return false
+		return reconnectDeferred
 	default:
-		// Transient — keep the session + saved password and retry on a later pass.
+		// Transient — keep the session + saved password and retry after a backoff.
 		log.Printf("scheduler: auto-reconnect for %s deferred (transient): %v", owner, rerr)
-		return false
+		return reconnectDeferred
 	}
 	if derr := s.store.DeleteCouncilSession(ctx, owner); derr != nil {
 		log.Printf("scheduler: unlink expired session %s: %v", owner, derr)
@@ -1112,7 +1198,28 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string) bool {
 		log.Printf("scheduler: session for %s expired; unlinked (re-link required)", owner)
 		s.alertRelink(owner) // proactively tell the user, don't wait for fine time
 	}
-	return false
+	return reconnectRetired
+}
+
+// claimNotify records a permit+outcome as having a delivery in flight, returning
+// false if one already is. releaseNotify clears it once delivery finishes.
+func (s *Scheduler) claimNotify(claim string) bool {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	if s.notifyInFlight == nil {
+		s.notifyInFlight = map[string]struct{}{} // literal-constructed test schedulers
+	}
+	if _, ok := s.notifyInFlight[claim]; ok {
+		return false
+	}
+	s.notifyInFlight[claim] = struct{}{}
+	return true
+}
+
+func (s *Scheduler) releaseNotify(claim string) {
+	s.notifyMu.Lock()
+	delete(s.notifyInFlight, claim)
+	s.notifyMu.Unlock()
 }
 
 // alertRelink notifies a user that their council connection dropped and they
@@ -1162,7 +1269,18 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	if notifiedKey == key {
 		return // already successfully told about this exact outcome
 	}
+	// Claim this permit+outcome SYNCHRONOUSLY before spawning delivery. Under a
+	// fleet-wide event the deliveries queue behind notifyConc, so without an in-flight
+	// claim the NEXT pass would see the same (not-yet-written) durable key and launch a
+	// duplicate for every permit — amplifying goroutines, mail, and DB reads each pass.
+	// In-memory: a restart drops the claim, which is fine, the durable notified-key
+	// still dedups anything already delivered.
+	claim := fmt.Sprintf("%d|%s", p.ID, key)
+	if !s.claimNotify(claim) {
+		return
+	}
 	go func() {
+		defer s.releaseNotify(claim)
 		// Bound how many deliveries run at once. A fleet-wide event (a mass rejection
 		// or an API-shape change) can call notifyUser for ~every permit on one tick;
 		// without this each would open its own SMTP connection and read the DB
@@ -1697,11 +1815,6 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // if it bailed early on a database read failure (so the caller does not stamp a clean
 // "last reconcile" that a watchdog would mistake for a healthy pass).
 func (s *Scheduler) reconcileAll(ctx context.Context) bool {
-	// Held shared for the whole pass: the daily snapshot takes this exclusively, so a
-	// VACUUM INTO can never begin in the window between "no reconcile running" and the
-	// pass actually starting (both contend for SQLite's single connection).
-	s.maintenanceMu.RLock()
-	defer s.maintenanceMu.RUnlock()
 	s.reconciling.Store(true)
 	defer s.reconciling.Store(false)
 	permits, err := s.store.ListPermits(ctx)
@@ -2079,14 +2192,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
 		return true
 	case errors.Is(err, parking.ErrSessionExpired):
-		// The cookie died between keep-warm passes. Try a saved-password
-		// auto-reconnect; failing that, retire the session once (so we stop
-		// retrying every minute) and prompt a re-link. A transient reconnect
-		// failure preserves the session for a later retry (see recoverOrRetire) —
-		// spaced out, so a lingering outage isn't probed with a login per minute.
-		if !s.recoverOrRetire(ctx, p.Owner) {
-			s.deferRetry(p.ID, 3) // ~8 min between attempts while the session is unusable
-		}
+		// The cookie died. Hand recovery to the reconnect worker (owner-deduplicated,
+		// drained out of this pass) rather than reconnecting inline — a mass expiry
+		// coinciding with a rollover must not make one reconcile pass block for hours.
+		// Defer this permit so it isn't re-attempted every minute meanwhile; the
+		// worker kicks the owner's permits the moment the session is back.
+		s.enqueueReconnect(ctx, p.Owner)
+		s.deferRetry(p.ID, 3)
 		return true
 	default:
 		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)

@@ -468,6 +468,8 @@ func TestKeepWarmUnlinksOnExpiry(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
+	// keep-warm enqueues the reconnect; the worker drains it. Drive that step directly.
+	s.recoverOrRetire(context.Background(), "expired@example.com")
 
 	if len(fc.refreshed) != 1 {
 		t.Fatalf("expected one refresh attempt, got %v", fc.refreshed)
@@ -590,6 +592,7 @@ func TestReconnectRejectedRetires(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
+	s.recoverOrRetire(context.Background(), "badpw@example.com") // drain the queued reconnect
 
 	if _, err := st.GetCouncilSession(context.Background(), "badpw@example.com"); err != store.ErrNotFound {
 		t.Fatalf("rejected password should retire the session, got err=%v", err)
@@ -611,6 +614,7 @@ func TestKeepWarmAutoReconnects(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
+	s.recoverOrRetire(context.Background(), "saved@example.com") // drain the queued reconnect
 
 	if len(fc.reconnected) != 1 {
 		t.Fatalf("expected one reconnect attempt, got %v", fc.reconnected)
@@ -771,7 +775,8 @@ func TestSessionExpiryNotifiesRelink(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: fn})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
-	time.Sleep(60 * time.Millisecond) // async re-link notify
+	s.recoverOrRetire(context.Background(), "expired@example.com") // drain: no saved password → retire + relink
+	time.Sleep(60 * time.Millisecond)                              // async re-link notify
 	if rl := fn.relinkSnap(); len(rl) != 1 || rl[0] != "expired@example.com" {
 		t.Fatalf("expected one re-link notification to the user, got %v", rl)
 	}
