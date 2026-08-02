@@ -143,6 +143,9 @@ type Scheduler struct {
 	// failure does not spam the operator every tick.
 	alertMu   sync.Mutex
 	lastAlert map[string]time.Time
+	// alertRetry is the short suppression window after a FAILED alert delivery
+	// (defaults to systemAlertRetry; a field so tests can shrink it).
+	alertRetry time.Duration
 
 	// applyMu guards applying, and applying holds one entry per permit that has a
 	// council plate-write in flight right now (the channel is closed on release, so
@@ -188,6 +191,16 @@ type Scheduler struct {
 	churnMu     sync.Mutex
 	churnExpiry []churnEvent // scheduler-observed session expiries, last hour
 	churnReconn []churnEvent // successful auto-reconnects, last hour
+
+	// commitActive persists a confirmed plate change (defaults to store.SetPermitActive;
+	// see New). A field so tests can inject a commit failure.
+	commitActive func(ctx context.Context, id int64, registration string) error
+
+	// maintenanceMu gives the daily VACUUM INTO snapshot REAL exclusion against a
+	// reconcile pass, not the observational reconciling-atomic check it used to have
+	// (which had a check-then-act race). Reconcile holds it shared (RLock) for a pass;
+	// the snapshot needs it exclusively and TryLock's it, deferring if a pass holds it.
+	maintenanceMu sync.RWMutex
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -209,6 +222,11 @@ const busyNotifyThreshold = 15
 const blockNotifyThreshold = 4
 
 const systemAlertThrottle = 30 * time.Minute
+
+// systemAlertRetry is the short window a systemic alert is suppressed for after a
+// FAILED delivery, so a transient outbound failure retries soon instead of muting
+// the alert for the full throttle. Must be < systemAlertThrottle.
+const systemAlertRetry = 5 * time.Minute
 
 // New builds a Scheduler. loc is the timezone rosters are expressed in.
 func New(st *store.Store, council Council, loc *time.Location, opts Options) *Scheduler {
@@ -240,7 +258,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	if wsm <= 0 {
 		wsm = time.Hour
 	}
-	return &Scheduler{
+	sc := &Scheduler{
 		store:            st,
 		council:          council,
 		loc:              loc,
@@ -259,11 +277,17 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		warmSafetyMargin: wsm,
 		trigger:          make(chan struct{}, 1),
 		lastAlert:        make(map[string]time.Time),
+		alertRetry:       systemAlertRetry,
 		nextTry:          make(map[int64]time.Time),
 		applying:         make(map[int64]chan struct{}),
 		unscheduled:      make(map[int64]string),
 		snapshotPath:     opts.SnapshotPath,
 	}
+	// commitActive persists a confirmed plate change. Held as a field, not a direct
+	// store call, purely so a test can inject a commit failure and exercise the
+	// "council applied but local commit failed" recovery path.
+	sc.commitActive = sc.store.SetPermitActive
+	return sc
 }
 
 // Kick requests an immediate reconcile (e.g. after a roster/override edit).
@@ -542,19 +566,33 @@ func (s *Scheduler) systemAlert(ctx context.Context, key, subject, body string) 
 	if s.notifier == nil || !s.notifier.AdminConfigured() {
 		return
 	}
+	retry := s.alertRetry
+	if retry <= 0 || retry >= systemAlertThrottle {
+		retry = systemAlertRetry
+	}
+	now := time.Now()
 	s.alertMu.Lock()
-	if t, ok := s.lastAlert[key]; ok && time.Since(t) < systemAlertThrottle {
+	if t, ok := s.lastAlert[key]; ok && now.Sub(t) < systemAlertThrottle {
 		s.alertMu.Unlock()
 		return
 	}
-	s.lastAlert[key] = time.Now()
+	// Claim the slot immediately (so a concurrent caller doesn't double-send) but only
+	// for a SHORT window: back-date the stamp so the next attempt is allowed after
+	// `retry`, not the full throttle. A SUCCESSFUL delivery extends it to the full
+	// interval below. This stops a transient SMTP/ntfy blip from muting a critical
+	// alert (login-shape, panic, db failure, session-churn) for the whole 30 minutes.
+	s.lastAlert[key] = now.Add(-systemAlertThrottle + retry)
 	s.alertMu.Unlock()
 	go func() {
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := s.notifier.NotifyAdmin(nctx, subject, body); err != nil {
-			log.Printf("scheduler: admin alert %q failed: %v", key, err)
+			log.Printf("scheduler: admin alert %q failed (retry in %s): %v", key, retry, err)
+			return // leave the short window: the next call after `retry` re-sends
 		}
+		s.alertMu.Lock()
+		s.lastAlert[key] = time.Now() // delivered: hold the full throttle
+		s.alertMu.Unlock()
 	}()
 }
 
@@ -693,10 +731,14 @@ func (s *Scheduler) maybeSnapshot(ctx context.Context) {
 	if s.snapshotPath == "" || time.Since(s.lastSnapshot) <= 24*time.Hour {
 		return
 	}
-	if s.reconcileInFlight() {
+	// Exclusive against reconcile, non-blocking: if a pass holds the shared lock, defer
+	// to the next housekeeping tick rather than blocking the housekeeping loop (and
+	// there is no point queuing behind a pass that itself contends for the connection).
+	if !s.maintenanceMu.TryLock() {
 		log.Printf("scheduler: deferring backup snapshot: a reconcile pass is in flight")
 		return
 	}
+	defer s.maintenanceMu.Unlock()
 	s.snapshotting.Store(true)
 	start := time.Now()
 	err := s.store.Snapshot(ctx, s.snapshotPath)
@@ -1568,10 +1610,12 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// reconcileInFlight reports whether a reconcile pass is running right now.
-func (s *Scheduler) reconcileInFlight() bool { return s.reconciling.Load() }
-
 func (s *Scheduler) reconcileAll(ctx context.Context) {
+	// Held shared for the whole pass: the daily snapshot takes this exclusively, so a
+	// VACUUM INTO can never begin in the window between "no reconcile running" and the
+	// pass actually starting (both contend for SQLite's single connection).
+	s.maintenanceMu.RLock()
+	defer s.maintenanceMu.RUnlock()
 	s.reconciling.Store(true)
 	defer s.reconciling.Store(false)
 	permits, err := s.store.ListPermits(ctx)
@@ -1822,8 +1866,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 
 	prev := p.ActiveRegistration // the plate we're changing away from
 	err = s.council.SetVehicle(ctx, p.Owner, p, want)
+	var commitErr error
 	if err == nil {
-		_ = s.store.SetPermitActive(ctx, p.ID, want)
+		commitErr = s.commitActive(ctx, p.ID, want)
 	}
 	// The decision is recorded, so drop the claim before the bookkeeping below: the
 	// activity row, the notifications and (on an expired session) a full headless
@@ -1831,6 +1876,19 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// guest link must not wait out a 20-second reconnect to get their car on.
 	release()
 	switch {
+	case err == nil && commitErr != nil:
+		// The council confirmed the change (SetVehicle re-reads to verify), so the car
+		// IS on the permit — this is not a failure to tell the user about. But we must
+		// not book it as a clean success either: the stale ActiveRegistration would
+		// drive a duplicate apply + "updated" notice on the next pass, and be wrong
+		// across a restart. Alert the operator and Kick a reconcile; the healing pass's
+		// pre-read sees the plate already present and records it, notifying exactly once.
+		log.Printf("scheduler: permit %s applied at the council but local commit failed: %v", p.CouncilPermitID, commitErr)
+		s.systemAlert(ctx, "commit-after-apply",
+			"Council change applied but not recorded locally",
+			fmt.Sprintf("Permit %s was set to %q at the council (confirmed), but writing that to the local database failed: %v. The car is on the permit; a reconcile will re-record it. If this repeats, the database may be failing.", p.CouncilPermitID, want, commitErr))
+		s.Kick()
+		return true
 	case err == nil:
 		s.clearFailStreak(ctx, p.ID)
 		s.clearRetry(p.ID)

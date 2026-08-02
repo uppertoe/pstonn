@@ -575,6 +575,25 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 	}
 }
 
+// A plate that differs only in whitespace/case is the SAME car (model.SamePlate),
+// so SetVehicle must treat it as already-allocated and report success — not send a
+// pointless mutation and then fail confirmation. Under the old strings.EqualFold
+// checks, "ABC 123" vs "ABC123" diverged: the pre-read was not a no-op and the
+// post-write confirm declared a durable mismatch for the correct car.
+func TestSetVehicleAcceptsWhitespaceVariantAsAlreadySet(t *testing.T) {
+	const owner = "space@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	p := model.Permit{CouncilPermitID: "1"}
+
+	// The council's own record shows the plate with a space; the target has none.
+	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"maxVehicles":1,"canEditOrDeleteVehicle":true,"permitVehicles":[{"PKPermitVehicleDetailID":1,"RegistrationNumber":"ABC 123","FKVehicleStateID":"1"}]}`)
+	if err := c.SetVehicle(context.Background(), owner, p, "ABC123"); err != nil {
+		t.Fatalf("a whitespace-only variant should be treated as already set, got %v", err)
+	}
+}
+
 // The council reports a refusal as a JSON ARRAY of message objects. Captured live
 // on 2026-07-31 from a manageVehicle POST that was rejected. Before this was
 // parsed the body was discarded and the user saw only "council returned 400",

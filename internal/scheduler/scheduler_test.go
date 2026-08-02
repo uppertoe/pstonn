@@ -214,6 +214,7 @@ type fakeNotifier struct {
 	applied       []appliedNote
 	outcomes      []notify.ApplyOutcome // full outcomes, for asserting message content
 	adminNotes    []string
+	adminErr      error // when set, NotifyAdmin records the attempt but returns this
 	relinks       []string
 	displaced     []string // guest emails told their car came off the permit
 	expiries      []string // "owner:permitLabel" per expiry warning sent
@@ -260,8 +261,14 @@ func (f *fakeNotifier) NotifyPermitExpiry(_ context.Context, owner, permitLabel 
 func (f *fakeNotifier) NotifyAdmin(_ context.Context, subject, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.adminNotes = append(f.adminNotes, subject)
-	return nil
+	f.adminNotes = append(f.adminNotes, subject) // records the ATTEMPT, success or not
+	return f.adminErr
+}
+
+func (f *fakeNotifier) setAdminErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.adminErr = err
 }
 
 func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permitLabel, oldReg, newReg string) error {

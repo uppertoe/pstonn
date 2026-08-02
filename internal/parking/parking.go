@@ -870,7 +870,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		return councilErr(FailRejected, op, errors.New("the council does not allow changing this permit's vehicle"))
 	}
 	cur := mv.PermitVehicles[0]
-	if strings.EqualFold(cur.RegistrationNumber, registration) {
+	if model.SamePlate(cur.RegistrationNumber, registration) {
 		// Already allocated (the read above IS the confirmation). Refresh the cache
 		// so callers reflect the council's own record, then report success.
 		c.regCache.Store(regKey{owner, p.CouncilPermitID}, cachedReg{reg: cur.RegistrationNumber, at: time.Now()})
@@ -920,7 +920,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		// Couldn't reach the council for the confirm — genuinely transient, retry.
 		return councilErr(FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
 	}
-	if !strings.EqualFold(confirmed, registration) {
+	if !model.SamePlate(confirmed, registration) {
 		// The POST was accepted (2xx) but the council's own record still shows a
 		// different plate: the write did NOT take. This is a durable refusal (a
 		// permission quirk or an API-shape change), not a blip — classify it as

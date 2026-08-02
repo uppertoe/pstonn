@@ -147,6 +147,17 @@ func TestFindDisplaced(t *testing.T) {
 			t.Fatalf("got %+v, want pa@example.com warned", got)
 		}
 	})
+	t.Run("whitespace variant of the departing plate still matches", func(t *testing.T) {
+		// The plate we changed away from is reported by the council as "GUEST 99",
+		// the booking stored it as "GUEST99". Same car, so the booker must still be
+		// warned — under strings.EqualFold the space made them differ and the warning
+		// was silently dropped.
+		ovr := []Override{live(1, 0, "GUEST99", "pa@example.com", early)}
+		got := FindDisplaced(ovr, vehicles, "GUEST 99", "beast-driver@example.com", members, now)
+		if got.Contact != "pa@example.com" {
+			t.Fatalf("got %+v, want pa@example.com warned despite the whitespace difference", got)
+		}
+	})
 	t.Run("self-displacement across channels is quiet", func(t *testing.T) {
 		// Pa swaps his own citroen for his own beast: same email, so no warning —
 		// even when the two bookings came through different links or channels.
