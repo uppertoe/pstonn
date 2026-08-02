@@ -371,7 +371,10 @@ func fillExpiry(pv *permitView, now time.Time) {
 }
 
 func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
@@ -431,7 +434,10 @@ func combineDateTime(date, timeStr, defaultTime string) string {
 }
 
 func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
@@ -539,7 +545,10 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return

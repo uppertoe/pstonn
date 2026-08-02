@@ -146,7 +146,12 @@ type Client struct {
 	http        *http.Client // redirects handled manually; cookies passed per-user
 	regCache    sync.Map     // regKey -> cachedReg, to bound council reads
 	regRefresh  sync.Map     // regKey -> struct{}, dedupes in-flight background plate refreshes
-	traffic     trafficCounters
+	// regGen is a per-key generation, bumped by ForgetPermit, so a plate read that was
+	// already in flight when a permit was removed cannot resurrect the cache entry
+	// afterwards. Guarded by regGenMu (writes only; regCache reads stay lock-free).
+	regGenMu sync.Mutex
+	regGen   map[regKey]uint64
+	traffic  trafficCounters
 
 	renewLocks    sync.Map   // owner -> *sync.Mutex, serialises silent-renew per owner
 	cooldownUntil sync.Map   // owner -> time.Time, soft-block backoff deadline
@@ -652,8 +657,10 @@ func isJSONResponse(resp *http.Response) bool {
 // element, PKPermitVehicleDetailID arrives as a bare JSON number while
 // FKVehicleStateID arrives as a quoted string, hence the differing Go types.
 type managedVehicleResp struct {
-	PermitNumber           string          `json:"permitNumber"`
-	PermitVehicleCount     int             `json:"permitVehicleCount"`
+	PermitNumber string `json:"permitNumber"`
+	// A POINTER so an OMITTED permitVehicleCount is distinguishable from a present
+	// zero: emptyIsCredible must not accept a response that merely dropped the field.
+	PermitVehicleCount     *int            `json:"permitVehicleCount"`
 	MaxVehicles            int             `json:"maxVehicles"`
 	CanAddVehicle          bool            `json:"canAddVehicle"`
 	CanEditOrDeleteVehicle bool            `json:"canEditOrDeleteVehicle"`
@@ -712,14 +719,25 @@ type manageVehicleV struct {
 // count agrees there are no vehicles. Anything else is an unexpected shape, which
 // is the operator alert that says the council changed its API.
 func (mv *managedVehicleResp) emptyIsCredible() bool {
-	return mv.PermitNumber != "" && mv.PermitVehicleCount == 0
+	// Every corroborating signal must be EXPLICITLY present: the permit is identified,
+	// the count field came back (not merely defaulted to zero by being absent) and
+	// says zero, AND permitVehicles is an explicit empty array rather than an omitted
+	// key. A shape change that drops any of these no longer masquerades as "no
+	// vehicle" — it surfaces as the unexpected-shape operator alert instead.
+	return mv.PermitNumber != "" &&
+		mv.PermitVehicleCount != nil && *mv.PermitVehicleCount == 0 &&
+		mv.PermitVehicles != nil
 }
 
 // errVehicleShape describes an empty vehicle list that nothing in the response
 // corroborates.
 func errVehicleShape(mv *managedVehicleResp) error {
-	return fmt.Errorf("the council returned no vehicles but the response does not look like a permit record (permitNumber=%q, permitVehicleCount=%d): API shape change?",
-		mv.PermitNumber, mv.PermitVehicleCount)
+	count := "absent"
+	if mv.PermitVehicleCount != nil {
+		count = fmt.Sprintf("%d", *mv.PermitVehicleCount)
+	}
+	return fmt.Errorf("the council returned no vehicles but the response does not look like a permit record (permitNumber=%q, permitVehicleCount=%s, permitVehiclesPresent=%t): API shape change?",
+		mv.PermitNumber, count, mv.PermitVehicles != nil)
 }
 
 // maxAPIBody bounds a permit-API JSON response. The real ones are a few
@@ -759,6 +777,13 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 			return "", councilErr(FailUnexpected, opReadVehicle, errVehicleShape(mv))
 		}
 		return "", nil
+	}
+	if len(mv.PermitVehicles) != 1 {
+		// The visitor-permit model is one managed vehicle per permit. More than one is
+		// an unexpected shape: reading (or later editing) only [0] could act on the
+		// wrong record, so refuse rather than guess — surfaced as a possible API change.
+		return "", councilErr(FailUnexpected, opReadVehicle,
+			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
 	}
 	return mv.PermitVehicles[0].RegistrationNumber, nil
 }
@@ -803,7 +828,33 @@ func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model
 // goroutine that owns it, and clearing it here would only let a second council
 // request start for a permit nobody is managing any more.
 func (c *Client) ForgetPermit(owner, councilPermitID string) {
-	c.regCache.Delete(regKey{owner, councilPermitID})
+	key := regKey{owner, councilPermitID}
+	c.regGenMu.Lock()
+	if c.regGen == nil {
+		c.regGen = map[regKey]uint64{}
+	}
+	c.regGen[key]++ // invalidate any refresh/write already in flight for this key
+	c.regGenMu.Unlock()
+	c.regCache.Delete(key)
+}
+
+// regGeneration reads a key's current generation (0 if never forgotten).
+func (c *Client) regGeneration(key regKey) uint64 {
+	c.regGenMu.Lock()
+	defer c.regGenMu.Unlock()
+	return c.regGen[key]
+}
+
+// storeRegIfCurrent writes reg to the cache only if the key has not been forgotten
+// since gen was captured — so a slow read that raced a ForgetPermit does not
+// resurrect a stale entry.
+func (c *Client) storeRegIfCurrent(key regKey, gen uint64, reg string) {
+	c.regGenMu.Lock()
+	defer c.regGenMu.Unlock()
+	if c.regGen[key] != gen {
+		return
+	}
+	c.regCache.Store(key, cachedReg{reg: reg, at: time.Now()})
 }
 
 // refreshCurrentVehicle fetches the permit's plate in the background, detached
@@ -815,6 +866,7 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 	if _, inflight := c.regRefresh.LoadOrStore(key, struct{}{}); inflight {
 		return
 	}
+	gen := c.regGeneration(key) // capture before the read; ForgetPermit bumps it
 	go func() {
 		defer c.regRefresh.Delete(key)
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -824,7 +876,7 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 			log.Printf("parking: background plate refresh for permit %s: %v", p.CouncilPermitID, err)
 			return
 		}
-		c.regCache.Store(key, cachedReg{reg: reg, at: time.Now()})
+		c.storeRegIfCurrent(key, gen, reg)
 	}()
 }
 
@@ -852,6 +904,8 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if c.sandbox != nil {
 		return c.sandboxSetVehicle(p, registration)
 	}
+	key := regKey{owner, p.CouncilPermitID}
+	gen := c.regGeneration(key) // so a concurrent ForgetPermit invalidates the cache writes below
 	mv, err := c.managedVehicle(ctx, owner, p)
 	if err != nil {
 		return err
@@ -869,11 +923,17 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	if !mv.CanEditOrDeleteVehicle {
 		return councilErr(FailRejected, op, errors.New("the council does not allow changing this permit's vehicle"))
 	}
+	if len(mv.PermitVehicles) != 1 {
+		// One managed vehicle per permit is the model; editing [0] of several could
+		// change the wrong record. Refuse as unexpected rather than guess.
+		return councilErr(FailUnexpected, op,
+			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
+	}
 	cur := mv.PermitVehicles[0]
 	if model.SamePlate(cur.RegistrationNumber, registration) {
 		// Already allocated (the read above IS the confirmation). Refresh the cache
 		// so callers reflect the council's own record, then report success.
-		c.regCache.Store(regKey{owner, p.CouncilPermitID}, cachedReg{reg: cur.RegistrationNumber, at: time.Now()})
+		c.storeRegIfCurrent(key, gen, cur.RegistrationNumber)
 		return nil
 	}
 	permitID, err := strconv.ParseInt(p.CouncilPermitID, 10, 64)
@@ -928,7 +988,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		// soothing "we'll keep trying" that never self-heals.
 		return councilErr(FailRejected, op, fmt.Errorf("change was accepted but the council still shows %q", confirmed))
 	}
-	c.regCache.Store(regKey{owner, p.CouncilPermitID}, cachedReg{reg: confirmed, at: time.Now()})
+	c.storeRegIfCurrent(key, gen, confirmed)
 	return nil
 }
 

@@ -29,6 +29,7 @@ type fakeCouncil struct {
 	permitsErr           error
 	setErr               error
 	setDelay             time.Duration // how long a council write takes, to widen races
+	panicOn              string        // council_permit_id whose SetVehicle should panic (per-unit-recovery test)
 
 	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
 	// from a handler-style goroutine and the reconcile loop at the same time.
@@ -108,6 +109,9 @@ func (f *fakeCouncil) upsertGridLocked(councilPermitID string, mutate func(*park
 }
 
 func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, reg string) error {
+	if p.CouncilPermitID == f.panicOn {
+		panic("fakeCouncil: forced panic for " + p.CouncilPermitID)
+	}
 	f.mu.Lock()
 	f.setCalls = append(f.setCalls, p.CouncilPermitID)
 	f.setRegs = append(f.setRegs, reg)

@@ -196,28 +196,47 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 //     account), which gates the owner-only actions (council link/unlink, account
 //     delete, managing members).
 func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrimary bool) {
+	user, owner, isPrimary, err := s.resolveAccountStrict(ctx)
+	if err != nil {
+		// READ-path fallback: the caller's OWN account, primary privilege withheld —
+		// a DB blip costs a 403 on owner-only gates, not a privilege. Harmless for a
+		// read (a secondary just sees their own empty account for a moment). A MUTATING
+		// handler must NOT use this: it would write into that phantom own-account. Those
+		// use resolveAccountStrict and fail closed — see its doc.
+		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", user, err)
+		return user, user, false
+	}
+	return user, owner, isPrimary
+}
+
+// resolveAccountStrict is resolveAccount but surfaces a membership-lookup failure, so
+// a MUTATING handler can fail CLOSED (503, write nothing) instead of silently writing
+// into a secondary's own phantom account when we cannot establish their scope. For
+// authorization scoping, "cannot determine" must mean "perform no mutation".
+func (s *Server) resolveAccountStrict(ctx context.Context) (user, owner string, isPrimary bool, err error) {
 	u, _ := identity.FromContext(ctx)
 	user = u.Email
 	primary, ok, err := s.store.MemberAccount(ctx, user)
 	if err != nil {
-		// Fail toward the caller's OWN account and withhold primary privilege: if we
-		// cannot prove they aren't a secondary, deny the owner-only gates (council
-		// link/unlink, account delete, member management) rather than fail open. A DB
-		// blip should cost a 403, not a privilege.
-		//
-		// Note what this does NOT guarantee. For a primary it is exactly right. For a
-		// SECONDARY it silently re-scopes them to their own email, so a mutation racing
-		// the blip writes into a phantom account of their own — invisible to them
-		// afterwards, and enough to flip their HasOwnData. It reads nobody else's data
-		// and escalates nothing (isPrimary stays false, the membership row is
-		// untouched), but it is a write-scope shift, not a no-op.
-		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", user, err)
-		return user, user, false
+		return user, "", false, err
 	}
 	if ok && primary != "" {
-		return user, primary, false
+		return user, primary, false, nil
 	}
-	return user, user, true
+	return user, user, true, nil
+}
+
+// accountForWrite resolves the acting account for a MUTATING handler, writing a 503
+// and returning ok=false if the account scope cannot be established (so the caller
+// returns without mutating). Centralises the fail-closed response.
+func (s *Server) accountForWrite(w http.ResponseWriter, r *http.Request) (user, owner string, isPrimary, ok bool) {
+	user, owner, isPrimary, err := s.resolveAccountStrict(r.Context())
+	if err != nil {
+		log.Printf("accountForWrite %s: membership lookup failed; refusing the mutation: %v", user, err)
+		s.message(w, http.StatusServiceUnavailable, "We couldn't confirm your account just now. Please try again in a moment.")
+		return "", "", false, false
+	}
+	return user, owner, isPrimary, true
 }
 
 func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {

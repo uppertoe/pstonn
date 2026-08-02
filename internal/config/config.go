@@ -523,7 +523,38 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ROSTER_KEY must be set (64 hex chars) whenever STATUS_TOKEN is: /status carries every consented account's email and push topic, and it is only ever served encrypted. Set the same key in the outage watchdog and have it request GET /status?roster=1")
 	}
 
+	// Cross-field session-lifetime invariant. The keep-warm safety clamp caps a
+	// session's warm threshold at IdleWindow-WarmSafetyMargin, and ONLY when that
+	// ceiling is positive; if WarmSafetyMargin >= IdleWindow the clamp silently
+	// disables itself and a warm interval near or above the idle window could let a
+	// set-and-forget user's session lapse before its first renewal. Refuse to start in
+	// that state rather than silently stop managing a permit.
+	if wc := cfg.Council; wc.IdleWindow > 0 && wc.WarmSafetyMargin >= wc.IdleWindow {
+		return nil, fmt.Errorf("COUNCIL_WARM_SAFETY_MARGIN (%s) must be less than COUNCIL_IDLE_WINDOW (%s): otherwise the keep-warm safety clamp is disabled and a session could lapse before its first renewal", wc.WarmSafetyMargin, wc.IdleWindow)
+	}
+
 	return cfg, nil
+}
+
+// CouncilWarnings returns non-fatal configuration concerns for the operator log:
+// field relationships that are legal but most likely a mistake. Fatal invariants are
+// enforced in Load; these are surfaced (main logs them at startup) rather than
+// blocking, so an unusual-but-deliberate setup can still run.
+func (c CouncilConfig) CouncilWarnings() []string {
+	var w []string
+	if c.ExpiryWarningMargin > 0 && c.WarmSafetyMargin > 0 && c.ExpiryWarningMargin <= c.WarmSafetyMargin {
+		w = append(w, fmt.Sprintf("COUNCIL_EXPIRY_WARNING_MARGIN (%s) is not above COUNCIL_WARM_SAFETY_MARGIN (%s): the near-expiry alert will not precede the warm clamp floor, so a forming reconnect backlog may go unwarned", c.ExpiryWarningMargin, c.WarmSafetyMargin))
+	}
+	if c.ReminderLead > 0 && c.SessionMaxAge > 0 && c.ReminderLead >= c.SessionMaxAge {
+		w = append(w, fmt.Sprintf("COUNCIL_REMINDER_LEAD (%s) is not less than the session max age (%s): the re-authorise reminder would never be sent before the session is retired", c.ReminderLead, c.SessionMaxAge))
+	}
+	if c.GovBurst > 0 && c.GovBurst < 4 {
+		w = append(w, fmt.Sprintf("COUNCIL_GOV_BURST (%d) is below one ordinary operation's ~4 requests: routine plate changes may self-throttle", c.GovBurst))
+	}
+	if c.GovLoginBurst > 0 && c.GovLoginBurst < 6 {
+		w = append(w, fmt.Sprintf("COUNCIL_GOV_LOGIN_BURST (%d) is below one login flow's ~6 requests: logins may self-throttle", c.GovLoginBurst))
+	}
+	return w
 }
 
 // MailDomainMismatch reports the sending domain and the app's own domain when
