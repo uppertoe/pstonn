@@ -242,6 +242,24 @@ type CouncilConfig struct {
 	// drift reads entirely.
 	DriftInterval time.Duration
 
+	// Governor limits: the transport-level CEILING on outbound council traffic and
+	// the SINGLE throughput authority (there is no separate per-operation pacing —
+	// requests that would exceed these simply wait). All 500 households share one
+	// egress IP, so this bounds what that IP presents to Azure Front Door. The
+	// defaults are ~6x the steady-state floor: a generous ceiling, not a target. The
+	// rollover spread window derives from GovRatePerMin too (see scheduler), so
+	// raising the rate for a larger fleet is a single knob — no other retuning.
+	//   COUNCIL_GOV_RATE          total requests/min across all surfaces (default 60)
+	//   COUNCIL_GOV_BURST         total burst allowance                  (default 10)
+	//   COUNCIL_GOV_LOGIN_RATE    credential-login surface requests/min  (default 12)
+	//   COUNCIL_GOV_LOGIN_BURST   login burst (one full login ≈ 6 reqs)  (default 6)
+	//   COUNCIL_GOV_CONCURRENCY   max simultaneous council requests       (default 4)
+	GovRatePerMin      int
+	GovBurst           int
+	GovLoginRatePerMin int
+	GovLoginBurst      int
+	GovConcurrency     int
+
 	// RolloverWindow staggers SCHEDULED plate changes across a window opening at
 	// the schedule boundary, capped at this value. COUNCIL_ROLLOVER_WINDOW, default
 	// 60m. The window SCALES with the fleet (see scheduler.effectiveSpread), so this
@@ -259,9 +277,10 @@ type CouncilConfig struct {
 	// only clock-driven changes are spread (model.Resolution.Scheduled) — a booking
 	// or guest activation still applies on the next tick.
 	//
-	// Below permits*RateDelay the window buys nothing, because the serial drain is
-	// already the constraint; startup logs the resulting convergence bound and says
-	// so. 0 disables spreading entirely.
+	// Below the serial drain implied by the governor rate (permits × per-operation
+	// drain) the window buys nothing, because that drain is already the constraint;
+	// startup logs the resulting convergence bound and says so. 0 disables spreading
+	// entirely.
 	RolloverWindow time.Duration
 
 	// ReminderLead is how far before the SessionMaxAge deadline to email the user
@@ -332,6 +351,11 @@ func Load() (*Config, error) {
 			IdleWindow:          envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
 			WarmSafetyMargin:    envDuration("COUNCIL_WARM_SAFETY_MARGIN", time.Hour),
 			ExpiryWarningMargin: envDuration("COUNCIL_EXPIRY_WARNING_MARGIN", 2*time.Hour),
+			GovRatePerMin:       envInt("COUNCIL_GOV_RATE", 60),
+			GovBurst:            envInt("COUNCIL_GOV_BURST", 10),
+			GovLoginRatePerMin:  envInt("COUNCIL_GOV_LOGIN_RATE", 12),
+			GovLoginBurst:       envInt("COUNCIL_GOV_LOGIN_BURST", 6),
+			GovConcurrency:      envInt("COUNCIL_GOV_CONCURRENCY", 4),
 			Sandbox:             env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
 			ReminderLead:        time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
 			ExpiryLead:          time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,

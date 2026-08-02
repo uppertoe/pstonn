@@ -290,6 +290,28 @@ func TestInvalidEnvValuesFailFast(t *testing.T) {
 			t.Fatalf("values not applied: %+v", cfg.Council)
 		}
 	})
+	t.Run("governor defaults and override", func(t *testing.T) {
+		t.Setenv("DOMAIN", "example.com")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if cfg.Council.GovRatePerMin != 60 || cfg.Council.GovBurst != 10 ||
+			cfg.Council.GovLoginRatePerMin != 12 || cfg.Council.GovLoginBurst != 6 ||
+			cfg.Council.GovConcurrency != 4 {
+			t.Fatalf("governor defaults not applied: %+v", cfg.Council)
+		}
+		// The whole point of this work: a larger fleet is one env change.
+		t.Setenv("COUNCIL_GOV_RATE", "240")
+		t.Setenv("COUNCIL_GOV_CONCURRENCY", "8")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatalf("load with overrides: %v", err)
+		}
+		if cfg.Council.GovRatePerMin != 240 || cfg.Council.GovConcurrency != 8 {
+			t.Fatalf("governor overrides not applied: rate=%d conc=%d", cfg.Council.GovRatePerMin, cfg.Council.GovConcurrency)
+		}
+	})
 }
 
 // TestSharesParentDomain covers the multi-label public suffix case: without it,

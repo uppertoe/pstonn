@@ -221,8 +221,12 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 		box:         box,
 		breaker: newBreaker(defaultBreakerThreshold, defaultBreakerWindow,
 			defaultBreakerCooldown, defaultBreakerProbe),
-		gov: newGovernor(defaultGovTotalPerMin, defaultGovTotalBurst,
-			defaultGovLoginPerMin, defaultGovLoginBurst, defaultGovConcurrency),
+		gov: newGovernor(
+			govOr(cfg.Council.GovRatePerMin, defaultGovTotalPerMin),
+			govOr(cfg.Council.GovBurst, defaultGovTotalBurst),
+			govOr(cfg.Council.GovLoginRatePerMin, defaultGovLoginPerMin),
+			govOr(cfg.Council.GovLoginBurst, defaultGovLoginBurst),
+			govIntOr(cfg.Council.GovConcurrency, defaultGovConcurrency)),
 		loginFlow: make(chan struct{}, 1),
 	}
 	// Track request rate with headroom over the widest window Stats queries (5m):
