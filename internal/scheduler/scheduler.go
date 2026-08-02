@@ -1405,11 +1405,15 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	}
 	go func() {
 		defer s.releaseNotify(claim)
-		// Re-read the durable key now that we hold the claim. The check above ran BEFORE
-		// claiming, so an in-flight delivery of this same outcome could have finished and
-		// written the key in between — then released its claim, letting us take it and
-		// send the user a duplicate of a notice they already had.
-		if k, _, _ := s.store.PermitNotify(ctx, p.ID); k == key {
+		// Detached context first, then re-read the durable key with it. The check
+		// before claiming could have raced a delivery that finished and wrote the key in
+		// between, then released its claim to us — this catches that. Using the caller's
+		// ctx here would fail the read during shutdown and, with the error ignored, look
+		// like "not yet delivered"; an inconclusive read defers rather than risking a
+		// duplicate, since the next pass retries anyway.
+		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if k, _, err := s.store.PermitNotify(nctx, p.ID); err != nil || k == key {
 			return
 		}
 		// Bound how many deliveries run at once. A fleet-wide event (a mass rejection
@@ -1423,8 +1427,6 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 			s.notifyConc <- struct{}{}
 			defer func() { <-s.notifyConc }()
 		}
-		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		delivered, err := s.notifier.NotifyApply(nctx, o)
 		if delivered != 0 { // >0 delivered, or -1 intentionally suppressed
 			if e := s.store.SetPermitNotifiedKey(nctx, p.ID, key); e != nil {

@@ -2663,8 +2663,10 @@ func TestCreateOverrideCappedEnforcesLimit(t *testing.T) {
 func seedGuestToken(t *testing.T, s *Store, owner string, permitID, tokenID int64) int64 {
 	t.Helper()
 	ctx := context.Background()
+	// allow_plate=1: these fixtures book typed plates, and the authorisation check now
+	// verifies the capability actually exercised, not merely that the link is live.
 	if _, err := s.db.ExecContext(ctx,
-		`INSERT INTO guest_grant (id, owner, permit_id, enabled, created_at) VALUES (?, ?, ?, 1, ?)`,
+		`INSERT INTO guest_grant (id, owner, permit_id, enabled, allow_plate, created_at) VALUES (?, ?, ?, 1, 1, ?)`,
 		tokenID, owner, permitID, nowUTC()); err != nil {
 		t.Fatalf("seed guest grant: %v", err)
 	}
@@ -2809,5 +2811,50 @@ func TestSetPermitActiveIfUnchangedRejectsStaleAdoption(t *testing.T) {
 	// The uncontended case still works.
 	if ok, err := s.SetPermitActiveIfUnchanged(ctx, pid, "NEW222", "NEWER444"); err != nil || !ok {
 		t.Fatalf("an uncontended adoption should land (ok=%v err=%v)", ok, err)
+	}
+}
+
+// Revoking is not the only way authority disappears: an owner can EDIT the pass and
+// remove the very vehicle the guest picked. The pre-write check must verify the whole
+// capability, not just that the link is live.
+func TestGuestOverrideAuthorisationFollowsGrantScope(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "scope@example.com"
+	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
+	veh, _ := s.CreateVehicle(ctx, owner, "CAR111", "car")
+	tok := seedGuestToken(t, s, owner, pid, 902)
+	// The pass covers that vehicle.
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO guest_grant_vehicle (grant_id, vehicle_id) VALUES (?, ?)`, tok, veh); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(6 * time.Hour)
+	ovID, err := s.CreateGuestOverride(ctx, pid, veh, time.Now(), &end, "visitor", tok)
+	if err != nil {
+		t.Fatalf("in-scope booking should succeed: %v", err)
+	}
+	if ok, err := s.GuestOverrideStillAuthorised(ctx, ovID, tok); err != nil || !ok {
+		t.Fatalf("an in-scope vehicle must authorise (ok=%v err=%v)", ok, err)
+	}
+
+	// The owner edits the pass, dropping that car — the link itself stays live.
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM guest_grant_vehicle WHERE grant_id = ? AND vehicle_id = ?`, tok, veh); err != nil {
+		t.Fatal(err)
+	}
+	if live, err := s.GuestTokenStillLive(ctx, tok); err != nil || !live {
+		t.Fatalf("the link should still be live after an edit (live=%v err=%v)", live, err)
+	}
+	if ok, err := s.GuestOverrideStillAuthorised(ctx, ovID, tok); err != nil || ok {
+		t.Fatalf("a vehicle removed from the pass must not authorise the write (ok=%v err=%v)", ok, err)
+	}
+
+	// The account-wide kill switch also withdraws authority.
+	if err := s.SetGuestsEnabled(ctx, owner, false); err != nil {
+		t.Fatal(err)
+	}
+	if live, err := s.GuestTokenStillLive(ctx, tok); err != nil || live {
+		t.Fatalf("the account kill switch must withdraw authority (live=%v err=%v)", live, err)
 	}
 }

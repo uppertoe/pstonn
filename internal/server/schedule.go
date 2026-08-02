@@ -206,7 +206,13 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			// exactly while applies settle). A blind write would regress the record to a
 			// plate the council no longer holds. Only adopt our belief locally if the
 			// stored one is still what we based the comparison on.
-			if ok, _ := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, p.ActiveRegistration, actual); ok {
+			ok, err := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, p.ActiveRegistration, actual)
+			if err != nil {
+				// Don't swallow it: a persistent write failure here would otherwise be
+				// invisible, the page just quietly showing a stale plate.
+				log.Printf("dashboard: adopt council plate for permit %d: %v", p.ID, err)
+			}
+			if ok {
 				p.ActiveRegistration = actual
 			}
 		}
