@@ -27,10 +27,11 @@ type fakeCouncil struct {
 	srv *httptest.Server
 	mux *http.ServeMux
 
-	renews  atomic.Int64 // completed silent-renew authorize calls
-	apiCode atomic.Int64 // status the API endpoint returns; 0 = 200 JSON
-	apiCT   atomic.Value // Content-Type for non-2xx API responses
-	apiBody atomic.Value // raw JSON the managedVehicle endpoint returns; "" = the canned record
+	renews   atomic.Int64 // completed silent-renew authorize calls
+	apiCode  atomic.Int64 // status the API endpoint returns; 0 = 200 JSON
+	apiCT    atomic.Value // Content-Type for non-2xx API responses
+	apiBody  atomic.Value // raw JSON the managedVehicle endpoint returns; "" = the canned record
+	authHTML atomic.Value // when non-empty, /connect/authorize returns 200 HTML with this body instead of a 302
 }
 
 func newFakeCouncil(t *testing.T) *fakeCouncil {
@@ -38,8 +39,15 @@ func newFakeCouncil(t *testing.T) *fakeCouncil {
 	f := &fakeCouncil{mux: http.NewServeMux()}
 	f.apiCT.Store("text/html")
 	f.apiBody.Store("")
+	f.authHTML.Store("")
 	f.mux.HandleFunc("/idm/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		f.renews.Add(1)
+		if h := f.authHTML.Load().(string); h != "" {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, h)
+			return
+		}
 		cb := r.URL.Query().Get("redirect_uri")
 		http.Redirect(w, r, cb+"?code=fresh-code&state="+r.URL.Query().Get("state"), http.StatusFound)
 	})
@@ -462,28 +470,37 @@ func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 
 	var status atomic.Int64
 	var ct atomic.Value
+	var body atomic.Value
 	f.mux.HandleFunc("/idm-page/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct.Load().(string))
 		w.WriteHeader(int(status.Load()))
-		io.WriteString(w, "<!DOCTYPE html><html><body><form>Sign in</form></body></html>")
+		io.WriteString(w, body.Load().(string))
 	})
 	c.authURL = f.srv.URL + "/idm-page/connect/authorize"
+
+	// A genuine IdentityServer sign-in page carries the antiforgery field; an edge
+	// (WAF) challenge page does not — only the former is a real expiry.
+	const loginForm = `<!DOCTYPE html><html><body><form><input name="__RequestVerificationToken" value="x"></form></body></html>`
+	const edgePage = `<!DOCTYPE html><html><body>Checking your browser…</body></html>`
 
 	cases := []struct {
 		name    string
 		code    int
 		ct      string
+		body    string
 		wantErr error // nil = "an error that is neither expiry nor busy"
 	}{
-		{"200 html login page", 200, "text/html; charset=utf-8", ErrSessionExpired},
-		{"200 html mislabelled", 200, "application/octet-stream", ErrSessionExpired},
-		{"500 with an html error page", 500, "text/html", nil},
-		{"503 push-back", 503, "text/html", ErrCouncilBusy},
+		{"200 login form (antiforgery marker) is an expiry", 200, "text/html; charset=utf-8", loginForm, ErrSessionExpired},
+		{"200 login form with a mislabelled content-type is still detected", 200, "application/octet-stream", loginForm, ErrSessionExpired},
+		{"200 edge challenge (no marker) stays transient", 200, "text/html; charset=utf-8", edgePage, nil},
+		{"500 with an html error page", 500, "text/html", edgePage, nil},
+		{"503 push-back", 503, "text/html", edgePage, ErrCouncilBusy},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			status.Store(int64(tc.code))
 			ct.Store(tc.ct)
+			body.Store(tc.body)
 			c.clearPenalty(owner) // each case starts outside any cooldown
 			err := c.Refresh(context.Background(), owner)
 			if err == nil {

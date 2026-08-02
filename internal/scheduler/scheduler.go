@@ -200,6 +200,10 @@ type Scheduler struct {
 	// see New). A field so tests can inject a commit failure.
 	commitActive func(ctx context.Context, id int64, registration string) error
 
+	// notifyConc bounds concurrent user-notification deliveries so a fleet-wide event
+	// can't spawn a fleet-sized burst of SMTP dials + single-connection DB reads.
+	notifyConc chan struct{}
+
 	// maintenanceMu gives the daily VACUUM INTO snapshot REAL exclusion against a
 	// reconcile pass, not the observational reconciling-atomic check it used to have
 	// (which had a check-then-act race). Reconcile holds it shared (RLock) for a pass;
@@ -226,6 +230,10 @@ const busyNotifyThreshold = 15
 const blockNotifyThreshold = 4
 
 const systemAlertThrottle = 30 * time.Minute
+
+// maxNotifyConcurrency bounds simultaneous user-notification deliveries (SMTP dials
+// + DB reads) so a mass-notification tick paces rather than spikes. See notifyUser.
+const maxNotifyConcurrency = 8
 
 // systemAlertRetry is the short window a systemic alert is suppressed for after a
 // FAILED delivery, so a transient outbound failure retries soon instead of muting
@@ -280,6 +288,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		idleWindow:       iw,
 		warmSafetyMargin: wsm,
 		trigger:          make(chan struct{}, 1),
+		notifyConc:       make(chan struct{}, maxNotifyConcurrency),
 		lastAlert:        make(map[string]time.Time),
 		alertRetry:       systemAlertRetry,
 		nextTry:          make(map[int64]time.Time),
@@ -860,6 +869,14 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		return
 	}
 	now := time.Now()
+	// A per-pass reconnect budget. Reconnects are full headless logins serialized
+	// globally on the login flow, so under a MASS expiry (a shortened council idle
+	// window — the exact churn incident) an unbounded serial loop would spend ~20s
+	// per contended session and take a pass of many minutes/hours, during which
+	// healthy sessions crossing their warm threshold are never re-warmed — the one
+	// place the system could amplify rather than damp. Capping reconnects per pass
+	// keeps every pass short; the backlog drains across passes at the login-flow rate.
+	reconnectBudget := maxReconnectsPerPass
 	for _, cs := range sessions {
 		// The governor paces the actual council requests this pass makes (warm and
 		// drift), so there is no per-call sleep here; we only need to stop promptly
@@ -867,14 +884,20 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		s.warmOne(ctx, cs, now)
+		s.warmOne(ctx, cs, now, &reconnectBudget)
 	}
 }
 
+// maxReconnectsPerPass bounds how many expired sessions one keep-warm pass will try
+// to reconnect, so a mass expiry cannot make a pass block for minutes on the
+// serialized login flow and starve healthy re-warming. See keepWarm.
+const maxReconnectsPerPass = 20
+
 // warmOne processes ONE session under panic recovery, so a deterministic panic on a
 // single session cannot abort the rest of the warm pass and starve every session
-// after it (which, with stable ordering, would repeat forever).
-func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now time.Time) {
+// after it (which, with stable ordering, would repeat forever). reconnectBudget is
+// the pass's remaining reconnect allowance (see keepWarm), decremented here.
+func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now time.Time, reconnectBudget *int) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", cs.Owner, r)
@@ -928,6 +951,13 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession, now ti
 			alive = true
 			log.Printf("scheduler: kept session for %s warm", cs.Owner)
 		case errors.Is(err, parking.ErrSessionExpired):
+			if *reconnectBudget <= 0 {
+				// This pass's reconnect budget is spent; leave the expired session for a
+				// later pass rather than block on the serialized login flow. Recovery
+				// drains across passes without starving healthy re-warming.
+				return
+			}
+			*reconnectBudget--
 			if s.recoverOrRetire(ctx, cs.Owner) {
 				alive = true
 			}
@@ -1133,6 +1163,17 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 		return // already successfully told about this exact outcome
 	}
 	go func() {
+		// Bound how many deliveries run at once. A fleet-wide event (a mass rejection
+		// or an API-shape change) can call notifyUser for ~every permit on one tick;
+		// without this each would open its own SMTP connection and read the DB
+		// concurrently — a ~fleet-sized spike of dials + single-connection contention
+		// exactly when the system is already stressed. The goroutines are cheap and
+		// just queue here; deliveries drain a few at a time. (Escalation and the
+		// once-only dedup below are unchanged.)
+		if s.notifyConc != nil { // nil only in literal-constructed test schedulers
+			s.notifyConc <- struct{}{}
+			defer func() { <-s.notifyConc }()
+		}
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		delivered, err := s.notifier.NotifyApply(nctx, o)
@@ -1709,7 +1750,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 		active++
 		activeOwners[p.Owner] = true
 		s.progress() // per-permit liveness, so a long legitimate pass is not a stall
-		s.safeReconcilePermit(ctx, p, vehByOwnerID, now, stats)
+		s.safeReconcilePermit(ctx, p, vehByOwnerID, stats)
 		// The governor paced the writes; we only need to abandon the pass promptly on
 		// shutdown instead of driving doomed writes into a cancelled context.
 		if ctx.Err() != nil {
@@ -1724,7 +1765,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 // panic on a single bad record cannot abort the pass and starve every permit ordered
 // after it (which, with stable DB ordering, would repeat forever). The outer
 // safeReconcile recover remains a backstop.
-func (s *Scheduler) safeReconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, now time.Time, stats *passStats) {
+func (s *Scheduler) safeReconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, stats *passStats) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: permit %s panicked (recovered); skipping it: %v", p.CouncilPermitID, r)
@@ -1732,7 +1773,7 @@ func (s *Scheduler) safeReconcilePermit(ctx context.Context, p model.Permit, veh
 				fmt.Sprintf("Reconciling permit %s panicked and was skipped so the rest of the pass could continue: %v\n\nIt will be retried next pass; if it keeps panicking that record needs attention.", p.CouncilPermitID, r))
 		}
 	}()
-	s.reconcilePermit(ctx, p, vehByOwnerID, now, stats)
+	s.reconcilePermit(ctx, p, vehByOwnerID, stats)
 }
 
 type ownerVehicle struct {
@@ -1847,7 +1888,13 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 
 // reconcilePermit applies any needed plate change for one permit. It returns
 // true when it actually contacted the council (so the caller can space bursts).
-func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, now time.Time, stats *passStats) (hitCouncil bool) {
+func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, stats *passStats) (hitCouncil bool) {
+	// Resolve against a FRESH clock, not the one captured at the start of the pass: a
+	// governed pass over 500-1000 permits legitimately runs for minutes, and an
+	// override whose StartsAt falls inside that window must be seen as started for
+	// the permit being processed now — otherwise the previous plate is (re)applied
+	// and only corrected next pass, leaving the wrong car on a live permit meanwhile.
+	now := time.Now().In(s.loc)
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)

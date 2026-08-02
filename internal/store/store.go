@@ -33,7 +33,8 @@ var ErrDuplicate = errors.New("already exists")
 
 // Store wraps the database handle.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string // the DB file path, for opening a separate snapshot connection
 }
 
 // OpenSQLite opens (creating if needed) the database and runs migrations.
@@ -65,7 +66,7 @@ func OpenSQLite(path string) (*Store, error) {
 			return nil, fmt.Errorf("pragma %q: %w", pragma, err)
 		}
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, path: path}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -94,7 +95,19 @@ func (s *Store) Snapshot(ctx context.Context, path string) error {
 	// A leftover temp file from a previous crash would fail the VACUUM below, and it
 	// is not the live backup, so it is safe to clear.
 	_ = os.Remove(tmp)
-	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, tmp); err != nil {
+	// Run VACUUM INTO on a SEPARATE connection to the same WAL database rather than
+	// the single primary connection. On the primary it would hold the one connection
+	// for the whole copy — seconds as the DB grows — stalling every HTTP handler and
+	// the reconcile loop meanwhile. A second reader in WAL mode sees a consistent
+	// committed snapshot and does not block the primary writer. The connection lives
+	// only for the duration of the daily snapshot.
+	snapDB, err := sql.Open("sqlite", "file:"+s.path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer snapDB.Close()
+	snapDB.SetMaxOpenConns(1)
+	if _, err := snapDB.ExecContext(ctx, `VACUUM INTO ?`, tmp); err != nil {
 		_ = os.Remove(tmp) // don't leave a partial file for the next run to trip over
 		return err
 	}

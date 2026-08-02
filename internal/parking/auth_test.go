@@ -1,6 +1,7 @@
 package parking
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -287,4 +288,34 @@ func TestMergeSetCookieNoChange(t *testing.T) {
 	if got := mergeSetCookie(existing, nil); got != existing {
 		t.Fatalf("mergeSetCookie with no Set-Cookie changed the header: %q", got)
 	}
+}
+
+// A prompt=none authorize that returns 200 HTML is only a genuine expiry when it is
+// IdentityServer's own sign-in form (carries the antiforgery field). An EDGE
+// challenge page (Azure Front Door / WAF) also arrives as 200 HTML but has no such
+// marker, and must NOT be read as an expired session — otherwise a transient edge
+// event wrongly retires a no-saved-password user and prompts a re-link.
+func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
+	const owner = "html@example.com"
+
+	t.Run("real login form is an expiry", func(t *testing.T) {
+		f := newFakeCouncil(t)
+		c, st, box := testClient(t, f)
+		linkOwner(t, c, st, box, owner)
+		f.authHTML.Store(`<html><body><form><input name="__RequestVerificationToken" value="x"></form></body></html>`)
+		if err := c.Refresh(context.Background(), owner); !errors.Is(err, ErrSessionExpired) {
+			t.Fatalf("a real login form should read as expired, got %v", err)
+		}
+	})
+
+	t.Run("edge challenge is transient, not an expiry", func(t *testing.T) {
+		f := newFakeCouncil(t)
+		c, st, box := testClient(t, f)
+		linkOwner(t, c, st, box, owner)
+		f.authHTML.Store(`<html><body>Checking your browser… <script>challenge()</script></body></html>`)
+		err := c.Refresh(context.Background(), owner)
+		if err == nil || errors.Is(err, ErrSessionExpired) {
+			t.Fatalf("an edge challenge must not read as expired, got %v", err)
+		}
+	})
 }

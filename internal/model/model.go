@@ -217,14 +217,25 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 	}
 
 	wd := now.Weekday()
-	for _, r := range rules {
-		if r.Weekday == wd {
-			// A roster day begins at local midnight, and now is already in the
-			// timezone rosters are expressed in (see the doc comment), so the day
-			// boundary is read straight off it.
-			midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-			return Resolution{VehicleID: r.VehicleID, Source: SourceRoster, Since: midnight, Scheduled: true}
+	var bestRule *WeeklyRule
+	for i := range rules {
+		r := &rules[i]
+		if r.Weekday != wd {
+			continue
 		}
+		// Deterministic tie-break if the data ever holds two rules for one weekday (a
+		// UI bug, a manual DB edit, a concurrent write): highest ID wins, mirroring the
+		// override tie-break, so the chosen plate never silently depends on query order.
+		if bestRule == nil || r.ID > bestRule.ID {
+			bestRule = r
+		}
+	}
+	if bestRule != nil {
+		// A roster day begins at local midnight, and now is already in the timezone
+		// rosters are expressed in (see the doc comment), so the day boundary is read
+		// straight off it.
+		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		return Resolution{VehicleID: bestRule.VehicleID, Source: SourceRoster, Since: midnight, Scheduled: true}
 	}
 	return Resolution{Source: SourceNone}
 }

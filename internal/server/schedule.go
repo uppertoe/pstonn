@@ -433,6 +433,11 @@ func combineDateTime(date, timeStr, defaultTime string) string {
 	return date + "T" + t
 }
 
+// maxLiveOverridesPerPermit caps simultaneously-active bookings on one permit, so the
+// never-pruned override table cannot grow without bound. Generous — far above any
+// real household's use.
+const maxLiveOverridesPerPermit = 50
+
 func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	user, owner, _, ok := s.accountForWrite(w, r)
 	if !ok {
@@ -498,6 +503,18 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	}
 	if endsAt != nil && !endsAt.After(startsAt) {
 		s.formError(w, r, "The end time must be after the start time.")
+		return
+	}
+	// Cap simultaneously-live bookings per permit. Each open-ended override beats the
+	// roster until removed and sits forever in the shared, hot-path override table, so
+	// unchecked accumulation — a UI loop, a careless or hostile account — bloats the DB
+	// and slows every dashboard render and reconcile pass. A ceiling a real household
+	// never reaches.
+	if n, err := s.store.CountLiveOverrides(r.Context(), p.ID); err != nil {
+		s.serverError(w, err)
+		return
+	} else if n >= maxLiveOverridesPerPermit {
+		s.formError(w, r, "This permit already has the maximum number of active bookings. Remove one before adding another.")
 		return
 	}
 	// Either a saved vehicle, or a one-off plate that is NOT saved as a vehicle

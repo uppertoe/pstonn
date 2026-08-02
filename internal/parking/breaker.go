@@ -15,6 +15,13 @@ const (
 	defaultBreakerWindow    = 2 * time.Minute
 	defaultBreakerCooldown  = 5 * time.Minute
 	defaultBreakerProbe     = 30 * time.Second
+	// maxBreakerCooldown caps how long a single pushback can pause the WHOLE fleet.
+	// The edge's Retry-After floors the cooldown (so we honour a real backoff), but
+	// uncapped it is a fleet-wide, restart-surviving outage from one response header:
+	// Azure Front Door can legitimately send Retry-After: 86400 on a 429/503, which
+	// would otherwise pause all council traffic for a day. The half-open probe then
+	// re-checks every probeInterval, so a still-live block simply re-opens.
+	maxBreakerCooldown = 30 * time.Minute
 )
 
 // The per-owner cooldown (penalize/cooldownFor) protects ONE account's session
@@ -124,6 +131,9 @@ func (b *breaker) onPushback(now time.Time, owner string, retryAfter time.Durati
 		cd := b.cooldown
 		if retryAfter > cd {
 			cd = retryAfter
+		}
+		if cd > maxBreakerCooldown {
+			cd = maxBreakerCooldown // never let one header pause the whole fleet for hours
 		}
 		b.openUntil = now.Add(cd)
 		// A fresh open episode: invalidate any probe permit admitted under the old
