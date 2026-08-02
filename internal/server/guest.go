@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -756,14 +757,10 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		// but a revocation landing in the gap since then deletes the override and tells
 		// the owner the pass has stopped working — this stops us then putting the
 		// revoked guest's plate on the real permit anyway.
-		if ok, cerr := s.store.GuestOverrideStillAuthorised(applyCtx, overrideID, gc.TokenID); cerr != nil || !ok {
+		if d := s.authoriseGuestApply(applyCtx, gc.TokenID, overrideID); d != guestApplyAllowed {
 			release()
-			if cerr != nil {
-				log.Printf("guest: re-authorisation check for permit %d: %v", permit.ID, cerr)
-			}
-			s.sched.Kick() // let reconcile restore the correct target
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "",
-				"This link was turned off just now, so the permit wasn't changed.")
+			s.kickScheduler() // let reconcile restore the correct target
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
 			return
 		}
 		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
@@ -871,6 +868,16 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
 	err := error(errApplyBusy)
 	if claimed {
+		// The same gate activation uses. A revert is still a council write on a guest's
+		// authority: if the link was revoked while we were deciding the target, it must
+		// not reach the portal (overrideID 0 — a revert restores the pre-guest plate
+		// rather than exercising a vehicle/plate capability).
+		if d := s.authoriseGuestApply(applyCtx, gc.TokenID, 0); d != guestApplyAllowed {
+			release()
+			s.kickScheduler()
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
+			return
+		}
 		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, target); err == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, target); e != nil {
 				log.Printf("guest: reverted permit %d to %q at council but local commit failed: %v", permit.ID, target, e)
@@ -1684,7 +1691,13 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 	// not be announced: logging it and emailing the household "a guest pass was
 	// deleted, those links have stopped working" for an id that never existed
 	// invents an event, and the dedup key only suppresses identical repeats.
+	// Take the permit's apply claim BEFORE revoking, so an in-flight guest activation
+	// either completes first (and its override is then swept) or cannot start — a
+	// revocation must not be overtaken by a council write on the authority it removed.
+	pid, _ := s.store.GuestGrantPermit(r.Context(), owner, pathInt(r, "id"))
+	releaseClaims := s.claimPermitApplies(r.Context(), []int64{pid})
 	err := s.store.DeleteGuestGrant(r.Context(), owner, pathInt(r, "id"))
+	releaseClaims()
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
@@ -1692,7 +1705,7 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionGuestDelete, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit, and any car they had put on it has been taken off.")
+			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit, and p.stonn is taking any car they had put on it back off now — check the permit directly if this is urgent.")
 		// The sweep changed what the schedule resolves to, so the permit is now out of
 		// date. Without a kick it stays that way until the next pass — and the point of
 		// revoking was that the guest's plate comes off NOW.
@@ -1707,7 +1720,10 @@ func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 	// was taken away rather than merely that some access was.
 	recipient, _ := s.store.GuestTokenRecipient(r.Context(), owner, pathInt(r, "tid"))
 	// Tolerate a missing row, but don't log an action that didn't happen.
+	pid, _ := s.store.GuestTokenPermit(r.Context(), owner, pathInt(r, "tid"))
+	releaseClaims := s.claimPermitApplies(r.Context(), []int64{pid}) // see deleteGuestGrant
 	err := s.store.RevokeGuestToken(r.Context(), owner, pathInt(r, "tid"))
+	releaseClaims()
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.serverError(w, err)
 		return
@@ -1718,7 +1734,7 @@ func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 		// removing a door QR): one member cutting off a person the others invited is
 		// exactly the change silence hides.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" revoked a guest link"+optional(recipient, " (")+closeParen(recipient)+" on your p.stonn account. That link no longer works, and any car it had put on your permit has been taken off.")
+			user+" revoked a guest link"+optional(recipient, " (")+closeParen(recipient)+" on your p.stonn account. That link no longer works, and p.stonn is taking any car it had put on your permit back off now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
@@ -1736,7 +1752,21 @@ func (s *Server) kickScheduler() {
 func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
 	enabled := r.FormValue("enabled") != ""
-	if err := s.store.SetGuestsEnabled(r.Context(), owner, enabled); err != nil {
+	// Pausing is a revocation across every permit on the account: claim them all (in a
+	// stable order) so no guest apply can be in flight as the switch flips.
+	var releaseClaims = func() {}
+	if !enabled {
+		var ids []int64
+		if ps, perr := s.store.ListPermitsFor(r.Context(), owner); perr == nil {
+			for _, p := range ps {
+				ids = append(ids, p.ID)
+			}
+		}
+		releaseClaims = s.claimPermitApplies(r.Context(), ids)
+	}
+	err := s.store.SetGuestsEnabled(r.Context(), owner, enabled)
+	releaseClaims()
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -1749,7 +1779,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 		// Pausing kills every guest link at once — a visitor at the kerb just sees
 		// "no longer active", so the household should know it was deliberate.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" paused all guest passes on your p.stonn account. Existing guest links and printed door QRs will not work until they are resumed, and any car a guest had put on a permit has been taken off.")
+			user+" paused all guest passes on your p.stonn account. Existing guest links and printed door QRs will not work until they are resumed, and p.stonn is taking any car a guest had put on a permit back off now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
@@ -2147,7 +2177,7 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working, and any car approved through it has been taken off the permit.")
+			user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working, and p.stonn is taking any car approved through it back off the permit now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
@@ -2290,4 +2320,90 @@ func guestCreateMessage(err error, fallback string) string {
 		return "This link is no longer active, so the permit wasn't changed. Please ask the household for a new one."
 	}
 	return fallback
+}
+
+// guestApplyDenial says why a guest council write must not proceed: revoked (the
+// owner withdrew the authority) or unverifiable (we could not check). They are
+// different things to tell a visitor — calling a database blip "the owner turned your
+// link off" starts an argument at the kerb over something that did not happen.
+type guestApplyDenial int
+
+const (
+	guestApplyAllowed guestApplyDenial = iota
+	guestApplyRevoked
+	guestApplyUnverified
+)
+
+// authoriseGuestApply is the single gate EVERY public guest path must pass immediately
+// before writing to the council, while holding that permit's apply claim.
+//
+// It exists as one helper on purpose: activation was fixed first and revert was left
+// behind, which is the recurring shape of bugs here — a capability check added to one
+// path and not its sibling. Anything that writes to the council on a guest's behalf
+// goes through this.
+//
+// overrideID != 0 checks the FULL capability of that specific override (token, grant,
+// permit, account switch, and the vehicle/plate permission it exercised). overrideID 0
+// checks only that the link still carries authority at all — the revert case, which
+// restores the pre-guest plate rather than exercising a capability.
+func (s *Server) authoriseGuestApply(ctx context.Context, tokenID, overrideID int64) guestApplyDenial {
+	var ok bool
+	var err error
+	if overrideID != 0 {
+		ok, err = s.store.GuestOverrideStillAuthorised(ctx, overrideID, tokenID)
+	} else {
+		ok, err = s.store.GuestTokenStillLive(ctx, tokenID)
+	}
+	switch {
+	case err != nil:
+		log.Printf("guest: could not verify authorisation for token %d (override %d): %v", tokenID, overrideID, err)
+		return guestApplyUnverified
+	case !ok:
+		return guestApplyRevoked
+	}
+	return guestApplyAllowed
+}
+
+func (d guestApplyDenial) message() string {
+	if d == guestApplyRevoked {
+		return "This link was turned off just now, so the permit wasn't changed."
+	}
+	return "We couldn't check your link just now, so the permit wasn't changed. Please try again."
+}
+
+// claimPermitApplies takes the per-permit apply claim for every id before a revocation
+// mutates guest authority, and returns a release for all of them.
+//
+// Holding the claim is what gives revocation a real linearization point: an activation
+// that already holds it completes (it WAS authorised), and the sweep then removes its
+// override; an activation that has not started yet blocks, and its re-check afterwards
+// fails. Without this, "revoked" could still be overtaken by a council write. ids are
+// claimed in a stable order so two multi-permit revocations cannot deadlock, and a
+// claim we cannot get is logged and skipped — a revocation must never fail to revoke.
+func (s *Server) claimPermitApplies(ctx context.Context, ids []int64) func() {
+	if s.sched == nil {
+		return func() {}
+	}
+	sorted := append([]int64(nil), ids...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	var releases []func()
+	for _, id := range sorted {
+		if id == 0 {
+			continue
+		}
+		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		release, ok := s.sched.AcquireApply(cctx, id)
+		cancel()
+		if !ok {
+			log.Printf("guest: revoking without the apply claim for permit %d (busy); a guest write in flight may still land and be reconciled away", id)
+			release()
+			continue
+		}
+		releases = append(releases, release)
+	}
+	return func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}
 }

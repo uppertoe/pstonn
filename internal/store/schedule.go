@@ -363,14 +363,16 @@ WHERE id = ? AND permit_id = ? AND permit_id IN (SELECT id FROM permit WHERE own
 }
 
 // GuestOverrideStillAuthorised reports whether a guest-created override is STILL
-// authorised to be applied: the row survives (every revocation path sweeps live
-// overrides by token) and its link is still live.
+// authorised to be applied, checking the WHOLE capability rather than just existence:
+// the row survives (every revocation path sweeps live overrides by token), the token is
+// unrevoked, the grant is enabled and still covers this permit, the account-level guest
+// switch is on, and the specific capability exercised is still granted — the chosen
+// saved vehicle is still in the pass, or arbitrary plates are still allowed.
 //
-// The guarded insert proves the link was live at INSERT time, but the council write
-// happens seconds later. Without this second check a revocation landing in that gap
-// lets a revoked guest's plate reach the real permit — after the owner has been told
-// the pass stopped working. Called under the permit apply claim, immediately before
-// the council write, so the answer cannot go stale while the write is decided.
+// The guarded insert proves all that at INSERT time, but the council write happens
+// seconds later, and an owner can revoke or EDIT the pass in between (removing the very
+// vehicle the guest picked). Called under the permit apply claim immediately before the
+// council write.
 func (s *Store) GuestOverrideStillAuthorised(ctx context.Context, overrideID, guestTokenID int64) (bool, error) {
 	if overrideID == 0 || guestTokenID == 0 {
 		return false, nil
@@ -380,7 +382,56 @@ func (s *Store) GuestOverrideStillAuthorised(ctx context.Context, overrideID, gu
 SELECT COUNT(*) FROM override o
 JOIN guest_token t ON t.id = o.guest_token_id
 JOIN guest_grant g ON g.id = t.grant_id
-WHERE o.id = ? AND o.guest_token_id = ? AND t.revoked_at = '' AND g.enabled = 1`,
+WHERE o.id = ? AND o.guest_token_id = ?
+  AND t.revoked_at = '' AND g.enabled = 1 AND g.permit_id = o.permit_id
+  AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1
+  AND ((o.vehicle_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM guest_grant_vehicle gv
+                    WHERE gv.grant_id = g.id AND gv.vehicle_id = o.vehicle_id))
+    OR (o.vehicle_id IS NULL AND g.allow_plate = 1))`,
 		overrideID, guestTokenID).Scan(&n)
 	return n > 0, err
+}
+
+// GuestTokenStillLive reports whether a guest link still carries any authority at all:
+// unrevoked token, enabled grant, account switch on. Used before a council write that
+// is not exercising a specific capability — a REVERT puts back the plate that was there
+// before the guest touched it, so it must not be gated on the vehicle/plate permissions
+// an activation needs (a pass without allow_plate can still undo itself).
+func (s *Store) GuestTokenStillLive(ctx context.Context, guestTokenID int64) (bool, error) {
+	if guestTokenID == 0 {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM guest_token t
+JOIN guest_grant g ON g.id = t.grant_id
+WHERE t.id = ? AND t.revoked_at = '' AND g.enabled = 1
+  AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
+		guestTokenID).Scan(&n)
+	return n > 0, err
+}
+
+// GuestGrantPermit / GuestTokenPermit resolve the permit a revocation affects, so the
+// handler can take that permit's apply claim BEFORE revoking — which is what makes the
+// revocation and any in-flight guest apply serialise against each other.
+func (s *Store) GuestGrantPermit(ctx context.Context, owner string, grantID int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT permit_id FROM guest_grant WHERE id = ? AND owner = ?`, grantID, owner).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return id, err
+}
+
+func (s *Store) GuestTokenPermit(ctx context.Context, owner string, tokenID int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT g.permit_id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+WHERE t.id = ? AND g.owner = ?`, tokenID, owner).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return id, err
 }
