@@ -348,7 +348,7 @@ func TestLinkPostsCredentialsToCouncilHost(t *testing.T) {
 	f := newLinkFake(t)
 	c, st, _ := clientAt(t, f.srv.URL)
 
-	if err := c.Link(context.Background(), "ok@example.com", "ok@example.com", "hunter2", false, true); err != nil {
+	if err := c.Link(context.Background(), "ok@example.com", "ok@example.com", "hunter2", false, true, 0); err != nil {
 		t.Fatalf("Link = %v, want success", err)
 	}
 	form := f.postedForm()
@@ -372,7 +372,7 @@ func TestLinkRefusesOffHostFormAction(t *testing.T) {
 	f.action = exfil.URL + "/steal"
 	c, st, _ := clientAt(t, f.srv.URL)
 
-	err := c.Link(context.Background(), "v@example.com", "v@example.com", "hunter2", true, true)
+	err := c.Link(context.Background(), "v@example.com", "v@example.com", "hunter2", true, true, 0)
 	if !errors.Is(err, ErrLoginOffHost) {
 		t.Fatalf("Link = %v, want ErrLoginOffHost", err)
 	}
@@ -400,7 +400,7 @@ func TestLinkRefusesOffHostRedirect(t *testing.T) {
 	f.loginRedirect = exfil.URL + "/Account/Login"
 	c, _, _ := clientAt(t, f.srv.URL)
 
-	err := c.Link(context.Background(), "r@example.com", "r@example.com", "hunter2", true, true)
+	err := c.Link(context.Background(), "r@example.com", "r@example.com", "hunter2", true, true, 0)
 	if !errors.Is(err, ErrLoginOffHost) {
 		t.Fatalf("Link = %v, want ErrLoginOffHost", err)
 	}
@@ -423,7 +423,7 @@ func TestLinkRejectsPrefixedSiblingCookieOnly(t *testing.T) {
 	}
 	c, st, _ := clientAt(t, f.srv.URL)
 
-	err := c.Link(context.Background(), "sib@example.com", "sib@example.com", "hunter2", true, true)
+	err := c.Link(context.Background(), "sib@example.com", "sib@example.com", "hunter2", true, true, 0)
 	if !errors.Is(err, ErrLoginRejected) {
 		t.Fatalf("Link = %v, want ErrLoginRejected", err)
 	}
@@ -445,7 +445,7 @@ func TestLinkRefusesEmptyAntiforgeryToken(t *testing.T) {
 	c, _, _ := clientAt(t, f.srv.URL)
 	c.authURL = srv.URL + "/idm/connect/authorize" // serves the page directly
 
-	err := c.Link(context.Background(), "af@example.com", "af@example.com", "hunter2", true, true)
+	err := c.Link(context.Background(), "af@example.com", "af@example.com", "hunter2", true, true, 0)
 	if !errors.Is(err, ErrLoginFormUnrecognised) {
 		t.Fatalf("Link = %v, want ErrLoginFormUnrecognised", err)
 	}

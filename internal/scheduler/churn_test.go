@@ -93,7 +93,7 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
 	cs, _ := st.GetCouncilSession(ctx, owner)
-	if got := s.recoverOrRetire(ctx, owner, cs.LinkedAt); got != reconnectDeferred {
+	if got := s.recoverOrRetire(ctx, owner, cs.Generation); got != reconnectDeferred {
 		t.Fatalf("a login-shape failure should defer (keep the session), got %v", got)
 	}
 	if _, err := st.GetCouncilSession(ctx, owner); err != nil {

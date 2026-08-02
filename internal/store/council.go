@@ -73,6 +73,13 @@ type CouncilSession struct {
 	// rarer question — did the permit change outside p.stonn — and coupling them
 	// doubled keep-warm's council traffic for no session-survival benefit.
 	DriftCheckedAt time.Time
+	// Generation is a monotonic version of the session MATERIAL (cookie/password),
+	// bumped on every successful write — interactive link, auto-reconnect, silent
+	// renew, cookie rotation, password opt-out. The async reconnect queue captures it
+	// at enqueue and conditions its save/delete on it, so recovery work can never act
+	// on a session that has since changed (linked_at, a business clock, is not a
+	// complete version and is preserved across auto-reconnect).
+	Generation int64
 }
 
 // ---- Council session (per app user) ----
@@ -83,9 +90,9 @@ func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSes
 	var cs CouncilSession
 	var expiry, updated, linked, reminded, reconnected, lastActive, driftChecked string
 	err := s.db.QueryRowContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at, drift_checked_at
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at, drift_checked_at, session_generation
 FROM council_session WHERE owner = ?`, owner).
-		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive, &driftChecked)
+		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive, &driftChecked, &cs.Generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
 	}
@@ -107,7 +114,7 @@ FROM council_session WHERE owner = ?`, owner).
 // secrets are included so callers can renew without a second lookup.
 func (s *Store) ListCouncilSessions(ctx context.Context) ([]CouncilSession, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at
+SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at, session_generation
 FROM council_session`)
 	if err != nil {
 		return nil, err
@@ -117,7 +124,7 @@ FROM council_session`)
 	for rows.Next() {
 		var cs CouncilSession
 		var expiry, updated, linked, reminded, lastActive, driftChecked string
-		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive, &driftChecked); err != nil {
+		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive, &driftChecked, &cs.Generation); err != nil {
 			return nil, err
 		}
 		cs.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
@@ -293,7 +300,8 @@ ON CONFLICT(owner) DO UPDATE SET
     reminder_sent_at    = '',
     confirm_token       = '',
     password_sealed     = excluded.password_sealed,
-    last_active_at      = excluded.last_active_at`,
+    last_active_at      = excluded.last_active_at,
+    session_generation  = council_session.session_generation + 1`,
 		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
 		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now)
 	return err
@@ -305,14 +313,32 @@ ON CONFLICT(owner) DO UPDATE SET
 // the only path that replays the saved password (silent cookie renews go through
 // UpdateCouncilToken), so the stamp is exactly "your password was used". A no-op
 // if the row is gone.
-func (s *Store) SaveReconnectedSession(ctx context.Context, cs CouncilSession) error {
+// ErrSessionSuperseded means a generation-conditioned session write matched no row:
+// the session material changed (a relink, unlink, another reconnect, or a password
+// opt-out) since the generation was captured, so this write must be treated as
+// superseded rather than applied.
+var ErrSessionSuperseded = errors.New("store: council session superseded since generation captured")
+
+// SaveReconnectedSessionIfGen writes the fresh cookie + (re-sealed) saved password
+// after a silent auto-reconnect — but ONLY if the row is still at expectedGen, so an
+// in-flight reconnect can never overwrite a session the user has since changed (a
+// relink, or a "stop auto-reconnecting" opt-out that cleared the password). It bumps
+// the generation and (deliberately) does NOT advance linked_at — the re-authorise
+// clock moves only on an interactive re-link — but stamps reconnected_at, the one path
+// that replays the saved password. Returns whether a row was written.
+func (s *Store) SaveReconnectedSessionIfGen(ctx context.Context, cs CouncilSession, expectedGen int64) (bool, error) {
 	now := nowUTC()
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
-SET cookie_sealed = ?, password_sealed = ?, updated_at = ?, reconnected_at = ?
-WHERE owner = ?`,
-		cs.Cookie, cs.Password, now, now, cs.Owner)
-	return err
+SET cookie_sealed = ?, password_sealed = ?, updated_at = ?, reconnected_at = ?,
+    session_generation = session_generation + 1
+WHERE owner = ? AND session_generation = ?`,
+		cs.Cookie, cs.Password, now, now, cs.Owner, expectedGen)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // UpdateCouncilToken refreshes just the cached access token and the (possibly
@@ -320,7 +346,8 @@ WHERE owner = ?`,
 func (s *Store) UpdateCouncilToken(ctx context.Context, owner, sealedCookie, sealedAccess string, expiry time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE council_session
-SET cookie_sealed = ?, access_token_sealed = ?, token_expiry = ?, updated_at = ?
+SET cookie_sealed = ?, access_token_sealed = ?, token_expiry = ?, updated_at = ?,
+    session_generation = session_generation + 1
 WHERE owner = ?`,
 		sealedCookie, sealedAccess, expiry.UTC().Format(time.RFC3339), nowUTC(), owner)
 	return err
@@ -334,7 +361,7 @@ WHERE owner = ?`,
 func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, sealedCookie string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE council_session
-SET cookie_sealed = ?, updated_at = ?
+SET cookie_sealed = ?, updated_at = ?, session_generation = session_generation + 1
 WHERE owner = ?`,
 		sealedCookie, nowUTC(), owner)
 	return err
@@ -345,7 +372,7 @@ WHERE owner = ?`,
 // session later expires it will require a manual re-link, as if never saved.
 func (s *Store) ClearCouncilPassword(ctx context.Context, owner string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE council_session SET password_sealed = '' WHERE owner = ?`, owner)
+		`UPDATE council_session SET password_sealed = '', session_generation = session_generation + 1 WHERE owner = ?`, owner)
 	return err
 }
 
@@ -392,15 +419,16 @@ WHERE owner = ?
 	return n > 0, err
 }
 
-// DeleteCouncilSessionIfGen removes the session ONLY if its linked_at still equals
-// gen — the generation observed when a reconnect was queued. A manual relink or a
-// reconnect since then stamps a fresh linked_at, so this deletes nothing and the new
-// session survives: stale recovery work can never retire a session the user just
-// re-established. Returns whether a row was actually deleted.
-func (s *Store) DeleteCouncilSessionIfGen(ctx context.Context, owner string, gen time.Time) (bool, error) {
+// DeleteCouncilSessionIfGen removes the session ONLY if its session_generation still
+// equals gen — the generation observed when a reconnect was queued. Any successful
+// session write since (a relink, an auto-reconnect, a renew, a password opt-out) has
+// bumped the generation, so this deletes nothing and the current session survives:
+// stale recovery work can never retire a session that has since changed. Returns
+// whether a row was actually deleted.
+func (s *Store) DeleteCouncilSessionIfGen(ctx context.Context, owner string, gen int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM council_session WHERE owner = ? AND linked_at = ?`,
-		owner, gen.UTC().Format(time.RFC3339))
+		`DELETE FROM council_session WHERE owner = ? AND session_generation = ?`,
+		owner, gen)
 	if err != nil {
 		return false, err
 	}

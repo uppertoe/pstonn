@@ -16,7 +16,7 @@ import (
 // constant silently stops a newly added ALTER from ever reaching an existing
 // database, which is a far worse failure than re-running statements that are all
 // idempotent and cost microseconds on an already-migrated file.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // migrationLockTTL bounds how long a dead migrator keeps the next start out. A
 // process killed mid-migration leaves the row claimed, and with no takeover window
@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS council_session (
     password_sealed      TEXT NOT NULL DEFAULT '',   -- opt-in sealed council password for auto-reconnect (empty = not saved)
     reconnected_at       TEXT NOT NULL DEFAULT '',   -- last saved-password auto-reconnect; shown to the user in Settings
     last_active_at       TEXT NOT NULL DEFAULT '',    -- last authenticated visit by ANY member; the idle clock (see decideWarm)
-    drift_checked_at     TEXT NOT NULL DEFAULT ''     -- last owner-grid drift/expiry read; its own cadence, decoupled from keep-warm
+    drift_checked_at     TEXT NOT NULL DEFAULT '',    -- last owner-grid drift/expiry read; its own cadence, decoupled from keep-warm
+    session_generation   INTEGER NOT NULL DEFAULT 1   -- monotonic version of the session material; the async reconnect queue's compare-and-swap token
 );
 
 CREATE TABLE IF NOT EXISTS vehicle (
@@ -449,6 +450,7 @@ INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 		`ALTER TABLE guest_token ADD COLUMN baseline_until TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN reconnected_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN drift_checked_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE council_session ADD COLUMN session_generation INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE guest_request ADD COLUMN decided_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_request ADD COLUMN until_ts TEXT NOT NULL DEFAULT ''`,
 		// Which member minted a guest pass. Needed to revoke a departing member's

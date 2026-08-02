@@ -118,7 +118,7 @@ func TestLiveMeasureIdleTimeout(t *testing.T) {
 	// Obtain a fresh, isolated session in the store, then drive keep-warm Refresh.
 	// Progress goes to stdout (fmt) not t.Log, so it streams live during the run.
 	if user != "" {
-		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
 		fmt.Printf("[%s] fresh headless login OK, session isolated to this probe\n", time.Now().Format("15:04:05"))
@@ -229,7 +229,7 @@ func TestLiveLinkLogin(t *testing.T) {
 	c := New(cfg, st, box)
 
 	// 1. Headless login → stores the sealed session cookie, discards the password.
-	if err := c.Link(ctx, owner, username, password, false, true); err != nil {
+	if err := c.Link(ctx, owner, username, password, false, true, 0); err != nil {
 		t.Fatalf("Link (headless login) failed: %v", err)
 	}
 	if !c.Linked(ctx, owner) {
@@ -376,7 +376,7 @@ func TestLiveSessionKick(t *testing.T) {
 		if user == "" || pass == "" {
 			t.Fatal("phase=link needs PSTONN_LIVE_USERNAME and PSTONN_LIVE_PASSWORD")
 		}
-		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 			t.Fatalf("headless link failed: %v", err)
 		}
 		// Prove it's alive right now via the exact production keep-warm path.
@@ -480,7 +480,7 @@ func TestLiveAuthorizeOnlyWarm(t *testing.T) {
 	const owner = "warm-probe@local"
 	c, _, st := liveClient(t)
 
-	if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+	if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 		t.Fatalf("headless login: %v", err)
 	}
 	cs, err := st.GetCouncilSession(ctx, owner)
@@ -574,7 +574,7 @@ func TestLiveWarmRenewIdleTimeout(t *testing.T) {
 	// Starting cookie: a fresh isolated headless login (preferred), or the seed.
 	var cookie string
 	if user != "" {
-		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
 		cs, err := c.store.GetCouncilSession(ctx, owner)

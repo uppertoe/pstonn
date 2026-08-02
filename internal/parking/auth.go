@@ -264,7 +264,11 @@ func (c *Client) exchangeCode(ctx context.Context, owner, code, verifier string)
 // re-authorise clock (linked_at); a non-interactive call (auto-reconnect) keeps
 // the clock anchored to the last real interactive link, so the periodic
 // "confirm you're still using this" bound still fires.
-func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword, interactive bool) error {
+// expectedGen conditions the NON-interactive (auto-reconnect) save on the session
+// generation observed when recovery was decided, so an in-flight reconnect can't
+// overwrite a session the user changed meanwhile (a relink, or a password opt-out);
+// it is ignored for an interactive link (which writes a fresh session unconditionally).
+func (c *Client) Link(ctx context.Context, owner, username, password string, savePassword, interactive bool, expectedGen int64) error {
 	if c.sandbox != nil {
 		return c.sandboxLink(ctx, owner, username) // any credentials link in sandbox mode
 	}
@@ -441,9 +445,18 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	}
 	cs := store.CouncilSession{Owner: owner, Cookie: sealed, Password: sealedPass}
 	if interactive {
-		return c.store.SaveCouncilSession(ctx, cs) // stamps linked_at = now
+		return c.store.SaveCouncilSession(ctx, cs) // stamps linked_at = now, bumps generation
 	}
-	return c.store.SaveReconnectedSession(ctx, cs) // preserves linked_at
+	// Auto-reconnect: persist ONLY if the session is still at expectedGen. If the user
+	// relinked or opted out of saved-password recovery during our login, the write
+	// lands nowhere and we report it superseded rather than clobbering their change.
+	switch saved, err := c.store.SaveReconnectedSessionIfGen(ctx, cs, expectedGen); {
+	case err != nil:
+		return err
+	case !saved:
+		return store.ErrSessionSuperseded
+	}
+	return nil
 }
 
 // Reconnect re-establishes an expired session non-interactively using the sealed
@@ -479,8 +492,9 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	}
 	// The council username is pinned to the owner's verified email at link time,
 	// so the owner doubles as the username here. interactive=false keeps the saved
-	// password and does NOT advance the re-authorise clock.
-	return c.Link(ctx, owner, owner, password, true, false)
+	// password and does NOT advance the re-authorise clock. The save is conditioned on
+	// the generation we just read, so a change during the login supersedes it.
+	return c.Link(ctx, owner, owner, password, true, false, cs.Generation)
 }
 
 // The council's page double-quotes its attribute values today, but quoting style

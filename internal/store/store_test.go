@@ -502,8 +502,13 @@ func TestSaveReconnectedSessionPreservesLinkedAt(t *testing.T) {
 	if !orig.ReconnectedAt.IsZero() {
 		t.Fatal("reconnected_at should be zero before any password reconnect")
 	}
-	if err := s.SaveReconnectedSession(ctx, CouncilSession{Owner: owner, Cookie: "c2", Password: "pw2"}); err != nil {
-		t.Fatal(err)
+	if saved, err := s.SaveReconnectedSessionIfGen(ctx, CouncilSession{Owner: owner, Cookie: "c2", Password: "pw2"}, orig.Generation); err != nil || !saved {
+		t.Fatalf("reconnect save at the current generation should land: saved=%v err=%v", saved, err)
+	}
+	// A save at a STALE generation must land nowhere (the compare-and-swap that stops
+	// an in-flight reconnect clobbering a session the user changed).
+	if saved, err := s.SaveReconnectedSessionIfGen(ctx, CouncilSession{Owner: owner, Cookie: "c3", Password: "pw3"}, orig.Generation); err != nil || saved {
+		t.Fatalf("a stale-generation reconnect save must not land: saved=%v err=%v", saved, err)
 	}
 	got, _ := s.GetCouncilSession(ctx, owner)
 	if !got.LinkedAt.Equal(orig.LinkedAt) {

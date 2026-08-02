@@ -95,7 +95,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 	c := New(cfg, st, box)
 
 	if user != "" {
-		if err := c.Link(ctx, owner, user, pass, false, true); err != nil {
+		if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
 	} else {
