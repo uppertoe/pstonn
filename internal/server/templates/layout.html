@@ -103,11 +103,13 @@
 {{if or (eq .State "landing") (eq .State "how")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "demos.js"}}"></script>{{end}}
 {{template "styles" .}}
-</head>
-<body hx-boost="true">
-<a href="#main" class="skip-link">Skip to content</a>
-<div id="htmx-bar" aria-hidden="true"></div>
-<div id="toast" role="status" aria-live="polite"></div>
+{{/* These live in the head, NOT in the body: the body is hx-boost="true", so htmx
+     swaps its innerHTML on every boosted navigation and RE-CREATES any script
+     element it finds there. A re-created one cannot inherit the nonce (browsers
+     hide the nonce value from the DOM after parsing), so the CSP blocked these on
+     every navigation. Both only register globals, so running once in the head is
+     correct as well as sufficient. Keep new inline scripts here for the same
+     reason. */}}
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>
   // Show the top loading bar during any htmx request (incl. boosted navigation).
   addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
@@ -162,36 +164,6 @@
     toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
   }
 </script>
-
-{{if eq .State "landing"}}{{template "page-landing" .}}
-{{- else if eq .State "security"}}{{template "page-security" .}}
-{{- else if eq .State "how"}}{{template "page-how" .}}
-{{- else if eq .State "contact"}}{{template "page-contact" .}}
-{{- else if eq .State "guest"}}{{template "page-guest" .}}
-{{- else if eq .State "guest-wait"}}{{template "page-guest-wait" .}}
-{{- else if eq .State "guest-result"}}{{template "page-guest-result" .}}
-{{- else if eq .State "unsubscribe"}}{{template "page-unsubscribe" .}}
-{{- else if eq .State "confirm"}}{{template "page-confirm" .}}
-{{- else if eq .State "terms"}}{{template "page-terms" .}}
-{{- else if eq .State "onboarding"}}{{template "page-onboarding" .}}
-{{- else if eq .State "picker"}}{{template "page-picker" .}}
-{{- else if eq .State "doorqr"}}{{template "page-doorqr" .}}
-{{- else if eq .State "admin"}}{{template "page-admin" .}}
-{{- else}}{{template "page-app" .}}
-{{- end}}
-
-{{/* Shared confirm dialog. appConfirm() drives it for both data-confirm forms
-     and hx-confirm requests; falls back to native confirm() where <dialog>
-     is unsupported. data-confirm-ok customises the confirm button label. */}}
-<dialog id="confirm-dlg" class="confirm">
-  <div class="dlg-box">
-    <p class="dlg-msg"></p>
-    <div class="dlg-actions">
-      <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
-      <button type="button" class="danger dlg-ok">Confirm</button>
-    </div>
-  </div>
-</dialog>
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>
 {{/* Keep a schedule popover on-screen: it opens centred on its cell, so ones
      anchored near a viewport edge overhang it and get clipped (overflow-x is
@@ -273,5 +245,40 @@ window.popClamp = window.popClamp || function (el) {
   });
 })();
 </script>
+</head>
+<body hx-boost="true">
+<a href="#main" class="skip-link">Skip to content</a>
+<div id="htmx-bar" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+{{if eq .State "landing"}}{{template "page-landing" .}}
+{{- else if eq .State "security"}}{{template "page-security" .}}
+{{- else if eq .State "how"}}{{template "page-how" .}}
+{{- else if eq .State "contact"}}{{template "page-contact" .}}
+{{- else if eq .State "guest"}}{{template "page-guest" .}}
+{{- else if eq .State "guest-wait"}}{{template "page-guest-wait" .}}
+{{- else if eq .State "guest-result"}}{{template "page-guest-result" .}}
+{{- else if eq .State "unsubscribe"}}{{template "page-unsubscribe" .}}
+{{- else if eq .State "confirm"}}{{template "page-confirm" .}}
+{{- else if eq .State "terms"}}{{template "page-terms" .}}
+{{- else if eq .State "onboarding"}}{{template "page-onboarding" .}}
+{{- else if eq .State "picker"}}{{template "page-picker" .}}
+{{- else if eq .State "doorqr"}}{{template "page-doorqr" .}}
+{{- else if eq .State "admin"}}{{template "page-admin" .}}
+{{- else}}{{template "page-app" .}}
+{{- end}}
+
+{{/* Shared confirm dialog. appConfirm() drives it for both data-confirm forms
+     and hx-confirm requests; falls back to native confirm() where <dialog>
+     is unsupported. data-confirm-ok customises the confirm button label. */}}
+<dialog id="confirm-dlg" class="confirm">
+  <div class="dlg-box">
+    <p class="dlg-msg"></p>
+    <div class="dlg-actions">
+      <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
+      <button type="button" class="danger dlg-ok">Confirm</button>
+    </div>
+  </div>
+</dialog>
 </body>
 </html>{{end}}
