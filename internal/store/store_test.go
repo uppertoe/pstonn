@@ -2629,3 +2629,20 @@ func TestBackfillRecoloursOldPalette(t *testing.T) {
 		}
 	}
 }
+
+// CreateOverrideCapped enforces the live-override cap atomically.
+func TestCreateOverrideCappedEnforcesLimit(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "cap@example.com"
+	veh, _ := s.CreateVehicle(ctx, owner, "REG1", "car")
+	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
+	for i := 0; i < 3; i++ {
+		if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", time.Now(), nil, owner, 3); err != nil {
+			t.Fatalf("create %d under the limit: %v", i, err)
+		}
+	}
+	if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", time.Now(), nil, owner, 3); !errors.Is(err, ErrOverrideLimit) {
+		t.Fatalf("over the limit should be ErrOverrideLimit, got %v", err)
+	}
+}

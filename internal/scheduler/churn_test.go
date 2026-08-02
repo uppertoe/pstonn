@@ -48,9 +48,10 @@ func TestSessionChurnAlertsOnDistinctOwners(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 	ctx := context.Background()
 
-	// The same owner three times must NOT alert (one flapping account is not systemic).
+	// The same owner three times must NOT alert (the queue dedups by owner, so the
+	// churn is noted once — one flapping account is not systemic).
 	for i := 0; i < 3; i++ {
-		s.recoverOrRetire(ctx, "flap@example.com")
+		s.enqueueReconnect(ctx, "flap@example.com")
 	}
 	time.Sleep(40 * time.Millisecond)
 	if hasAdmin(fn, "expiring unusually often") {
@@ -59,20 +60,20 @@ func TestSessionChurnAlertsOnDistinctOwners(t *testing.T) {
 
 	// Three DIFFERENT owners within the window → systemic.
 	for _, o := range []string{"a@example.com", "b@example.com", "c@example.com"} {
-		s.recoverOrRetire(ctx, o)
+		s.enqueueReconnect(ctx, o)
 	}
 	time.Sleep(60 * time.Millisecond)
 	if !hasAdmin(fn, "expiring unusually often") {
 		t.Fatalf("three distinct owners re-authing should alert, got %v", fn.adminSnap())
 	}
 
-	// And the churn is visible on the metric surface.
+	// And the churn is visible on the metric surface (flap deduped to 1, plus a/b/c).
 	exp, _, owners := s.SessionChurn()
 	if owners < 3 {
 		t.Errorf("expired_owners_1h = %d, want >=3", owners)
 	}
-	if exp < 6 {
-		t.Errorf("expiries_1h = %d, want >=6 (flap x3 + three owners)", exp)
+	if exp < 4 {
+		t.Errorf("expiries_1h = %d, want >=4 (flap once + three owners)", exp)
 	}
 }
 
@@ -88,8 +89,8 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 	fc := &fakeCouncil{reconnectSet: true, reconnectErr: parking.ErrLoginFormUnrecognised}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
-	if s.recoverOrRetire(ctx, owner) {
-		t.Fatal("a login-shape failure must not report the session recovered")
+	if got := s.recoverOrRetire(ctx, owner); got != reconnectDeferred {
+		t.Fatalf("a login-shape failure should defer (keep the session), got %v", got)
 	}
 	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
 		t.Fatalf("session was retired on a login-shape change (recovery could not resume): %v", err)
@@ -107,8 +108,9 @@ func TestReconnectCounted(t *testing.T) {
 	fc := &fakeCouncil{reconnectSet: true} // reconnectErr nil = success
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
-	if !s.recoverOrRetire(ctx, "ok@example.com") {
-		t.Fatal("a nil reconnect error should report recovery")
+	s.enqueueReconnect(ctx, "ok@example.com") // discovery notes the expiry
+	if got := s.recoverOrRetire(ctx, "ok@example.com"); got != reconnectRecovered {
+		t.Fatalf("a nil reconnect error should report recovery, got %v", got)
 	}
 	exp, reconns, _ := s.SessionChurn()
 	if reconns != 1 {
