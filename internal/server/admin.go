@@ -269,6 +269,13 @@ type sessionCounts struct {
 	Expiries1h      int `json:"expiries_1h"`
 	Reconnects1h    int `json:"reconnects_1h"`
 	ExpiredOwners1h int `json:"expired_owners_1h"`
+	// Reconnect-queue backlog, so the watchdog can tell healthy draining from a
+	// growing recovery backlog (a login-shape outage or repeated transient failures):
+	// how many owners are queued for auto-reconnect, how many are due now, and the age
+	// of the oldest queued item in seconds.
+	ReconnectQueued        int `json:"reconnect_queued"`
+	ReconnectDue           int `json:"reconnect_due"`
+	ReconnectOldestSeconds int `json:"reconnect_oldest_seconds"`
 }
 
 // councilSessionCounts aggregates warm/expiry-margin health from the live sessions.
@@ -395,6 +402,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, scheduled)
 	counts.Expiries1h, counts.Reconnects1h, counts.ExpiredOwners1h = s.sched.SessionChurn()
+	counts.ReconnectQueued, counts.ReconnectDue, counts.ReconnectOldestSeconds = s.sched.ReconnectBacklog()
 	last := s.sched.LastReconcile()
 	resp := statusResponse{
 		Time: now.UTC().Format(time.RFC3339),

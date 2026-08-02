@@ -465,7 +465,7 @@ func TestStatusRosterSealed(t *testing.T) {
 		t.Fatalf("the plain health poll should carry no roster: %s", body)
 	}
 	// ...but it DOES carry the council-health section the watchdog alerts on.
-	for _, key := range []string{`"council"`, `"requests_1m"`, `"breaker_open"`, `"breaker_persist_ok"`, `"overdue_warm"`, `"near_expiry"`, `"expiries_1h"`, `"reconnects_1h"`, `"expired_owners_1h"`} {
+	for _, key := range []string{`"council"`, `"requests_1m"`, `"breaker_open"`, `"breaker_persist_ok"`, `"overdue_warm"`, `"near_expiry"`, `"expiries_1h"`, `"reconnects_1h"`, `"expired_owners_1h"`, `"reconnect_queued"`, `"reconnect_due"`} {
 		if !strings.Contains(body, key) {
 			t.Fatalf("status payload missing watchdog key %s: %s", key, body)
 		}
