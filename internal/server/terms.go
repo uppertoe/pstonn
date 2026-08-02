@@ -137,6 +137,7 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, derr)
 		return
 	}
+	s.sched.CancelReconnect(user) // session gone; drop any queued reconnect
 	if wasLinked {
 		log.Printf("user %s declined updated terms, council account disconnected", user)
 		go func() {

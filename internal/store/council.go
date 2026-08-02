@@ -392,6 +392,22 @@ WHERE owner = ?
 	return n > 0, err
 }
 
+// DeleteCouncilSessionIfGen removes the session ONLY if its linked_at still equals
+// gen — the generation observed when a reconnect was queued. A manual relink or a
+// reconnect since then stamps a fresh linked_at, so this deletes nothing and the new
+// session survives: stale recovery work can never retire a session the user just
+// re-established. Returns whether a row was actually deleted.
+func (s *Store) DeleteCouncilSessionIfGen(ctx context.Context, owner string, gen time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM council_session WHERE owner = ? AND linked_at = ?`,
+		owner, gen.UTC().Format(time.RFC3339))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // BreakerState is the persisted fleet-circuit-breaker pause. OpenUntil in the
 // future on boot means the breaker should start paused (a block that a restart
 // must not clear); Generation is carried forward to stay monotonic.
