@@ -84,7 +84,13 @@ func (c *Client) authorizeWithCookie(ctx context.Context, owner, cookie string) 
 	// IdentityServer page from any other 200, and the classification below turns
 	// on that. Bounded because the rest of the body is of no interest and a
 	// hostile or broken portal must not be able to make us read without limit.
-	head, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	//
+	// 64 KiB, not 8: the expiry test looks for the antiforgery field ANYWHERE in this
+	// prefix, so a sign-in page that grew past the limit (inline CSS/JS is ordinary
+	// for a login page) would push the marker out of view and make every genuine
+	// expiry on this path classify as transient — a session that never gets recovered.
+	// Still trivially bounded against a hostile body.
+	head, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	drainClose(resp)
 
 	newCookie = mergeSetCookie(cookie, resp.Cookies())

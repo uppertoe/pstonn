@@ -73,12 +73,16 @@ type CouncilSession struct {
 	// rarer question — did the permit change outside p.stonn — and coupling them
 	// doubled keep-warm's council traffic for no session-survival benefit.
 	DriftCheckedAt time.Time
-	// Generation is a monotonic version of the session MATERIAL (cookie/password),
-	// bumped on every successful write — interactive link, auto-reconnect, silent
-	// renew, cookie rotation, password opt-out. The async reconnect queue captures it
-	// at enqueue and conditions its save/delete on it, so recovery work can never act
-	// on a session that has since changed (linked_at, a business clock, is not a
-	// complete version and is preserved across auto-reconnect).
+	// Generation is a monotonic-per-OWNER version of the session MATERIAL
+	// (cookie/password), bumped by every successful write: interactive link,
+	// auto-reconnect, silent renew, cookie rotation, password opt-out. It is the
+	// compare-and-swap token for asynchronous work — recovery captures the generation
+	// it FAILED at and conditions its save/delete on it, so that work can never act on
+	// a session that has since changed. linked_at cannot serve this purpose: it is a
+	// business clock (the re-authorise deadline) and is deliberately preserved across
+	// an auto-reconnect. A fresh row seeds the generation from the clock rather than
+	// from 1 (see newSessionGeneration), so an unlink+relink cannot restart the counter
+	// and let work bound to the OLD row match the recreated one (an ABA defeating the CAS).
 	Generation int64
 }
 
@@ -287,8 +291,8 @@ WHERE EXISTS (SELECT 1 FROM weekly_rule wr WHERE wr.permit_id = p.id)
 func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error {
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)
+INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at, session_generation)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
 ON CONFLICT(owner) DO UPDATE SET
     sub                 = excluded.sub,
     council_email       = excluded.council_email,
@@ -303,16 +307,30 @@ ON CONFLICT(owner) DO UPDATE SET
     last_active_at      = excluded.last_active_at,
     session_generation  = council_session.session_generation + 1`,
 		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
-		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now)
+		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now, s.newSessionGeneration())
 	return err
 }
 
-// SaveReconnectedSession writes the fresh cookie + (re-sealed) saved password
-// after a silent auto-reconnect, WITHOUT advancing linked_at — the re-authorise
-// clock only moves on an interactive re-link. It stamps reconnected_at: this is
-// the only path that replays the saved password (silent cookie renews go through
-// UpdateCouncilToken), so the stamp is exactly "your password was used". A no-op
-// if the row is gone.
+// newSessionGeneration seeds a FRESH session row's generation. A relink is a
+// delete+insert, so a counter restarting at 1 would let work bound to the old row's
+// generation match the new row (ABA) and act on a session it never observed.
+//
+// The seed is wall-clock milliseconds, forced STRICTLY above the last one this process
+// issued. The clock alone is not enough — two saves can land in the same millisecond —
+// and a bare counter is not enough either, since it would restart at process boundaries.
+// Together they are strictly increasing within a run and far above any prior value
+// across restarts (the per-write increments only ever add small amounts).
+func (s *Store) newSessionGeneration() int64 {
+	s.genMu.Lock()
+	defer s.genMu.Unlock()
+	gen := time.Now().UTC().UnixMilli()
+	if gen <= s.lastGen {
+		gen = s.lastGen + 1
+	}
+	s.lastGen = gen
+	return gen
+}
+
 // ErrSessionSuperseded means a generation-conditioned session write matched no row:
 // the session material changed (a relink, unlink, another reconnect, or a password
 // opt-out) since the generation was captured, so this write must be treated as
@@ -343,14 +361,28 @@ WHERE owner = ? AND session_generation = ?`,
 
 // UpdateCouncilToken refreshes just the cached access token and the (possibly
 // rotated) session cookie after a silent-renew.
-func (s *Store) UpdateCouncilToken(ctx context.Context, owner, sealedCookie, sealedAccess string, expiry time.Time) error {
-	_, err := s.db.ExecContext(ctx, `
+// It is conditioned on expectedGen — the generation of the session the renew was
+// started from. A silent renew takes seconds; if an interactive re-link landed in
+// that window the row now holds a DIFFERENT, valid cookie, and writing the re-sealed
+// old one over it would silently undo the user's re-link (and lose the new cookie for
+// good, since keep-warm would then happily keep the old one alive). Returns
+// ErrSessionSuperseded when the row moved on.
+func (s *Store) UpdateCouncilToken(ctx context.Context, owner, sealedCookie, sealedAccess string, expiry time.Time, expectedGen int64) error {
+	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
 SET cookie_sealed = ?, access_token_sealed = ?, token_expiry = ?, updated_at = ?,
     session_generation = session_generation + 1
-WHERE owner = ?`,
-		sealedCookie, sealedAccess, expiry.UTC().Format(time.RFC3339), nowUTC(), owner)
-	return err
+WHERE owner = ? AND session_generation = ?`,
+		sealedCookie, sealedAccess, expiry.UTC().Format(time.RFC3339), nowUTC(), owner, expectedGen)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrSessionSuperseded
+	}
+	return nil
 }
 
 // UpdateCouncilCookie persists a (re-sealed) session cookie from an authorize-only
@@ -358,13 +390,24 @@ WHERE owner = ?`,
 // token. updated_at IS bumped because it is keep-warm's freshness clock (see
 // scheduler.decideWarm): without it, every warm pass would judge the session still
 // stale and immediately renew it again.
-func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, sealedCookie string) error {
-	_, err := s.db.ExecContext(ctx, `
+// Conditioned on expectedGen for the same reason as UpdateCouncilToken: a keep-warm
+// probe spans seconds, and an interactive re-link inside that window must not be
+// overwritten by the re-sealed older cookie. Returns ErrSessionSuperseded if so.
+func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, sealedCookie string, expectedGen int64) error {
+	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
 SET cookie_sealed = ?, updated_at = ?, session_generation = session_generation + 1
-WHERE owner = ?`,
-		sealedCookie, nowUTC(), owner)
-	return err
+WHERE owner = ? AND session_generation = ?`,
+		sealedCookie, nowUTC(), owner, expectedGen)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrSessionSuperseded
+	}
+	return nil
 }
 
 // ClearCouncilPassword drops a saved (sealed) council password without unlinking

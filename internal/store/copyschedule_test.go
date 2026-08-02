@@ -111,6 +111,7 @@ func TestCopyScheduleDropsGuestTokenAttribution(t *testing.T) {
 	future := now.Add(6 * time.Hour)
 	// A guest-authorised booking on the source, carrying a (non-zero) token id.
 	const fakeTokenID = 4242
+	seedGuestToken(t, st, owner, src, fakeTokenID)
 	if _, err := st.CreateGuestOverride(ctx, src, vehID, now.Add(-time.Minute), &future, "visitor@example.com", fakeTokenID); err != nil {
 		t.Fatalf("guest override: %v", err)
 	}

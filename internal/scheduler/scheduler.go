@@ -935,12 +935,10 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	if action == warmRetire {
 		// Nobody on this account has used the app for the whole bound: stop
 		// renewing, drop the session, and let the dashboard prompt a re-link.
-		// Re-check the idle clock inside the delete. This pass sleeps between
-		// council calls, so the decision above can be minutes old by now — an
-		// unconditional delete retired people who came back mid-pass, seconds
-		// after they used the app. A no-op also means someone else (the reconcile
-		// loop's recoverOrRetire) got there first, so the alert is theirs to send,
-		// not ours to duplicate.
+		// Re-check the idle clock inside the delete: an unconditional delete retired
+		// people who came back mid-pass, seconds after they used the app. A no-op also
+		// means someone else (the reconnect worker's recoverOrRetire) got there first,
+		// so the alert is theirs to send, not ours to duplicate.
 		retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, now.Add(-s.sessionMaxAge))
 		switch {
 		case err != nil:
@@ -976,8 +974,13 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 		case errors.Is(err, parking.ErrSessionExpired):
 			// Hand recovery to the reconnect worker and move on — never reconnect inline
 			// in the warm pass. alive stays false; the worker re-warms via a kick on a
-			// successful reconnect.
-			s.enqueueReconnect(ctx, cs.Owner)
+			// successful reconnect. Bind to the generation the failure carries, falling
+			// back to this pass's snapshot (older, therefore safe) if it is untagged.
+			gen := cs.Generation
+			if g, ok := parking.SessionGenOf(err); ok {
+				gen = g
+			}
+			s.enqueueReconnect(ctx, cs.Owner, gen)
 		case errors.Is(err, parking.ErrNotLinked):
 			// Raced with an unlink; nothing to do.
 		case errors.Is(err, parking.ErrCouncilBusy):
@@ -1002,6 +1005,13 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			// The read failed; leave drift_checked_at alone so the next pass retries
 			// instead of standing down for a full interval.
 			log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
+			// A drift read is often how we learn the cookie was killed council-side just
+			// AFTER a successful warm — the churn incident's signature. Without this the
+			// expiry was only logged: updated_at is fresh so keep-warm won't re-probe for
+			// a whole warm interval, leaving a dead session unqueued for hours.
+			if g, ok := parking.SessionGenOf(derr); ok {
+				s.enqueueReconnect(ctx, cs.Owner, g)
+			}
 		} else if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
 			log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
 		}
@@ -1079,20 +1089,18 @@ func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h in
 // reconnectLoop worker rather than reconnecting inline and blocking the convergence
 // loop. The churn canary is fed HERE, at discovery — once per owner while queued — so
 // it counts real distinct expiries, not repeated attempts.
-func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string) {
-	// Bind the task to the CURRENT session's generation (linked_at). Reading it here
-	// means a later manual relink/unlink (which stamps a new linked_at or removes the
-	// row) supersedes this work rather than being clobbered by it. If the session is
-	// already gone, there is nothing to reconnect.
-	cs, err := s.store.GetCouncilSession(ctx, owner)
-	if err != nil {
-		return
-	}
+// gen MUST be the generation of the session that actually failed — never a value
+// re-read here. Re-reading was a real defect: an interactive re-link landing between
+// the failure and the enqueue made the task bind to the user's BRAND-NEW session, and
+// the worker would then retire it. A stale-old gen is safe (it simply mismatches, the
+// task is discarded, and the next keep-warm pass rediscovers within ~3 min); a
+// too-new one is what destroys a valid session.
+func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string, gen int64) {
 	now := time.Now()
 	s.reconnectMu.Lock()
 	_, already := s.reconnectQ[owner]
 	if !already {
-		s.reconnectQ[owner] = reconnectItem{next: now, queuedAt: now, gen: cs.Generation}
+		s.reconnectQ[owner] = reconnectItem{next: now, queuedAt: now, gen: gen}
 	}
 	s.reconnectMu.Unlock()
 	if already {
@@ -1241,8 +1249,17 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 	// Skip stale work: if the session was relinked, reconnected, renewed, or unlinked
 	// since this was queued, its generation no longer matches (or it is gone) — this
 	// recovery task is not ours to act on.
-	if cur, err := s.store.GetCouncilSession(ctx, owner); err != nil || cur.Generation != gen {
-		return reconnectRetired // discard the task; the current session (if any) is untouched
+	switch cur, err := s.store.GetCouncilSession(ctx, owner); {
+	case errors.Is(err, store.ErrNotFound):
+		return reconnectRetired // the session is genuinely gone; nothing to recover
+	case err != nil:
+		// A TRANSIENT read failure (SQLite contention — likeliest during exactly the
+		// mass-expiry this queue exists for) must not drop the task, which is the same
+		// mistake the failed-delete path already corrects.
+		log.Printf("scheduler: reconnect guard read for %s failed; retrying later: %v", owner, err)
+		return reconnectDeferred
+	case cur.Generation != gen:
+		return reconnectRetired // superseded: the current session is not ours to touch
 	}
 	// A reconnect is a full headless login (several sequential round trips); bound it
 	// so a slow portal can't wedge the drain worker.
@@ -2304,7 +2321,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// coinciding with a rollover must not make one reconcile pass block for hours.
 		// Defer this permit so it isn't re-attempted every minute meanwhile; the
 		// worker kicks the owner's permits the moment the session is back.
-		s.enqueueReconnect(ctx, p.Owner)
+		// Only queue when the failure carried the generation it failed at. Untagged, we
+		// cannot bind safely (re-reading could pick up a fresh re-link and retire it),
+		// so leave it: keep-warm re-probes a dead session every recovery tick (~3 min)
+		// and enqueues it there with a properly captured generation.
+		if g, ok := parking.SessionGenOf(err); ok {
+			s.enqueueReconnect(ctx, p.Owner, g)
+		}
 		s.deferRetry(p.ID, 3)
 		return true
 	default:

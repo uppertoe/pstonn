@@ -391,7 +391,7 @@ func (c *Client) renewLocked(ctx context.Context, owner string, cs store.Council
 	}
 	at, expiry, newCookie, err := c.silentRenew(ctx, owner, cookie)
 	if err != nil {
-		return "", err
+		return "", withSessionGen(err, cs.Generation) // see warmLocked
 	}
 	sealedAccess, err := c.box.SealCtx(secretbox.CouncilToken(owner), at)
 	if err != nil {
@@ -407,7 +407,7 @@ func (c *Client) renewLocked(ctx context.Context, owner string, cs store.Council
 		}
 		sealedCookie = sc
 	}
-	if err := c.store.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAccess, expiry); err != nil {
+	if err := c.store.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAccess, expiry, cs.Generation); err != nil {
 		return "", err
 	}
 	return at, nil
@@ -472,7 +472,10 @@ func (c *Client) warmLocked(ctx context.Context, owner string, cs store.CouncilS
 	}
 	newCookie, err := c.warmRenew(ctx, owner, cookie)
 	if err != nil {
-		return err
+		// Tag an expiry with the generation of the session that actually failed, so the
+		// scheduler's recovery queue binds to THIS session and not to whatever the row
+		// holds by the time it enqueues (a re-link can land in between).
+		return withSessionGen(err, cs.Generation)
 	}
 	// The keep-warm probe's happy path: an authorize-only warm is the most common
 	// half-open probe (the recovery tick fires it), so its success is what usually
@@ -486,7 +489,7 @@ func (c *Client) warmLocked(ctx context.Context, owner string, cs store.CouncilS
 	if err != nil {
 		return err
 	}
-	return c.store.UpdateCouncilCookie(ctx, owner, sealed)
+	return c.store.UpdateCouncilCookie(ctx, owner, sealed, cs.Generation)
 }
 
 // apiRequest issues an authenticated request to the permit API as the app user.
@@ -794,6 +797,34 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 			errors.New("a managed vehicle record has an empty registration: API shape change?"))
 	}
 	return mv.PermitVehicles[0].RegistrationNumber, nil
+}
+
+// SessionExpiredError is ErrSessionExpired carrying the generation of the session
+// that failed. The async recovery queue needs the version it FAILED at: if it instead
+// re-read the row when queueing, a re-link landing in between would make it bind to —
+// and then potentially retire — the user's brand-new session. Unwraps to
+// ErrSessionExpired, so every existing errors.Is check is unaffected.
+type SessionExpiredError struct{ Gen int64 }
+
+func (e *SessionExpiredError) Error() string { return ErrSessionExpired.Error() }
+func (e *SessionExpiredError) Unwrap() error { return ErrSessionExpired }
+
+// withSessionGen tags an expiry with the failing session's generation, passing any
+// other error through untouched.
+func withSessionGen(err error, gen int64) error {
+	if errors.Is(err, ErrSessionExpired) {
+		return &SessionExpiredError{Gen: gen}
+	}
+	return err
+}
+
+// SessionGenOf reports the generation an expiry failed at, and whether it was tagged.
+func SessionGenOf(err error) (int64, bool) {
+	var se *SessionExpiredError
+	if errors.As(err, &se) {
+		return se.Gen, true
+	}
+	return 0, false
 }
 
 // ErrNoCachedPlate means no plate has been fetched from the council yet for

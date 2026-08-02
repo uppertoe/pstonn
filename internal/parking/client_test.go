@@ -137,7 +137,8 @@ func linkOwner(t *testing.T, c *Client, st *store.Store, box *secretbox.Box, own
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAT, time.Now().Add(time.Hour)); err != nil {
+	genCS, _ := st.GetCouncilSession(ctx, owner)
+	if err := st.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAT, time.Now().Add(time.Hour), genCS.Generation); err != nil {
 		t.Fatal(err)
 	}
 }

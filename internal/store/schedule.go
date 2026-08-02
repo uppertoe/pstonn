@@ -162,15 +162,60 @@ VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
 // CreateGuestOverride is CreateOverride tagged with the guest link that made it,
 // so a guest's revert can remove exactly their own changes.
 func (s *Store) CreateGuestOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
+	return s.createOverrideGuarded(ctx, permitID, vehicleID, "", startsAt, endsAt, createdBy, guestTokenID)
+}
+
+// createOverrideGuarded inserts a guest-created override only if that guest link is
+// STILL live and the permit is under its live-override cap, both decided inside the
+// insert itself.
+//
+// The liveness guard closes a revocation race with a real cost: the handler checks the
+// token when it resolves the request, but the insert happens several statements later
+// (rate limit, form parse, and queueing behind the single SQLite connection). A revoke
+// landing in that gap sweeps live overrides — finds none, because this one does not
+// exist yet — tells the household "any car it had put on your permit has been taken
+// off", and then this insert lands anyway. Nothing joins guest_token when resolving a
+// permit's target, so that orphan then steers the permit until its window ends (up to
+// ~2 days with the overnight box): the user's explicit revocation, silently undone.
+func (s *Store) createOverrideGuarded(ctx context.Context, permitID, vehicleID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
+	var vid any // NULL for a plate booking
+	if vehicleID != 0 {
+		vid = vehicleID
+	}
+	// The liveness EXISTS applies ONLY to real guest creates: guest_token_id 0 is a
+	// member-created override (CreateOverride delegates here), which has no token to
+	// check and must not be refused by one. The cap applies to both.
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
-VALUES (?, ?, '', ?, ?, ?, ?, ?)`,
-		permitID, vehicleID, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?
+WHERE (? = 0 OR EXISTS (
+        SELECT 1 FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+        WHERE t.id = ? AND t.revoked_at = '' AND g.enabled = 1))
+  AND (SELECT COUNT(*) FROM override
+       WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)) < ?`,
+		permitID, vid, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID,
+		guestTokenID, guestTokenID, permitID, nowUTC(), MaxLiveOverridesPerPermit)
 	if err != nil {
 		return 0, err
 	}
+	if n, err := res.RowsAffected(); err != nil {
+		return 0, err
+	} else if n == 0 {
+		return 0, ErrGuestOverrideRefused
+	}
 	return res.LastInsertId()
 }
+
+// ErrGuestOverrideRefused means a guest-created override was not written: the link was
+// revoked/disabled between resolving it and the insert, or the permit is at its live-
+// override cap. The caller must NOT go on to change the plate at the council.
+var ErrGuestOverrideRefused = errors.New("store: guest link is no longer active, or the permit has too many live bookings")
+
+// MaxLiveOverridesPerPermit caps simultaneously-active bookings on one permit so the
+// never-pruned, hot-path override table cannot grow without bound. It applies to guest
+// creates as well as member ones — capping only the member path left the public guest
+// and door-QR flows able to insert without limit, which is the larger surface.
+const MaxLiveOverridesPerPermit = 50
 
 // CreatePlateOverride books a one-off using a literal, unsaved number plate
 // (vehicle_id IS NULL). The plate is normalised by the caller.
@@ -181,14 +226,7 @@ func (s *Store) CreatePlateOverride(ctx context.Context, permitID int64, registr
 // CreateGuestPlateOverride is CreatePlateOverride tagged with the guest link
 // that made it (see CreateGuestOverride).
 func (s *Store) CreateGuestPlateOverride(ctx context.Context, permitID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
-VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
-		permitID, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+	return s.createOverrideGuarded(ctx, permitID, 0, registration, startsAt, endsAt, createdBy, guestTokenID)
 }
 
 // DeleteGuestOverrides removes every override a guest link created on a permit
