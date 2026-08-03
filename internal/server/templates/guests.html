@@ -50,7 +50,7 @@
     {{range .Edit.Recipients}}
     <div class="grecip">
       <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
-      {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<form method="post" action="/guests/tokens/{{.TokenID}}/revoke"><button class="ghost sm" type="submit">Revoke link</button></form>{{end}}
+      {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<form method="post" action="/guests/tokens/{{.TokenID}}/revoke" data-confirm="Revoke this link? It stops working, and any car they still have on the permit comes off now." data-confirm-ok="Revoke link"><button class="ghost sm" type="submit">Revoke link</button></form>{{end}}
     </div>
     {{else}}
     <p class="empty-note">No one has a link yet. Add someone above.</p>
@@ -111,9 +111,9 @@
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
         <strong>Guest passes are {{if .GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
-        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once, without deleting anything.</div>
+        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor car still on a permit comes off now.</div>
       </div>
-      <form method="post" action="/guests/toggle">
+      <form method="post" action="/guests/toggle"{{if .GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor car still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
         <input type="hidden" name="enabled" value="{{if .GuestsEnabled}}{{else}}1{{end}}">
         <button type="submit" class="{{if .GuestsEnabled}}danger{{end}}">{{if .GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
       </form>
@@ -156,7 +156,7 @@
       </div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <a href="/guests/door/{{.GrantID}}/view" hx-boost="false"><button type="button">{{template "ic-qr"}} View &amp; print</button></a>
-        <form method="post" action="/guests/door/{{.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button class="ghost icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button></form>
+        <form method="post" action="/guests/door/{{.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working, and any visitor car you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button class="ghost icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button></form>
       </div>
     </div>
     {{end}}
@@ -171,7 +171,7 @@
         <h2 style="margin:0">{{if .Label}}{{.Label}}{{else}}{{.PermitLabel}}{{end}}</h2>
         <div class="row" style="gap:6px">
           <a href="/guests/{{.ID}}/edit"><button type="button" class="ghost sm">{{template "ic-edit"}} Edit</button></a>
-          <form method="post" action="/guests/{{.ID}}/delete" data-confirm="Delete this guest pass? All its links stop working." data-confirm-ok="Delete pass">
+          <form method="post" action="/guests/{{.ID}}/delete" data-confirm="Delete this guest pass? All its links stop working, and any visitor car still on the permit through it comes off now." data-confirm-ok="Delete pass">
             <button class="ghost icon" type="submit" title="Delete pass" aria-label="Delete pass">{{template "ic-trash"}}</button>
           </form>
         </div>
@@ -254,7 +254,7 @@
     <p class="posterfor">Door QR for <strong>{{.DoorQR.PermitLabel}}</strong></p>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" data-print>{{template "ic-qr"}} Print</button>
-      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
+      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this door QR? Any copy you printed stops working, and any visitor car you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
     </div>
   </div>
 
