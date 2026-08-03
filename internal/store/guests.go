@@ -282,8 +282,14 @@ func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE guest_token SET token_hash = ?, created_at = ?, revoked_at = '', expires_at = '',
-             baseline_plate = '', baseline_until = '' WHERE id = ?`,
+		// baseline_plate / baseline_until are deliberately LEFT ALONE. They hold the
+		// plate that was on the permit before this link was used, and "Put <plate> back"
+		// promises to restore exactly that. The booking survives a re-send, so its undo
+		// must survive too — clearing it both removes the guest's revert and lets the
+		// next activation capture the GUEST's plate as the baseline, so a later visitor's
+		// "put it back" would restore the wrong car. Stale baselines are already replaced
+		// by CaptureOrExtendGuestBaseline once the window lapses.
+		`UPDATE guest_token SET token_hash = ?, created_at = ?, revoked_at = '', expires_at = '' WHERE id = ?`,
 		newHash, nowUTC(), keepID); err != nil {
 		return 0, err
 	}
@@ -507,7 +513,7 @@ SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
 FROM guest_grant g
 JOIN permit p ON p.id = g.permit_id
 JOIN guest_token t ON t.grant_id = g.id
-WHERE g.id = ? AND g.owner = ? AND g.request_only = 1`, grantID, owner).
+WHERE g.id = ? AND g.owner = ? AND g.request_only = 1 AND g.enabled = 1`, grantID, owner).
 		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
 	if err == sql.ErrNoRows {
 		return PrintedGrant{}, ErrNotFound
@@ -550,7 +556,7 @@ SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
 FROM guest_grant g
 JOIN permit p ON p.id = g.permit_id
 JOIN guest_token t ON t.grant_id = g.id
-WHERE g.owner = ? AND g.request_only = 1
+WHERE g.owner = ? AND g.request_only = 1 AND g.enabled = 1
 ORDER BY g.id DESC`, owner)
 	if err != nil {
 		return nil, err

@@ -137,13 +137,16 @@ func TestLiveCaptureShapes(t *testing.T) {
 	// the grid carries all three, one owner-level call can replace both, which is
 	// the single largest traffic cut available.
 	missing := []string{}
-	if row.VehicleRego == "" {
+	// Nil means the key was absent entirely (a shape change); "" means present but
+	// empty. Either way the grid cannot serve that half of the call.
+	blank := func(v *string) bool { return v == nil || *v == "" }
+	if blank(row.VehicleRego) {
 		missing = append(missing, "VehicleRego")
 	}
-	if row.PermitStatus == "" {
+	if blank(row.PermitStatus) {
 		missing = append(missing, "PermitStatus")
 	}
-	if row.EndDate == "" {
+	if blank(row.EndDate) {
 		missing = append(missing, "EndDate")
 	}
 	if len(missing) == 0 {
@@ -174,12 +177,16 @@ func TestLiveCaptureShapes(t *testing.T) {
 	// Q1: does the grid's denormalised plate agree with the authoritative one? If
 	// it lags or differs, drift detection would silently invert when moved to the
 	// grid, so this gates the whole grid-collapse change.
+	gridRego := ""
+	if row.VehicleRego != nil {
+		gridRego = *row.VehicleRego
+	}
 	switch {
-	case strings.EqualFold(row.VehicleRego, cur.RegistrationNumber):
+	case strings.EqualFold(gridRego, cur.RegistrationNumber):
 		findings[captureQ1] = fmt.Sprintf("YES — both report %q; the grid can drive drift detection", cur.RegistrationNumber)
 	default:
 		findings[captureQ1] = fmt.Sprintf("NO — grid says %q, managedVehicle says %q; DO NOT move drift onto the grid",
-			row.VehicleRego, cur.RegistrationNumber)
+			gridRego, cur.RegistrationNumber)
 	}
 
 	// ---- 3. The edit ---------------------------------------------------------
