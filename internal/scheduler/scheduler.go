@@ -38,10 +38,10 @@ type Council interface {
 	// Reconnect re-establishes an expired session from the user's opt-in saved
 	// password. Returns parking.ErrNoSavedPassword when none was saved.
 	Reconnect(ctx context.Context, owner string) error
-	// ListPermits reads the owner's council permits (used to refresh expiry/status).
-	ListPermits(ctx context.Context, owner string) ([]parking.PermitInfo, error)
-	// ListPermitsComplete additionally reports whether the list was the WHOLE account.
-	// Drift must not check an owner off for another interval on the strength of a page.
+	// ListPermitsComplete reads the owner's council permits (to refresh expiry/status)
+	// and reports whether the list was the WHOLE account. Drift must not check an owner
+	// off for another interval on the strength of one page, so the bool is not optional
+	// here — the plain ListPermits the display paths use is not on this interface.
 	ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error)
 	// Blocked reports whether the fleet circuit breaker is open — a CONFIRMED
 	// shared-edge block affecting the whole fleet, not one owner's cooldown. Used
@@ -236,6 +236,10 @@ type Scheduler struct {
 	driftRetryAt map[string]time.Time
 	driftFails   map[string]int
 	driftShape   []churnEvent
+
+	// truncAlertMu guards the once-a-day limit on the permit-list truncation alert.
+	truncAlertMu sync.Mutex
+	truncAlertAt time.Time
 
 	// reminderWarnMu guards the rate limit on the "no SMTP sender" operator warning.
 	reminderWarnMu sync.Mutex
@@ -941,6 +945,33 @@ func (s *Scheduler) noteDriftSuccess(owner string) {
 	s.driftMu.Unlock()
 }
 
+// noteDriftDeferred backs an owner off by a whole drift interval without touching the
+// failure ladder: the read worked, it was just not a complete account.
+func (s *Scheduler) noteDriftDeferred(owner string) {
+	s.driftMu.Lock()
+	delete(s.driftFails, owner)
+	s.driftRetryAt[owner] = time.Now().Add(s.driftThresholdFor(owner))
+	s.driftMu.Unlock()
+}
+
+// alertTruncatedList raises the paging alert at most once a day. systemAlert dedups
+// per key, but only for 30 minutes, and truncation persists until pagination is
+// written — 48 alerts a day would be muted inside one, taking the rest of the channel's
+// credibility with it.
+func (s *Scheduler) alertTruncatedList(ctx context.Context) {
+	s.truncAlertMu.Lock()
+	if time.Since(s.truncAlertAt) < 24*time.Hour {
+		s.truncAlertMu.Unlock()
+		return
+	}
+	s.truncAlertAt = time.Now()
+	s.truncAlertMu.Unlock()
+	s.systemAlert(ctx, "council-permit-list-truncated", "The council is only returning part of the permit list",
+		"Permit reads are coming back as pages, so p.stonn is acting on partial lists and cannot drift-check "+
+			"the permits behind the first page. Their plate changes go undetected and their expiry warnings "+
+			"will not fire. See truncated_grid_* on /status for the last observed counts. This needs pagination.")
+}
+
 func (s *Scheduler) driftBackedOff(owner string, now time.Time) bool {
 	s.driftMu.Lock()
 	defer s.driftMu.Unlock()
@@ -1084,7 +1115,17 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			// drift_checked_at is deliberately NOT advanced (the check did not happen),
 			// but the owner is backed off so a persistent failure cannot retry on every
 			// warm tick across the whole fleet.
-			s.noteDriftFailure(ctx, cs.Owner, derr)
+			if errors.Is(derr, parking.ErrPermitListPartial) {
+				// Truncation is a standing condition, not a blip, so enter at the normal
+				// drift cadence instead of the failure ladder. The ladder's 15m/60m/240m
+				// ramp costs three EXTRA reads per owner before it settles — 4,500 extra
+				// council requests at 500 owners, on the very day the council changed its
+				// paging, and again after every restart because the ladder lives in memory
+				// while last_drift_check stays permanently stale.
+				s.noteDriftDeferred(cs.Owner)
+			} else {
+				s.noteDriftFailure(ctx, cs.Owner, derr)
+			}
 			log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
 			// A drift read is often how we learn the cookie was killed council-side just
 			// AFTER a successful warm — the churn incident's signature. Without this the
@@ -1786,10 +1827,14 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		// plate drift and expiry warnings would go missing for good. Returning an error
 		// leaves the checkpoint alone and puts the owner on the ordinary drift backoff,
 		// so this cannot become a retry storm either.
-		s.systemAlert(ctx, "council-permit-list-truncated", "The council is only returning part of the permit list",
-			"Permit reads are coming back as pages, so p.stonn is acting on partial lists and cannot "+
-				"drift-check the permits behind the first page. This needs pagination implementing.")
-		return parking.ErrPermitListPartial
+		s.alertTruncatedList(ctx)
+		// JOINED, not replaced. Whatever went wrong for the permits we DID read is still
+		// the more urgent error and its identity is load-bearing: a SessionExpiredError
+		// here is how we learn a cookie was killed council-side, and warmOne only queues
+		// the reconnect if it can still find that error. Returning a bare marker instead
+		// left dead sessions unqueued, and hid FailUnexpected from the API-shape tally so
+		// the "several accounts failing the same way" alert could never fire.
+		return errors.Join(incomplete, parking.ErrPermitListPartial)
 	}
 	// Only a fully-applied round counts as a drift check (see MarkDriftChecked).
 	return incomplete

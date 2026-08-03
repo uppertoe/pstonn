@@ -378,20 +378,59 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 		t.Fatalf("rule: %v", err)
 	}
 
-	fc := &fakeCouncil{partialPermits: true}
+	// A permit the council DOES return, so the pass has real work to do: the meta write
+	// below is what proves the partial path still does everything it can before it
+	// declines to check the owner off.
+	fc := &fakeCouncil{partialPermits: true, permits: []parking.PermitInfo{{
+		CouncilPermitID: "14576", PermitNumber: "VPP9", PermitType: "Resident",
+		Status: "Active", CurrentRego: "PAGE01",
+	}}}
 	s := New(st, fc, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
 
 	if err := s.checkDrift(ctx, owner); !errors.Is(err, parking.ErrPermitListPartial) {
 		t.Fatalf("checkDrift = %v, want ErrPermitListPartial: a page must not be reported "+
 			"as a completed check of the whole account", err)
 	}
+	// The work we COULD do still happened.
+	got, err := st.ListPermitsFor(ctx, owner)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("permits: %v / %d", err, len(got))
+	}
+	if got[0].PermitNumber != "VPP9" {
+		t.Fatalf("the partial pass skipped the metadata refresh for a permit it DID read: %+v; "+
+			"declining the checkpoint must not mean declining the work", got[0])
+	}
 
-	// A complete list is still reported as done, so the guard rejects truncation and
+	// And the checkpoint really is withheld end-to-end, through warmOne rather than by
+	// reading checkDrift's return value.
+	cs, err := st.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	s.warmOne(ctx, cs)
+	after, err := st.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatalf("session after: %v", err)
+	}
+	if !after.DriftCheckedAt.IsZero() {
+		t.Fatalf("last_drift_check was advanced (%s) on a partial list; the permits behind "+
+			"the page would never be read again", after.DriftCheckedAt)
+	}
+
+	// A complete list still checks the owner off, so the guard rejects truncation and
 	// not drift in general.
 	fc.mu.Lock()
 	fc.partialPermits = false
 	fc.mu.Unlock()
 	if err := s.checkDrift(ctx, owner); err != nil {
 		t.Fatalf("a complete permit list must check the owner off: %v", err)
+	}
+	s.warmOne(ctx, cs)
+	done, err := st.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatalf("session done: %v", err)
+	}
+	if done.DriftCheckedAt.IsZero() {
+		t.Fatal("a complete permit list did not advance last_drift_check")
 	}
 }
