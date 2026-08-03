@@ -1086,17 +1086,49 @@ type gridResp struct {
 	TotalItems *int       `json:"TotalItems"`
 }
 
+// gridRow is decoded with POINTERS for every field drift acts on, so an omitted key
+// is distinguishable from a legitimately empty value. With plain values the two are
+// identical after decoding, and that is the dangerous direction: a schema change that
+// drops VehicleRego would read as "the council holds no plate for this permit", so
+// drift would clear the stored plate and issue a corrective write — for every permit
+// on every account at once, against the shared egress IP. Blank PermitStatus/EndDate
+// would likewise be written over good stored metadata. Absence is a shape change and
+// must be reported as one, not silently coerced to "".
 type gridRow struct {
-	PKPermitID                            int64  `json:"PKPermitID"`
-	FKPermitTypeID                        int64  `json:"FKPermitTypeID"`
-	PermitNumber                          string `json:"PermitNumber"`
-	PermitType                            string `json:"PermitType"`
-	PermitStatus                          string `json:"PermitStatus"`
-	VehicleRego                           string `json:"VehicleRego"`
-	StartDate                             string `json:"StartDate"`
-	EndDate                               string `json:"EndDate"`
-	PermitTypeAllowsVehicleChangeByHolder bool   `json:"PermitTypeAllowsVehicleChangeByHolder"`
-	IsCoHolder                            bool   `json:"IsCoHolder"`
+	PKPermitID                            int64   `json:"PKPermitID"`
+	FKPermitTypeID                        *int64  `json:"FKPermitTypeID"`
+	PermitNumber                          *string `json:"PermitNumber"`
+	PermitType                            *string `json:"PermitType"`
+	PermitStatus                          *string `json:"PermitStatus"`
+	VehicleRego                           *string `json:"VehicleRego"`
+	StartDate                             *string `json:"StartDate"`
+	EndDate                               *string `json:"EndDate"`
+	PermitTypeAllowsVehicleChangeByHolder *bool   `json:"PermitTypeAllowsVehicleChangeByHolder"`
+	IsCoHolder                            bool    `json:"IsCoHolder"`
+}
+
+// missingGridFields names the absent keys on a row, so the shape-change error says
+// which field vanished rather than just that something did.
+func (r gridRow) missingGridFields() []string {
+	var missing []string
+	for _, f := range []struct {
+		name    string
+		present bool
+	}{
+		{"FKPermitTypeID", r.FKPermitTypeID != nil},
+		{"PermitNumber", r.PermitNumber != nil},
+		{"PermitType", r.PermitType != nil},
+		{"PermitStatus", r.PermitStatus != nil},
+		{"VehicleRego", r.VehicleRego != nil},
+		{"StartDate", r.StartDate != nil},
+		{"EndDate", r.EndDate != nil},
+		{"PermitTypeAllowsVehicleChangeByHolder", r.PermitTypeAllowsVehicleChangeByHolder != nil},
+	} {
+		if !f.present {
+			missing = append(missing, f.name)
+		}
+	}
+	return missing
 }
 
 // ListPermits returns the permits on the app user's linked council account.
@@ -1170,23 +1202,28 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 		// A date we cannot parse must not silently become the zero time: end_date drives
 		// expiry, and drift writes it over the stored value, so a format change would
 		// quietly retire live permits. Empty stays empty (genuinely "not set").
-		start, serr := councilDate(r.StartDate)
-		end, eerr := councilDate(r.EndDate)
+		if missing := r.missingGridFields(); len(missing) > 0 {
+			return nil, councilErr(FailUnexpected, op,
+				fmt.Errorf("permit %d is missing %s: API shape change? Treating an absent field as empty "+
+					"would blank the stored permit and clear its plate", r.PKPermitID, strings.Join(missing, ", ")))
+		}
+		start, serr := councilDate(*r.StartDate)
+		end, eerr := councilDate(*r.EndDate)
 		if serr != nil || eerr != nil {
 			return nil, councilErr(FailUnexpected, op,
 				fmt.Errorf("permit %d has an unparseable date (start=%q end=%q): API shape change?",
-					r.PKPermitID, safeExcerpt(r.StartDate), safeExcerpt(r.EndDate)))
+					r.PKPermitID, safeExcerpt(*r.StartDate), safeExcerpt(*r.EndDate)))
 		}
 		out = append(out, PermitInfo{
 			CouncilPermitID:  strconv.FormatInt(r.PKPermitID, 10),
-			PermitTypeID:     strconv.FormatInt(r.FKPermitTypeID, 10),
-			PermitNumber:     r.PermitNumber,
-			PermitType:       r.PermitType,
-			Status:           r.PermitStatus,
-			CurrentRego:      r.VehicleRego,
+			PermitTypeID:     strconv.FormatInt(*r.FKPermitTypeID, 10),
+			PermitNumber:     *r.PermitNumber,
+			PermitType:       *r.PermitType,
+			Status:           *r.PermitStatus,
+			CurrentRego:      *r.VehicleRego,
 			StartDate:        start,
 			EndDate:          end,
-			CanChangeVehicle: r.PermitTypeAllowsVehicleChangeByHolder,
+			CanChangeVehicle: *r.PermitTypeAllowsVehicleChangeByHolder,
 			IsCoHolder:       r.IsCoHolder,
 		})
 	}

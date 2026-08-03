@@ -153,9 +153,22 @@ func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label st
 		return 0, err
 	}
 
+	// Refuse to create first-own-data for an ACCEPTED secondary, the same invariant
+	// SaveCouncilSession enforces. AcceptInvite requires the invitee to hold no vehicles
+	// of their own; without the matching guard here a create authorised moments before
+	// acceptance lands moments after it, and the address ends up both sharing the
+	// primary's account and owning data that nothing in the shared UI will ever show.
+	// Narrower window than the council-link race, same broken invariant.
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO vehicle (owner, registration, label, color, created_at) VALUES (?, ?, ?, ?, ?)`,
-		owner, registration, label, pickVehicleColor(used), nowUTC())
+		`INSERT INTO vehicle (owner, registration, label, color, created_at)
+		 SELECT ?, ?, ?, ?, ?
+		 WHERE NOT EXISTS (SELECT 1 FROM account_member WHERE member_email = ? AND invite_pending = 0)`,
+		owner, registration, label, pickVehicleColor(used), nowUTC(), owner)
+	if err == nil {
+		if n, _ := res.RowsAffected(); n == 0 {
+			return 0, ErrSecondaryAccount
+		}
+	}
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, ErrDuplicate

@@ -2,6 +2,8 @@ package parking
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -124,6 +126,19 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		io.WriteString(w, f.gridBody.Load().(string))
 	})
 
+	// row builds a COMPLETE grid row. Every field drift acts on must be present, so
+	// tests that are about something else (counts, ids) must not accidentally also be
+	// testing absence.
+	row := func(id int64, over string) string {
+		base := fmt.Sprintf(`"PKPermitID":%d,"FKPermitTypeID":3,"PermitNumber":"P1","PermitType":"Resident",`+
+			`"PermitStatus":"Active","VehicleRego":"ABC123","StartDate":"2026-01-01T00:00:00",`+
+			`"EndDate":"2026-12-31T00:00:00","PermitTypeAllowsVehicleChangeByHolder":true`, id)
+		if over != "" {
+			base += "," + over
+		}
+		return "{" + base + "}"
+	}
+
 	// `{}` — every field absent — must NOT read as "no permits" (the missing-vs-zero
 	// trap: absent decodes to nil/0 and looked identical to a genuinely empty account).
 	for _, body := range []string{`{}`, `{"TotalItems":0}`, `{"PermitGrid":[]}`} {
@@ -133,7 +148,7 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		}
 	}
 	// More rows than the count claims is impossible: refuse.
-	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":1},{"PKPermitID":2}]}`)
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + row(1, "") + `,` + row(2, "") + `]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
 		t.Fatal("more rows than TotalItems must be refused")
 	}
@@ -141,7 +156,7 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	// by drift, never stripped, whereas an error aborts the pass before expiry warnings
 	// go out and breaks the picker for the whole account. But it must not pass unseen —
 	// it means the council has started paging and we owe it real pagination.
-	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[{"PKPermitID":1}]}`)
+	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[` + row(1, "") + `]}`)
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
 		t.Fatalf("a partial page should degrade, not fail: %v / %d", err, len(ps))
 	}
@@ -149,13 +164,37 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		t.Fatalf("a truncated permit grid was not recorded for the operator: %+v; "+
 			"acting on a partial list while reporting nothing is how a paging change stays invisible", st)
 	}
+	// An OMITTED field must be refused, not coerced to "". Absent VehicleRego would read
+	// as "the council holds no plate", so drift would clear the stored plate and issue a
+	// corrective write for every permit on every account at once; absent PermitStatus or
+	// EndDate would be written over good stored metadata.
+	for _, field := range []string{"VehicleRego", "PermitStatus", "EndDate", "PermitType", "PermitNumber",
+		"FKPermitTypeID", "PermitTypeAllowsVehicleChangeByHolder"} {
+		full := row(9, "")
+		var partial map[string]any
+		if err := json.Unmarshal([]byte(full), &partial); err != nil {
+			t.Fatalf("fixture: %v", err)
+		}
+		delete(partial, field)
+		b, _ := json.Marshal([]any{partial})
+		f.gridBody.Store(`{"TotalItems":1,"PermitGrid":` + string(b) + `}`)
+		if _, err := c.ListPermits(context.Background(), owner); err == nil {
+			t.Fatalf("a grid row missing %s was accepted; an absent key is indistinguishable "+
+				"from an empty value once decoded, and drift acts on the difference", field)
+		}
+	}
+	// A COMPLETE row still passes, so the guard above rejects absence and not shape.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + row(9, "") + `]}`)
+	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
+		t.Fatalf("a complete grid row must be accepted: %v / %d", err, len(ps))
+	}
 	// Negative ids are as unusable as zero.
-	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":-4}]}`)
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + row(-4, "") + `]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
 		t.Fatal("a negative PKPermitID must be refused")
 	}
 	// A malformed date must not silently become the zero time: end_date drives expiry.
-	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":7,"EndDate":"31/12/2026"}]}`)
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + row(7, `"EndDate":"31/12/2026"`) + `]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
 		t.Fatal("an unparseable date must be refused, not zeroed")
 	}

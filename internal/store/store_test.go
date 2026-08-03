@@ -3153,6 +3153,21 @@ func TestReplacedPosterStaysUnderHouseholdControl(t *testing.T) {
 		t.Fatalf("current poster is grant %d, want the replacement %d: the retired poster "+
 			"can be handed back as the live one", got.GrantID, newGrant)
 	}
+	// The retired grant must not be offered anywhere the household can act on it: the
+	// management list and the reprint view both drive "View & print" for a code that no
+	// longer resolves, and removing that entry revokes every printed grant on the permit
+	// — including the working one, and its bookings.
+	listed, err := s.ListPrintedGrants(ctx, owner)
+	if err != nil {
+		t.Fatalf("list posters: %v", err)
+	}
+	if len(listed) != 1 || listed[0].GrantID != newGrant {
+		t.Fatalf("the retired poster is still listed as a current one: %+v", listed)
+	}
+	if _, err := s.PrintedGrantByID(ctx, owner, oldGrant); err == nil {
+		t.Fatal("a retired poster can still be viewed and reprinted, so the household is " +
+			"handed a code that cannot work")
+	}
 	// Taking the poster down must reach the retired grant's visitor as well.
 	if err := s.RevokePrintedGrant(ctx, owner, newGrant); err != nil {
 		t.Fatalf("revoke poster: %v", err)
@@ -3215,5 +3230,66 @@ func TestDisabledGrantCannotActivate(t *testing.T) {
 	// The booking it already authorised is untouched — that is the whole point.
 	if n := countLiveOverrides(t, s, permitID); n != 1 {
 		t.Fatalf("disabling the grant removed the booking it had already authorised (%d live, want 1)", n)
+	}
+}
+
+// TestResendKeepsTheUndoBaseline pins that a re-send preserves the guest's revert.
+// The booking survives a re-send, so the "Put <plate> back" control must survive with
+// it: the baseline holds the plate that was on the permit BEFORE the link was used, and
+// clearing it both removes that guest's undo and lets the next activation capture the
+// GUEST's plate as the baseline — so a later visitor's revert would restore the wrong car.
+func TestResendKeepsTheUndoBaseline(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "baseline@example.com"
+	_, grantID := setupGuestBooking(t, s, owner)
+	tokenID, err := s.GrantTokenID(ctx, grantID)
+	if err != nil {
+		t.Fatalf("token id: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE guest_token SET baseline_plate = 'HOME1', baseline_until = ? WHERE id = ?`,
+		time.Now().Add(12*time.Hour).UTC().Format(time.RFC3339), tokenID); err != nil {
+		t.Fatalf("seed baseline: %v", err)
+	}
+
+	if _, err := s.ResetGuestToken(ctx, owner, grantID, "visitor@example.com", "newhash"); err != nil {
+		t.Fatalf("resend: %v", err)
+	}
+
+	var plate string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT baseline_plate FROM guest_token WHERE id = ?`, tokenID).Scan(&plate); err != nil {
+		t.Fatalf("read baseline: %v", err)
+	}
+	if plate != "HOME1" {
+		t.Fatalf("baseline_plate = %q after a re-send, want HOME1: the guest can no longer "+
+			"put the household's car back, and the next activation would capture the guest plate instead", plate)
+	}
+}
+
+// TestVehicleCreateRefusedForAcceptedSecondary mirrors the council-link guard on the
+// other kind of first-own-data: AcceptInvite requires the invitee to own no vehicles,
+// so a create that lands after acceptance must be refused rather than quietly building
+// data nothing in the shared account will show.
+func TestVehicleCreateRefusedForAcceptedSecondary(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const primary, member = "primary@example.com", "member@example.com"
+	if err := s.AddMemberCapped(ctx, primary, member, 5); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	// A pending invite must not block them: they are still their own household.
+	if _, err := s.CreateVehicle(ctx, member, "PEND01", "car"); err != nil {
+		t.Fatalf("a pending invite must not block adding a car: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE owner = ?`, member); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if err := s.AcceptInvite(ctx, member, primary); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if _, err := s.CreateVehicle(ctx, member, "LATE01", "car"); !errors.Is(err, ErrSecondaryAccount) {
+		t.Fatalf("CreateVehicle = %v, want ErrSecondaryAccount", err)
 	}
 }
