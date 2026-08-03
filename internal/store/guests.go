@@ -264,6 +264,16 @@ func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64
 	// Drop the recipient's old token(s) and issue one fresh link, so the old link
 	// dies and the recipient still shows exactly once in the management list. The
 	// old link genuinely stops working — it can't be re-sent (hash-only storage).
+	// Sweep this recipient's live overrides BEFORE dropping their token row: override
+	// carries guest_token_id with no foreign key, so once the row is gone the
+	// override is an orphan no later revocation can match (every sweep joins
+	// guest_token). Re-sending a link would otherwise leave the previous visitor's
+	// plate on the permit permanently, with the UI reporting the link replaced.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT id FROM guest_token WHERE grant_id = ? AND recipient_email = ?)`,
+		nowUTC(), grantID, recipientEmail); err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM guest_token WHERE grant_id = ? AND recipient_email = ?`,
 		grantID, recipientEmail); err != nil {
@@ -297,6 +307,17 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner, createdBy string, perm
 		return 0, ErrNotFound
 	}
 	// Prune the owner's already-expired on-screen grants (cascades their tokens).
+	// Sweep their live overrides FIRST: an expired LINK can still have an unexpired
+	// booking (a 6pm scan good until midnight), and once the token row is pruned that
+	// override is an orphan no revocation can reach, because every sweep joins
+	// guest_token. Re-opening the visitor QR for the next guest would otherwise strand
+	// the previous visitor's plate on the permit.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+        WHERE g.owner = ? AND g.on_screen = 1
+          AND t.expires_at != '' AND t.expires_at <= ?)`, nowUTC(), owner, nowUTC()); err != nil {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM guest_grant WHERE owner = ? AND on_screen = 1
 		 AND id IN (SELECT grant_id FROM guest_token WHERE expires_at != '' AND expires_at <= ?)`,
@@ -385,6 +406,16 @@ func (s *Store) CreatePrintedGrant(ctx context.Context, owner, createdBy string,
 	}
 	if permitOK == 0 {
 		return 0, ErrNotFound
+	}
+	// Replacing the printed QR retires the old code, so sweep the live overrides it
+	// approved before its token rows go: afterwards nothing can match them (no foreign
+	// key, and every sweep joins guest_token), leaving a plate on the permit that the
+	// household can no longer take off through any control.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+        WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1)`,
+		nowUTC(), owner, permitID); err != nil {
+		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`, owner, permitID); err != nil {

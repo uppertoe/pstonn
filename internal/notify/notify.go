@@ -435,7 +435,12 @@ type ApplyOutcome struct {
 // actionNeeded reports a hard failure the user must act on (a non-transient
 // error: a dead council session, a rejected plate). These bypass the quiet-hours
 // hold and send immediately — an unattended fine risk shouldn't wait until 6am.
-func (o ApplyOutcome) actionNeeded() bool { return !o.OK && !o.Transient }
+// Urgent counts as action-needed even when Transient. A CONFIRMED fleet block is
+// flagged Transient (it will clear) but its body says "change the vehicle yourself at
+// the council now to avoid a fine" — quiet hours were holding exactly that message
+// until 06:00, so a block at 23:30 left the household on the wrong plate all night
+// with the high-priority push suppressed.
+func (o ApplyOutcome) actionNeeded() bool { return !o.OK && (!o.Transient || o.Urgent) }
 
 // deferUntil returns the quiet-hours delivery time for this outcome, or the zero
 // time (send now) when the outcome is a hard action-needed failure.

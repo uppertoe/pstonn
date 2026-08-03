@@ -145,3 +145,23 @@ func TestComposeApplyCopy(t *testing.T) {
 		t.Fatalf("urgent block body must carry the act-now action and portal: %q", ub2)
 	}
 }
+
+// The "act now or risk a fine" notice must never be held by quiet hours. It is flagged
+// Transient (a fleet block does clear) but Urgent, and the old actionNeeded() looked
+// only at Transient — so the one message designed to break through DND was the one
+// deferred until 06:00.
+func TestUrgentOutcomeIsNotHeldByQuietHours(t *testing.T) {
+	loc := time.FixedZone("AEST", 10*3600)
+	s := &Service{loc: loc}
+	pref := store.NotifyPref{QuietFrom: 22, QuietUntil: 6}
+	at2330 := time.Date(2026, 8, 2, 23, 30, 0, 0, loc)
+	urgent := ApplyOutcome{OK: false, Transient: true, Urgent: true}
+	if got := s.deferUntil(pref, at2330, urgent); !got.IsZero() {
+		t.Fatalf("an urgent fine-risk notice was deferred to %v; it must send immediately", got)
+	}
+	// A soft transient failure is still allowed to wait for morning.
+	soft := ApplyOutcome{OK: false, Transient: true}
+	if got := s.deferUntil(pref, at2330, soft); got.IsZero() {
+		t.Fatal("a non-urgent transient failure should still respect quiet hours")
+	}
+}

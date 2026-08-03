@@ -150,6 +150,14 @@ func (s *Store) MarkDriftChecked(ctx context.Context, owner string) error {
 	return err
 }
 
+// ClearReminderSent undoes MarkReminderSent, so a reminder whose token was recorded
+// but whose email then failed to send can be retried instead of being marked done.
+func (s *Store) ClearReminderSent(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET reminder_sent_at = '', confirm_token = '' WHERE owner = ?`, owner)
+	return err
+}
+
 // MarkReminderSent records that the approaching-expiry email was sent and stores
 // the single-use token embedded in its confirm link — as a hash, so the row cannot
 // be read for a working link. The caller keeps the plaintext only long enough to

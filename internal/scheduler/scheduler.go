@@ -214,6 +214,17 @@ type Scheduler struct {
 	reconnectMu sync.Mutex
 	reconnectQ  map[string]reconnectItem
 
+	// driftMu guards the per-owner drift backoff and the shape-failure tally. A failed
+	// drift read used to leave drift_checked_at alone and so retry on EVERY warm tick
+	// (~3 min) indefinitely; with a fleet-wide API-shape change that is 500 owners x 3
+	// requests every 3 minutes, driving the governor toward its ceiling until the
+	// council pushes back. Failures now back off per owner, and repeated SHAPE failures
+	// across distinct owners raise one operator alert.
+	driftMu      sync.Mutex
+	driftRetryAt map[string]time.Time
+	driftFails   map[string]int
+	driftShape   []churnEvent
+
 	// notifyInFlight claims a permit+outcome key while its delivery goroutine is
 	// queued/running, so a fleet-wide event can't re-launch duplicate deliveries every
 	// pass before the first has written its durable dedup key. Guarded by notifyMu.
@@ -331,6 +342,8 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		trigger:          make(chan struct{}, 1),
 		notifyConc:       make(chan struct{}, maxNotifyConcurrency),
 		reconnectQ:       make(map[string]reconnectItem),
+		driftRetryAt:     make(map[string]time.Time),
+		driftFails:       make(map[string]int),
 		notifyInFlight:   make(map[string]struct{}),
 		lastAlert:        make(map[string]time.Time),
 		alertRetry:       systemAlertRetry,
@@ -872,6 +885,46 @@ func (s *Scheduler) driftThresholdFor(owner string) time.Duration {
 	return time.Duration(float64(s.driftInterval) * (1 + (u*2-1)*s.jitterFrac))
 }
 
+// noteDriftFailure backs the owner off exponentially (5m, 10m, ... capped at the drift
+// interval) so a persistent failure costs one read per backoff rather than one per warm
+// tick. A shape failure additionally feeds a distinct-owner tally: several owners
+// failing the same way is an API change, not a blip, and the operator should hear once.
+func (s *Scheduler) noteDriftFailure(ctx context.Context, owner string, err error) {
+	s.driftMu.Lock()
+	s.driftFails[owner]++
+	n := s.driftFails[owner]
+	backoff := reconnectBackoffMin << min(n-1, 6)
+	if s.driftInterval > 0 && backoff > s.driftInterval {
+		backoff = s.driftInterval
+	}
+	s.driftRetryAt[owner] = time.Now().Add(backoff)
+	var distinct int
+	if kind, _ := parking.FailureOf(err); kind == parking.FailUnexpected {
+		s.driftShape = append(pruneChurn(s.driftShape, time.Now()), churnEvent{owner, time.Now()})
+		distinct = distinctOwners(s.driftShape)
+	}
+	s.driftMu.Unlock()
+	if distinct >= sessionChurnAlertOwners {
+		s.systemAlert(ctx, "drift-shape",
+			"Council permit reads are failing the same way for several accounts",
+			fmt.Sprintf("%d different accounts have had a drift/permit read rejected as an unexpected response within the last hour. That pattern is an API-shape change rather than a blip: permit status, expiry and external-change detection are stale for those accounts until it is fixed. Reads are backing off, so traffic is bounded meanwhile.", distinct))
+	}
+}
+
+func (s *Scheduler) noteDriftSuccess(owner string) {
+	s.driftMu.Lock()
+	delete(s.driftFails, owner)
+	delete(s.driftRetryAt, owner)
+	s.driftMu.Unlock()
+}
+
+func (s *Scheduler) driftBackedOff(owner string, now time.Time) bool {
+	s.driftMu.Lock()
+	defer s.driftMu.Unlock()
+	at, ok := s.driftRetryAt[owner]
+	return ok && now.Before(at)
+}
+
 // driftDue reports whether the owner-grid drift/expiry read is due for this
 // session. A session that has never had one — a fresh link, or a row migrated
 // before the column existed — falls back to the warm clock as its baseline, so it
@@ -880,6 +933,9 @@ func (s *Scheduler) driftThresholdFor(owner string) time.Duration {
 func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
 	if s.driftInterval <= 0 {
 		return false
+	}
+	if s.driftBackedOff(cs.Owner, now) {
+		return false // a failing read is retried on its own backoff, not every warm tick
 	}
 	baseline := cs.DriftCheckedAt
 	if baseline.IsZero() {
@@ -1002,8 +1058,10 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	// the block clears.
 	if alive && !s.council.Blocked() && s.driftDue(cs, now) {
 		if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
-			// The read failed; leave drift_checked_at alone so the next pass retries
-			// instead of standing down for a full interval.
+			// drift_checked_at is deliberately NOT advanced (the check did not happen),
+			// but the owner is backed off so a persistent failure cannot retry on every
+			// warm tick across the whole fleet.
+			s.noteDriftFailure(ctx, cs.Owner, derr)
 			log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
 			// A drift read is often how we learn the cookie was killed council-side just
 			// AFTER a successful warm — the churn incident's signature. Without this the
@@ -1012,8 +1070,11 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			if g, ok := parking.SessionGenOf(derr); ok {
 				s.enqueueReconnect(ctx, cs.Owner, g)
 			}
-		} else if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
-			log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
+		} else {
+			s.noteDriftSuccess(cs.Owner) // clear any backoff from earlier failures
+			if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
+				log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
+			}
 		}
 	}
 }
@@ -1760,17 +1821,32 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		return
 	}
 	url := s.publicBaseURL + "/council/confirm?token=" + token
+	// RECORD THE TOKEN FIRST. Sending first meant a failed write emailed a confirm link
+	// that could never work — and, because reminder_sent_at stayed empty, sent another
+	// broken one every warm tick. Recording first makes the emailed link valid by
+	// construction; if the send then fails we roll the mark back so it can be retried.
+	if err := s.store.MarkReminderSent(ctx, cs.Owner, token); err != nil {
+		log.Printf("scheduler: mark reminder for %s: %v", cs.Owner, err)
+		return
+	}
 	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.loc), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", cs.Owner, err)
+		// DETACHED context for the rollback. Using ctx here was a real defect: the most
+		// likely reason the send failed is that ctx was cancelled (shutdown), and the
+		// rollback would then fail for the same reason — leaving the session marked
+		// reminded but never reminded, so maybeRemind's !ReminderSent.IsZero() guard
+		// never fires again and the session lapses silently. That is worse than the
+		// duplicate the old ordering risked.
+		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner); cerr != nil {
+			log.Printf("scheduler: roll back reminder mark for %s: %v", cs.Owner, cerr)
+		}
+		cancel()
 		// The reminder is email-only. If it keeps failing through the window the
 		// session lapses silently, so alert the operator (throttled).
 		s.systemAlert(ctx, "reminder-send",
 			"Renewal reminder could not be sent",
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
-		return
-	}
-	if err := s.store.MarkReminderSent(ctx, cs.Owner, token); err != nil {
-		log.Printf("scheduler: mark reminder for %s: %v", cs.Owner, err)
 		return
 	}
 	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", cs.Owner, deadline.In(s.loc).Format("2006-01-02"))

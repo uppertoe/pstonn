@@ -124,6 +124,29 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		io.WriteString(w, f.gridBody.Load().(string))
 	})
 
+	// `{}` — every field absent — must NOT read as "no permits" (the missing-vs-zero
+	// trap: absent decodes to nil/0 and looked identical to a genuinely empty account).
+	for _, body := range []string{`{}`, `{"TotalItems":0}`, `{"PermitGrid":[]}`} {
+		f.gridBody.Store(body)
+		if _, err := c.ListPermits(context.Background(), owner); err == nil {
+			t.Fatalf("%s must be refused as a shape change, not read as an empty account", body)
+		}
+	}
+	// A non-empty grid that disagrees with the count is also a shape change.
+	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[{"PKPermitID":1}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("a row count disagreeing with TotalItems must be refused")
+	}
+	// Negative ids are as unusable as zero.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":-4}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("a negative PKPermitID must be refused")
+	}
+	// A malformed date must not silently become the zero time: end_date drives expiry.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":7,"EndDate":"31/12/2026"}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("an unparseable date must be refused, not zeroed")
+	}
 	// The council's own count contradicts the empty grid: refuse.
 	f.gridBody.Store(`{"TotalItems":3,"PermitGrid":[]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
@@ -138,5 +161,36 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	f.gridBody.Store(`{"TotalItems":0,"PermitGrid":[]}`)
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 0 {
 		t.Fatalf("a corroborated empty account should read as no permits: %v / %d", err, len(ps))
+	}
+}
+
+// A token-shape failure must classify as FailUnexpected. Left unclassified, FailureOf
+// defaults it to FailTransient — and a transient verdict on a FLEET-WIDE shape change
+// means every owner retries it on every warm tick instead of the operator being told.
+func TestTokenShapeFailuresAreUnexpectedNotTransient(t *testing.T) {
+	const owner = "tok@example.com"
+	for name, body := range map[string]string{
+		"no expires_in":     `{"access_token":"a","token_type":"Bearer"}`,
+		"zero expires_in":   `{"access_token":"a","expires_in":0,"token_type":"Bearer"}`,
+		"absurd expires_in": `{"access_token":"a","expires_in":999999,"token_type":"Bearer"}`,
+		"wrong token_type":  `{"access_token":"a","expires_in":3600,"token_type":"Mac"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeCouncil(t)
+			c, st, box := testClient(t, f)
+			linkOwner(t, c, st, box, owner)
+			f.mux.HandleFunc("/idm2/connect/token", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, body)
+			})
+			c.tokenURL = f.srv.URL + "/idm2/connect/token"
+			_, err := c.exchangeCode(context.Background(), owner, "code", "verifier")
+			if err == nil {
+				t.Fatalf("%s should be refused", name)
+			}
+			if kind, _ := FailureOf(err); kind != FailUnexpected {
+				t.Fatalf("%s classified as %v, want FailUnexpected (transient would retry forever)", name, kind)
+			}
+		})
 	}
 }

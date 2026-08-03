@@ -2858,3 +2858,126 @@ func TestGuestOverrideAuthorisationFollowsGrantScope(t *testing.T) {
 		t.Fatalf("the account kill switch must withdraw authority (live=%v err=%v)", live, err)
 	}
 }
+
+// Acceptance must re-test its prerequisites in the SAME statement: a council link or a
+// first vehicle landing between a caller's check and the update would otherwise accept
+// the invite anyway, hiding the invitee's own permits under someone else's account.
+func TestAcceptInviteIsBlockedByOwnDataAtomically(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, invitee = "primary@example.com", "invitee@example.com"
+	if err := s.AddMemberCapped(ctx, owner, invitee, 5); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	// The invitee acquires their own data AFTER the handler would have checked.
+	if _, err := s.CreateVehicle(ctx, invitee, "OWN111", "their car"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); !errors.Is(err, ErrInviteBlocked) {
+		t.Fatalf("accept = %v, want ErrInviteBlocked (their own data must not be hidden)", err)
+	}
+	// With the blocking data gone the same invite accepts normally. (Delete only the
+	// vehicle: DeleteAllForOwner would also remove the pending invite row.)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE owner = ?`, invitee); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); err != nil {
+		t.Fatalf("a clean invitee should be able to accept: %v", err)
+	}
+}
+
+// Revoking a guest's authority must also remove the bookings it made — through EVERY
+// route, not just the two that already swept.
+//
+// override.guest_token_id has no foreign key, and every sweep matches via a JOIN onto
+// guest_token. So any path that DELETES a grant/token without sweeping first orphans
+// the override: it still steers the permit (ListOverrides does not join guest_token)
+// and no later control can reach it — not revoke, not delete-pass, not the
+// account-wide pause. A stranger's plate would hold a real permit for up to ~2 days
+// while every button the household presses reports success.
+func TestRevocationRoutesSweepLiveOverrides(t *testing.T) {
+	ctx := context.Background()
+	// setup builds an owner + permit + a member-created pass with one live guest
+	// booking, and returns the permit and grant ids.
+	setup := func(t *testing.T, s *Store, owner string) (permitID, grantID int64) {
+		t.Helper()
+		permitID, _ = s.UpsertPermit(ctx, owner, "p1", "14", "P")
+		if err := s.AddMemberCapped(ctx, owner, "member@example.com", 5); err != nil {
+			t.Fatal(err)
+		}
+		grantID, err := s.CreateGuestGrant(ctx, owner, "member@example.com", permitID, "pass", true, nil,
+			[]GuestRecipient{{Email: "visitor@example.com", TokenHash: "hash1"}})
+		if err != nil {
+			t.Fatalf("create grant: %v", err)
+		}
+		// The pass must permit a typed plate for the booking below.
+		if _, err := s.db.ExecContext(ctx, `UPDATE guest_grant SET allow_plate = 1 WHERE id = ?`, grantID); err != nil {
+			t.Fatal(err)
+		}
+		var tokenID int64
+		if err := s.db.QueryRowContext(ctx, `SELECT id FROM guest_token WHERE grant_id = ?`, grantID).Scan(&tokenID); err != nil {
+			t.Fatalf("token id: %v", err)
+		}
+		end := time.Now().Add(36 * time.Hour) // an overnight booking, live into tomorrow
+		if _, err := s.CreateGuestPlateOverride(ctx, permitID, "STRANGR", time.Now().Add(-time.Minute), &end, "visitor", tokenID); err != nil {
+			t.Fatalf("guest booking: %v", err)
+		}
+		if ovs, _ := s.ListOverrides(ctx, permitID, time.Now()); len(ovs) != 1 {
+			t.Fatalf("setup: expected the guest booking to be live, got %d", len(ovs))
+		}
+		return permitID, grantID
+	}
+
+	t.Run("removing the member who created the pass", func(t *testing.T) {
+		s := newTestStore(t)
+		const owner = "owner1@example.com"
+		pid, _ := setup(t, s, owner)
+		if _, err := s.RemoveMember(ctx, owner, "member@example.com"); err != nil {
+			t.Fatalf("remove member: %v", err)
+		}
+		assertNoLiveOverrides(t, s, pid)
+	})
+
+	t.Run("re-sending the guest link", func(t *testing.T) {
+		s := newTestStore(t)
+		const owner = "owner2@example.com"
+		pid, grantID := setup(t, s, owner)
+		if _, err := s.ResetGuestToken(ctx, owner, grantID, "visitor@example.com", "newhash"); err != nil {
+			t.Fatalf("reset token: %v", err)
+		}
+		assertNoLiveOverrides(t, s, pid)
+	})
+}
+
+func assertNoLiveOverrides(t *testing.T, s *Store, permitID int64) {
+	t.Helper()
+	ovs, err := s.ListOverrides(context.Background(), permitID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ovs) != 0 {
+		t.Fatalf("revocation left %d live guest booking(s) on the permit; with the token row gone nothing can ever remove them", len(ovs))
+	}
+}
+
+// The in-SQL guard must mirror IsPrimary exactly. IsPrimary uses CountMembers, which
+// counts PENDING rows too — so an invitee who has themselves invited someone (offer
+// outstanding) is already a primary and must not also become a secondary.
+func TestAcceptInviteBlockedByOwnPendingInvite(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, invitee = "primary@example.com", "invitee@example.com"
+	if err := s.AddMemberCapped(ctx, owner, invitee, 5); err != nil {
+		t.Fatal(err)
+	}
+	// The invitee invites someone of their own: pending, but IsPrimary already true.
+	if err := s.AddMemberCapped(ctx, invitee, "theirguest@example.com", 5); err != nil {
+		t.Fatal(err)
+	}
+	if isP, err := s.IsPrimary(ctx, invitee); err != nil || !isP {
+		t.Fatalf("IsPrimary should count a pending invite (isP=%v err=%v)", isP, err)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); !errors.Is(err, ErrInviteBlocked) {
+		t.Fatalf("accept = %v, want ErrInviteBlocked — the guard must match IsPrimary", err)
+	}
+}

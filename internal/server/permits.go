@@ -208,12 +208,20 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Seed "on permit now" from the plate the council record already reports, so
 	// it shows immediately instead of "unknown" until the first live refresh.
+	// Seeding failures are not fatal — the scheduler refreshes both on its own cadence —
+	// but they must not be invisible: silently swallowing them meant a permit that
+	// showed "unknown" with no clue why, and no signal if the writes were failing for
+	// everyone.
 	if match.CurrentRego != "" {
-		_ = s.store.SetPermitActive(ctx, pid, match.CurrentRego)
+		if err := s.store.SetPermitActive(ctx, pid, match.CurrentRego); err != nil {
+			log.Printf("addPermit: seed current plate for permit %d: %v", pid, err)
+		}
 	}
 	// Seed expiry + status + identifiers so the schedule shows them straight away;
 	// the scheduler keeps them fresh on the keep-warm cadence thereafter.
-	_ = s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate)
+	if err := s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate); err != nil {
+		log.Printf("addPermit: seed metadata for permit %s: %v", cpid, err)
+	}
 	target := match.PermitNumber
 	if target == "" {
 		target = cpid

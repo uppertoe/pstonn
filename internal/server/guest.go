@@ -1451,6 +1451,14 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Choose at least one car this pass may activate.")
 		return
 	}
+	// Parse and validate the recipients BEFORE mutating anything: returning an error
+	// after the label/cars were already committed left the pass changed while telling
+	// the user it failed.
+	emails, droppedEmails := parseEmails(r.FormValue("recipients"))
+	if len(emails) > maxGuestRecipients {
+		s.formError(w, r, tooManyRecipients)
+		return
+	}
 	if err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That pass or car isn't one you manage.")
@@ -1462,11 +1470,6 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 
 	// New recipients (if any) each get a fresh token + link.
 	var newLinks []guestLinkView
-	emails, droppedEmails := parseEmails(r.FormValue("recipients"))
-	if len(emails) > maxGuestRecipients {
-		s.formError(w, r, tooManyRecipients)
-		return
-	}
 	if len(emails) > 0 {
 		recs, links := s.mintLinks(emails)
 		added, err := s.store.AddGuestTokens(r.Context(), owner, id, recs)

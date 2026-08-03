@@ -43,6 +43,13 @@ type Server struct {
 	guestLinkOut *rateLimiter // per-owner throttle on guest-pass link emails
 	guestLinkTo  *rateLimiter // per-recipient throttle on guest-pass link emails
 	councilTry   *rateLimiter // per-user throttle on council password attempts (councilLink)
+	// admitMu serialises NEW-household admission: the capacity count and the council
+	// link that consumes the slot must be one decision, or concurrent newcomers all
+	// read 499 and all save. Held across the link (already globally serialised by the
+	// council client's login flow, so this adds no contention in practice). Taken before
+	// we know whether this is a signup or a re-link, so re-links serialise too; council
+	// links are rare and already serialised downstream, so that costs nothing.
+	admitMu sync.Mutex
 	// testNotifyLimit throttles the on-demand "send test" button (per user): the
 	// only authenticated control that sends mail whenever it is pressed.
 	testNotifyLimit *rateLimiter
