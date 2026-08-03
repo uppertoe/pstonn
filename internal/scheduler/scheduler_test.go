@@ -30,6 +30,7 @@ type fakeCouncil struct {
 	setErr               error
 	setDelay             time.Duration // how long a council write takes, to widen races
 	panicOn              string        // council_permit_id whose SetVehicle should panic (per-unit-recovery test)
+	onListPermits        func()        // runs INSIDE ListPermits, to simulate an apply landing mid-read
 
 	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
 	// from a handler-style goroutine and the reconcile loop at the same time.
@@ -177,6 +178,9 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 	return f.reconnectErr
 }
 func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
+	if f.onListPermits != nil {
+		f.onListPermits()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++ // the owner-grid read; drift/expiry uses it, so counting it counts drift

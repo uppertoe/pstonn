@@ -2981,3 +2981,25 @@ func TestAcceptInviteBlockedByOwnPendingInvite(t *testing.T) {
 		t.Fatalf("accept = %v, want ErrInviteBlocked — the guard must match IsPrimary", err)
 	}
 }
+
+// An older breaker snapshot must never overwrite a newer one: a stale "closed" landing
+// after a newer "open" would make a restart resume full traffic into a live block.
+func TestSaveBreakerStateIsGenerationGuarded(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	newer := BreakerState{OpenUntil: time.Now().Add(time.Hour), LastPushback: time.Now(), Generation: 9}
+	if err := s.SaveBreakerState(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	older := BreakerState{OpenUntil: time.Time{}, LastPushback: time.Now(), Generation: 4}
+	if err := s.SaveBreakerState(ctx, older); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadBreakerState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Generation != 9 || got.OpenUntil.IsZero() {
+		t.Fatalf("an older snapshot overwrote a newer one: gen=%d openUntil=%v", got.Generation, got.OpenUntil)
+	}
+}

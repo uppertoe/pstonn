@@ -486,7 +486,7 @@ func TestGuestApplyNotifyThrottledPerAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 15; i++ {
-		s.notifyGuestApply(ctx, permit, fmt.Sprintf("CYC%03d", i), "", "visitor (QR)", model.DisplacedBooking{})
+		s.notifyGuestApply(ctx, permit, fmt.Sprintf("CYC%03d", i), "", "visitor (QR)", model.DisplacedBooking{}, false)
 	}
 	queued, err := s.store.DueOutbox(ctx, time.Now().Add(72*time.Hour), 100)
 	if err != nil {

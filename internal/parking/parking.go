@@ -288,20 +288,19 @@ func (c *Client) persistBreaker() {
 	if c.store == nil {
 		return
 	}
-	// Snapshot AND write under one lock. Taking them separately let two concurrent
-	// transitions interleave — an older "closed" snapshot could reach the database after
-	// a newer "open" one, and SaveBreakerState overwrites unconditionally, so a restart
-	// would then resume FULL traffic into a block that is still in force. The write is
-	// bounded (3s) so holding the lock cannot wedge a caller.
-	c.persistMu.Lock()
-	defer c.persistMu.Unlock()
+	// Ordering is enforced in SQL (SaveBreakerState only applies a generation >= the
+	// stored one), so an older snapshot can no longer overwrite a newer one and this
+	// does NOT need to hold a lock across the write. That matters: /status reads
+	// persistErr under the same mutex, and a fleet block is when both are busiest.
 	openUntil, lastPushback, gen := c.breaker.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := c.store.SaveBreakerState(ctx, store.BreakerState{
 		OpenUntil: openUntil, LastPushback: lastPushback, Generation: gen,
 	})
+	c.persistMu.Lock()
 	c.persistErr, c.persistAt = err, time.Now()
+	c.persistMu.Unlock()
 	if err != nil {
 		log.Printf("parking: persist breaker state: %v (restart-protection degraded)", err)
 	}
@@ -985,6 +984,15 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
 	}
 	cur := mv.PermitVehicles[0]
+	// Every other field on the write below is validated or defaulted; this one was
+	// taken on trust. An absent PKPermitVehicleDetailID yields json.Number("") and we
+	// would POST an edit with empty SelectedVehicle/ChangeSetID/detail id. What the
+	// council does with that is unknown, and this is the one code path that can put a
+	// wrong plate on a real permit — so fail closed.
+	if strings.TrimSpace(cur.PKPermitVehicleDetailID.String()) == "" {
+		return councilErr(FailUnexpected, op,
+			errors.New("managed vehicle has no PKPermitVehicleDetailID: API shape change?"))
+	}
 	if model.SamePlate(cur.RegistrationNumber, registration) {
 		// Already allocated (the read above IS the confirmation). Refresh the cache
 		// so callers reflect the council's own record, then report success.
@@ -1111,9 +1119,26 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 				g.PermitGrid == nil, g.TotalItems == nil))
 	}
 	rows, total := *g.PermitGrid, *g.TotalItems
-	if total != len(rows) {
+	// Deliberately NOT exact equality. We request pageSize=0 meaning "everything", but
+	// if the council ever applies a default page size, TotalItems becomes the unpaged
+	// total and exact equality would hard-fail ListPermits for every account holding
+	// more permits than one page — the picker, addPermit and drift all break at once.
+	// What must never pass is the case this guard exists for: the council says there ARE
+	// permits and sent us none.
+	if len(rows) == 0 && total != 0 {
 		return nil, councilErr(FailUnexpected, op,
-			fmt.Errorf("permit grid has %d rows but the response claims %d items: API shape change?", len(rows), total))
+			fmt.Errorf("permit grid is empty but the response claims %d items: API shape change?", total))
+	}
+	if total < len(rows) {
+		return nil, councilErr(FailUnexpected, op,
+			fmt.Errorf("permit grid has %d rows but the response claims only %d items: API shape change?", len(rows), total))
+	}
+	if total > len(rows) {
+		// Tolerated so a paging change degrades instead of failing every account — but
+		// it means we are acting on a PARTIAL list (drift cannot see the permits we were
+		// not sent), so it must not be silent.
+		log.Printf("parking: permit grid returned %d of %d permits for %s; acting on a partial list (paging change?)",
+			len(rows), total, owner)
 	}
 	out := make([]PermitInfo, 0, len(rows))
 	for _, r := range rows {
@@ -1149,8 +1174,6 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 	return out, nil
 }
 
-// parseCouncilDate parses the portal's zoneless local timestamps
-// (e.g. "2026-07-13T00:00:00"), returning the zero time if unparseable.
 // councilDate parses a council date, reporting a malformed one instead of swallowing
 // it. Empty means "not set" and is not an error.
 func councilDate(s string) (time.Time, error) {
@@ -1162,17 +1185,6 @@ func councilDate(s string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return t, nil
-}
-
-func parseCouncilDate(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse("2006-01-02T15:04:05", s)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }
 
 func randToken() (string, error) {

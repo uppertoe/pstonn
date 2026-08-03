@@ -515,17 +515,19 @@ func (s *Store) LoadBreakerState(ctx context.Context) (BreakerState, error) {
 
 // SaveBreakerState persists the breaker pause on every open/close/pushback
 // transition, so a restart resumes from the real state rather than a clean slate.
-func (s *Store) SaveBreakerState(ctx context.Context, bs BreakerState) error {
-	ou, lp := "", ""
-	if !bs.OpenUntil.IsZero() {
-		ou = bs.OpenUntil.UTC().Format(time.RFC3339)
-	}
-	if !bs.LastPushback.IsZero() {
-		lp = bs.LastPushback.UTC().Format(time.RFC3339)
-	}
+func (s *Store) SaveBreakerState(ctx context.Context, b BreakerState) error {
+	// Generation-guarded, so an older snapshot cannot overwrite a newer one even if two
+	// transitions race to the database. That makes ordering safe WITHOUT holding a lock
+	// across this write — which matters because /status reads the persist health under
+	// the same mutex, and a fleet block is exactly when both are busiest.
 	_, err := s.db.ExecContext(ctx, `
-UPDATE breaker_state SET open_until = ?, generation = ?, last_pushback = ?, updated_at = ?
-WHERE id = 1`,
-		ou, int64(bs.Generation), lp, nowUTC())
+INSERT INTO breaker_state (id, open_until, last_pushback, generation)
+VALUES (1, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    open_until    = excluded.open_until,
+    last_pushback = excluded.last_pushback,
+    generation    = excluded.generation
+WHERE excluded.generation >= breaker_state.generation`,
+		b.OpenUntil.UTC().Format(time.RFC3339), b.LastPushback.UTC().Format(time.RFC3339), b.Generation)
 	return err
 }

@@ -1174,6 +1174,14 @@ func outboxTarget(it store.OutboxItem) string {
 // on failure it enters it, and the caller must stop draining. Reports whether the
 // store accepted the write.
 func (s *Service) record(ctx context.Context, id int64, u outboxUpdate) bool {
+	// DETACHED. mailer.Send* takes no context, so a send is uncancellable — but this
+	// bookkeeping was threaded the signal context. On SIGTERM mid-send the mail goes
+	// out, this write fails instantly with context.Canceled, the row stays 'pending'
+	// with next_attempt in the past, and the startup drain re-sends it. The whole
+	// unrecorded/flushUnrecorded machinery exists to prevent exactly that duplicate and
+	// was defeated by the one failure mode guaranteed to end the process.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	var err error
 	switch u.status {
 	case "sent":

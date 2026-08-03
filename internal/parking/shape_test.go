@@ -132,10 +132,16 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 			t.Fatalf("%s must be refused as a shape change, not read as an empty account", body)
 		}
 	}
-	// A non-empty grid that disagrees with the count is also a shape change.
-	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[{"PKPermitID":1}]}`)
+	// More rows than the count claims is impossible: refuse.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":1},{"PKPermitID":2}]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
-		t.Fatal("a row count disagreeing with TotalItems must be refused")
+		t.Fatal("more rows than TotalItems must be refused")
+	}
+	// FEWER rows than the count is tolerated (a future default page size would make it
+	// normal); hard-failing would break every account with more permits than one page.
+	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[{"PKPermitID":1}]}`)
+	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
+		t.Fatalf("a partial page should degrade, not fail: %v / %d", err, len(ps))
 	}
 	// Negative ids are as unusable as zero.
 	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":-4}]}`)
@@ -192,5 +198,28 @@ func TestTokenShapeFailuresAreUnexpectedNotTransient(t *testing.T) {
 				t.Fatalf("%s classified as %v, want FailUnexpected (transient would retry forever)", name, kind)
 			}
 		})
+	}
+}
+
+// The detail id is the only field on the manageVehicle write that was taken on trust.
+// Absent, json.Number("").String() is "", and we would POST an edit with an empty
+// SelectedVehicle/ChangeSetID — on the one code path that can put a wrong plate on a
+// real permit. It must fail closed.
+func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
+	const owner = "detail@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	p := model.Permit{CouncilPermitID: "1"}
+	// A well-formed record in every respect EXCEPT the detail id, and a plate that
+	// differs from the target so the no-op short-circuit does not hide it.
+	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"maxVehicles":1,"canEditOrDeleteVehicle":true,` +
+		`"permitVehicles":[{"RegistrationNumber":"AAA111","FKVehicleStateID":"1"}]}`)
+	err := c.SetVehicle(context.Background(), owner, p, "BBB222")
+	if err == nil {
+		t.Fatal("a managed vehicle with no PKPermitVehicleDetailID must not be written to")
+	}
+	if kind, _ := FailureOf(err); kind != FailUnexpected {
+		t.Fatalf("kind = %v, want FailUnexpected (a shape change, not a durable refusal)", kind)
 	}
 }
