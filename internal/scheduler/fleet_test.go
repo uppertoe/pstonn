@@ -64,7 +64,35 @@ type stubCouncil struct {
 	retryPost atomic.Int64 // Retry-After seconds advertised on a refusal
 	apiSeq    atomic.Int64 // deals out the deterministic failures
 	failures  atomic.Int64 // refusals actually served
-	authDead  atomic.Bool  // authorize returns the LOGIN PAGE: the cookie is dead
+	authDead  atomic.Bool  // every authorize returns the LOGIN PAGE, login impossible
+	deadTags  map[string]bool
+	logins    atomic.Int64 // successful credential logins
+	nextTag   atomic.Int64
+}
+
+// killAllCookies invalidates every session cookie the fleet currently holds, the way a
+// council-side purge would. Unlike authDead it leaves the login endpoint working, so a
+// household with a saved password can actually recover.
+func (s *stubCouncil) killAllCookies() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for tag := range s.byTag {
+		s.deadTags[tag] = true
+	}
+}
+
+// cookieLive reports whether the presented cookie still identifies a live session.
+func (s *stubCouncil) cookieLive(r *http.Request) (tag string, ok bool) {
+	c, err := r.Cookie("Permits.IDM.Identity")
+	if err != nil {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deadTags[c.Value] || s.byTag[c.Value] == "" {
+		return c.Value, false
+	}
+	return c.Value, true
 }
 
 // injectFault applies the configured latency and, on its turn, refuses the request the
@@ -92,7 +120,7 @@ func (s *stubCouncil) injectFault(w http.ResponseWriter) bool {
 
 func newStubCouncil(t *testing.T) *stubCouncil {
 	t.Helper()
-	s := &stubCouncil{plates: map[string]string{}, byPath: map[string]int{}, byTag: map[string]string{}, byTok: map[string]string{}}
+	s := &stubCouncil{plates: map[string]string{}, byPath: map[string]int{}, byTag: map[string]string{}, byTok: map[string]string{}, deadTags: map[string]bool{}}
 	mux := http.NewServeMux()
 
 	record := func(path string) {
@@ -107,18 +135,18 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	// keep talking about the same household, so the stub does it the same way.
 	mux.HandleFunc("/idm/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		record("authorize")
-		if s.authDead.Load() {
+		tag, live := s.cookieLive(r)
+		if s.authDead.Load() || !live {
 			// How the council actually signals a dead cookie: 200 HTML carrying the
 			// ASP.NET antiforgery field, instead of the 302 back to the app. This is what
-			// turns into ErrSessionExpired and hands the owner to the reconnect worker.
+			// becomes ErrSessionExpired and hands the owner to the reconnect worker.
 			w.Header().Set("Content-Type", "text/html")
 			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, `<html><form><input name="__RequestVerificationToken" value="x"></form></html>`)
+			_, _ = io.WriteString(w, `<html><body><form method="post" action="/idm/Account/Login">`+
+				`<input type="hidden" name="__RequestVerificationToken" value="tok">`+
+				`<input name="Username" value=""><input name="Password" type="password" value="">`+
+				`</form></body></html>`)
 			return
-		}
-		tag := ""
-		if c, err := r.Cookie("Permits.IDM.Identity"); err == nil {
-			tag = c.Value
 		}
 		cb := r.URL.Query().Get("redirect_uri")
 		http.Redirect(w, r, cb+"?code=code-"+tag+"&state="+r.URL.Query().Get("state"), http.StatusFound)
@@ -137,6 +165,35 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 			"access_token": "tok-" + tag, "expires_in": 3600, "token_type": "Bearer",
 		})
 	})
+	// Credential login: what a saved-password reconnect actually posts. Issues a FRESH
+	// session cookie, which is the whole point — the owner comes back linked rather than
+	// being retired.
+	mux.HandleFunc("/idm/Account/Login", func(w http.ResponseWriter, r *http.Request) {
+		record("login")
+		_ = r.ParseForm()
+		owner := r.PostFormValue("Username")
+		s.mu.Lock()
+		known := false
+		for _, o := range s.byTag {
+			if o == owner {
+				known = true
+				break
+			}
+		}
+		s.mu.Unlock()
+		if !known || r.PostFormValue("Password") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		tag := fmt.Sprintf("re%d", s.nextTag.Add(1))
+		s.mu.Lock()
+		s.byTag[tag] = owner
+		s.mu.Unlock()
+		s.logins.Add(1)
+		http.SetCookie(w, &http.Cookie{Name: "Permits.IDM.Identity", Value: tag, Path: "/"})
+		w.WriteHeader(http.StatusOK)
+	})
+
 	// The permit grid. One permit per owner, carrying the plate the council holds.
 	mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
 		record("grid")
@@ -328,6 +385,13 @@ func newFleetRig(t *testing.T, size int) *fleetRig {
 // API calls. Seeding fresh tokens quietly removed two requests per owner from the
 // headline number, making the measurement a lower bound rather than the real thing.
 func newFleetRigTokens(t *testing.T, size int, freshTokens bool) *fleetRig {
+	return newFleetRigOpts(t, size, freshTokens, false)
+}
+
+// newFleetRigOpts additionally controls whether each household has a SAVED PASSWORD.
+// Without one the reconnect worker can only retire a killed session; with one it can
+// actually log back in, which is the path 500 simultaneous expiries would take.
+func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *fleetRig {
 	t.Helper()
 	ctx := context.Background()
 	council := newStubCouncil(t)
@@ -361,8 +425,18 @@ func newFleetRigTokens(t *testing.T, size int, freshTokens bool) *fleetRig {
 	// OLD plate, a vehicle, and a rule for today naming the NEW one. That is exactly
 	// the midnight-rollover shape — every permit due to change at once.
 	desired := map[int64]string{}
-	seal := func(v string) string {
-		s, err := box.Seal(v)
+	// Context-BOUND, the way production writes these. An unbound Seal is still readable,
+	// but every read logs a legacy-ciphertext migration and rewrites the row — hundreds
+	// of extra database writes that have nothing to do with the capacity being measured.
+	sealCookie := func(owner, v string) string {
+		s, err := box.SealCtx(secretbox.CouncilCookie(owner), v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	sealToken := func(owner, v string) string {
+		s, err := box.SealCtx(secretbox.CouncilToken(owner), v)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -376,7 +450,17 @@ func newFleetRigTokens(t *testing.T, size int, freshTokens bool) *fleetRig {
 		council.byTag[tag] = owner
 		council.mu.Unlock()
 
-		if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: seal("Permits.IDM.Identity=" + tag)}); err != nil {
+		sealedPass := ""
+		if savePasswords {
+			p, err := box.SealCtx(secretbox.CouncilPassword(owner), "hunter2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sealedPass = p
+		}
+		if err := st.SaveCouncilSession(ctx, store.CouncilSession{
+			Owner: owner, Cookie: sealCookie(owner, "Permits.IDM.Identity="+tag), Password: sealedPass,
+		}); err != nil {
 			t.Fatalf("seed session %d: %v", i, err)
 		}
 		cs, err := st.GetCouncilSession(ctx, owner)
@@ -390,7 +474,7 @@ func newFleetRigTokens(t *testing.T, size int, freshTokens bool) *fleetRig {
 		if freshTokens {
 			tokenExpiry = time.Now().Add(time.Hour)
 		}
-		if err := st.UpdateCouncilToken(ctx, owner, cs.Cookie, seal("tok-"+tag), tokenExpiry, cs.Generation); err != nil {
+		if err := st.UpdateCouncilToken(ctx, owner, cs.Cookie, sealToken(owner, "tok-"+tag), tokenExpiry, cs.Generation); err != nil {
 			t.Fatalf("seed token %d: %v", i, err)
 		}
 		pid, err := st.UpsertPermit(ctx, owner, councilIDFor(owner), "14", "Permit")
@@ -740,6 +824,77 @@ func TestFleetReconnectRecovery(t *testing.T) {
 	// is the correct outcome — but it must cost a bounded amount to reach.
 	if perOwner := float64(recoveryCost) / float64(queued); perOwner > 4 {
 		t.Errorf("recovery cost %.2f requests per queued owner; a fleet-wide kick would "+
+			"stampede the edge that just came back", perOwner)
+	}
+}
+
+// TestFleetSavedPasswordRecovery is the scenario 500 simultaneous expiries would
+// actually take. Every household's council cookie is purged at once and every
+// household HAS a saved password, so the reconnect worker can log back in rather than
+// simply retiring them. The earlier recovery test measured zero council requests only
+// because it had nothing to recover with — every account was unlinked, which is a
+// correct outcome but not the expensive one.
+//
+// What must hold: sessions come back LINKED (not retired), each costs one login rather
+// than a retry ladder, and the queue converges.
+func TestFleetSavedPasswordRecovery(t *testing.T) {
+	requireFleet(t)
+	ctx := context.Background()
+	// Defaults small on purpose: recovery is paced by the LOGIN governor (12/min), so
+	// this test's wall-clock is size/12 minutes whatever the machine does. That pacing
+	// is the finding, not an obstacle — see the log line below.
+	size := fleetSize(t, 20)
+	rig := newFleetRigOpts(t, size, false, true)
+
+	rig.council.killAllCookies()
+	for i := 0; i < 2; i++ {
+		rig.sched.reconcileAll(ctx)
+	}
+	queued := rig.sched.reconnectQueueLen()
+	if queued == 0 {
+		t.Fatal("a fleet-wide cookie purge queued nobody for reconnect")
+	}
+
+	before := rig.council.total()
+	for i := 0; i < queued*4 && rig.sched.reconnectQueueLen() > 0; i++ {
+		rig.sched.drainOneReconnect(ctx)
+	}
+	recoveryCost := rig.council.total() - before
+
+	// Linked, not retired: the session row must survive with a fresh generation.
+	linked, retired := 0, 0
+	for i := 0; i < size; i++ {
+		owner := fmt.Sprintf("owner%04d@example.com", i)
+		if _, err := rig.store.GetCouncilSession(ctx, owner); err == nil {
+			linked++
+		} else {
+			retired++
+		}
+	}
+
+	t.Logf("\n"+
+		"    fleet ................. %d owners, all with saved passwords\n"+
+		"    queued for reconnect .. %d\n"+
+		"    credential logins ..... %d\n"+
+		"    recovery cost ......... %d requests (%.2f per queued owner)\n"+
+		"    still linked .......... %d   retired: %d\n"+
+		"    still queued .......... %d\n"+
+		"    IMPLIED full-fleet recovery: %d logins at the 12/min login governor =\n"+
+		"      ~%.0f min for 500 households, ~%.0f min for 1000\n",
+		size, queued, rig.council.logins.Load(), recoveryCost,
+		float64(recoveryCost)/float64(queued), linked, retired, rig.sched.reconnectQueueLen(),
+		rig.council.logins.Load(), 500.0/12.0, 1000.0/12.0)
+
+	if n := rig.sched.reconnectQueueLen(); n != 0 {
+		t.Errorf("%d owner(s) still queued; the queue is not converging", n)
+	}
+	if retired > 0 {
+		t.Errorf("%d household(s) were unlinked despite holding a saved password; they would "+
+			"each be asked to re-link by hand for an outage they never saw", retired)
+	}
+	// A recovery must not cost more than its own login plus the reads that follow it.
+	if perOwner := float64(recoveryCost) / float64(queued); perOwner > 8 {
+		t.Errorf("recovery cost %.2f requests per owner; 500 simultaneous expiries would "+
 			"stampede the edge that just came back", perOwner)
 	}
 }

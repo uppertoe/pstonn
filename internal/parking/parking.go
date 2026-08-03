@@ -1206,7 +1206,7 @@ func (c *Client) listPermits(ctx context.Context, owner string) ([]PermitInfo, b
 			return all, false, nil
 		}
 	}
-	c.noteTruncatedGrid(len(all), len(all)+1)
+	c.noteTruncatedGrid(len(all), expected)
 	log.Printf("parking: permit list for %s still incomplete after %d pages; acting on a partial list",
 		owner, maxPermitPages)
 	return all, false, nil

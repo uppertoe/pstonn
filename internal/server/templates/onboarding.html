@@ -95,7 +95,10 @@
          holds no permits at all. Deliberately NOT linking "back to schedule":
          with nothing managed, /schedule renders this very page, which read as a
          broken loop. */}}
-    {{if .HasPermits}}
+    {{if .PermitsUnknown}}
+    <p class="empty-note">We couldn't load your permit list from the council just now, so we can't tell what's on your account. Nothing has changed &mdash; please try again in a few minutes.</p>
+    <p class="empty-note" style="margin-top:8px">If this keeps happening, check the council's own ePermits site is working. <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    {{else if .HasPermits}}
     <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
     <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. <a href="/how" hx-boost="false">What p.stonn can and cannot do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else}}
