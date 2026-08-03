@@ -10,7 +10,7 @@
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
          up stuck, and the failure looks like "wrong password" when it isn't. */}}
-    <p class="lnote">You'll need an existing City of Stonnington <strong>ePermits</strong> account, with a visitor permit on it, using the same email address. p.stonn schedules a permit you already hold &mdash; it can't apply for one. <a href="/how">What you need &rarr;</a></p>
+    <p class="lnote">You'll need an existing City of Stonnington <strong>ePermits</strong> account, with a visitor permit on it, using the same email address. p.stonn schedules a permit you already hold &mdash; it can't apply for one. <a href="/how" hx-boost="false">What you need &rarr;</a></p>
   </section>
   <div class="demos">
     <div class="dm-mini" data-demo="mini">
@@ -22,7 +22,7 @@
           <div class="dm-sync">{{template "ic-check"}}</div>
         </div>
       </div>
-      <p class="dm-foot"><a href="/how">See how it works &rarr;</a></p>
+      <p class="dm-foot"><a href="/how" hx-boost="false">See how it works &rarr;</a></p>
     </div>
   </div>
   <section class="lsteps">
@@ -53,7 +53,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/how">How it works</a>.</p>
+    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
 
     <h2 class="about-h2">The security model</h2>
     <ul>
@@ -94,7 +94,7 @@
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
   </section>
 
-  <p class="ldisclaimer" style="margin-top:26px"><a href="/">← Back</a></p>
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">← Back</a></p>
 </main>
 
 {{end}}
@@ -196,7 +196,7 @@
     <p>Once your council account has a visitor permit, <a href="/schedule" hx-boost="false">sign in to p.stonn</a> and connect it.</p>
   </section>
 
-  <p class="ldisclaimer" style="margin-top:26px"><a href="/">&larr; Back</a></p>
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>
 </main>
 
 {{end}}
@@ -222,7 +222,7 @@
     </label>
     <button type="submit" style="justify-content:center">{{template "ic-link"}} Send message</button>
   </form>
-  <p class="ldisclaimer" style="margin-top:32px"><a href="/">← Back</a></p>
+  <p class="ldisclaimer" style="margin-top:32px"><a href="/" hx-boost="false">← Back</a></p>
 </main>
 
 {{end}}

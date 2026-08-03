@@ -267,3 +267,33 @@ func TestNoInlineScriptInsideBoostedBody(t *testing.T) {
 		}
 	}
 }
+
+// Links INTO the landing and how-it-works pages must do a full navigation.
+//
+// Those two pages are the only ones that pull demos.css/demos.js, and layout.html
+// loads them conditionally in <head>. hx-boost swaps only the BODY, so arriving via a
+// boosted link renders the demo markup with neither its stylesheet nor its script —
+// unstyled and inert until a manual refresh. The nav already opts out; the hazard is
+// that every future content link has to remember, so this enforces it centrally.
+func TestLinksIntoAssetPagesAreNotBoosted(t *testing.T) {
+	// Matches an <a> whose href is exactly "/" or "/how" and that lacks hx-boost.
+	link := regexp.MustCompile(`<a href="(/|/how)"(?:\s[^>]*)?>`)
+	err := fs.WalkDir(templateFS, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
+			return err
+		}
+		b, e := templateFS.ReadFile(p)
+		if e != nil {
+			return e
+		}
+		for _, tag := range link.FindAllString(string(b), -1) {
+			if !strings.Contains(tag, `hx-boost="false"`) {
+				t.Errorf(`%s: link into a page with conditional <head> assets must carry hx-boost="false", or it arrives without demos.css/js:\n\t%s`, p, tag)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

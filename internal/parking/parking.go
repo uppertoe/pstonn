@@ -1080,8 +1080,23 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(&g); err != nil {
 		return nil, councilErr(FailUnexpected, op, err)
 	}
+	// A 200 whose body decoded to nothing useful is an API-SHAPE failure, not "this
+	// account has no permits". Believing the latter is expensive: the picker offers
+	// nothing to add, a legitimate permit looks gone, and drift records a clean empty
+	// snapshot over real state. TotalItems is the council's own count, so an empty
+	// grid is only credible when it agrees.
+	if len(g.PermitGrid) == 0 && g.TotalItems != 0 {
+		return nil, councilErr(FailUnexpected, op,
+			fmt.Errorf("permit grid was empty but the response claims %d items: API shape change?", g.TotalItems))
+	}
 	out := make([]PermitInfo, 0, len(g.PermitGrid))
 	for _, r := range g.PermitGrid {
+		// Every row must identify its permit; without an ID we cannot act on it, and a
+		// zero would be written into the store as the string "0".
+		if r.PKPermitID == 0 {
+			return nil, councilErr(FailUnexpected, op,
+				errors.New("a permit row has no PKPermitID: API shape change?"))
+		}
 		out = append(out, PermitInfo{
 			CouncilPermitID:  strconv.FormatInt(r.PKPermitID, 10),
 			PermitTypeID:     strconv.FormatInt(r.FKPermitTypeID, 10),

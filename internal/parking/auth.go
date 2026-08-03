@@ -253,6 +253,18 @@ func (c *Client) exchangeCode(ctx context.Context, owner, code, verifier string)
 	if tok.AccessToken == "" {
 		return nil, errors.New("parking: token response had no access_token")
 	}
+	// A 200 is not enough: the fields we DEPEND on must be sane, or the failure is
+	// silent and expensive. A missing/zero expires_in makes the token look already
+	// expired, so every single API call would mint a fresh one — multiplying auth
+	// traffic on the shared egress IP for as long as the shape stays wrong. A
+	// non-Bearer type means our Authorization header is malformed and every call
+	// 401s. Treat both as an API-shape change rather than papering over them.
+	if !strings.EqualFold(tok.TokenType, "Bearer") && tok.TokenType != "" {
+		return nil, fmt.Errorf("parking: token response has unsupported token_type %q: API shape change?", safeExcerpt(tok.TokenType))
+	}
+	if tok.ExpiresIn <= 0 || tok.ExpiresIn > 24*3600 {
+		return nil, fmt.Errorf("parking: token response has implausible expires_in %d: API shape change?", tok.ExpiresIn)
+	}
 	return &tok, nil
 }
 

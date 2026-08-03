@@ -2,6 +2,8 @@ package parking
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -106,5 +108,35 @@ func TestCurrentVehicleRejectsBlankRegoOnPresentVehicle(t *testing.T) {
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"permitVehicles":[{"PKPermitVehicleDetailID":1,"RegistrationNumber":"   ","FKVehicleStateID":"1"}]}`)
 	if _, err := c.CurrentVehicle(context.Background(), owner, p); err == nil {
 		t.Fatal("a present vehicle with a blank registration must be unexpected, not an empty permit")
+	}
+}
+
+// A 200 whose body decoded to nothing useful must be an API-shape failure, not "this
+// account has no permits" — believing the latter makes a real permit look gone and
+// lets drift record a clean empty snapshot over live state.
+func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
+	const owner = "grid@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	f.mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, f.gridBody.Load().(string))
+	})
+
+	// The council's own count contradicts the empty grid: refuse.
+	f.gridBody.Store(`{"TotalItems":3,"PermitGrid":[]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("an empty grid contradicting TotalItems must not read as 'no permits'")
+	}
+	// A row with no permit id is unusable and must not become the string "0".
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PermitNumber":"VPP1"}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("a permit row with no PKPermitID must be refused")
+	}
+	// A genuinely empty account still works.
+	f.gridBody.Store(`{"TotalItems":0,"PermitGrid":[]}`)
+	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 0 {
+		t.Fatalf("a corroborated empty account should read as no permits: %v / %d", err, len(ps))
 	}
 }
