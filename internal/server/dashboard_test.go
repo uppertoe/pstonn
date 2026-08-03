@@ -101,6 +101,10 @@ func TestTemplatesRender(t *testing.T) {
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
+		// A partial permit read holding ZERO rows must not be reported as an empty
+		// account. Saying "your council account doesn't have any permits on it yet" to
+		// someone who holds several is a flat falsehood they cannot act on.
+		{"picker-partial-empty", dashboardData{User: user, State: "picker", Loc: loc, PermitsUnknown: true}, "couldn't load your permit list"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
 		// On a FIRST link the box is TICKED. Without a saved password the schedule
 		// stops the first time the council ends the session — which happens whenever

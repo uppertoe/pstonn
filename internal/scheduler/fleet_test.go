@@ -137,15 +137,12 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 		record("authorize")
 		tag, live := s.cookieLive(r)
 		if s.authDead.Load() || !live {
-			// How the council actually signals a dead cookie: 200 HTML carrying the
-			// ASP.NET antiforgery field, instead of the 302 back to the app. This is what
-			// becomes ErrSessionExpired and hands the owner to the reconnect worker.
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, `<html><body><form method="post" action="/idm/Account/Login">`+
-				`<input type="hidden" name="__RequestVerificationToken" value="tok">`+
-				`<input name="Username" value=""><input name="Password" type="password" value="">`+
-				`</form></body></html>`)
+			// The council REDIRECTS a dead cookie to the login page rather than serving
+			// the form from authorize. The distinction is not cosmetic: the follow-up GET
+			// of that page is itself charged to the login governor, so serving the form
+			// here charged one governed request per recovery where production charges
+			// two — and halved the estimated time to recover a whole fleet.
+			http.Redirect(w, r, "/idm/Account/Login?returnurl=%2Fidm%2Fcb", http.StatusFound)
 			return
 		}
 		cb := r.URL.Query().Get("redirect_uri")
@@ -170,6 +167,15 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	// being retired.
 	mux.HandleFunc("/idm/Account/Login", func(w http.ResponseWriter, r *http.Request) {
 		record("login")
+		if r.Method != http.MethodPost {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `<html><body><form method="post" action="/idm/Account/Login">`+
+				`<input type="hidden" name="__RequestVerificationToken" value="tok">`+
+				`<input name="Username" value=""><input name="Password" type="password" value="">`+
+				`</form></body></html>`)
+			return
+		}
 		_ = r.ParseForm()
 		owner := r.PostFormValue("Username")
 		s.mu.Lock()
@@ -860,6 +866,18 @@ func TestFleetSavedPasswordRecovery(t *testing.T) {
 		rig.sched.drainOneReconnect(ctx)
 	}
 	recoveryCost := rig.council.total() - before
+	rig.council.mu.Lock()
+	loginHits := rig.council.byPath["login"]
+	rig.council.mu.Unlock()
+
+	// A restored cookie in the database is not restored SERVICE. Drive the fleet to
+	// convergence with the recovered sessions: that is what proves each fresh cookie can
+	// complete an authorize, mint a token, read the permit API and land a change.
+	convergeStart := rig.council.total()
+	for i := 0; i < 10 && rig.converged() < size; i++ {
+		rig.sched.reconcileAll(ctx)
+	}
+	convergeCost := rig.council.total() - convergeStart
 
 	// Linked, not retired: the session row must survive with a fresh generation.
 	linked, retired := 0, 0
@@ -879,11 +897,15 @@ func TestFleetSavedPasswordRecovery(t *testing.T) {
 		"    recovery cost ......... %d requests (%.2f per queued owner)\n"+
 		"    still linked .......... %d   retired: %d\n"+
 		"    still queued .......... %d\n"+
-		"    IMPLIED full-fleet recovery: %d logins at the 12/min login governor =\n"+
-		"      ~%.0f min for 500 households, ~%.0f min for 1000\n",
+		"    converged after recovery %d/%d for %d more requests\n"+
+		"    IMPLIED full-fleet recovery: %.1f LOGIN-GOVERNED requests per household\n"+
+		"      at 12/min = ~%.0f min for 500, ~%.0f min for 1000 (before the reconcile\n"+
+		"      that follows, which is paced by the main governor)\n",
 		size, queued, rig.council.logins.Load(), recoveryCost,
 		float64(recoveryCost)/float64(queued), linked, retired, rig.sched.reconnectQueueLen(),
-		rig.council.logins.Load(), 500.0/12.0, 1000.0/12.0)
+		rig.converged(), size, convergeCost,
+		float64(loginHits)/float64(queued),
+		500*float64(loginHits)/float64(queued)/12.0, 1000*float64(loginHits)/float64(queued)/12.0)
 
 	if n := rig.sched.reconnectQueueLen(); n != 0 {
 		t.Errorf("%d owner(s) still queued; the queue is not converging", n)
@@ -891,6 +913,10 @@ func TestFleetSavedPasswordRecovery(t *testing.T) {
 	if retired > 0 {
 		t.Errorf("%d household(s) were unlinked despite holding a saved password; they would "+
 			"each be asked to re-link by hand for an outage they never saw", retired)
+	}
+	if got := rig.converged(); got != size {
+		t.Errorf("only %d/%d households converged after recovery; the sessions are stored but "+
+			"not working — a fresh cookie that cannot drive the permit API has restored nothing", got, size)
 	}
 	// A recovery must not cost more than its own login plus the reads that follow it.
 	if perOwner := float64(recoveryCost) / float64(queued); perOwner > 8 {
