@@ -237,10 +237,6 @@ type Scheduler struct {
 	driftFails   map[string]int
 	driftShape   []churnEvent
 
-	// truncAlertMu guards the once-a-day limit on the permit-list truncation alert.
-	truncAlertMu sync.Mutex
-	truncAlertAt time.Time
-
 	// reminderWarnMu guards the rate limit on the "no SMTP sender" operator warning.
 	reminderWarnMu sync.Mutex
 	reminderWarnAt time.Time
@@ -669,16 +665,28 @@ func (s *Scheduler) watchdog(ctx context.Context) {
 // systemAlert sends an operator alert for a systemic failure, throttled per key
 // so a persistent problem does not spam every tick.
 func (s *Scheduler) systemAlert(ctx context.Context, key, subject, body string) {
+	s.systemAlertEvery(ctx, key, subject, body, systemAlertThrottle)
+}
+
+// systemAlertEvery is systemAlert with the repeat interval chosen by the caller, for
+// conditions that persist. The retry-on-failure behaviour below is the reason this is
+// a parameter rather than a wrapper: an outer "once a day" gate stamped before delivery
+// would suppress the retry too, so a first attempt that failed would mean the operator
+// heard nothing at all for a day.
+func (s *Scheduler) systemAlertEvery(ctx context.Context, key, subject, body string, throttle time.Duration) {
 	if s.notifier == nil || !s.notifier.AdminConfigured() {
 		return
 	}
+	if throttle <= 0 {
+		throttle = systemAlertThrottle
+	}
 	retry := s.alertRetry
-	if retry <= 0 || retry >= systemAlertThrottle {
+	if retry <= 0 || retry >= throttle {
 		retry = systemAlertRetry
 	}
 	now := time.Now()
 	s.alertMu.Lock()
-	if t, ok := s.lastAlert[key]; ok && now.Sub(t) < systemAlertThrottle {
+	if t, ok := s.lastAlert[key]; ok && now.Sub(t) < throttle {
 		s.alertMu.Unlock()
 		return
 	}
@@ -687,7 +695,7 @@ func (s *Scheduler) systemAlert(ctx context.Context, key, subject, body string) 
 	// `retry`, not the full throttle. A SUCCESSFUL delivery extends it to the full
 	// interval below. This stops a transient SMTP/ntfy blip from muting a critical
 	// alert (login-shape, panic, db failure, session-churn) for the whole 30 minutes.
-	s.lastAlert[key] = now.Add(-systemAlertThrottle + retry)
+	s.lastAlert[key] = now.Add(-throttle + retry)
 	s.alertMu.Unlock()
 	go func() {
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -954,22 +962,18 @@ func (s *Scheduler) noteDriftDeferred(owner string) {
 	s.driftMu.Unlock()
 }
 
-// alertTruncatedList raises the paging alert at most once a day. systemAlert dedups
-// per key, but only for 30 minutes, and truncation persists until pagination is
-// written — 48 alerts a day would be muted inside one, taking the rest of the channel's
-// credibility with it.
+// alertTruncatedList raises the paging alert at most once a day. Truncation persists
+// until pagination can collect the account, and systemAlert's default 30-minute repeat
+// would be 48 alerts a day — muted inside one, taking the rest of the channel with it.
+// The interval is passed DOWN rather than gated here, so a failed delivery still
+// retries on the short window instead of being silenced for a day.
 func (s *Scheduler) alertTruncatedList(ctx context.Context) {
-	s.truncAlertMu.Lock()
-	if time.Since(s.truncAlertAt) < 24*time.Hour {
-		s.truncAlertMu.Unlock()
-		return
-	}
-	s.truncAlertAt = time.Now()
-	s.truncAlertMu.Unlock()
-	s.systemAlert(ctx, "council-permit-list-truncated", "The council is only returning part of the permit list",
-		"Permit reads are coming back as pages, so p.stonn is acting on partial lists and cannot drift-check "+
-			"the permits behind the first page. Their plate changes go undetected and their expiry warnings "+
-			"will not fire. See truncated_grid_* on /status for the last observed counts. This needs pagination.")
+	s.systemAlertEvery(ctx, "council-permit-list-truncated",
+		"The council is only returning part of the permit list",
+		"Permit reads are coming back as pages and we could not collect the whole account, so the permits "+
+			"we could not reach are not being drift-checked: their plate changes go undetected and their "+
+			"expiry warnings will not fire. See truncated_grid_* on /status for the last observed counts.",
+		24*time.Hour)
 }
 
 func (s *Scheduler) driftBackedOff(owner string, now time.Time) bool {
