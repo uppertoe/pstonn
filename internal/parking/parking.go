@@ -1145,20 +1145,72 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 // listPermits is the single implementation. complete reports whether the rows are the
 // WHOLE account rather than a page, determined at decode time so it cannot race with
 // another owner's read.
-func (c *Client) listPermits(ctx context.Context, owner string) (_ []PermitInfo, complete bool, err error) {
+// maxPermitPages bounds the paging loop. A household with more than this many permits
+// does not exist; the cap is here so a council that ignores pageNumber cannot turn one
+// read into an unbounded request loop against the shared egress IP.
+const maxPermitPages = 20
+
+// listPermits reads the owner's whole permit list, paging if the council gives us one.
+// complete reports whether we ended up holding the entire account.
+//
+// We ask for pageSize=0 ("everything") and the council has always honoured it, so the
+// loop below normally runs exactly once. It exists because the alternative — accepting
+// whatever the first page held — was silently wrong in a way users felt: the picker
+// showed a truncated list, and addPermit read absence from that page as "this permit is
+// not yours" and returned 403 for a permit the household genuinely holds.
+func (c *Client) listPermits(ctx context.Context, owner string) ([]PermitInfo, bool, error) {
 	const op = "list your permits"
 	if c.sandbox != nil {
 		return c.sandboxListPermits(), true, nil
 	}
+	var all []PermitInfo
+	seen := make(map[string]bool)
+	for page := 0; page < maxPermitPages; page++ {
+		rows, total, err := c.permitPage(ctx, owner, page)
+		if err != nil {
+			return nil, false, err
+		}
+		added := 0
+		for _, p := range rows {
+			if seen[p.CouncilPermitID] {
+				continue // a council that ignores pageNumber would repeat page 0 forever
+			}
+			seen[p.CouncilPermitID] = true
+			all = append(all, p)
+			added++
+		}
+		if len(all) >= total {
+			return all, true, nil
+		}
+		if added == 0 {
+			// No progress and still short of the count: paging is not working the way we
+			// assumed, so report what we have and let the caller decide. Drift declines
+			// to check the owner off; the display paths show what they got.
+			c.noteTruncatedGrid(len(all), total)
+			log.Printf("parking: permit list for %s stalled at %d of %d after %d page(s); "+
+				"acting on a partial list", owner, len(all), total, page+1)
+			return all, false, nil
+		}
+	}
+	c.noteTruncatedGrid(len(all), len(all)+1)
+	log.Printf("parking: permit list for %s still incomplete after %d pages; acting on a partial list",
+		owner, maxPermitPages)
+	return all, false, nil
+}
+
+// permitPage reads ONE page of the grid and returns its rows plus the total the council
+// says the account holds.
+func (c *Client) permitPage(ctx context.Context, owner string, page int) (_ []PermitInfo, total int, err error) {
+	const op = "list your permits"
 	resp, err := c.apiRequest(ctx, owner, http.MethodGet, "/api/Index/grid", op,
-		url.Values{"pageNumber": {"0"}, "pageSize": {"0"}}, nil)
+		url.Values{"pageNumber": {strconv.Itoa(page)}, "pageSize": {"0"}}, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	var g gridResp
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(&g); err != nil {
-		return nil, false, councilErr(FailUnexpected, op, err)
+		return nil, 0, councilErr(FailUnexpected, op, err)
 	}
 	// A 200 whose body decoded to nothing useful is an API-SHAPE failure, not "this
 	// account has no permits". Believing the latter is expensive: the picker offers
@@ -1166,12 +1218,11 @@ func (c *Client) listPermits(ctx context.Context, owner string) (_ []PermitInfo,
 	// snapshot over real state. So BOTH top-level fields must be explicitly present,
 	// and the council's own count must agree with what it sent.
 	if g.PermitGrid == nil || g.TotalItems == nil {
-		return nil, false, councilErr(FailUnexpected, op,
+		return nil, 0, councilErr(FailUnexpected, op,
 			fmt.Errorf("permit grid response is missing PermitGrid=%t/TotalItems=%t: API shape change?",
 				g.PermitGrid == nil, g.TotalItems == nil))
 	}
 	rows, total := *g.PermitGrid, *g.TotalItems
-	complete = true
 	// Deliberately NOT exact equality. We request pageSize=0 meaning "everything", but
 	// if the council ever applies a default page size, TotalItems becomes the unpaged
 	// total and exact equality would hard-fail ListPermits for every account holding
@@ -1179,53 +1230,37 @@ func (c *Client) listPermits(ctx context.Context, owner string) (_ []PermitInfo,
 	// What must never pass is the case this guard exists for: the council says there ARE
 	// permits and sent us none.
 	if len(rows) == 0 && total != 0 {
-		return nil, false, councilErr(FailUnexpected, op,
+		return nil, 0, councilErr(FailUnexpected, op,
 			fmt.Errorf("permit grid is empty but the response claims %d items: API shape change?", total))
 	}
 	if total < len(rows) {
-		return nil, false, councilErr(FailUnexpected, op,
+		return nil, 0, councilErr(FailUnexpected, op,
 			fmt.Errorf("permit grid has %d rows but the response claims only %d items: API shape change?", len(rows), total))
 	}
-	if total > len(rows) {
-		// Tolerated, deliberately, and NOT silent.
-		//
-		// Failing here is the worse trade, because a permit missing from the list is
-		// inert rather than dangerous: checkDrift skips any stored permit it cannot find
-		// in the grid ("the council no longer lists it"), so nothing strips a plate. An
-		// error, by contrast, aborts the whole drift pass before it refreshes permit
-		// meta AND before it sends approaching-expiry warnings — so the account loses
-		// warnings for the permits we WERE sent, and the picker and addPermit break too.
-		// We would turn a partial answer into no service for that household.
-		//
-		// What must not happen is treating it as complete without anyone knowing, so the
-		// truncation is recorded on the status page as well as logged. It means the
-		// council has started paging and we owe it a real pagination implementation.
-		complete = false
-		c.noteTruncatedGrid(len(rows), total)
-		log.Printf("parking: permit grid returned %d of %d permits for %s; acting on a partial list. "+
-			"The council appears to have started paging and we must implement pagination.",
-			len(rows), total, owner)
-	}
+	// A page shorter than the total is now NORMAL — it just means there is another
+	// page — so the caller loops rather than treating it as a shape change. The two
+	// guards above still stand: a claimed-nonempty account that sent nothing, and more
+	// rows than the council says exist, are both impossible and refused.
 	out := make([]PermitInfo, 0, len(rows))
 	for _, r := range rows {
 		// Every row must identify its permit; without a usable ID we cannot act on it,
 		// and a zero/negative would be written into the store as "0"/"-1".
 		if r.PKPermitID <= 0 {
-			return nil, false, councilErr(FailUnexpected, op,
+			return nil, 0, councilErr(FailUnexpected, op,
 				fmt.Errorf("a permit row has a non-positive PKPermitID (%d): API shape change?", r.PKPermitID))
 		}
 		// A date we cannot parse must not silently become the zero time: end_date drives
 		// expiry, and drift writes it over the stored value, so a format change would
 		// quietly retire live permits. Empty stays empty (genuinely "not set").
 		if missing := r.missingGridFields(); len(missing) > 0 {
-			return nil, false, councilErr(FailUnexpected, op,
+			return nil, 0, councilErr(FailUnexpected, op,
 				fmt.Errorf("permit %d is missing %s: API shape change? Treating an absent field as empty "+
 					"would blank the stored permit and clear its plate", r.PKPermitID, strings.Join(missing, ", ")))
 		}
 		start, serr := councilDate(*r.StartDate)
 		end, eerr := councilDate(*r.EndDate)
 		if serr != nil || eerr != nil {
-			return nil, false, councilErr(FailUnexpected, op,
+			return nil, 0, councilErr(FailUnexpected, op,
 				fmt.Errorf("permit %d has an unparseable date (start=%q end=%q): API shape change?",
 					r.PKPermitID, safeExcerpt(*r.StartDate), safeExcerpt(*r.EndDate)))
 		}
@@ -1242,7 +1277,7 @@ func (c *Client) listPermits(ctx context.Context, owner string) (_ []PermitInfo,
 			IsCoHolder:       r.IsCoHolder,
 		})
 	}
-	return out, complete, nil
+	return out, total, nil
 }
 
 // councilDate parses a council date, reporting a malformed one instead of swallowing

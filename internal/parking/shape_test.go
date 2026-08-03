@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/uppertoe/pstonn/internal/model"
@@ -278,5 +279,96 @@ func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
 	}
 	if kind, _ := FailureOf(err); kind != FailUnexpected {
 		t.Fatalf("kind = %v, want FailUnexpected (a shape change, not a durable refusal)", kind)
+	}
+}
+
+// TestListPermitsPagesUntilComplete covers the case the truncation guard only ever
+// reported. We ask for pageSize=0 ("everything") and the council has always honoured
+// it, but if it ever applies a default page size, accepting the first page is silently
+// wrong in a way households feel: the picker shows a short list, and addPermit reads
+// absence from that page as "this permit is not yours" and refuses a permit they hold.
+func TestListPermitsPagesUntilComplete(t *testing.T) {
+	const owner = "paged@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+
+	row := func(id int64) string {
+		return fmt.Sprintf(`{"PKPermitID":%d,"FKPermitTypeID":3,"PermitNumber":"P%d","PermitType":"Resident",`+
+			`"PermitStatus":"Active","VehicleRego":"ABC%03d","StartDate":"2026-01-01T00:00:00",`+
+			`"EndDate":"2026-12-31T00:00:00","PermitTypeAllowsVehicleChangeByHolder":true}`, id, id, id)
+	}
+	var pages int32
+	f.mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&pages, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// Three permits, one per page — the council's own count stays at the unpaged total.
+		switch r.URL.Query().Get("pageNumber") {
+		case "0":
+			io.WriteString(w, `{"TotalItems":3,"PermitGrid":[`+row(1)+`]}`)
+		case "1":
+			io.WriteString(w, `{"TotalItems":3,"PermitGrid":[`+row(2)+`]}`)
+		default:
+			io.WriteString(w, `{"TotalItems":3,"PermitGrid":[`+row(3)+`]}`)
+		}
+	})
+
+	ps, complete, err := c.ListPermitsComplete(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("ListPermitsComplete: %v", err)
+	}
+	if !complete {
+		t.Error("a fully-collected list reported itself partial, so drift would never " +
+			"check this owner off again")
+	}
+	if len(ps) != 3 {
+		t.Fatalf("collected %d permits across pages, want 3: a permit beyond the first page "+
+			"is invisible to the picker and refused by addPermit", len(ps))
+	}
+	if n := atomic.LoadInt32(&pages); n != 3 {
+		t.Errorf("made %d page requests, want 3", n)
+	}
+	// The truncation signal must stay quiet: paging worked, nothing was lost.
+	if !c.Stats().TruncatedGridAt.IsZero() {
+		t.Error("successful paging still reported a truncated grid to the operator")
+	}
+}
+
+// TestListPermitsStopsWhenPagingMakesNoProgress pins the guard against a council that
+// ignores pageNumber: repeating page 0 forever must terminate, not loop against the
+// shared egress IP.
+func TestListPermitsStopsWhenPagingMakesNoProgress(t *testing.T) {
+	const owner = "stuck@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+
+	var reqs int32
+	f.mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqs, 1)
+		w.Header().Set("Content-Type", "application/json")
+		// Claims 5, always returns the same single row whatever page we ask for.
+		io.WriteString(w, `{"TotalItems":5,"PermitGrid":[{"PKPermitID":1,"FKPermitTypeID":3,
+			"PermitNumber":"P1","PermitType":"Resident","PermitStatus":"Active","VehicleRego":"ABC001",
+			"StartDate":"2026-01-01T00:00:00","EndDate":"2026-12-31T00:00:00",
+			"PermitTypeAllowsVehicleChangeByHolder":true}]}`)
+	})
+
+	ps, complete, err := c.ListPermitsComplete(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("ListPermitsComplete: %v", err)
+	}
+	if complete {
+		t.Error("a list we could not complete reported itself whole")
+	}
+	if len(ps) != 1 {
+		t.Fatalf("got %d permits, want the 1 distinct row", len(ps))
+	}
+	if n := atomic.LoadInt32(&reqs); n > 3 {
+		t.Errorf("made %d requests against a council that ignores pageNumber; it must stop "+
+			"as soon as a page adds nothing, not hammer a shared IP", n)
+	}
+	if c.Stats().TruncatedGridAt.IsZero() {
+		t.Error("an incomplete list was not reported to the operator")
 	}
 }

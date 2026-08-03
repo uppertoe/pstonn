@@ -64,6 +64,7 @@ type stubCouncil struct {
 	retryPost atomic.Int64 // Retry-After seconds advertised on a refusal
 	apiSeq    atomic.Int64 // deals out the deterministic failures
 	failures  atomic.Int64 // refusals actually served
+	authDead  atomic.Bool  // authorize returns the LOGIN PAGE: the cookie is dead
 }
 
 // injectFault applies the configured latency and, on its turn, refuses the request the
@@ -106,6 +107,15 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	// keep talking about the same household, so the stub does it the same way.
 	mux.HandleFunc("/idm/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		record("authorize")
+		if s.authDead.Load() {
+			// How the council actually signals a dead cookie: 200 HTML carrying the
+			// ASP.NET antiforgery field, instead of the 302 back to the app. This is what
+			// turns into ErrSessionExpired and hands the owner to the reconnect worker.
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `<html><form><input name="__RequestVerificationToken" value="x"></form></html>`)
+			return
+		}
 		tag := ""
 		if c, err := r.Cookie("Permits.IDM.Identity"); err == nil {
 			tag = c.Value
@@ -256,6 +266,10 @@ func councilIDFor(owner string) string {
 	return strconv.Itoa(n)
 }
 
+// cfgConcurrency is the harness's council concurrency. Kept as a named constant so the
+// wall-clock budget in the failure test is derived from it rather than guessed.
+const cfgConcurrency = 8
+
 // fleetRig is a whole synthetic deployment: a stub council, a real store, a real
 // parking client (governor, breaker, token and session handling) and a real scheduler.
 type fleetRig struct {
@@ -302,6 +316,18 @@ func fleetSize(t *testing.T, def int) int {
 // newFleetRig seeds size households into the midnight-rollover shape: every permit due
 // to change at once, which is the worst honest case.
 func newFleetRig(t *testing.T, size int) *fleetRig {
+	return newFleetRigTokens(t, size, os.Getenv("PSTONN_FLEET_FRESH_TOKENS") != "")
+}
+
+// newFleetRigTokens seeds the fleet with either a still-valid cached access token or an
+// already-expired one.
+//
+// Expired is the DEFAULT because it is what production actually looks like: keep-warm
+// is authorize-only and mints no token, so by the time a rollover runs, the 1h token
+// has long gone and the operation costs an authorize + token exchange on top of its
+// API calls. Seeding fresh tokens quietly removed two requests per owner from the
+// headline number, making the measurement a lower bound rather than the real thing.
+func newFleetRigTokens(t *testing.T, size int, freshTokens bool) *fleetRig {
 	t.Helper()
 	ctx := context.Background()
 	council := newStubCouncil(t)
@@ -326,7 +352,7 @@ func newFleetRig(t *testing.T, size int) *fleetRig {
 	// waiting out the pacer; convergence at the real rate is computed from the count.
 	cfg.Council.GovRatePerMin = 1 << 20
 	cfg.Council.GovBurst = 1 << 20
-	cfg.Council.GovConcurrency = 8
+	cfg.Council.GovConcurrency = cfgConcurrency
 
 	client := parking.New(cfg, st, box)
 	sched := New(st, client, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Hour})
@@ -360,7 +386,11 @@ func newFleetRig(t *testing.T, size int) *fleetRig {
 		council.mu.Lock()
 		council.byTok["tok-"+tag] = owner
 		council.mu.Unlock()
-		if err := st.UpdateCouncilToken(ctx, owner, cs.Cookie, seal("tok-"+tag), time.Now().Add(time.Hour), cs.Generation); err != nil {
+		tokenExpiry := time.Now().Add(-time.Minute) // expired: the realistic rollover
+		if freshTokens {
+			tokenExpiry = time.Now().Add(time.Hour)
+		}
+		if err := st.UpdateCouncilToken(ctx, owner, cs.Cookie, seal("tok-"+tag), tokenExpiry, cs.Generation); err != nil {
 			t.Fatalf("seed token %d: %v", i, err)
 		}
 		pid, err := st.UpsertPermit(ctx, owner, councilIDFor(owner), "14", "Permit")
@@ -565,6 +595,7 @@ func TestFleetUnderFailure(t *testing.T) {
 		failEvery int64
 		failCode  int64
 		retryPost int64
+		authDead  bool
 		// maxReqFactor bounds total council traffic against the clean baseline.
 		maxReqFactor float64
 	}{
@@ -573,6 +604,10 @@ func TestFleetUnderFailure(t *testing.T) {
 		{name: "1-in-2 gateway errors (503)", failEvery: 2, failCode: 503, maxReqFactor: 3},
 		{name: "every session killed (401)", failEvery: 1, failCode: 401, maxReqFactor: 4},
 		{name: "slow AND refusing", latencyMS: 100, failEvery: 4, failCode: 429, maxReqFactor: 3},
+		// Not an API refusal: the session COOKIE is dead, so authorize returns the login
+		// page. This is the churn incident's shape, and the only scenario that reaches
+		// the reconnect worker.
+		{name: "every cookie rejected (login page)", authDead: true, maxReqFactor: 4},
 	}
 
 	for _, tc := range cases {
@@ -583,6 +618,7 @@ func TestFleetUnderFailure(t *testing.T) {
 			rig.council.failEvery.Store(tc.failEvery)
 			rig.council.failCode.Store(tc.failCode)
 			rig.council.retryPost.Store(tc.retryPost)
+			rig.council.authDead.Store(tc.authDead)
 
 			stop := make(chan struct{})
 			reads := probeReads(ctx, rig.store, stop)
@@ -623,10 +659,19 @@ func TestFleetUnderFailure(t *testing.T) {
 					"into a refusing edge from one shared IP is how a soft block becomes a hard one",
 					reqs, limit)
 			}
-			// CASCADE 3: the pass must still finish.
-			if elapsed > 90*time.Second {
-				t.Errorf("three reconcile passes took %s under failure; the scheduler is not "+
-					"shedding work and a rollover would never land", elapsed)
+			// CASCADE 3: the pass must still finish, and "finish" has to scale with the
+			// work. A fixed ceiling was really an assertion about fleet size: at 250ms a
+			// call, 500 owners cannot possibly come in under 90s, so the test failed on
+			// arithmetic rather than on anything going wrong. Budget the injected latency
+			// explicitly and allow 4x headroom over it.
+			budget := 10 * time.Second
+			if tc.latencyMS > 0 {
+				perPass := time.Duration(tc.latencyMS) * time.Millisecond * time.Duration(size) * 3
+				budget += 4 * time.Duration(passes) * perPass / time.Duration(cfgConcurrency)
+			}
+			if elapsed > budget {
+				t.Errorf("%d reconcile passes took %s against a budget of %s; the scheduler is "+
+					"not shedding work and a rollover would never land", passes, elapsed, budget)
 			}
 		})
 	}
