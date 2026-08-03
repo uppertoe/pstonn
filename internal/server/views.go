@@ -75,6 +75,12 @@ type dashboardData struct {
 	// holds permits but none is schedulable (so explain why), versus it holds no
 	// permits at all (so explain that one must be applied for with the council).
 	HasPermits bool
+
+	// PermitsUnknown means the council gave us only part of the list, so an empty
+	// picker proves nothing. Without it, a partial response holding zero rows told the
+	// household flatly "your council account doesn't have any permits on it yet" —
+	// about an account that may well hold several.
+	PermitsUnknown bool
 	// guest passes
 	Guests          []guestGrantView   // management page: existing grants
 	GuestsEnabled   bool               // kill-switch state (default on)

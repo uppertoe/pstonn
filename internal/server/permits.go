@@ -73,6 +73,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// household simply cannot see a permit they hold and has no way to know why.
 		base.Warn = "We could only load part of your permit list from the council just now, " +
 			"so a permit you hold may be missing below. Try again in a few minutes."
+		base.PermitsUnknown = true
 	}
 	base.HasPermits = len(permits) > 0
 	already := map[string]bool{}
