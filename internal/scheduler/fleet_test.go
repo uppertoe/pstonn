@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,6 +55,38 @@ type stubCouncil struct {
 	byPath map[string]int
 
 	srv *httptest.Server
+
+	// Fault injection. Deterministic: failures are dealt out by a request counter, not
+	// a random source, so anything this finds can be reproduced exactly.
+	latencyMS atomic.Int64 // artificial delay before every API response
+	failEvery atomic.Int64 // refuse 1 API request in N (0 = never)
+	failCode  atomic.Int64 // the status to refuse with
+	retryPost atomic.Int64 // Retry-After seconds advertised on a refusal
+	apiSeq    atomic.Int64 // deals out the deterministic failures
+	failures  atomic.Int64 // refusals actually served
+}
+
+// injectFault applies the configured latency and, on its turn, refuses the request the
+// way the council edge does. Reports whether it already wrote the response.
+func (s *stubCouncil) injectFault(w http.ResponseWriter) bool {
+	if ms := s.latencyMS.Load(); ms > 0 {
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
+	every := s.failEvery.Load()
+	if every <= 0 || s.apiSeq.Add(1)%every != 0 {
+		return false
+	}
+	s.failures.Add(1)
+	code := int(s.failCode.Load())
+	if code == 0 {
+		code = http.StatusTooManyRequests
+	}
+	if ra := s.retryPost.Load(); ra > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(ra, 10))
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(code)
+	return true
 }
 
 func newStubCouncil(t *testing.T) *stubCouncil {
@@ -97,6 +130,9 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	// The permit grid. One permit per owner, carrying the plate the council holds.
 	mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
 		record("grid")
+		if s.injectFault(w) {
+			return
+		}
 		owner := s.ownerOf(r)
 		s.mu.Lock()
 		plate := s.plates[owner]
@@ -111,6 +147,9 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	// The current-vehicle read, used both to decide drift and to CONFIRM an apply.
 	mux.HandleFunc("/ssp-svc/api/permits/managedVehicle", func(w http.ResponseWriter, r *http.Request) {
 		record("managedVehicle")
+		if s.injectFault(w) {
+			return
+		}
 		owner := s.ownerOf(r)
 		s.mu.Lock()
 		plate := s.plates[owner]
@@ -128,6 +167,9 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	// which is what makes an apply cost TWO requests rather than one.
 	mux.HandleFunc("/ssp-svc/api/permits/manageVehicle", func(w http.ResponseWriter, r *http.Request) {
 		record("manageVehicle")
+		if s.injectFault(w) {
+			return
+		}
 		owner := s.ownerOf(r)
 		// Mirrors manageVehicleReq: the plate lives on the nested Vehicle object.
 		var body struct {
@@ -214,18 +256,53 @@ func councilIDFor(owner string) string {
 	return strconv.Itoa(n)
 }
 
-func TestFleetConvergenceAndContention(t *testing.T) {
+// fleetRig is a whole synthetic deployment: a stub council, a real store, a real
+// parking client (governor, breaker, token and session handling) and a real scheduler.
+type fleetRig struct {
+	sched   *Scheduler
+	store   *store.Store
+	council *stubCouncil
+	size    int
+}
+
+// converged counts households whose permit THE COUNCIL now holds under the new plate,
+// so a local write that never landed cannot pass for success.
+func (r *fleetRig) converged() int {
+	r.council.mu.Lock()
+	defer r.council.mu.Unlock()
+	done := 0
+	for i := 0; i < r.size; i++ {
+		if r.council.plates[fmt.Sprintf("owner%04d@example.com", i)] == fmt.Sprintf("NEW%03d", i%1000) {
+			done++
+		}
+	}
+	return done
+}
+
+func requireFleet(t *testing.T) {
+	t.Helper()
 	if os.Getenv("PSTONN_FLEET") == "" {
 		t.Skip("set PSTONN_FLEET=1 to run the synthetic fleet harness")
 	}
-	size := 100
-	if v := os.Getenv("PSTONN_FLEET_SIZE"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			t.Fatalf("PSTONN_FLEET_SIZE=%q is not a positive integer", v)
-		}
-		size = n
+}
+
+func fleetSize(t *testing.T, def int) int {
+	t.Helper()
+	v := os.Getenv("PSTONN_FLEET_SIZE")
+	if v == "" {
+		return def
 	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		t.Fatalf("PSTONN_FLEET_SIZE=%q is not a positive integer", v)
+	}
+	return n
+}
+
+// newFleetRig seeds size households into the midnight-rollover shape: every permit due
+// to change at once, which is the worst honest case.
+func newFleetRig(t *testing.T, size int) *fleetRig {
+	t.Helper()
 	ctx := context.Background()
 	council := newStubCouncil(t)
 
@@ -301,6 +378,16 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 		desired[pid] = plate
 	}
 
+	return &fleetRig{sched: sched, store: st, council: council, size: size}
+}
+
+func TestFleetConvergenceAndContention(t *testing.T) {
+	requireFleet(t)
+	ctx := context.Background()
+	size := fleetSize(t, 100)
+	rig := newFleetRig(t, size)
+	sched, st, council := rig.sched, rig.store, rig.council
+
 	// A background "page load" while the fleet converges. Every request in this app
 	// serialises through ONE SQLite connection (SetMaxOpenConns(1)), so this is the
 	// number that says whether the UI stays usable during a rollover.
@@ -333,14 +420,7 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 	for {
 		sched.reconcileAll(ctx)
 		passes++
-		done := 0
-		council.mu.Lock()
-		for i := 0; i < size; i++ {
-			if council.plates[fmt.Sprintf("owner%04d@example.com", i)] == fmt.Sprintf("NEW%03d", i%1000) {
-				done++
-			}
-		}
-		council.mu.Unlock()
+		done := rig.converged()
 		if done == size {
 			break
 		}
@@ -408,5 +488,146 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 	if p95 > 250*time.Millisecond {
 		t.Errorf("dashboard reads hit p95 %s while the fleet converged; every request shares one "+
 			"SQLite connection, so this is what the UI feels during a rollover", p95)
+	}
+}
+
+// probeReads runs a representative dashboard read in a loop and returns its latency
+// distribution. This is the cascade detector: every request in this app serialises
+// through ONE SQLite connection, so if any council call were made while holding it, a
+// slow or refusing council would freeze the UI for everyone rather than just delaying
+// permits. The council here is deliberately far slower than the store.
+func probeReads(ctx context.Context, st *store.Store, stop <-chan struct{}) func() (p50, p95, p99 time.Duration, n int) {
+	var mu sync.Mutex
+	var samples []time.Duration
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			start := time.Now()
+			if _, err := st.ListPermitsFor(ctx, "owner0000@example.com"); err != nil {
+				return
+			}
+			d := time.Since(start)
+			mu.Lock()
+			samples = append(samples, d)
+			mu.Unlock()
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	return func() (time.Duration, time.Duration, time.Duration, int) {
+		<-done
+		mu.Lock()
+		defer mu.Unlock()
+		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+		q := func(f float64) time.Duration {
+			if len(samples) == 0 {
+				return 0
+			}
+			return samples[int(float64(len(samples)-1)*f)]
+		}
+		return q(0.50), q(0.95), q(0.99), len(samples)
+	}
+}
+
+// TestFleetUnderFailure asks the question a clean-path harness cannot: when the council
+// is slow, refusing, or has killed every session, does the damage stay in the council
+// path, or does it cascade into the app?
+//
+// Three things would count as a cascade and are asserted against:
+//   - dashboard reads degrading with council latency (a council call under the DB lock)
+//   - failures producing MORE council traffic than the clean run (a retry storm feeding
+//     the very block that caused it, on a shared egress IP)
+//   - the pass never terminating
+func TestFleetUnderFailure(t *testing.T) {
+	requireFleet(t)
+	size := fleetSize(t, 100)
+
+	// Clean baseline to measure the failure runs against.
+	base := newFleetRig(t, size)
+	baseStop := make(chan struct{})
+	baseReads := probeReads(context.Background(), base.store, baseStop)
+	baseStart := time.Now()
+	base.sched.reconcileAll(context.Background())
+	baseElapsed := time.Since(baseStart)
+	close(baseStop)
+	_, baseP95, _, _ := baseReads()
+	baseReqs := base.council.total()
+	t.Logf("baseline: %d requests, %s, dashboard p95 %s", baseReqs, baseElapsed.Round(time.Millisecond), baseP95)
+
+	cases := []struct {
+		name      string
+		latencyMS int64
+		failEvery int64
+		failCode  int64
+		retryPost int64
+		// maxReqFactor bounds total council traffic against the clean baseline.
+		maxReqFactor float64
+	}{
+		{name: "slow council (250ms every call)", latencyMS: 250, maxReqFactor: 1.5},
+		{name: "1-in-3 rate-limited (429 + Retry-After 60)", failEvery: 3, failCode: 429, retryPost: 60, maxReqFactor: 3},
+		{name: "1-in-2 gateway errors (503)", failEvery: 2, failCode: 503, maxReqFactor: 3},
+		{name: "every session killed (401)", failEvery: 1, failCode: 401, maxReqFactor: 4},
+		{name: "slow AND refusing", latencyMS: 100, failEvery: 4, failCode: 429, maxReqFactor: 3},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			rig := newFleetRig(t, size)
+			rig.council.latencyMS.Store(tc.latencyMS)
+			rig.council.failEvery.Store(tc.failEvery)
+			rig.council.failCode.Store(tc.failCode)
+			rig.council.retryPost.Store(tc.retryPost)
+
+			stop := make(chan struct{})
+			reads := probeReads(ctx, rig.store, stop)
+
+			// A fixed number of passes rather than "until converged": under a hard block
+			// convergence is SUPPOSED to be incomplete, and hanging until it isn't would
+			// only be measuring the deadline.
+			start := time.Now()
+			const passes = 3
+			for i := 0; i < passes; i++ {
+				rig.sched.reconcileAll(ctx)
+			}
+			elapsed := time.Since(start)
+			close(stop)
+			p50, p95, p99, n := reads()
+
+			reqs := rig.council.total()
+			open := rig.sched.council.(*parking.Client).Blocked()
+			t.Logf("\n"+
+				"    council requests ...... %d over %d passes (baseline %d for 1)\n"+
+				"    refusals served ....... %d\n"+
+				"    converged ............. %d/%d\n"+
+				"    wall-clock ............ %s\n"+
+				"    breaker open .......... %v\n"+
+				"    dashboard reads ....... p50 %s  p95 %s  p99 %s  (n=%d)\n",
+				reqs, passes, baseReqs, rig.council.failures.Load(),
+				rig.converged(), size, elapsed.Round(time.Millisecond), open, p50, p95, p99, n)
+
+			// CASCADE 1: the UI must not feel the council at all.
+			if p95 > 50*time.Millisecond {
+				t.Errorf("dashboard reads hit p95 %s while the council was degraded; the council "+
+					"path is holding the single SQLite connection, so one slow upstream freezes "+
+					"the whole app rather than just delaying permits", p95)
+			}
+			// CASCADE 2: trouble must not generate MORE load on the thing in trouble.
+			if limit := float64(baseReqs) * tc.maxReqFactor * float64(passes); float64(reqs) > limit {
+				t.Errorf("failure produced %d council requests, over the %.0f budget: retrying "+
+					"into a refusing edge from one shared IP is how a soft block becomes a hard one",
+					reqs, limit)
+			}
+			// CASCADE 3: the pass must still finish.
+			if elapsed > 90*time.Second {
+				t.Errorf("three reconcile passes took %s under failure; the scheduler is not "+
+					"shedding work and a rollover would never land", elapsed)
+			}
+		})
 	}
 }
