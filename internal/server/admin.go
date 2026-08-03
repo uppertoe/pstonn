@@ -344,6 +344,16 @@ type councilStatus struct {
 	LastPushbackRef    string `json:"last_pushback_ref,omitempty"`
 	PersistOK          bool   `json:"breaker_persist_ok"`
 	PersistError       string `json:"breaker_persist_error,omitempty"`
+	// LastPushbackSurface says whether the refusal hit login, auth or API traffic —
+	// the difference between "our credentials are being throttled" and "our reads are".
+	LastPushbackSurface string `json:"last_pushback_surface,omitempty"`
+	// TruncatedGrid* report the last time the council returned fewer permits than it
+	// said it had. That means it has started paging and we are acting on partial lists,
+	// which the watchdog must be able to alert on: the app log alone loses the evidence
+	// on restart, and a stable first page would hide missing permits indefinitely.
+	TruncatedGridAt   string `json:"truncated_grid_at,omitempty"`
+	TruncatedGridGot  int    `json:"truncated_grid_got,omitempty"`
+	TruncatedGridWant int    `json:"truncated_grid_want,omitempty"`
 }
 
 // statusJSON is the read-only status the external outage watchdog polls. It is
@@ -452,15 +462,21 @@ func (s *Server) councilSnapshot() councilStatus {
 // timestamps as RFC3339.
 func councilStatusFrom(st parking.Stats) councilStatus {
 	cs := councilStatus{
-		Requests1m:         st.LastMinute,
-		Requests5m:         st.Last5Min,
-		PushbacksTotal:     st.Pushback,
-		BreakerOpen:        st.BreakerOpen,
-		BreakerRemainingS:  int(st.BreakerFor.Round(time.Second) / time.Second),
-		LastPushbackStatus: st.LastPushbackStatus,
-		LastPushbackRef:    st.LastPushbackRef,
-		PersistOK:          st.PersistOK,
-		PersistError:       st.PersistError,
+		Requests1m:          st.LastMinute,
+		Requests5m:          st.Last5Min,
+		PushbacksTotal:      st.Pushback,
+		BreakerOpen:         st.BreakerOpen,
+		BreakerRemainingS:   int(st.BreakerFor.Round(time.Second) / time.Second),
+		LastPushbackStatus:  st.LastPushbackStatus,
+		LastPushbackRef:     st.LastPushbackRef,
+		PersistOK:           st.PersistOK,
+		PersistError:        st.PersistError,
+		LastPushbackSurface: st.LastPushbackSurface,
+		TruncatedGridGot:    st.TruncatedGridGot,
+		TruncatedGridWant:   st.TruncatedGridWant,
+	}
+	if !st.TruncatedGridAt.IsZero() {
+		cs.TruncatedGridAt = st.TruncatedGridAt.UTC().Format(time.RFC3339)
 	}
 	if !st.LastPushbackAt.IsZero() {
 		cs.LastPushbackAt = st.LastPushbackAt.UTC().Format(time.RFC3339)

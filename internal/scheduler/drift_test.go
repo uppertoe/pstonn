@@ -355,3 +355,43 @@ func TestDriftDoesNotRegressAnApplyThatLandedDuringTheRead(t *testing.T) {
 		t.Fatalf("drift regressed the record to %q; the apply that landed during the read must win", p.ActiveRegistration)
 	}
 }
+
+// TestPartialPermitListIsNotACompletedDriftCheck pins that acting on a page is not the
+// same as having checked the account. If the council starts paging and we advance
+// last_drift_check anyway, the permits behind the first page are never read again:
+// their plate drift goes undetected and their expiry warnings never fire, silently and
+// for good. The work we CAN do still happens; only the checkpoint is withheld.
+func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "paged@example.com"
+	seedSession(t, st, owner)
+	pid, err := st.UpsertPermit(ctx, owner, "14576", "14", "Permit")
+	if err != nil {
+		t.Fatalf("permit: %v", err)
+	}
+	vid, err := st.CreateVehicle(ctx, owner, "PAGE01", "car")
+	if err != nil {
+		t.Fatalf("vehicle: %v", err)
+	}
+	if err := st.SetRule(ctx, pid, time.Monday, vid); err != nil {
+		t.Fatalf("rule: %v", err)
+	}
+
+	fc := &fakeCouncil{partialPermits: true}
+	s := New(st, fc, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
+
+	if err := s.checkDrift(ctx, owner); !errors.Is(err, parking.ErrPermitListPartial) {
+		t.Fatalf("checkDrift = %v, want ErrPermitListPartial: a page must not be reported "+
+			"as a completed check of the whole account", err)
+	}
+
+	// A complete list is still reported as done, so the guard rejects truncation and
+	// not drift in general.
+	fc.mu.Lock()
+	fc.partialPermits = false
+	fc.mu.Unlock()
+	if err := s.checkDrift(ctx, owner); err != nil {
+		t.Fatalf("a complete permit list must check the owner off: %v", err)
+	}
+}

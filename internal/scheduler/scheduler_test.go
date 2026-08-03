@@ -31,6 +31,7 @@ type fakeCouncil struct {
 	setDelay             time.Duration // how long a council write takes, to widen races
 	panicOn              string        // council_permit_id whose SetVehicle should panic (per-unit-recovery test)
 	onListPermits        func()        // runs INSIDE ListPermits, to simulate an apply landing mid-read
+	partialPermits       bool          // report the permit list as a PAGE, not the whole account
 
 	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
 	// from a handler-style goroutine and the reconcile loop at the same time.
@@ -177,6 +178,17 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 	}
 	return f.reconnectErr
 }
+
+// ListPermitsComplete reports the list as complete unless a test sets partialPermits,
+// which is how the truncated-grid path is exercised.
+func (f *fakeCouncil) ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error) {
+	ps, err := f.ListPermits(ctx, owner)
+	f.mu.Lock()
+	partial := f.partialPermits
+	f.mu.Unlock()
+	return ps, !partial, err
+}
+
 func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
 	if f.onListPermits != nil {
 		f.onListPermits()
@@ -1141,9 +1153,19 @@ func TestCouncilBusyTellsTheUserEventually(t *testing.T) {
 	for i := 0; i < busyNotifyThreshold; i++ {
 		s.reconcileAll(ctx)
 	}
-	applied := nf.appliedSnap()
-	if len(applied) == 0 {
-		t.Fatal("a sustained council block never reached the user")
+	// notifyUser delivers on its own goroutine, so poll rather than sampling once: a
+	// bare read races the delivery and fails only under load, which reads as a flaky
+	// suite rather than the timing assumption it actually is.
+	var applied []appliedNote
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if applied = nf.appliedSnap(); len(applied) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a sustained council block never reached the user")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	out := nf.outcomeSnap()[0]
 	if out.OK || !out.Transient {
