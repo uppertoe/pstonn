@@ -160,6 +160,14 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
 		t.Fatalf("a partial page should degrade, not fail: %v / %d", err, len(ps))
 	}
+	// The bool drift actually branches on must be asserted directly, not inferred from
+	// the Stats side-effect: if `complete = true` were ever moved below the truncation
+	// branch, every truncated read would report itself whole and the guard would revert
+	// silently, with the Stats assertion below still passing.
+	if _, complete, err := c.ListPermitsComplete(context.Background(), owner); err != nil || complete {
+		t.Fatalf("ListPermitsComplete reported complete=%v (err %v) for a truncated grid; "+
+			"drift would check the owner off on the strength of one page", complete, err)
+	}
 	if st := c.Stats(); st.TruncatedGridAt.IsZero() || st.TruncatedGridGot != 1 || st.TruncatedGridWant != 2 {
 		t.Fatalf("a truncated permit grid was not recorded for the operator: %+v; "+
 			"acting on a partial list while reporting nothing is how a paging change stays invisible", st)
@@ -187,6 +195,10 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + row(9, "") + `]}`)
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
 		t.Fatalf("a complete grid row must be accepted: %v / %d", err, len(ps))
+	}
+	if _, complete, err := c.ListPermitsComplete(context.Background(), owner); err != nil || !complete {
+		t.Fatalf("ListPermitsComplete reported complete=%v (err %v) for a WHOLE account; "+
+			"drift would never check anyone off", complete, err)
 	}
 	// Negative ids are as unusable as zero.
 	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + row(-4, "") + `]}`)

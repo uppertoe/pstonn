@@ -18,6 +18,8 @@ func TestCouncilStatusFrom(t *testing.T) {
 		BreakerOpen: true, BreakerFor: 90 * time.Second,
 		LastPushbackAt: at, LastPushbackStatus: 429, LastPushbackRef: "AZ-REF-1",
 		PersistOK: false, PersistError: "disk full",
+		LastPushbackSurface: "api",
+		TruncatedGridAt:     at.Add(-time.Hour), TruncatedGridGot: 7, TruncatedGridWant: 12,
 	})
 	if cs.Requests1m != 5 || cs.Requests5m != 20 || cs.PushbacksTotal != 3 {
 		t.Errorf("rate/pushback totals mismapped: %+v", cs)
@@ -32,10 +34,25 @@ func TestCouncilStatusFrom(t *testing.T) {
 		t.Errorf("persist health mismapped: ok=%v err=%q", cs.PersistOK, cs.PersistError)
 	}
 
+	// The two signals the watchdog alerts on. Both were recorded in parking.Stats and
+	// silently dropped by this mapper, so the operator had no way to see either: a
+	// paging change looked identical to a healthy account, and a refusal gave no clue
+	// whether it hit login, auth or API traffic.
+	if cs.LastPushbackSurface != "api" {
+		t.Errorf("pushback surface dropped: %+v", cs)
+	}
+	if cs.TruncatedGridAt != "2026-08-01T08:00:00Z" || cs.TruncatedGridGot != 7 || cs.TruncatedGridWant != 12 {
+		t.Errorf("truncated-grid signal dropped: at=%q got=%d want=%d",
+			cs.TruncatedGridAt, cs.TruncatedGridGot, cs.TruncatedGridWant)
+	}
+
 	// Healthy defaults: no pushback seen, persistence intact, breaker closed.
 	clean := councilStatusFrom(parking.Stats{PersistOK: true})
 	if clean.BreakerOpen || clean.LastPushbackAt != "" || !clean.PersistOK {
 		t.Errorf("clean snapshot should be quiet: %+v", clean)
+	}
+	if clean.TruncatedGridAt != "" || clean.LastPushbackSurface != "" {
+		t.Errorf("a clean snapshot must not report truncation or a pushback surface: %+v", clean)
 	}
 }
 
