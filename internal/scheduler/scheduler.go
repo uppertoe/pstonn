@@ -40,6 +40,9 @@ type Council interface {
 	Reconnect(ctx context.Context, owner string) error
 	// ListPermits reads the owner's council permits (used to refresh expiry/status).
 	ListPermits(ctx context.Context, owner string) ([]parking.PermitInfo, error)
+	// ListPermitsComplete additionally reports whether the list was the WHOLE account.
+	// Drift must not check an owner off for another interval on the strength of a page.
+	ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error)
 	// Blocked reports whether the fleet circuit breaker is open — a CONFIRMED
 	// shared-edge block affecting the whole fleet, not one owner's cooldown. Used
 	// to escalate the user-facing block warning (sooner, firmer) once we know a due
@@ -1682,7 +1685,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 	for _, p := range before {
 		wasActive[p.ID] = p.ActiveRegistration
 	}
-	live, err := s.council.ListPermits(ctx, owner)
+	live, complete, err := s.council.ListPermitsComplete(ctx, owner)
 	if err != nil {
 		// A read failure is not evidence of drift, and — critically — it is not a
 		// drift check either: report it so the caller does NOT advance
@@ -1775,6 +1778,19 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		s.Kick() // reconcile now: re-apply the schedule over the drift
 	}
 	s.warnExpiring(ctx, owner)
+	if !complete {
+		// Everything above ran for the permits we WERE sent — that work is real and worth
+		// keeping. But the owner has not been drift-checked, and saying so is the whole
+		// point: advancing last_drift_check here would retire the permits behind the page
+		// from view entirely, and if the council settles into a stable first page their
+		// plate drift and expiry warnings would go missing for good. Returning an error
+		// leaves the checkpoint alone and puts the owner on the ordinary drift backoff,
+		// so this cannot become a retry storm either.
+		s.systemAlert(ctx, "council-permit-list-truncated", "The council is only returning part of the permit list",
+			"Permit reads are coming back as pages, so p.stonn is acting on partial lists and cannot "+
+				"drift-check the permits behind the first page. This needs pagination implementing.")
+		return parking.ErrPermitListPartial
+	}
 	// Only a fully-applied round counts as a drift check (see MarkDriftChecked).
 	return incomplete
 }
