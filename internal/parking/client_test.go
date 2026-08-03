@@ -32,6 +32,7 @@ type fakeCouncil struct {
 	apiCT    atomic.Value // Content-Type for non-2xx API responses
 	apiBody  atomic.Value // raw JSON the managedVehicle endpoint returns; "" = the canned record
 	authHTML atomic.Value // when non-empty, /connect/authorize returns 200 HTML with this body instead of a 302
+	gridBody atomic.Value // raw JSON the permit-grid endpoint returns
 }
 
 func newFakeCouncil(t *testing.T) *fakeCouncil {
@@ -40,6 +41,7 @@ func newFakeCouncil(t *testing.T) *fakeCouncil {
 	f.apiCT.Store("text/html")
 	f.apiBody.Store("")
 	f.authHTML.Store("")
+	f.gridBody.Store(`{"TotalItems":0,"PermitGrid":[]}`)
 	f.mux.HandleFunc("/idm/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		f.renews.Add(1)
 		if h := f.authHTML.Load().(string); h != "" {

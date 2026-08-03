@@ -97,10 +97,10 @@
          broken loop. */}}
     {{if .HasPermits}}
     <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
-    <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. <a href="/how">What p.stonn can and cannot do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. <a href="/how" hx-boost="false">What p.stonn can and cannot do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else}}
     <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
-    <p class="empty-note" style="margin-top:8px">Apply for a visitor permit on the council's ePermits site first, then come back and it will appear here. <a href="/how">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">Apply for a visitor permit on the council's ePermits site first, then come back and it will appear here. <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{end}}
     {{end}}
   </section>
