@@ -435,7 +435,12 @@ type ApplyOutcome struct {
 // actionNeeded reports a hard failure the user must act on (a non-transient
 // error: a dead council session, a rejected plate). These bypass the quiet-hours
 // hold and send immediately — an unattended fine risk shouldn't wait until 6am.
-func (o ApplyOutcome) actionNeeded() bool { return !o.OK && !o.Transient }
+// Urgent counts as action-needed even when Transient. A CONFIRMED fleet block is
+// flagged Transient (it will clear) but its body says "change the vehicle yourself at
+// the council now to avoid a fine" — quiet hours were holding exactly that message
+// until 06:00, so a block at 23:30 left the household on the wrong plate all night
+// with the high-priority push suppressed.
+func (o ApplyOutcome) actionNeeded() bool { return !o.OK && (!o.Transient || o.Urgent) }
 
 // deferUntil returns the quiet-hours delivery time for this outcome, or the zero
 // time (send now) when the outcome is a hard action-needed failure.
@@ -1169,6 +1174,14 @@ func outboxTarget(it store.OutboxItem) string {
 // on failure it enters it, and the caller must stop draining. Reports whether the
 // store accepted the write.
 func (s *Service) record(ctx context.Context, id int64, u outboxUpdate) bool {
+	// DETACHED. mailer.Send* takes no context, so a send is uncancellable — but this
+	// bookkeeping was threaded the signal context. On SIGTERM mid-send the mail goes
+	// out, this write fails instantly with context.Canceled, the row stays 'pending'
+	// with next_attempt in the past, and the startup drain re-sends it. The whole
+	// unrecorded/flushUnrecorded machinery exists to prevent exactly that duplicate and
+	// was defeated by the one failure mode guaranteed to end the process.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	var err error
 	switch u.status {
 	case "sent":

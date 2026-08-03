@@ -124,6 +124,41 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		io.WriteString(w, f.gridBody.Load().(string))
 	})
 
+	// `{}` — every field absent — must NOT read as "no permits" (the missing-vs-zero
+	// trap: absent decodes to nil/0 and looked identical to a genuinely empty account).
+	for _, body := range []string{`{}`, `{"TotalItems":0}`, `{"PermitGrid":[]}`} {
+		f.gridBody.Store(body)
+		if _, err := c.ListPermits(context.Background(), owner); err == nil {
+			t.Fatalf("%s must be refused as a shape change, not read as an empty account", body)
+		}
+	}
+	// More rows than the count claims is impossible: refuse.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":1},{"PKPermitID":2}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("more rows than TotalItems must be refused")
+	}
+	// FEWER rows than the count is tolerated: a permit missing from the grid is skipped
+	// by drift, never stripped, whereas an error aborts the pass before expiry warnings
+	// go out and breaks the picker for the whole account. But it must not pass unseen —
+	// it means the council has started paging and we owe it real pagination.
+	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[{"PKPermitID":1}]}`)
+	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
+		t.Fatalf("a partial page should degrade, not fail: %v / %d", err, len(ps))
+	}
+	if st := c.Stats(); st.TruncatedGridAt.IsZero() || st.TruncatedGridGot != 1 || st.TruncatedGridWant != 2 {
+		t.Fatalf("a truncated permit grid was not recorded for the operator: %+v; "+
+			"acting on a partial list while reporting nothing is how a paging change stays invisible", st)
+	}
+	// Negative ids are as unusable as zero.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":-4}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("a negative PKPermitID must be refused")
+	}
+	// A malformed date must not silently become the zero time: end_date drives expiry.
+	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":7,"EndDate":"31/12/2026"}]}`)
+	if _, err := c.ListPermits(context.Background(), owner); err == nil {
+		t.Fatal("an unparseable date must be refused, not zeroed")
+	}
 	// The council's own count contradicts the empty grid: refuse.
 	f.gridBody.Store(`{"TotalItems":3,"PermitGrid":[]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
@@ -138,5 +173,59 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	f.gridBody.Store(`{"TotalItems":0,"PermitGrid":[]}`)
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 0 {
 		t.Fatalf("a corroborated empty account should read as no permits: %v / %d", err, len(ps))
+	}
+}
+
+// A token-shape failure must classify as FailUnexpected. Left unclassified, FailureOf
+// defaults it to FailTransient — and a transient verdict on a FLEET-WIDE shape change
+// means every owner retries it on every warm tick instead of the operator being told.
+func TestTokenShapeFailuresAreUnexpectedNotTransient(t *testing.T) {
+	const owner = "tok@example.com"
+	for name, body := range map[string]string{
+		"no expires_in":     `{"access_token":"a","token_type":"Bearer"}`,
+		"zero expires_in":   `{"access_token":"a","expires_in":0,"token_type":"Bearer"}`,
+		"absurd expires_in": `{"access_token":"a","expires_in":999999,"token_type":"Bearer"}`,
+		"wrong token_type":  `{"access_token":"a","expires_in":3600,"token_type":"Mac"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeCouncil(t)
+			c, st, box := testClient(t, f)
+			linkOwner(t, c, st, box, owner)
+			f.mux.HandleFunc("/idm2/connect/token", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, body)
+			})
+			c.tokenURL = f.srv.URL + "/idm2/connect/token"
+			_, err := c.exchangeCode(context.Background(), owner, "code", "verifier")
+			if err == nil {
+				t.Fatalf("%s should be refused", name)
+			}
+			if kind, _ := FailureOf(err); kind != FailUnexpected {
+				t.Fatalf("%s classified as %v, want FailUnexpected (transient would retry forever)", name, kind)
+			}
+		})
+	}
+}
+
+// The detail id is the only field on the manageVehicle write that was taken on trust.
+// Absent, json.Number("").String() is "", and we would POST an edit with an empty
+// SelectedVehicle/ChangeSetID — on the one code path that can put a wrong plate on a
+// real permit. It must fail closed.
+func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
+	const owner = "detail@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	p := model.Permit{CouncilPermitID: "1"}
+	// A well-formed record in every respect EXCEPT the detail id, and a plate that
+	// differs from the target so the no-op short-circuit does not hide it.
+	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"maxVehicles":1,"canEditOrDeleteVehicle":true,` +
+		`"permitVehicles":[{"RegistrationNumber":"AAA111","FKVehicleStateID":"1"}]}`)
+	err := c.SetVehicle(context.Background(), owner, p, "BBB222")
+	if err == nil {
+		t.Fatal("a managed vehicle with no PKPermitVehicleDetailID must not be written to")
+	}
+	if kind, _ := FailureOf(err); kind != FailUnexpected {
+		t.Fatalf("kind = %v, want FailUnexpected (a shape change, not a durable refusal)", kind)
 	}
 }

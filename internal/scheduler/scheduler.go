@@ -69,6 +69,9 @@ type Notifier interface {
 	// (a guest or a saved vehicle's attached email — no account) that their car
 	// has been taken off the permit.
 	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
+	// EmailAvailable reports whether an SMTP sender is configured. The renewal
+	// reminder is email-only, so Enabled() (any channel) is the wrong gate for it.
+	EmailAvailable() bool
 }
 
 // Options configures the Scheduler's session-lifecycle behaviour.
@@ -107,10 +110,16 @@ type Options struct {
 // warm (silent-renewing idle cookies) up to a fixed re-authorise bound, emailing
 // a confirm link as that bound approaches.
 type Scheduler struct {
-	store    *store.Store
-	council  Council
-	loc      *time.Location
-	interval time.Duration
+	store *store.Store
+
+	// markDriftChecked indirects the drift checkpoint write. Production always uses the
+	// store; a test replaces it to make the write fail, which is the only way to reach
+	// the branch that decides whether a failed checkpoint may clear the backoff — and
+	// getting that wrong re-reads the council for the same owner every single tick.
+	markDriftChecked func(ctx context.Context, owner string) error
+	council          Council
+	loc              *time.Location
+	interval         time.Duration
 
 	sessionMaxAge    time.Duration
 	warmInterval     time.Duration
@@ -214,6 +223,21 @@ type Scheduler struct {
 	reconnectMu sync.Mutex
 	reconnectQ  map[string]reconnectItem
 
+	// driftMu guards the per-owner drift backoff and the shape-failure tally. A failed
+	// drift read used to leave drift_checked_at alone and so retry on EVERY warm tick
+	// (~3 min) indefinitely; with a fleet-wide API-shape change that is 500 owners x 3
+	// requests every 3 minutes, driving the governor toward its ceiling until the
+	// council pushes back. Failures now back off per owner, and repeated SHAPE failures
+	// across distinct owners raise one operator alert.
+	driftMu      sync.Mutex
+	driftRetryAt map[string]time.Time
+	driftFails   map[string]int
+	driftShape   []churnEvent
+
+	// reminderWarnMu guards the rate limit on the "no SMTP sender" operator warning.
+	reminderWarnMu sync.Mutex
+	reminderWarnAt time.Time
+
 	// notifyInFlight claims a permit+outcome key while its delivery goroutine is
 	// queued/running, so a fleet-wide event can't re-launch duplicate deliveries every
 	// pass before the first has written its durable dedup key. Guarded by notifyMu.
@@ -313,6 +337,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	}
 	sc := &Scheduler{
 		store:            st,
+		markDriftChecked: st.MarkDriftChecked,
 		council:          council,
 		loc:              loc,
 		interval:         time.Minute,
@@ -331,6 +356,8 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		trigger:          make(chan struct{}, 1),
 		notifyConc:       make(chan struct{}, maxNotifyConcurrency),
 		reconnectQ:       make(map[string]reconnectItem),
+		driftRetryAt:     make(map[string]time.Time),
+		driftFails:       make(map[string]int),
 		notifyInFlight:   make(map[string]struct{}),
 		lastAlert:        make(map[string]time.Time),
 		alertRetry:       systemAlertRetry,
@@ -872,6 +899,52 @@ func (s *Scheduler) driftThresholdFor(owner string) time.Duration {
 	return time.Duration(float64(s.driftInterval) * (1 + (u*2-1)*s.jitterFrac))
 }
 
+// noteDriftFailure backs the owner off exponentially (5m, 10m, ... capped at the drift
+// interval) so a persistent failure costs one read per backoff rather than one per warm
+// tick. A shape failure additionally feeds a distinct-owner tally: several owners
+// failing the same way is an API change, not a blip, and the operator should hear once.
+func (s *Scheduler) noteDriftFailure(ctx context.Context, owner string, err error) {
+	s.driftMu.Lock()
+	s.driftFails[owner]++
+	n := s.driftFails[owner]
+	// Start at the warm tick and climb fast: the pass ticks every 3 minutes, so a 5m
+	// first step barely damped the fleet-wide case this exists for. 15m x 4^(n-1)
+	// reaches the cap in three failures instead of seven.
+	backoff := 15 * time.Minute
+	for i := 1; i < n && i < 5; i++ {
+		backoff *= 4
+	}
+	if s.driftInterval > 0 && backoff > s.driftInterval {
+		backoff = s.driftInterval
+	}
+	s.driftRetryAt[owner] = time.Now().Add(backoff)
+	var distinct int
+	if kind, _ := parking.FailureOf(err); kind == parking.FailUnexpected {
+		s.driftShape = append(pruneChurn(s.driftShape, time.Now()), churnEvent{owner, time.Now()})
+		distinct = distinctOwners(s.driftShape)
+	}
+	s.driftMu.Unlock()
+	if distinct >= sessionChurnAlertOwners {
+		s.systemAlert(ctx, "drift-shape",
+			"Council permit reads are failing the same way for several accounts",
+			fmt.Sprintf("%d different accounts have had a drift/permit read rejected as an unexpected response within the last hour. That pattern is an API-shape change rather than a blip: permit status, expiry and external-change detection are stale for those accounts until it is fixed. Reads are backing off, so traffic is bounded meanwhile.", distinct))
+	}
+}
+
+func (s *Scheduler) noteDriftSuccess(owner string) {
+	s.driftMu.Lock()
+	delete(s.driftFails, owner)
+	delete(s.driftRetryAt, owner)
+	s.driftMu.Unlock()
+}
+
+func (s *Scheduler) driftBackedOff(owner string, now time.Time) bool {
+	s.driftMu.Lock()
+	defer s.driftMu.Unlock()
+	at, ok := s.driftRetryAt[owner]
+	return ok && now.Before(at)
+}
+
 // driftDue reports whether the owner-grid drift/expiry read is due for this
 // session. A session that has never had one — a fresh link, or a row migrated
 // before the column existed — falls back to the warm clock as its baseline, so it
@@ -880,6 +953,9 @@ func (s *Scheduler) driftThresholdFor(owner string) time.Duration {
 func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
 	if s.driftInterval <= 0 {
 		return false
+	}
+	if s.driftBackedOff(cs.Owner, now) {
+		return false // a failing read is retried on its own backoff, not every warm tick
 	}
 	baseline := cs.DriftCheckedAt
 	if baseline.IsZero() {
@@ -1002,8 +1078,10 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	// the block clears.
 	if alive && !s.council.Blocked() && s.driftDue(cs, now) {
 		if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
-			// The read failed; leave drift_checked_at alone so the next pass retries
-			// instead of standing down for a full interval.
+			// drift_checked_at is deliberately NOT advanced (the check did not happen),
+			// but the owner is backed off so a persistent failure cannot retry on every
+			// warm tick across the whole fleet.
+			s.noteDriftFailure(ctx, cs.Owner, derr)
 			log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
 			// A drift read is often how we learn the cookie was killed council-side just
 			// AFTER a successful warm — the churn incident's signature. Without this the
@@ -1012,8 +1090,19 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			if g, ok := parking.SessionGenOf(derr); ok {
 				s.enqueueReconnect(ctx, cs.Owner, g)
 			}
-		} else if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
-			log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
+		} else {
+			// Clear the backoff only once the checkpoint is DURABLE. last_drift_check is
+			// what stops this owner being picked again next tick; if the write fails and
+			// we have already cleared the backoff, the owner stays due forever and we
+			// re-read the council every cycle — three requests an owner, against an edge
+			// we may be failing precisely because it is throttling us. Treating the failed
+			// write as a drift failure keeps the backoff on and lets it widen.
+			if err := s.markDriftChecked(ctx, cs.Owner); err != nil {
+				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", cs.Owner, err)
+				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
+			} else {
+				s.noteDriftSuccess(cs.Owner) // clear any backoff from earlier failures
+			}
 		}
 	}
 }
@@ -1123,6 +1212,9 @@ func (s *Scheduler) CancelReconnect(owner string) {
 	s.reconnectMu.Lock()
 	delete(s.reconnectQ, owner)
 	s.reconnectMu.Unlock()
+	// Drop drift bookkeeping too: without this the two maps keep an entry per
+	// unlinked/retired owner until the process restarts.
+	s.noteDriftSuccess(owner)
 }
 
 // nextDueReconnect returns the queued owner with the earliest next-attempt time (ties
@@ -1363,6 +1455,28 @@ func (s *Scheduler) alertRelink(owner string) {
 	}()
 }
 
+// warnDisplaced emails the driver whose car just came off the permit, reporting
+// whether the warning will genuinely reach them. A suppressed address never will, so
+// claiming otherwise leaves nobody to tell the driver. (A send-rate throttle is not
+// counted as a failure: hitting it means this person has already had six notices in a
+// day, so "we told them" remains true.)
+func (s *Scheduler) warnDisplaced(ctx context.Context, p model.Permit, d model.DisplacedBooking, prev, want string) bool {
+	if d.Contact == "" || s.notifier == nil || !s.notifier.Enabled() {
+		return false
+	}
+	if sup, err := s.store.SuppressedAmong(ctx, []string{d.Contact}); err != nil || len(sup) > 0 {
+		if err != nil {
+			log.Printf("scheduler: suppression check for %s: %v", d.Contact, err)
+		}
+		return false // undeliverable (or unknown): tell the account to pass it on
+	}
+	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, want); err != nil {
+		log.Printf("scheduler: enqueue driver-displaced for %s: %v", d.Contact, err)
+		return false
+	}
+	return true
+}
+
 // permitLabel is the human name for a permit in notifications.
 func permitLabel(p model.Permit) string {
 	if p.Label != "" {
@@ -1428,6 +1542,14 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 			defer func() { <-s.notifyConc }()
 		}
 		delivered, err := s.notifier.NotifyApply(nctx, o)
+		if delivered != 0 && err != nil {
+			// Some members were reached and some were not. Recording the key here would
+			// mean the ones that failed are never retried — on a shared account that can
+			// be the person who actually parks the car, and for an OK:false outcome that
+			// is the fine. Leave the key unset so the next pass re-delivers.
+			log.Printf("scheduler: partial notify for %s (delivered=%d): %v — not recording, will retry", o.Owner, delivered, err)
+			return
+		}
 		if delivered != 0 { // >0 delivered, or -1 intentionally suppressed
 			if e := s.store.SetPermitNotifiedKey(nctx, p.ID, key); e != nil {
 				// The notice went out but recording it as sent failed, so the next pass
@@ -1548,6 +1670,18 @@ func describeFailure(kind parking.FailureKind, op string) (reason, action string
 func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 	// The caller (keepWarm) already spaced this call from the previous one, and the
 	// transport governor spaces at the request level, so no extra sleep here.
+	// Capture our belief BEFORE the council round trip. The CAS below exists to discard
+	// a reading that an apply overtook mid-flight — reading the baseline afterwards
+	// folded that apply INTO the expected value, so the swap succeeded and regressed the
+	// record to a plate the council no longer holds.
+	before, berr := s.store.ListPermitsFor(ctx, owner)
+	if berr != nil {
+		return berr
+	}
+	wasActive := make(map[int64]string, len(before))
+	for _, p := range before {
+		wasActive[p.ID] = p.ActiveRegistration
+	}
 	live, err := s.council.ListPermits(ctx, owner)
 	if err != nil {
 		// A read failure is not evidence of drift, and — critically — it is not a
@@ -1624,7 +1758,9 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 		// to a plate the council no longer holds — a false "changed at the portal" row
 		// and a duplicate "updated" notice on the way back. If it lost the race, the
 		// other writer's value is the fresh one; drop ours and skip the drift row.
-		swapped, e := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, p.ActiveRegistration, actual)
+		// Swap against what we believed when the council read STARTED, not what the row
+		// says now: an apply that landed during the read must win, not be overwritten.
+		swapped, e := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, wasActive[p.ID], actual)
 		if e != nil || !swapped {
 			if e != nil {
 				log.Printf("scheduler: drift adopt for permit %s: %v", p.CouncilPermitID, e)
@@ -1734,10 +1870,25 @@ func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalO
 		fmt.Sprintf("This reconcile pass, %d user(s) had a plate change fail (%d with an unexpected/unparseable council response). This may be a council outage or an API change; check the logs.", failN, unexpectedN))
 }
 
+// warnNoReminderChannel logs the missing-SMTP warning at most hourly: this is on a
+// per-owner path that runs every warm tick, so an unguarded log would be the only
+// thing in the journal at fleet scale.
+func (s *Scheduler) warnNoReminderChannel() {
+	s.reminderWarnMu.Lock()
+	defer s.reminderWarnMu.Unlock()
+	now := time.Now()
+	if now.Sub(s.reminderWarnAt) < time.Hour {
+		return
+	}
+	s.reminderWarnAt = now
+	log.Printf("scheduler: renewal reminders are disabled because no SMTP sender is configured " +
+		"(the reminder is email-only; ntfy does not carry it). Households will not be warned before their council link expires.")
+}
+
 // maybeRemind emails the one-click renewal-confirm link once per cycle when a
 // session is within ReminderLead of its re-authorise deadline.
 func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, now time.Time) {
-	if s.notifier == nil || !s.notifier.Enabled() {
+	if s.notifier == nil {
 		return
 	}
 	// Measured against the same idle clock decideWarm uses, so the reminder is a
@@ -1750,6 +1901,19 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 	if s.sessionMaxAge <= 0 || s.reminderLead <= 0 || idleSince.IsZero() || !cs.ReminderSent.IsZero() {
 		return
 	}
+	// PLACED AFTER the configuration check below, deliberately: an operator who has
+	// turned reminders off (ReminderLead = 0) is not missing anything, and warning them
+	// hourly about a feature they disabled is how real warnings get tuned out.
+	// Gate on the channel this message actually uses, not on "any channel configured".
+	// The renewal reminder is email-only, but Enabled() is also true for an ntfy-only
+	// deployment — so we would mark the reminder sent and then no-op inside the mailer,
+	// permanently consuming the household's one warning and letting the permit lapse in
+	// silence. Skipping without recording means the reminders start working the moment
+	// SMTP is configured, and the operator is told why they aren't.
+	if !s.notifier.EmailAvailable() {
+		s.warnNoReminderChannel()
+		return
+	}
 	deadline := idleSince.Add(s.sessionMaxAge)
 	if now.Before(deadline.Add(-s.reminderLead)) || !now.Before(deadline) {
 		return // not yet in the reminder window (or already past the deadline)
@@ -1760,17 +1924,32 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		return
 	}
 	url := s.publicBaseURL + "/council/confirm?token=" + token
+	// RECORD THE TOKEN FIRST. Sending first meant a failed write emailed a confirm link
+	// that could never work — and, because reminder_sent_at stayed empty, sent another
+	// broken one every warm tick. Recording first makes the emailed link valid by
+	// construction; if the send then fails we roll the mark back so it can be retried.
+	if err := s.store.MarkReminderSent(ctx, cs.Owner, token); err != nil {
+		log.Printf("scheduler: mark reminder for %s: %v", cs.Owner, err)
+		return
+	}
 	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.loc), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", cs.Owner, err)
+		// DETACHED context for the rollback. Using ctx here was a real defect: the most
+		// likely reason the send failed is that ctx was cancelled (shutdown), and the
+		// rollback would then fail for the same reason — leaving the session marked
+		// reminded but never reminded, so maybeRemind's !ReminderSent.IsZero() guard
+		// never fires again and the session lapses silently. That is worse than the
+		// duplicate the old ordering risked.
+		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner); cerr != nil {
+			log.Printf("scheduler: roll back reminder mark for %s: %v", cs.Owner, cerr)
+		}
+		cancel()
 		// The reminder is email-only. If it keeps failing through the window the
 		// session lapses silently, so alert the operator (throttled).
 		s.systemAlert(ctx, "reminder-send",
 			"Renewal reminder could not be sent",
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
-		return
-	}
-	if err := s.store.MarkReminderSent(ctx, cs.Owner, token); err != nil {
-		log.Printf("scheduler: mark reminder for %s: %v", cs.Owner, err)
 		return
 	}
 	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", cs.Owner, deadline.In(s.loc).Format("2006-01-02"))
@@ -2233,7 +2412,23 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// under the claim so we neither re-apply a plate that is already on (a real
 	// council write plus a "your permit was updated" notice for a no-op) nor act on a
 	// stale failure streak.
-	if fresh, ferr := s.store.GetPermit(ctx, p.ID); ferr == nil {
+	fresh, ferr := s.store.GetPermit(ctx, p.ID)
+	if ferr != nil {
+		// The permit may have been removed mid-pass. Falling through wrote a real plate
+		// change to the council for a permit we no longer manage, then booked it as a
+		// clean success (SetPermitActive matches 0 rows and returns nil), re-creating
+		// activity and notify rows for the id DeletePermit just cleaned up and emailing
+		// "your permit was updated" for the permit they just removed.
+		log.Printf("scheduler: skipping permit %d: could not re-read it under the claim: %v", p.ID, ferr)
+		return false
+	}
+	if fresh.Inactive(now, s.loc) {
+		// checkDrift may have written a council-reported expiry earlier in THIS pass.
+		// Writing anyway earns a council refusal that alarms the household with "the
+		// council would not let p.stonn update your permit" for a permit that expired.
+		return false
+	}
+	{
 		p.ActiveRegistration, p.FailStreak = fresh.ActiveRegistration, fresh.FailStreak
 		if model.SamePlate(want, p.ActiveRegistration) {
 			s.settle(ctx, p)
@@ -2264,7 +2459,15 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.systemAlert(ctx, "commit-after-apply",
 			"Council change applied but not recorded locally",
 			fmt.Sprintf("Permit %s was set to %q at the council (confirmed), but writing that to the local database failed: %v. The car is on the permit; a reconcile will re-record it. If this repeats, the database may be failing.", p.CouncilPermitID, want, commitErr))
-		s.Kick()
+		// Pace it like any other failure. Without a streak/backoff this branch Kicked a
+		// fleet-wide reconcile immediately, the next pass re-read the same stale plate,
+		// applied again, failed to commit again and Kicked again — a continuous loop of
+		// council reads on the shared egress IP (SetVehicle always pre-reads), starving
+		// keep-warm and real due changes, while progress() kept the watchdog quiet.
+		// Precondition is a read-OK/write-failing database (full disk, read-only remount).
+		s.bumpFailStreak(ctx, p.ID)
+		s.deferRetry(p.ID, 3)
+		s.KickPermit(p.ID) // this permit, not the whole fleet
 		return true
 	case err == nil:
 		s.clearFailStreak(ctx, p.ID)
@@ -2283,15 +2486,16 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// By names whoever created the winning one-off, so a household can tell
 		// "my roster ran" from "someone booked over it" — the account is shared, and
 		// an unattributed change is indistinguishable from the schedule working.
+		// Warn the displaced driver FIRST, and report to the account only what actually
+		// happened. This flag picks between "we've emailed the person responsible" and
+		// "we had no way to reach them — please tell them", so asserting it from "an
+		// address exists" stood BOTH people down when the address was suppressed (a
+		// previous bounce/unsubscribe means it is guaranteed never to be delivered).
+		told := s.warnDisplaced(ctx, p, d, prev, want)
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), By: res.By, OK: true,
-			DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
+			DisplacedReg: d.Reg, DisplacedTold: told,
 		}, "success|"+prev+">"+want)
-		if d.Contact != "" && s.notifier != nil && s.notifier.Enabled() {
-			if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, want); err != nil {
-				log.Printf("scheduler: enqueue driver-displaced for %s: %v", d.Contact, err)
-			}
-		}
 		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true
 	case errors.Is(err, parking.ErrNotLinked):

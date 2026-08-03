@@ -778,8 +778,8 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	s.sched.Kick()
 	if err == nil {
 		_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "success", "activated by "+createdBy)
-		d := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
-		s.notifyGuestApply(bg, permit, reg, name, createdBy, d)
+		d, told := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
+		s.notifyGuestApply(bg, permit, reg, name, createdBy, d, told)
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
@@ -848,7 +848,12 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	} else {
 		end := revertPinEnd(now, gc.BaselineUntil)
 		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", guestCreateMessage(err, "Something went wrong. Please try again."))
+			// The sweep above ALREADY committed, so "the permit wasn't changed" would be
+			// false. Say what actually happened and let reconcile settle the target.
+			log.Printf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
+			s.kickScheduler()
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
+				"Your car was taken off the permit, but we couldn't put the previous one back automatically — it will be restored shortly.")
 			return
 		}
 	}
@@ -891,7 +896,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		// A revert can't displace a third party: the guest's own overrides were
 		// just swept, and the baseline is only re-pinned when nothing else covers
 		// now — so there is no displaced booking to chase.
-		s.notifyGuestApply(bg, permit, target, "", createdBy+" (undo)", model.DisplacedBooking{})
+		s.notifyGuestApply(bg, permit, target, "", createdBy+" (undo)", model.DisplacedBooking{}, false)
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
@@ -979,7 +984,7 @@ func guestApplyDetail(err error) string {
 	return "The council did not accept the change."
 }
 
-func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string, d model.DisplacedBooking) {
+func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string, d model.DisplacedBooking, told bool) {
 	if s.notify == nil {
 		return
 	}
@@ -997,7 +1002,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 	// silently drop the "a guest put their car on your permit" notice.
 	outcome := notify.ApplyOutcome{
 		Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
-		DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
+		DisplacedReg: d.Reg, DisplacedTold: told,
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {
 		log.Printf("guest apply notify enqueue for %s: %v", permit.Owner, err)
@@ -1011,18 +1016,22 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 // can annotate the account notification (Reg set + no Contact = a booking was
 // displaced but its driver couldn't be told). Best-effort: on any store error it
 // stays quiet — a missed heads-up is low-harm, the account fanout still fires.
-func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev, next, actor string) model.DisplacedBooking {
+// Returns the displaced booking and whether its driver will genuinely be warned. The
+// second value decides between "we've emailed them" and "please tell them yourself", so
+// it must reflect what happened — a suppressed address (previous bounce/unsubscribe) is
+// guaranteed never to be delivered, and claiming otherwise stands BOTH people down.
+func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev, next, actor string) (model.DisplacedBooking, bool) {
 	if prev == "" || model.SamePlate(prev, next) {
-		return model.DisplacedBooking{}
+		return model.DisplacedBooking{}, false
 	}
 	now := time.Now()
 	overrides, err := s.store.ListOverrides(ctx, permit.ID, now)
 	if err != nil {
-		return model.DisplacedBooking{}
+		return model.DisplacedBooking{}, false
 	}
 	saved, err := s.store.ListVehiclesFor(ctx, permit.Owner)
 	if err != nil {
-		return model.DisplacedBooking{}
+		return model.DisplacedBooking{}, false
 	}
 	vehicles := make(map[int64]model.VehicleInfo, len(saved))
 	for _, v := range saved {
@@ -1030,15 +1039,23 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 	}
 	members, err := s.store.AccountEmails(ctx, permit.Owner)
 	if err != nil {
-		return model.DisplacedBooking{}
+		return model.DisplacedBooking{}, false
 	}
 	d := model.FindDisplaced(overrides, vehicles, prev, actor, members, now)
-	if d.Contact != "" && s.notify != nil {
-		if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, next); err != nil {
-			log.Printf("enqueue driver-displaced for %s: %v", d.Contact, err)
-		}
+	if d.Contact == "" || s.notify == nil {
+		return d, false
 	}
-	return d
+	if sup, serr := s.store.SuppressedAmong(ctx, []string{d.Contact}); serr != nil || len(sup) > 0 {
+		if serr != nil {
+			log.Printf("suppression check for %s: %v", d.Contact, serr)
+		}
+		return d, false // undeliverable (or unknown): ask the account to pass it on
+	}
+	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, next); err != nil {
+		log.Printf("enqueue driver-displaced for %s: %v", d.Contact, err)
+		return d, false
+	}
+	return d, true
 }
 
 func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
@@ -1451,6 +1468,14 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Choose at least one car this pass may activate.")
 		return
 	}
+	// Parse and validate the recipients BEFORE mutating anything: returning an error
+	// after the label/cars were already committed left the pass changed while telling
+	// the user it failed.
+	emails, droppedEmails := parseEmails(r.FormValue("recipients"))
+	if len(emails) > maxGuestRecipients {
+		s.formError(w, r, tooManyRecipients)
+		return
+	}
 	if err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That pass or car isn't one you manage.")
@@ -1462,16 +1487,17 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 
 	// New recipients (if any) each get a fresh token + link.
 	var newLinks []guestLinkView
-	emails, droppedEmails := parseEmails(r.FormValue("recipients"))
-	if len(emails) > maxGuestRecipients {
-		s.formError(w, r, tooManyRecipients)
-		return
-	}
 	if len(emails) > 0 {
 		recs, links := s.mintLinks(emails)
+		// NOTE: the grant update above has already committed. These errors must not claim
+		// the whole edit failed.
 		added, err := s.store.AddGuestTokens(r.Context(), owner, id, recs)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			s.serverError(w, err)
+			// A 500 here would tell the user the whole edit failed when the label/cars
+			// are already committed. Send them back to the pass, which shows its real
+			// current state and lets them add the recipients again.
+			log.Printf("guest: pass %d updated but adding recipients failed: %v", id, err)
+			http.Redirect(w, r, "/guests", http.StatusSeeOther)
 			return
 		}
 		addedSet := map[string]bool{}
@@ -1490,7 +1516,13 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
-		s.serverError(w, err)
+		// By here the grant is updated AND any new tokens are live. A 500 would strand
+		// them: this render is the only place the links are shown, and emailLinks below
+		// never runs. Redirect instead — the pass and its recipients are listed on the
+		// guests page, so the household can re-send a link rather than being left with
+		// live tokens they never saw.
+		log.Printf("guest: pass %d updated but the guests page could not be rendered: %v", id, err)
+		http.Redirect(w, r, "/guests", http.StatusSeeOther)
 		return
 	}
 	if len(newLinks) > 0 {
@@ -2197,6 +2229,12 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Claim the permit first, exactly as deleteGuestGrant/revokeGuestToken/toggleGuests
+	// do. Without it an in-flight door-QR approval could write the visitor's plate to
+	// the council AFTER the household was told the code had stopped working.
+	if pid, perr := s.store.GuestGrantPermit(r.Context(), owner, atoi64(r.PathValue("id"))); perr == nil {
+		defer s.claimPermitApplies(r.Context(), []int64{pid})()
+	}
 	label := s.grantLabel(r.Context(), owner, atoi64(r.PathValue("id")))
 	// As in deleteGuestGrant: a no-op must not announce itself to the household.
 	err := s.store.RevokePrintedGrant(r.Context(), owner, atoi64(r.PathValue("id")))
@@ -2306,6 +2344,18 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
 	applyErr := error(errApplyBusy)
 	if claimed {
+		// The same gate guestActivate and guestRevert use. This was the one guest path
+		// that wrote to the council without re-checking authorisation under the claim:
+		// a door QR revoked between the approval and here would otherwise still have its
+		// visitor's plate applied, after the household was told the code had stopped.
+		if d := s.authoriseGuestApply(applyCtx, doorToken, ovID); d != guestApplyAllowed {
+			release()
+			cancel()                                    // this path returns early; don't leak the apply context
+			_ = s.store.DeleteOverride(bg, owner, ovID) // don't leave it for the scheduler
+			s.kickScheduler()
+			http.Redirect(w, r, "/guests?revoked=1", http.StatusSeeOther)
+			return
+		}
 		if applyErr = s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, req.Plate); e != nil {
 				log.Printf("guest: approved plate %q for permit %d at council but local commit failed: %v", req.Plate, permit.ID, e)
@@ -2320,10 +2370,10 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		// permit; warn that driver if they're reachable. The approving member saw
 		// the change happen, but the OTHER members didn't — fan the confirmation
 		// out like every other plate change (the guest-link path does the same).
-		d := s.displacedDriver(bg, permit, prev, req.Plate, user)
+		d, told := s.displacedDriver(bg, permit, prev, req.Plate, user)
 		outcome := notify.ApplyOutcome{
 			Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: req.Plate, By: user, Source: "doorqr", OK: true,
-			DisplacedReg: d.Reg, DisplacedTold: d.Contact != "",
+			DisplacedReg: d.Reg, DisplacedTold: told,
 		}
 		if err := s.notify.EnqueueApply(bg, outcome); err != nil {
 			log.Printf("doorqr apply notify enqueue for %s: %v", permit.Owner, err)

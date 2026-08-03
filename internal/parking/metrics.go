@@ -121,6 +121,13 @@ type Stats struct {
 	// false only if the LAST write failed.
 	PersistOK    bool
 	PersistError string
+
+	// TruncatedGridAt is the last time a permit list arrived short of the count the
+	// council reported: the council has started paging and we are acting on partial
+	// lists until pagination is implemented. Zero means it has never happened.
+	TruncatedGridAt   time.Time
+	TruncatedGridGot  int
+	TruncatedGridWant int
 }
 
 // Blocked reports whether the fleet circuit breaker is currently open — a
@@ -143,6 +150,9 @@ func (c *Client) Stats() Stats {
 	c.persistMu.Lock()
 	pErr := c.persistErr
 	c.persistMu.Unlock()
+	c.truncMu.Lock()
+	truncAt, truncGot, truncWant := c.truncAt, c.truncGot, c.truncWant
+	c.truncMu.Unlock()
 	persistError := ""
 	if pErr != nil {
 		persistError = pErr.Error()
@@ -163,5 +173,8 @@ func (c *Client) Stats() Stats {
 		LastPushbackRef:     pb.AzureRef,
 		PersistOK:           pErr == nil,
 		PersistError:        persistError,
+		TruncatedGridAt:     truncAt,
+		TruncatedGridGot:    truncGot,
+		TruncatedGridWant:   truncWant,
 	}
 }

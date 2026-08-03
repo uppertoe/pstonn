@@ -324,3 +324,34 @@ func TestFailedDriftDoesNotMarkChecked(t *testing.T) {
 		t.Fatal("a successful drift read did not advance drift_checked_at")
 	}
 }
+
+// Drift's compare-and-swap must be judged against what we believed when the council
+// read STARTED. Reading the baseline afterwards folded a concurrent apply into the
+// expected value, so the swap succeeded and regressed the record to a plate the council
+// no longer holds — costing a false "changed at the portal" row, a duplicate notice,
+// and (if the target flips before the next tick) a permit shown as covered when it is
+// not, until the next drift read hours later.
+func TestDriftDoesNotRegressAnApplyThatLandedDuringTheRead(t *testing.T) {
+	ctx := context.Background()
+	const owner, councilID = "raced@example.com", "raced-1"
+	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "OLD999", "OLD999")
+
+	// While the council read is in flight, an apply commits a NEWER plate.
+	fc.onListPermits = func() {
+		if err := st.SetPermitActive(ctx, pid, "NEW222"); err != nil {
+			t.Errorf("simulated concurrent apply: %v", err)
+		}
+	}
+
+	if err := s.checkDrift(ctx, owner); err != nil {
+		t.Fatalf("drift: %v", err)
+	}
+
+	p, err := st.GetPermit(ctx, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ActiveRegistration != "NEW222" {
+		t.Fatalf("drift regressed the record to %q; the apply that landed during the read must win", p.ActiveRegistration)
+	}
+}

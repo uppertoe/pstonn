@@ -119,14 +119,18 @@ func TestLiveCaptureShapes(t *testing.T) {
 	if err := json.Unmarshal(gridRaw, &grid); err != nil {
 		t.Fatalf("grid did not decode into the shape this client expects: %v", err)
 	}
+	if grid.PermitGrid == nil {
+		t.Fatal("grid response has no PermitGrid key; the client would reject this as a shape change")
+	}
+	rows := *grid.PermitGrid
 	var row *gridRow
-	for i := range grid.PermitGrid {
-		if fmt.Sprint(grid.PermitGrid[i].PKPermitID) == permitID {
-			row = &grid.PermitGrid[i]
+	for i := range rows {
+		if fmt.Sprint(rows[i].PKPermitID) == permitID {
+			row = &rows[i]
 		}
 	}
 	if row == nil {
-		t.Fatalf("permit %s not present in the grid (%d permits returned)", permitID, len(grid.PermitGrid))
+		t.Fatalf("permit %s not present in the grid (%d permits returned)", permitID, len(rows))
 	}
 
 	// Q4: checkDrift needs a plate; syncPermitExpiry needs status + end date. If

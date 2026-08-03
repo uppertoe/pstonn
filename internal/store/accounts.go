@@ -90,6 +90,19 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	// Guest passes they minted as a secondary are the security-relevant one: those
 	// are bearer links over someone else's permit, and after this delete the primary
 	// could no longer see them in Settings to revoke. Mirrors revokeGrantsBy.
+	//
+	// Sweep their live bookings FIRST. The delete cascades the token rows away, and
+	// override.guest_token_id has no foreign key, so afterwards a visitor's plate is
+	// left steering someone ELSE's permit with nothing able to reach it: the primary's
+	// revoke, delete-pass and account-wide pause all match through guest_token, and the
+	// pass has vanished from their Settings page entirely. They would be left with a
+	// stranger's plate on their permit for up to two days, every control reporting
+	// success. This is what "Mirrors revokeGrantsBy" was always meant to mean.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+        WHERE g.created_by = ? AND g.owner != ?)`, nowUTC(), owner, owner); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM guest_grant WHERE created_by = ? AND owner != ?`, owner, owner); err != nil {
 		return err
@@ -221,19 +234,44 @@ func (s *Store) PendingInvite(ctx context.Context, memberEmail string) (owner st
 // second acceptance.
 //
 // Returns ErrNotFound when there is no such pending invite.
+// The prerequisites are checked INSIDE the same statement, not by the caller
+// beforehand: a council link or a first vehicle landing between a caller's check and
+// this update would accept the invite anyway, leaving a secondary whose own permits and
+// session are hidden under someone else's account. Returns ErrInviteBlocked when the
+// invitee has become a primary or acquired their own data, so the handler can say which.
 func (s *Store) AcceptInvite(ctx context.Context, memberEmail, owner string) error {
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE account_member SET invite_pending = 0, added_at = ?
-		 WHERE member_email = ? AND owner = ? AND invite_pending = 1`,
-		nowUTC(), memberEmail, owner)
+	res, err := s.db.ExecContext(ctx, `
+UPDATE account_member SET invite_pending = 0, added_at = ?
+WHERE member_email = ? AND owner = ? AND invite_pending = 1
+  AND NOT EXISTS (SELECT 1 FROM account_member m2 WHERE m2.owner = ?)
+  AND NOT EXISTS (SELECT 1 FROM council_session WHERE owner = ?)
+  AND NOT EXISTS (SELECT 1 FROM permit WHERE owner = ?)
+  AND NOT EXISTS (SELECT 1 FROM vehicle WHERE owner = ?)`,
+		nowUTC(), memberEmail, owner, memberEmail, memberEmail, memberEmail, memberEmail)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
+		// Either no pending invite, or a prerequisite now fails. Distinguish them so the
+		// handler does not tell someone "no such invitation" when the real reason is that
+		// they just linked a council account.
+		var blocked int
+		if e := s.db.QueryRowContext(ctx, `SELECT
+        EXISTS(SELECT 1 FROM account_member WHERE owner = ?)
+     OR EXISTS(SELECT 1 FROM council_session WHERE owner = ?)
+     OR EXISTS(SELECT 1 FROM permit WHERE owner = ?)
+     OR EXISTS(SELECT 1 FROM vehicle WHERE owner = ?)`,
+			memberEmail, memberEmail, memberEmail, memberEmail).Scan(&blocked); e == nil && blocked == 1 {
+			return ErrInviteBlocked
+		}
 		return ErrNotFound
 	}
 	return nil
 }
+
+// ErrInviteBlocked means the invitee cannot become a secondary: they now run their own
+// account (own data) or are a primary with dependants of their own.
+var ErrInviteBlocked = errors.New("store: invitee has their own account data or dependants")
 
 // DeclineInvite removes a pending invite. Deliberately restricted to pending rows:
 // this is the invitee's own refusal, not a way to leave an account they have already
@@ -645,6 +683,19 @@ func dropQueuedPush(ctx context.Context, tx *sql.Tx, memberEmail string) error {
 func revokeGrantsBy(ctx context.Context, tx *sql.Tx, owner, memberEmail string) (int64, error) {
 	if memberEmail == "" {
 		return 0, nil
+	}
+	// Sweep the live overrides these grants created BEFORE deleting them. override
+	// carries guest_token_id with no foreign key, so once the token rows are gone
+	// nothing can match those overrides again — they become orphans that still steer
+	// the permit (ListOverrides does not join guest_token) and that no later control
+	// can remove: revoke, delete-pass and even the account-wide pause all match via a
+	// JOIN onto guest_token. The household would be told the car was taken off while a
+	// departed member's visitor kept the permit for up to ~2 days. DeleteGuestGrant
+	// already sweeps first for exactly this reason.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+        WHERE g.owner = ? AND g.created_by = ?)`, nowUTC(), owner, memberEmail); err != nil {
+		return 0, err
 	}
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM guest_grant WHERE owner = ? AND created_by = ?`, owner, memberEmail)

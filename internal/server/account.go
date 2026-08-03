@@ -56,6 +56,12 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	// restart the service they were already using. HasOwnData covers that: a session,
 	// a permit, or a vehicle all mean this is a re-link, not a signup.
 	if s.cfg.MaxAccounts > 0 {
+		// Hold the admission boundary across the count AND the link below. Counting then
+		// releasing let concurrent newcomers all observe 499 and all save — the login
+		// serialisation downstream does not help, because the capacity DECISION was
+		// already made before entering it. Unlocked on every exit path via defer.
+		s.admitMu.Lock()
+		defer s.admitMu.Unlock()
 		// FAIL CLOSED on a read error. Logging and proceeding meant database trouble
 		// silently lifted the cap — exactly when the service is least able to absorb
 		// new households. An existing user is never affected: HasOwnData short-circuits
@@ -102,6 +108,16 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 			s.message(w, http.StatusBadGateway,
 				"The council portal wouldn't accept that sign-in. Either the password is wrong, or there is no City of Stonnington ePermits account for "+user+
 					". p.stonn can only manage a permit you already hold: check you can sign in at the council's own ePermits site with this email address first. If your ePermits account uses a different email, sign out and sign back in to p.stonn with that address instead.")
+			return
+		}
+		if errors.Is(err, store.ErrSecondaryAccount) {
+			// The council sign-in actually SUCCEEDED; we refused to keep it because this
+			// address joined another household while the sign-in was in flight. Saying
+			// "a problem at our end" here would be a lie about their password and leave
+			// them retrying something that can never work.
+			s.message(w, http.StatusConflict,
+				"You've joined another p.stonn household, so this address now shares that household's permits instead of holding its own council link. "+
+					"Your council password was accepted — there is nothing wrong with it. If you meant to manage your own permits, leave the shared household from Settings first, then link again.")
 			return
 		}
 		s.message(w, http.StatusBadGateway, "Could not link your council account. This appears to be a problem at our end or on the council's site rather than your password. Please try again shortly.")
@@ -346,11 +362,17 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusConflict, "You already have your own permits in p.stonn, and joining another account would hide them. Decline this invitation, or remove your own account first if you would rather share.")
 		return
 	}
-	if err := s.store.AcceptInvite(ctx, u.Email, owner); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			redirectHome(w, r)
-			return
-		}
+	// The checks above are for a clear message; the STORE decides. Its update re-tests
+	// the same prerequisites in the statement itself, so a council link or first vehicle
+	// landing in between cannot slip an invite through behind them.
+	switch err := s.store.AcceptInvite(ctx, u.Email, owner); {
+	case errors.Is(err, store.ErrInviteBlocked):
+		s.message(w, http.StatusConflict, "You've started your own p.stonn account since this invitation was sent, so joining another would hide your own permits. Decline it, or remove your own account first if you would rather share.")
+		return
+	case errors.Is(err, store.ErrNotFound):
+		redirectHome(w, r)
+		return
+	case err != nil:
 		s.serverError(w, err)
 		return
 	}

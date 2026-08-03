@@ -244,14 +244,23 @@ func (c *Client) exchangeCode(ctx context.Context, owner, code, verifier string)
 		return nil, busy
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("parking: token endpoint status %d: %s", resp.StatusCode, safeExcerpt(string(body)))
+		return nil, councilErr(FailUnexpected, "sign in to the council",
+			fmt.Errorf("token endpoint status %d: %s", resp.StatusCode, safeExcerpt(string(body))))
 	}
 	var tok tokenResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return nil, fmt.Errorf("parking: decode token response: %w", err)
+		// The likeliest shape signal of all: a token endpoint returning HTML (an error
+		// page, an edge interstitial). Bare, FailureOf would call it transient and every
+		// owner would retry it forever instead of the operator being told.
+		return nil, councilErr(FailUnexpected, "sign in to the council",
+			fmt.Errorf("token response was not JSON: %w", err))
 	}
+	// councilErr(FailUnexpected), NOT a bare error: FailureOf defaults an unclassified
+	// error to FailTransient, which for a SHAPE change is the worst answer — every
+	// owner retries it forever on the warm tick instead of the operator being told.
+	const tokOp = "sign in to the council"
 	if tok.AccessToken == "" {
-		return nil, errors.New("parking: token response had no access_token")
+		return nil, councilErr(FailUnexpected, tokOp, errors.New("token response had no access_token"))
 	}
 	// A 200 is not enough: the fields we DEPEND on must be sane, or the failure is
 	// silent and expensive. A missing/zero expires_in makes the token look already
@@ -260,10 +269,12 @@ func (c *Client) exchangeCode(ctx context.Context, owner, code, verifier string)
 	// non-Bearer type means our Authorization header is malformed and every call
 	// 401s. Treat both as an API-shape change rather than papering over them.
 	if !strings.EqualFold(tok.TokenType, "Bearer") && tok.TokenType != "" {
-		return nil, fmt.Errorf("parking: token response has unsupported token_type %q: API shape change?", safeExcerpt(tok.TokenType))
+		return nil, councilErr(FailUnexpected, tokOp,
+			fmt.Errorf("token response has unsupported token_type %q: API shape change?", safeExcerpt(tok.TokenType)))
 	}
 	if tok.ExpiresIn <= 0 || tok.ExpiresIn > 24*3600 {
-		return nil, fmt.Errorf("parking: token response has implausible expires_in %d: API shape change?", tok.ExpiresIn)
+		return nil, councilErr(FailUnexpected, tokOp,
+			fmt.Errorf("token response has implausible expires_in %d: API shape change?", tok.ExpiresIn))
 	}
 	return &tok, nil
 }

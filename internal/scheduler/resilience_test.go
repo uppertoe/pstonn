@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -60,5 +61,57 @@ func TestReconcileStampsSuccessOnlyOnCleanPass(t *testing.T) {
 	}
 	if rec2 := s.LastReconcile(); !rec2.Equal(rec1) {
 		t.Fatalf("a failed pass must not advance the clean-reconcile clock: %v != %v", rec2, rec1)
+	}
+}
+
+// A failing drift read must back off per owner, not retry on every warm tick. Without
+// this a fleet-wide API-shape change is 500 owners x 3 requests every 3 minutes.
+func TestDriftFailureBacksOffAndResets(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "driftbo@example.com"
+	seedSession(t, st, owner)
+	s := New(st, &fakeCouncil{}, time.UTC, Options{DriftInterval: 6 * time.Hour, Notifier: &fakeNotifier{on: true, admin: true}})
+	cs, _ := st.GetCouncilSession(ctx, owner)
+
+	if s.driftBackedOff(owner, time.Now()) {
+		t.Fatal("a healthy owner must not start backed off")
+	}
+	s.noteDriftFailure(ctx, owner, errors.New("boom"))
+	if !s.driftBackedOff(owner, time.Now()) {
+		t.Fatal("a failed drift read must back the owner off")
+	}
+	// The backoff gates driftDue, which is what actually stops the retry.
+	cs.DriftCheckedAt = time.Time{}
+	cs.UpdatedAt = time.Now().Add(-24 * time.Hour) // long overdue
+	if s.driftDue(cs, time.Now()) {
+		t.Fatal("a backed-off owner must not be drift-due")
+	}
+	// It must be well clear of the 3-minute warm tick, or it damps nothing.
+	if !s.driftBackedOff(owner, time.Now().Add(10*time.Minute)) {
+		t.Fatal("the first backoff step must outlast several warm ticks")
+	}
+	// Success clears it.
+	s.noteDriftSuccess(owner)
+	if s.driftBackedOff(owner, time.Now()) {
+		t.Fatal("a successful drift read must clear the backoff")
+	}
+	if !s.driftDue(cs, time.Now()) {
+		t.Fatal("an overdue owner should be drift-due again once the backoff clears")
+	}
+}
+
+// Cancelling a reconnect must not leave drift bookkeeping behind for an owner who is
+// gone — the two maps are only otherwise cleared on success.
+func TestCancelReconnectClearsDriftBookkeeping(t *testing.T) {
+	st := newStore(t)
+	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+	s.noteDriftFailure(context.Background(), "gone@example.com", errors.New("boom"))
+	s.CancelReconnect("gone@example.com")
+	s.driftMu.Lock()
+	n := len(s.driftRetryAt) + len(s.driftFails)
+	s.driftMu.Unlock()
+	if n != 0 {
+		t.Fatalf("drift bookkeeping leaked %d entries for a cancelled owner", n)
 	}
 }

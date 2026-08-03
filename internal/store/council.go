@@ -150,6 +150,14 @@ func (s *Store) MarkDriftChecked(ctx context.Context, owner string) error {
 	return err
 }
 
+// ClearReminderSent undoes MarkReminderSent, so a reminder whose token was recorded
+// but whose email then failed to send can be retried instead of being marked done.
+func (s *Store) ClearReminderSent(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE council_session SET reminder_sent_at = '', confirm_token = '' WHERE owner = ?`, owner)
+	return err
+}
+
 // MarkReminderSent records that the approaching-expiry email was sent and stores
 // the single-use token embedded in its confirm link — as a hash, so the row cannot
 // be read for a working link. The caller keeps the plaintext only long enough to
@@ -290,9 +298,17 @@ WHERE EXISTS (SELECT 1 FROM weekly_rule wr WHERE wr.permit_id = p.id)
 // invalidates the old token pairing).
 func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error {
 	now := nowUTC()
-	_, err := s.db.ExecContext(ctx, `
+	// Refuse to write a council session for someone who is now an ACCEPTED secondary.
+	// AcceptInvite already refuses to make a linker into a secondary, but that only
+	// closes one direction: a council link started before the invite was accepted lands
+	// after it, and the two guards together must hold whichever way the race falls.
+	// Otherwise the address ends up both sharing the primary's permits and holding its
+	// own council session — where a member sees two sets of permits and the scheduler
+	// warms a session nothing owns.
+	res, err := s.db.ExecContext(ctx, `
 INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at, session_generation)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?
+WHERE NOT EXISTS (SELECT 1 FROM account_member WHERE member_email = ? AND invite_pending = 0)
 ON CONFLICT(owner) DO UPDATE SET
     sub                 = excluded.sub,
     council_email       = excluded.council_email,
@@ -307,9 +323,20 @@ ON CONFLICT(owner) DO UPDATE SET
     last_active_at      = excluded.last_active_at,
     session_generation  = council_session.session_generation + 1`,
 		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
-		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now, s.newSessionGeneration())
-	return err
+		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now, s.newSessionGeneration(),
+		cs.Owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrSecondaryAccount
+	}
+	return nil
 }
+
+// ErrSecondaryAccount means the address joined another household while its council
+// link was in flight, so the link must not be saved: it uses the primary's permits now.
+var ErrSecondaryAccount = errors.New("store: this address has joined another household, so it cannot hold its own council link")
 
 // newSessionGeneration seeds a FRESH session row's generation. A relink is a
 // delete+insert, so a counter restarting at 1 would let work bound to the old row's
@@ -507,17 +534,19 @@ func (s *Store) LoadBreakerState(ctx context.Context) (BreakerState, error) {
 
 // SaveBreakerState persists the breaker pause on every open/close/pushback
 // transition, so a restart resumes from the real state rather than a clean slate.
-func (s *Store) SaveBreakerState(ctx context.Context, bs BreakerState) error {
-	ou, lp := "", ""
-	if !bs.OpenUntil.IsZero() {
-		ou = bs.OpenUntil.UTC().Format(time.RFC3339)
-	}
-	if !bs.LastPushback.IsZero() {
-		lp = bs.LastPushback.UTC().Format(time.RFC3339)
-	}
+func (s *Store) SaveBreakerState(ctx context.Context, b BreakerState) error {
+	// Generation-guarded, so an older snapshot cannot overwrite a newer one even if two
+	// transitions race to the database. That makes ordering safe WITHOUT holding a lock
+	// across this write — which matters because /status reads the persist health under
+	// the same mutex, and a fleet block is exactly when both are busiest.
 	_, err := s.db.ExecContext(ctx, `
-UPDATE breaker_state SET open_until = ?, generation = ?, last_pushback = ?, updated_at = ?
-WHERE id = 1`,
-		ou, int64(bs.Generation), lp, nowUTC())
+INSERT INTO breaker_state (id, open_until, last_pushback, generation)
+VALUES (1, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    open_until    = excluded.open_until,
+    last_pushback = excluded.last_pushback,
+    generation    = excluded.generation
+WHERE excluded.generation >= breaker_state.generation`,
+		b.OpenUntil.UTC().Format(time.RFC3339), b.LastPushback.UTC().Format(time.RFC3339), b.Generation)
 	return err
 }

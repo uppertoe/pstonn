@@ -30,6 +30,7 @@ type fakeCouncil struct {
 	setErr               error
 	setDelay             time.Duration // how long a council write takes, to widen races
 	panicOn              string        // council_permit_id whose SetVehicle should panic (per-unit-recovery test)
+	onListPermits        func()        // runs INSIDE ListPermits, to simulate an apply landing mid-read
 
 	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
 	// from a handler-style goroutine and the reconcile loop at the same time.
@@ -177,6 +178,9 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 	return f.reconnectErr
 }
 func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
+	if f.onListPermits != nil {
+		f.onListPermits()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++ // the owner-grid read; drift/expiry uses it, so counting it counts drift
@@ -225,7 +229,11 @@ type fakeNotifier struct {
 	expiryDeliver int      // channels to report delivered (0 => 1)
 }
 
-func (f *fakeNotifier) Enabled() bool         { return f.on }
+func (f *fakeNotifier) Enabled() bool { return f.on }
+
+// EmailAvailable mirrors Enabled here: the fake stands in for a fully configured
+// notifier, and the ntfy-only case has its own dedicated test.
+func (f *fakeNotifier) EmailAvailable() bool  { return f.on }
 func (f *fakeNotifier) AdminConfigured() bool { return f.admin }
 func (f *fakeNotifier) SendRenewalReminder(ctx context.Context, to string, deadline time.Time, url string) error {
 	f.mu.Lock()
@@ -850,6 +858,85 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	cs2, _ := st.GetCouncilSession(ctx, "soon@example.com")
 	if !cs2.ReminderSent.IsZero() || cs2.ConfirmToken != "" {
 		t.Fatalf("confirm did not reset the cycle: %+v", cs2)
+	}
+}
+
+// ntfyOnlyNotifier stands in for a deployment with ntfy configured but no SMTP —
+// Enabled() is true, but the renewal reminder cannot actually be delivered.
+type ntfyOnlyNotifier struct{ fakeNotifier }
+
+func (n *ntfyOnlyNotifier) Enabled() bool        { return true }
+func (n *ntfyOnlyNotifier) EmailAvailable() bool { return false }
+
+// TestNoReminderRecordedWithoutEmail pins that an undeliverable reminder is not
+// recorded as sent. reminder_sent_at is one-shot, so marking it on an ntfy-only
+// deployment burns the household's single warning against a mailer that silently
+// no-ops: their council link then lapses with nothing said, and every permit the
+// scheduler holds for them goes with it.
+func TestNoReminderRecordedWithoutEmail(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	seedSession(t, st, "soon@example.com")
+	fn := &ntfyOnlyNotifier{}
+	s := New(st, &fakeCouncil{}, time.UTC, Options{
+		SessionMaxAge: 10 * time.Second, WarmInterval: time.Hour,
+		ReminderLead: 10 * time.Second, PublicBaseURL: "https://pstonn.example", Notifier: fn,
+	})
+	s.keepWarm(ctx)
+
+	cs, err := st.GetCouncilSession(ctx, "soon@example.com")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !cs.ReminderSent.IsZero() || cs.ConfirmToken != "" {
+		t.Fatalf("a reminder was recorded as sent with no email channel to send it on: %+v; "+
+			"the household would never be warned and could not be warned again", cs)
+	}
+}
+
+// TestDriftBackoffSurvivesAFailedCheckpoint pins the ordering between clearing the
+// backoff and durably recording the check. last_drift_check is what stops an owner
+// being picked again next tick; clearing the backoff before that write lands means a
+// store error leaves the owner permanently due, and we re-read the council for them
+// every minute — three requests each time, against an edge that may be refusing us
+// precisely because we are asking too often.
+func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "drifter@example.com"
+	seedSession(t, st, owner)
+	// warmOne only reads for owners with something to act on.
+	pid, err := st.UpsertPermit(ctx, owner, "p1", "14", "P")
+	if err != nil {
+		t.Fatalf("permit: %v", err)
+	}
+	vid, err := st.CreateVehicle(ctx, owner, "SCHED01", "car")
+	if err != nil {
+		t.Fatalf("vehicle: %v", err)
+	}
+	if err := st.SetRule(ctx, pid, time.Monday, vid); err != nil {
+		t.Fatalf("weekly rule: %v", err)
+	}
+	s := New(st, &fakeCouncil{}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
+	s.markDriftChecked = func(context.Context, string) error {
+		return errors.New("disk full")
+	}
+	driftFailCount := func() int {
+		s.driftMu.Lock()
+		defer s.driftMu.Unlock()
+		return s.driftFails[owner]
+	}
+	if driftFailCount() != 0 {
+		t.Fatal("setup: a fresh owner must not start with drift failures")
+	}
+	cs, err := st.GetCouncilSession(ctx, owner)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	s.warmOne(ctx, cs) // never drift-checked, so this pass reads and then checkpoints
+	if driftFailCount() == 0 {
+		t.Fatal("the drift checkpoint failed to save, yet nothing was backed off; " +
+			"last_drift_check never advanced, so this owner stays due and is re-read every tick")
 	}
 }
 

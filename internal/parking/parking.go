@@ -180,7 +180,14 @@ type Client struct {
 	// none needed yet).
 	persistMu  sync.Mutex
 	persistErr error
-	persistAt  time.Time
+
+	// truncMu guards the last observed short permit grid, surfaced on the status page
+	// so a paging change is visible to an operator rather than only in the journal.
+	truncMu   sync.Mutex
+	truncAt   time.Time
+	truncGot  int
+	truncWant int
+	persistAt time.Time
 
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
@@ -288,6 +295,10 @@ func (c *Client) persistBreaker() {
 	if c.store == nil {
 		return
 	}
+	// Ordering is enforced in SQL (SaveBreakerState only applies a generation >= the
+	// stored one), so an older snapshot can no longer overwrite a newer one and this
+	// does NOT need to hold a lock across the write. That matters: /status reads
+	// persistErr under the same mutex, and a fleet block is when both are busiest.
 	openUntil, lastPushback, gen := c.breaker.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -663,10 +674,15 @@ type managedVehicleResp struct {
 	PermitNumber string `json:"permitNumber"`
 	// A POINTER so an OMITTED permitVehicleCount is distinguishable from a present
 	// zero: emptyIsCredible must not accept a response that merely dropped the field.
-	PermitVehicleCount     *int            `json:"permitVehicleCount"`
-	MaxVehicles            int             `json:"maxVehicles"`
-	CanAddVehicle          bool            `json:"canAddVehicle"`
-	CanEditOrDeleteVehicle bool            `json:"canEditOrDeleteVehicle"`
+	PermitVehicleCount *int `json:"permitVehicleCount"`
+	MaxVehicles        int  `json:"maxVehicles"`
+	CanAddVehicle      bool `json:"canAddVehicle"`
+	// POINTER for the same reason as PermitVehicleCount: this one drives a DURABLE
+	// refusal. Absent decodes to false, which would turn a dropped/renamed field into
+	// "the council does not allow changing this permit's vehicle" for EVERY permit at
+	// once — alarming every household with a false statement about their council
+	// account, and never retrying (FailRejected).
+	CanEditOrDeleteVehicle *bool           `json:"canEditOrDeleteVehicle"`
 	PermitVehicles         []permitVehicle `json:"permitVehicles"`
 }
 
@@ -959,7 +975,13 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		}
 		return councilErr(FailRejected, op, errors.New("the permit has no vehicle to change"))
 	}
-	if !mv.CanEditOrDeleteVehicle {
+	if mv.CanEditOrDeleteVehicle == nil {
+		// Absent, not false: we cannot tell "not permitted" from "field gone". Unexpected
+		// (retried, operator alerted), never the durable refusal.
+		return councilErr(FailUnexpected, op,
+			errors.New("response has no canEditOrDeleteVehicle field: API shape change?"))
+	}
+	if !*mv.CanEditOrDeleteVehicle {
 		return councilErr(FailRejected, op, errors.New("the council does not allow changing this permit's vehicle"))
 	}
 	if len(mv.PermitVehicles) != 1 {
@@ -969,6 +991,15 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
 	}
 	cur := mv.PermitVehicles[0]
+	// Every other field on the write below is validated or defaulted; this one was
+	// taken on trust. An absent PKPermitVehicleDetailID yields json.Number("") and we
+	// would POST an edit with empty SelectedVehicle/ChangeSetID/detail id. What the
+	// council does with that is unknown, and this is the one code path that can put a
+	// wrong plate on a real permit — so fail closed.
+	if strings.TrimSpace(cur.PKPermitVehicleDetailID.String()) == "" {
+		return councilErr(FailUnexpected, op,
+			errors.New("managed vehicle has no PKPermitVehicleDetailID: API shape change?"))
+	}
 	if model.SamePlate(cur.RegistrationNumber, registration) {
 		// Already allocated (the read above IS the confirmation). Refresh the cache
 		// so callers reflect the council's own record, then report success.
@@ -1046,9 +1077,13 @@ type PermitInfo struct {
 	IsCoHolder       bool
 }
 
+// POINTERS, so an ABSENT key is distinguishable from a present zero/empty. Without
+// that, `{}` decodes to (nil, 0) and reads as "this account has no permits" — the same
+// missing-vs-zero trap already closed on managedVehicleResp, which this struct is the
+// sibling of.
 type gridResp struct {
-	PermitGrid []gridRow `json:"PermitGrid"`
-	TotalItems int       `json:"TotalItems"`
+	PermitGrid *[]gridRow `json:"PermitGrid"`
+	TotalItems *int       `json:"TotalItems"`
 }
 
 type gridRow struct {
@@ -1083,19 +1118,64 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 	// A 200 whose body decoded to nothing useful is an API-SHAPE failure, not "this
 	// account has no permits". Believing the latter is expensive: the picker offers
 	// nothing to add, a legitimate permit looks gone, and drift records a clean empty
-	// snapshot over real state. TotalItems is the council's own count, so an empty
-	// grid is only credible when it agrees.
-	if len(g.PermitGrid) == 0 && g.TotalItems != 0 {
+	// snapshot over real state. So BOTH top-level fields must be explicitly present,
+	// and the council's own count must agree with what it sent.
+	if g.PermitGrid == nil || g.TotalItems == nil {
 		return nil, councilErr(FailUnexpected, op,
-			fmt.Errorf("permit grid was empty but the response claims %d items: API shape change?", g.TotalItems))
+			fmt.Errorf("permit grid response is missing PermitGrid=%t/TotalItems=%t: API shape change?",
+				g.PermitGrid == nil, g.TotalItems == nil))
 	}
-	out := make([]PermitInfo, 0, len(g.PermitGrid))
-	for _, r := range g.PermitGrid {
-		// Every row must identify its permit; without an ID we cannot act on it, and a
-		// zero would be written into the store as the string "0".
-		if r.PKPermitID == 0 {
+	rows, total := *g.PermitGrid, *g.TotalItems
+	// Deliberately NOT exact equality. We request pageSize=0 meaning "everything", but
+	// if the council ever applies a default page size, TotalItems becomes the unpaged
+	// total and exact equality would hard-fail ListPermits for every account holding
+	// more permits than one page — the picker, addPermit and drift all break at once.
+	// What must never pass is the case this guard exists for: the council says there ARE
+	// permits and sent us none.
+	if len(rows) == 0 && total != 0 {
+		return nil, councilErr(FailUnexpected, op,
+			fmt.Errorf("permit grid is empty but the response claims %d items: API shape change?", total))
+	}
+	if total < len(rows) {
+		return nil, councilErr(FailUnexpected, op,
+			fmt.Errorf("permit grid has %d rows but the response claims only %d items: API shape change?", len(rows), total))
+	}
+	if total > len(rows) {
+		// Tolerated, deliberately, and NOT silent.
+		//
+		// Failing here is the worse trade, because a permit missing from the list is
+		// inert rather than dangerous: checkDrift skips any stored permit it cannot find
+		// in the grid ("the council no longer lists it"), so nothing strips a plate. An
+		// error, by contrast, aborts the whole drift pass before it refreshes permit
+		// meta AND before it sends approaching-expiry warnings — so the account loses
+		// warnings for the permits we WERE sent, and the picker and addPermit break too.
+		// We would turn a partial answer into no service for that household.
+		//
+		// What must not happen is treating it as complete without anyone knowing, so the
+		// truncation is recorded on the status page as well as logged. It means the
+		// council has started paging and we owe it a real pagination implementation.
+		c.noteTruncatedGrid(len(rows), total)
+		log.Printf("parking: permit grid returned %d of %d permits for %s; acting on a partial list. "+
+			"The council appears to have started paging and we must implement pagination.",
+			len(rows), total, owner)
+	}
+	out := make([]PermitInfo, 0, len(rows))
+	for _, r := range rows {
+		// Every row must identify its permit; without a usable ID we cannot act on it,
+		// and a zero/negative would be written into the store as "0"/"-1".
+		if r.PKPermitID <= 0 {
 			return nil, councilErr(FailUnexpected, op,
-				errors.New("a permit row has no PKPermitID: API shape change?"))
+				fmt.Errorf("a permit row has a non-positive PKPermitID (%d): API shape change?", r.PKPermitID))
+		}
+		// A date we cannot parse must not silently become the zero time: end_date drives
+		// expiry, and drift writes it over the stored value, so a format change would
+		// quietly retire live permits. Empty stays empty (genuinely "not set").
+		start, serr := councilDate(r.StartDate)
+		end, eerr := councilDate(r.EndDate)
+		if serr != nil || eerr != nil {
+			return nil, councilErr(FailUnexpected, op,
+				fmt.Errorf("permit %d has an unparseable date (start=%q end=%q): API shape change?",
+					r.PKPermitID, safeExcerpt(r.StartDate), safeExcerpt(r.EndDate)))
 		}
 		out = append(out, PermitInfo{
 			CouncilPermitID:  strconv.FormatInt(r.PKPermitID, 10),
@@ -1104,8 +1184,8 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 			PermitType:       r.PermitType,
 			Status:           r.PermitStatus,
 			CurrentRego:      r.VehicleRego,
-			StartDate:        parseCouncilDate(r.StartDate),
-			EndDate:          parseCouncilDate(r.EndDate),
+			StartDate:        start,
+			EndDate:          end,
 			CanChangeVehicle: r.PermitTypeAllowsVehicleChangeByHolder,
 			IsCoHolder:       r.IsCoHolder,
 		})
@@ -1113,17 +1193,17 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 	return out, nil
 }
 
-// parseCouncilDate parses the portal's zoneless local timestamps
-// (e.g. "2026-07-13T00:00:00"), returning the zero time if unparseable.
-func parseCouncilDate(s string) time.Time {
+// councilDate parses a council date, reporting a malformed one instead of swallowing
+// it. Empty means "not set" and is not an error.
+func councilDate(s string) (time.Time, error) {
 	if s == "" {
-		return time.Time{}
+		return time.Time{}, nil
 	}
 	t, err := time.Parse("2006-01-02T15:04:05", s)
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, err
 	}
-	return t
+	return t, nil
 }
 
 func randToken() (string, error) {
@@ -1137,4 +1217,12 @@ func randToken() (string, error) {
 func s256(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// noteTruncatedGrid records that the council returned fewer permits than it claimed,
+// for the status page. Last-one-wins: this is a shape signal, not a tally.
+func (c *Client) noteTruncatedGrid(got, want int) {
+	c.truncMu.Lock()
+	c.truncAt, c.truncGot, c.truncWant = time.Now(), got, want
+	c.truncMu.Unlock()
 }

@@ -2858,3 +2858,362 @@ func TestGuestOverrideAuthorisationFollowsGrantScope(t *testing.T) {
 		t.Fatalf("the account kill switch must withdraw authority (live=%v err=%v)", live, err)
 	}
 }
+
+// Acceptance must re-test its prerequisites in the SAME statement: a council link or a
+// first vehicle landing between a caller's check and the update would otherwise accept
+// the invite anyway, hiding the invitee's own permits under someone else's account.
+func TestAcceptInviteIsBlockedByOwnDataAtomically(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, invitee = "primary@example.com", "invitee@example.com"
+	if err := s.AddMemberCapped(ctx, owner, invitee, 5); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	// The invitee acquires their own data AFTER the handler would have checked.
+	if _, err := s.CreateVehicle(ctx, invitee, "OWN111", "their car"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); !errors.Is(err, ErrInviteBlocked) {
+		t.Fatalf("accept = %v, want ErrInviteBlocked (their own data must not be hidden)", err)
+	}
+	// With the blocking data gone the same invite accepts normally. (Delete only the
+	// vehicle: DeleteAllForOwner would also remove the pending invite row.)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE owner = ?`, invitee); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); err != nil {
+		t.Fatalf("a clean invitee should be able to accept: %v", err)
+	}
+}
+
+// Revoking a guest's authority must also remove the bookings it made — through EVERY
+// route, not just the two that already swept.
+//
+// override.guest_token_id has no foreign key, and every sweep matches via a JOIN onto
+// guest_token. So any path that DELETES a grant/token without sweeping first orphans
+// the override: it still steers the permit (ListOverrides does not join guest_token)
+// and no later control can reach it — not revoke, not delete-pass, not the
+// account-wide pause. A stranger's plate would hold a real permit for up to ~2 days
+// while every button the household presses reports success.
+// setupGuestBooking builds an owner + permit + a member-created pass with one live
+// guest booking, and returns the permit and grant ids. Shared by the revocation and
+// token-lifecycle tests, which assert opposite outcomes from the same starting point.
+func setupGuestBooking(t *testing.T, s *Store, owner string) (permitID, grantID int64) {
+	ctx := context.Background()
+	t.Helper()
+	permitID, _ = s.UpsertPermit(ctx, owner, "p1", "14", "P")
+	if err := s.AddMemberCapped(ctx, owner, "member@example.com", 5); err != nil {
+		t.Fatal(err)
+	}
+	grantID, err := s.CreateGuestGrant(ctx, owner, "member@example.com", permitID, "pass", true, nil,
+		[]GuestRecipient{{Email: "visitor@example.com", TokenHash: "hash1"}})
+	if err != nil {
+		t.Fatalf("create grant: %v", err)
+	}
+	// The pass must permit a typed plate for the booking below.
+	if _, err := s.db.ExecContext(ctx, `UPDATE guest_grant SET allow_plate = 1 WHERE id = ?`, grantID); err != nil {
+		t.Fatal(err)
+	}
+	var tokenID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM guest_token WHERE grant_id = ?`, grantID).Scan(&tokenID); err != nil {
+		t.Fatalf("token id: %v", err)
+	}
+	end := time.Now().Add(36 * time.Hour) // an overnight booking, live into tomorrow
+	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "STRANGR", time.Now().Add(-time.Minute), &end, "visitor", tokenID); err != nil {
+		t.Fatalf("guest booking: %v", err)
+	}
+	if ovs, _ := s.ListOverrides(ctx, permitID, time.Now()); len(ovs) != 1 {
+		t.Fatalf("setup: expected the guest booking to be live, got %d", len(ovs))
+	}
+	return permitID, grantID
+}
+
+func TestRevocationRoutesSweepLiveOverrides(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("removing the member who created the pass", func(t *testing.T) {
+		s := newTestStore(t)
+		const owner = "owner1@example.com"
+		pid, _ := setupGuestBooking(t, s, owner)
+		if _, err := s.RemoveMember(ctx, owner, "member@example.com"); err != nil {
+			t.Fatalf("remove member: %v", err)
+		}
+		assertNoLiveOverrides(t, s, pid)
+	})
+
+}
+
+// TestTokenLifecycleKeepsPromisedBooking pins the line between retiring a LINK and
+// withdrawing a BOOKING. A guest is told their car is on the permit until the end of
+// the day; only a deliberate revocation may take it off early. Re-sending a pass and
+// re-opening the visitor QR are link-management actions, so the plate must stay on —
+// and must stay REACHABLE, since override.guest_token_id has no foreign key and a
+// deleted token row would strand it beyond every revocation sweep.
+func TestTokenLifecycleKeepsPromisedBooking(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("re-sending a pass keeps the recipient's live booking", func(t *testing.T) {
+		s := newTestStore(t)
+		const owner = "owner2@example.com"
+		pid, grantID := setupGuestBooking(t, s, owner)
+		if _, err := s.ResetGuestToken(ctx, owner, grantID, "visitor@example.com", "newhash"); err != nil {
+			t.Fatalf("reset token: %v", err)
+		}
+		if n := countLiveOverrides(t, s, pid); n != 1 {
+			t.Fatalf("re-sending the link cancelled the visitor's booking (%d live, want 1); "+
+				"they were promised the day, and a re-send only replaces the link", n)
+		}
+		// ...and the household can still take it off deliberately.
+		tid, err := s.GrantTokenID(ctx, grantID)
+		if err != nil {
+			t.Fatalf("grant token id: %v", err)
+		}
+		if err := s.RevokeGuestToken(ctx, owner, tid); err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+		if n := countLiveOverrides(t, s, pid); n != 0 {
+			t.Fatalf("after an explicit revoke %d live booking(s) remain: the re-send orphaned "+
+				"the override from its token row, so no sweep can reach it", n)
+		}
+	})
+
+	t.Run("re-opening the visitor QR keeps the expired code's live booking", func(t *testing.T) {
+		s := newTestStore(t)
+		const owner = "owner3@example.com"
+		pid, grantID := setupGuestBooking(t, s, owner)
+		// Expire the LINK (15 minutes) while the BOOKING still runs to end of day.
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE guest_token SET expires_at = ? WHERE grant_id = ?`,
+			time.Now().UTC().Add(-time.Hour).Format(time.RFC3339), grantID); err != nil {
+			t.Fatalf("expire token: %v", err)
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE guest_grant SET on_screen = 1 WHERE id = ?`, grantID); err != nil {
+			t.Fatalf("mark on-screen: %v", err)
+		}
+		if _, err := s.CreateQRGrant(ctx, owner, owner, pid, "qrhash", "qrsealed", 15*time.Minute); err != nil {
+			t.Fatalf("create QR grant: %v", err)
+		}
+		if n := countLiveOverrides(t, s, pid); n != 1 {
+			t.Fatalf("showing a new QR cancelled the previous visitor's booking (%d live, want 1); "+
+				"the code expires in 15 minutes but the car was promised the day", n)
+		}
+		// The retired grant's token row must still be joinable, or the booking is beyond
+		// every control. Deleting the pass is the household's explicit withdrawal.
+		if err := s.DeleteGuestGrant(ctx, owner, grantID); err != nil {
+			t.Fatalf("delete grant: %v", err)
+		}
+		if n := countLiveOverrides(t, s, pid); n != 0 {
+			t.Fatalf("after deliberately deleting the pass %d live booking(s) remain: the prune "+
+				"orphaned the override from its token row, putting it beyond every control", n)
+		}
+	})
+}
+
+func countLiveOverrides(t *testing.T, s *Store, permitID int64) int {
+	t.Helper()
+	ovs, err := s.ListOverrides(context.Background(), permitID, time.Now())
+	if err != nil {
+		t.Fatalf("list overrides: %v", err)
+	}
+	return len(ovs)
+}
+
+func assertNoLiveOverrides(t *testing.T, s *Store, permitID int64) {
+	t.Helper()
+	ovs, err := s.ListOverrides(context.Background(), permitID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ovs) != 0 {
+		t.Fatalf("revocation left %d live guest booking(s) on the permit; with the token row gone nothing can ever remove them", len(ovs))
+	}
+}
+
+// The in-SQL guard must mirror IsPrimary exactly. IsPrimary uses CountMembers, which
+// counts PENDING rows too — so an invitee who has themselves invited someone (offer
+// outstanding) is already a primary and must not also become a secondary.
+func TestAcceptInviteBlockedByOwnPendingInvite(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, invitee = "primary@example.com", "invitee@example.com"
+	if err := s.AddMemberCapped(ctx, owner, invitee, 5); err != nil {
+		t.Fatal(err)
+	}
+	// The invitee invites someone of their own: pending, but IsPrimary already true.
+	if err := s.AddMemberCapped(ctx, invitee, "theirguest@example.com", 5); err != nil {
+		t.Fatal(err)
+	}
+	if isP, err := s.IsPrimary(ctx, invitee); err != nil || !isP {
+		t.Fatalf("IsPrimary should count a pending invite (isP=%v err=%v)", isP, err)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); !errors.Is(err, ErrInviteBlocked) {
+		t.Fatalf("accept = %v, want ErrInviteBlocked — the guard must match IsPrimary", err)
+	}
+}
+
+// An older breaker snapshot must never overwrite a newer one: a stale "closed" landing
+// after a newer "open" would make a restart resume full traffic into a live block.
+func TestSaveBreakerStateIsGenerationGuarded(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	newer := BreakerState{OpenUntil: time.Now().Add(time.Hour), LastPushback: time.Now(), Generation: 9}
+	if err := s.SaveBreakerState(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	older := BreakerState{OpenUntil: time.Time{}, LastPushback: time.Now(), Generation: 4}
+	if err := s.SaveBreakerState(ctx, older); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LoadBreakerState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Generation != 9 || got.OpenUntil.IsZero() {
+		t.Fatalf("an older snapshot overwrote a newer one: gen=%d openUntil=%v", got.Generation, got.OpenUntil)
+	}
+}
+
+// TestCouncilLinkRefusedForAcceptedSecondary closes the inverse of the AcceptInvite
+// guard. AcceptInvite refuses to make a council-linked address into a secondary; this
+// is the same race running the other way — the link was already in flight when the
+// invite was accepted, and lands afterwards. Both directions must hold, or the address
+// ends up sharing the primary's permits AND holding its own council session.
+func TestCouncilLinkRefusedForAcceptedSecondary(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const primary, member = "primary@example.com", "member@example.com"
+
+	// While the invite is only PENDING, they are still their own household: a link
+	// landing now is legitimate and must be saved.
+	if err := s.AddMemberCapped(ctx, primary, member, 5); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: member, Cookie: "c1"}); err != nil {
+		t.Fatalf("a pending invite must not block linking: %v", err)
+	}
+
+	// Once accepted, it must not. (Clear the session first: AcceptInvite itself refuses
+	// while one exists, which is the guard's other half.)
+	if err := s.DeleteCouncilSession(ctx, member); err != nil {
+		t.Fatalf("clear session: %v", err)
+	}
+	if err := s.AcceptInvite(ctx, member, primary); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: member, Cookie: "c2"}); !errors.Is(err, ErrSecondaryAccount) {
+		t.Fatalf("SaveCouncilSession = %v, want ErrSecondaryAccount: a link that lands after the "+
+			"invite was accepted would give a secondary its own council session", err)
+	}
+	if _, err := s.GetCouncilSession(ctx, member); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a council session was written for an accepted secondary (err = %v)", err)
+	}
+}
+
+// TestReplacedPosterStaysUnderHouseholdControl covers the cost of keeping a retired
+// printed grant alive so its bookings survive: the household must still be shown the
+// CURRENT poster, and taking the poster down must reach the retired one's visitors
+// too — they are invisible in the UI, so revoking by the displayed id alone would
+// strand their plates on the permit with no control that can remove them.
+func TestReplacedPosterStaysUnderHouseholdControl(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "poster@example.com"
+	permitID, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
+
+	oldGrant, err := s.CreatePrintedGrant(ctx, owner, owner, permitID, "oldhash", "oldsealed")
+	if err != nil {
+		t.Fatalf("first poster: %v", err)
+	}
+	oldToken, err := s.GrantTokenID(ctx, oldGrant)
+	if err != nil {
+		t.Fatalf("old token: %v", err)
+	}
+	end := time.Now().Add(12 * time.Hour)
+	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "OLDVIS", time.Now().Add(-time.Minute), &end, "visitor", oldToken); err != nil {
+		t.Fatalf("approve a visitor through the old poster: %v", err)
+	}
+
+	newGrant, err := s.CreatePrintedGrant(ctx, owner, owner, permitID, "newhash", "newsealed")
+	if err != nil {
+		t.Fatalf("replacement poster: %v", err)
+	}
+	if newGrant == oldGrant {
+		t.Fatal("the replacement reused the old grant id")
+	}
+	// The approved visitor keeps the day they were promised.
+	if n := countLiveOverrides(t, s, permitID); n != 1 {
+		t.Fatalf("printing a replacement cancelled the approved visitor (%d live, want 1)", n)
+	}
+	// The household is shown the NEW poster, never the retired one.
+	got, err := s.PrintedGrantForPermit(ctx, owner, permitID)
+	if err != nil {
+		t.Fatalf("current poster: %v", err)
+	}
+	if got.GrantID != newGrant {
+		t.Fatalf("current poster is grant %d, want the replacement %d: the retired poster "+
+			"can be handed back as the live one", got.GrantID, newGrant)
+	}
+	// Taking the poster down must reach the retired grant's visitor as well.
+	if err := s.RevokePrintedGrant(ctx, owner, newGrant); err != nil {
+		t.Fatalf("revoke poster: %v", err)
+	}
+	if n := countLiveOverrides(t, s, permitID); n != 0 {
+		t.Fatalf("%d visitor plate(s) still on the permit after the poster was taken down; "+
+			"they came from the retired grant, which the UI cannot show or target", n)
+	}
+}
+
+// TestDeleteAllForOwnerSweepsGuestBookingsOnOtherPermits covers the one revocation
+// route that reaches ACROSS households. A secondary can mint a guest pass on the
+// primary's permit; when that secondary erases their own data the pass is deleted from
+// the primary's account. If the live booking behind it is not swept first it is left
+// steering the primary's permit with nothing able to reach it — the pass is gone from
+// their Settings, and revoke, delete-pass and the account-wide pause all match through
+// guest_token, which cascaded away with the grant.
+func TestDeleteAllForOwnerSweepsGuestBookingsOnOtherPermits(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const primary, secondary = "primary@example.com", "secondary@example.com"
+
+	permitID, grantID := setupGuestBooking(t, s, primary)
+	// setupGuestBooking mints the pass as "member@example.com"; re-attribute it to the
+	// secondary who is about to erase themselves.
+	if _, err := s.db.ExecContext(ctx, `UPDATE guest_grant SET created_by = ? WHERE id = ?`, secondary, grantID); err != nil {
+		t.Fatalf("re-attribute grant: %v", err)
+	}
+	if n := countLiveOverrides(t, s, permitID); n != 1 {
+		t.Fatalf("setup: expected the visitor booking to be live, got %d", n)
+	}
+
+	if err := s.DeleteAllForOwner(ctx, secondary); err != nil {
+		t.Fatalf("delete all: %v", err)
+	}
+	if n := countLiveOverrides(t, s, permitID); n != 0 {
+		t.Fatalf("%d stranger plate(s) still on the primary's permit after the secondary "+
+			"erased their data; the grant and its tokens are gone, so no control can reach them", n)
+	}
+}
+
+// TestDisabledGrantCannotActivate pins the property the retire-don't-delete change
+// depends on: a retired grant's link must stop working. Without it, keeping the row to
+// protect an existing booking would instead keep a stale link usable.
+func TestDisabledGrantCannotActivate(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "owner@example.com"
+	permitID, grantID := setupGuestBooking(t, s, owner)
+
+	if _, err := s.GuestContextByTokenHash(ctx, "hash1"); err != nil {
+		t.Fatalf("setup: the live link should resolve: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE guest_grant SET enabled = 0 WHERE id = ?`, grantID); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if _, err := s.GuestContextByTokenHash(ctx, "hash1"); err == nil {
+		t.Fatal("a retired grant's link still resolves, so retiring it does not stop new visitors using it")
+	}
+	// The booking it already authorised is untouched — that is the whole point.
+	if n := countLiveOverrides(t, s, permitID); n != 1 {
+		t.Fatalf("disabling the grant removed the booking it had already authorised (%d live, want 1)", n)
+	}
+}
