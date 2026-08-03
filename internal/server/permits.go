@@ -50,7 +50,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again. p.stonn deliberately limits how often it contacts the council.")
 		return
 	}
-	permits, err := s.council.ListPermits(ctx, owner)
+	permits, complete, err := s.council.ListPermitsComplete(ctx, owner)
 	if err != nil {
 		base.State = "onboarding"
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
@@ -67,6 +67,12 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	if err != nil {
 		s.serverError(w, err)
 		return
+	}
+	if !complete {
+		// Say so rather than presenting a page as the whole account. Without this the
+		// household simply cannot see a permit they hold and has no way to know why.
+		base.Warn = "We could only load part of your permit list from the council just now, " +
+			"so a permit you hold may be missing below. Try again in a few minutes."
 	}
 	base.HasPermits = len(permits) > 0
 	already := map[string]bool{}
@@ -155,7 +161,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 			"Too many council lookups in a short time. Please wait a moment and try again.")
 		return
 	}
-	permits, err := s.council.ListPermits(ctx, owner)
+	permits, complete, err := s.council.ListPermitsComplete(ctx, owner)
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) || errors.Is(err, parking.ErrNotLinked) {
 			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
@@ -173,6 +179,15 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if match == nil {
+		if !complete {
+			// We never saw the whole account, so absence proves nothing. Telling the
+			// household "that permit isn't yours" would be a flat falsehood about a permit
+			// they hold, and one they cannot act on. Fail retryable instead.
+			s.message(w, http.StatusBadGateway,
+				"We could only load part of your permit list from the council just now, so we can't yet "+
+					"confirm this permit is on your account. Nothing has changed — please try again in a few minutes.")
+			return
+		}
 		s.message(w, http.StatusForbidden, "That permit isn't one your council account can manage.")
 		return
 	}
