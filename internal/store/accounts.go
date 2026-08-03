@@ -90,6 +90,19 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	// Guest passes they minted as a secondary are the security-relevant one: those
 	// are bearer links over someone else's permit, and after this delete the primary
 	// could no longer see them in Settings to revoke. Mirrors revokeGrantsBy.
+	//
+	// Sweep their live bookings FIRST. The delete cascades the token rows away, and
+	// override.guest_token_id has no foreign key, so afterwards a visitor's plate is
+	// left steering someone ELSE's permit with nothing able to reach it: the primary's
+	// revoke, delete-pass and account-wide pause all match through guest_token, and the
+	// pass has vanished from their Settings page entirely. They would be left with a
+	// stranger's plate on their permit for up to two days, every control reporting
+	// success. This is what "Mirrors revokeGrantsBy" was always meant to mean.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+        WHERE g.created_by = ? AND g.owner != ?)`, nowUTC(), owner, owner); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM guest_grant WHERE created_by = ? AND owner != ?`, owner, owner); err != nil {
 		return err

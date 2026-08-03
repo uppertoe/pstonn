@@ -137,11 +137,17 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
 		t.Fatal("more rows than TotalItems must be refused")
 	}
-	// FEWER rows than the count is tolerated (a future default page size would make it
-	// normal); hard-failing would break every account with more permits than one page.
+	// FEWER rows than the count is tolerated: a permit missing from the grid is skipped
+	// by drift, never stripped, whereas an error aborts the pass before expiry warnings
+	// go out and breaks the picker for the whole account. But it must not pass unseen —
+	// it means the council has started paging and we owe it real pagination.
 	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[{"PKPermitID":1}]}`)
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
 		t.Fatalf("a partial page should degrade, not fail: %v / %d", err, len(ps))
+	}
+	if st := c.Stats(); st.TruncatedGridAt.IsZero() || st.TruncatedGridGot != 1 || st.TruncatedGridWant != 2 {
+		t.Fatalf("a truncated permit grid was not recorded for the operator: %+v; "+
+			"acting on a partial list while reporting nothing is how a paging change stays invisible", st)
 	}
 	// Negative ids are as unusable as zero.
 	f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[{"PKPermitID":-4}]}`)

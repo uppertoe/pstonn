@@ -233,3 +233,39 @@ func TestBreakerCooldownCappedAgainstHugeRetryAfter(t *testing.T) {
 		t.Fatalf("fleet pause = %s — want >0 and capped at %s, not the raw Retry-After", wait, maxBreakerCooldown)
 	}
 }
+
+// TestBreakerGenerationStrictlyIncreasesPerTransition pins the ordering key used by
+// persistence. SaveBreakerState applies the snapshot with the higher generation, so if
+// open and close could share one, a delayed "open" snapshot could land after the
+// "close" and a restart would resume a fleet-wide pause with no pushback behind it.
+func TestBreakerGenerationStrictlyIncreasesPerTransition(t *testing.T) {
+	b := newBreaker(1, time.Minute, time.Minute, time.Second)
+	now := time.Now()
+
+	_, _, genStart := b.snapshot()
+	if !b.onPushback(now, "a@example.com", 0) {
+		t.Fatal("a pushback at threshold 1 must open the circuit")
+	}
+	_, _, genOpen := b.snapshot()
+	if genOpen <= genStart {
+		t.Fatalf("opening did not advance the generation: %d -> %d", genStart, genOpen)
+	}
+
+	// Half-open, then let the probe succeed and close the circuit.
+	permit, ok, _ := b.allow(now.Add(2 * time.Minute))
+	if !ok || !permit.probe {
+		t.Fatalf("expected a half-open probe, got %+v ok=%v", permit, ok)
+	}
+	if !b.onSuccess(now.Add(2*time.Minute), "a@example.com", permit) {
+		t.Fatal("the probe's success must close the circuit")
+	}
+	openUntil, _, genClosed := b.snapshot()
+	if !openUntil.IsZero() {
+		t.Fatalf("circuit still open after a successful probe: %v", openUntil)
+	}
+	if genClosed <= genOpen {
+		t.Fatalf("closing shares the open episode's generation (%d -> %d): a delayed open "+
+			"snapshot could then overwrite the close and resurrect the pause across a restart",
+			genOpen, genClosed)
+	}
+}

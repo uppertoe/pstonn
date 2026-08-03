@@ -180,7 +180,14 @@ type Client struct {
 	// none needed yet).
 	persistMu  sync.Mutex
 	persistErr error
-	persistAt  time.Time
+
+	// truncMu guards the last observed short permit grid, surfaced on the status page
+	// so a paging change is visible to an operator rather than only in the journal.
+	truncMu   sync.Mutex
+	truncAt   time.Time
+	truncGot  int
+	truncWant int
+	persistAt time.Time
 
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
 }
@@ -1134,10 +1141,22 @@ func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, e
 			fmt.Errorf("permit grid has %d rows but the response claims only %d items: API shape change?", len(rows), total))
 	}
 	if total > len(rows) {
-		// Tolerated so a paging change degrades instead of failing every account — but
-		// it means we are acting on a PARTIAL list (drift cannot see the permits we were
-		// not sent), so it must not be silent.
-		log.Printf("parking: permit grid returned %d of %d permits for %s; acting on a partial list (paging change?)",
+		// Tolerated, deliberately, and NOT silent.
+		//
+		// Failing here is the worse trade, because a permit missing from the list is
+		// inert rather than dangerous: checkDrift skips any stored permit it cannot find
+		// in the grid ("the council no longer lists it"), so nothing strips a plate. An
+		// error, by contrast, aborts the whole drift pass before it refreshes permit
+		// meta AND before it sends approaching-expiry warnings — so the account loses
+		// warnings for the permits we WERE sent, and the picker and addPermit break too.
+		// We would turn a partial answer into no service for that household.
+		//
+		// What must not happen is treating it as complete without anyone knowing, so the
+		// truncation is recorded on the status page as well as logged. It means the
+		// council has started paging and we owe it a real pagination implementation.
+		c.noteTruncatedGrid(len(rows), total)
+		log.Printf("parking: permit grid returned %d of %d permits for %s; acting on a partial list. "+
+			"The council appears to have started paging and we must implement pagination.",
 			len(rows), total, owner)
 	}
 	out := make([]PermitInfo, 0, len(rows))
@@ -1198,4 +1217,12 @@ func randToken() (string, error) {
 func s256(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// noteTruncatedGrid records that the council returned fewer permits than it claimed,
+// for the status page. Last-one-wins: this is a shape signal, not a tally.
+func (c *Client) noteTruncatedGrid(got, want int) {
+	c.truncMu.Lock()
+	c.truncAt, c.truncGot, c.truncWant = time.Now(), got, want
+	c.truncMu.Unlock()
 }

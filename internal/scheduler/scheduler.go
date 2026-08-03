@@ -69,6 +69,9 @@ type Notifier interface {
 	// (a guest or a saved vehicle's attached email — no account) that their car
 	// has been taken off the permit.
 	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
+	// EmailAvailable reports whether an SMTP sender is configured. The renewal
+	// reminder is email-only, so Enabled() (any channel) is the wrong gate for it.
+	EmailAvailable() bool
 }
 
 // Options configures the Scheduler's session-lifecycle behaviour.
@@ -107,10 +110,16 @@ type Options struct {
 // warm (silent-renewing idle cookies) up to a fixed re-authorise bound, emailing
 // a confirm link as that bound approaches.
 type Scheduler struct {
-	store    *store.Store
-	council  Council
-	loc      *time.Location
-	interval time.Duration
+	store *store.Store
+
+	// markDriftChecked indirects the drift checkpoint write. Production always uses the
+	// store; a test replaces it to make the write fail, which is the only way to reach
+	// the branch that decides whether a failed checkpoint may clear the backoff — and
+	// getting that wrong re-reads the council for the same owner every single tick.
+	markDriftChecked func(ctx context.Context, owner string) error
+	council          Council
+	loc              *time.Location
+	interval         time.Duration
 
 	sessionMaxAge    time.Duration
 	warmInterval     time.Duration
@@ -225,6 +234,10 @@ type Scheduler struct {
 	driftFails   map[string]int
 	driftShape   []churnEvent
 
+	// reminderWarnMu guards the rate limit on the "no SMTP sender" operator warning.
+	reminderWarnMu sync.Mutex
+	reminderWarnAt time.Time
+
 	// notifyInFlight claims a permit+outcome key while its delivery goroutine is
 	// queued/running, so a fleet-wide event can't re-launch duplicate deliveries every
 	// pass before the first has written its durable dedup key. Guarded by notifyMu.
@@ -324,6 +337,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	}
 	sc := &Scheduler{
 		store:            st,
+		markDriftChecked: st.MarkDriftChecked,
 		council:          council,
 		loc:              loc,
 		interval:         time.Minute,
@@ -1077,9 +1091,17 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 				s.enqueueReconnect(ctx, cs.Owner, g)
 			}
 		} else {
-			s.noteDriftSuccess(cs.Owner) // clear any backoff from earlier failures
-			if err := s.store.MarkDriftChecked(ctx, cs.Owner); err != nil {
-				log.Printf("scheduler: mark drift-checked %s: %v", cs.Owner, err)
+			// Clear the backoff only once the checkpoint is DURABLE. last_drift_check is
+			// what stops this owner being picked again next tick; if the write fails and
+			// we have already cleared the backoff, the owner stays due forever and we
+			// re-read the council every cycle — three requests an owner, against an edge
+			// we may be failing precisely because it is throttling us. Treating the failed
+			// write as a drift failure keeps the backoff on and lets it widen.
+			if err := s.markDriftChecked(ctx, cs.Owner); err != nil {
+				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", cs.Owner, err)
+				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
+			} else {
+				s.noteDriftSuccess(cs.Owner) // clear any backoff from earlier failures
 			}
 		}
 	}
@@ -1848,10 +1870,25 @@ func (s *Scheduler) detectSystemic(ctx context.Context, stats *passStats, totalO
 		fmt.Sprintf("This reconcile pass, %d user(s) had a plate change fail (%d with an unexpected/unparseable council response). This may be a council outage or an API change; check the logs.", failN, unexpectedN))
 }
 
+// warnNoReminderChannel logs the missing-SMTP warning at most hourly: this is on a
+// per-owner path that runs every warm tick, so an unguarded log would be the only
+// thing in the journal at fleet scale.
+func (s *Scheduler) warnNoReminderChannel() {
+	s.reminderWarnMu.Lock()
+	defer s.reminderWarnMu.Unlock()
+	now := time.Now()
+	if now.Sub(s.reminderWarnAt) < time.Hour {
+		return
+	}
+	s.reminderWarnAt = now
+	log.Printf("scheduler: renewal reminders are disabled because no SMTP sender is configured " +
+		"(the reminder is email-only; ntfy does not carry it). Households will not be warned before their council link expires.")
+}
+
 // maybeRemind emails the one-click renewal-confirm link once per cycle when a
 // session is within ReminderLead of its re-authorise deadline.
 func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, now time.Time) {
-	if s.notifier == nil || !s.notifier.Enabled() {
+	if s.notifier == nil {
 		return
 	}
 	// Measured against the same idle clock decideWarm uses, so the reminder is a
@@ -1862,6 +1899,19 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		idleSince = cs.LinkedAt
 	}
 	if s.sessionMaxAge <= 0 || s.reminderLead <= 0 || idleSince.IsZero() || !cs.ReminderSent.IsZero() {
+		return
+	}
+	// PLACED AFTER the configuration check below, deliberately: an operator who has
+	// turned reminders off (ReminderLead = 0) is not missing anything, and warning them
+	// hourly about a feature they disabled is how real warnings get tuned out.
+	// Gate on the channel this message actually uses, not on "any channel configured".
+	// The renewal reminder is email-only, but Enabled() is also true for an ntfy-only
+	// deployment — so we would mark the reminder sent and then no-op inside the mailer,
+	// permanently consuming the household's one warning and letting the permit lapse in
+	// silence. Skipping without recording means the reminders start working the moment
+	// SMTP is configured, and the operator is told why they aren't.
+	if !s.notifier.EmailAvailable() {
+		s.warnNoReminderChannel()
 		return
 	}
 	deadline := idleSince.Add(s.sessionMaxAge)

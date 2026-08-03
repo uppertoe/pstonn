@@ -261,27 +261,38 @@ func (s *Store) ResetGuestToken(ctx context.Context, owner string, grantID int64
 	if wasRecipient == 0 {
 		return 0, ErrNotFound
 	}
-	// Drop the recipient's old token(s) and issue one fresh link, so the old link
-	// dies and the recipient still shows exactly once in the management list. The
-	// old link genuinely stops working — it can't be re-sent (hash-only storage).
-	// Sweep this recipient's live overrides BEFORE dropping their token row: override
-	// carries guest_token_id with no foreign key, so once the row is gone the
-	// override is an orphan no later revocation can match (every sweep joins
-	// guest_token). Re-sending a link would otherwise leave the previous visitor's
-	// plate on the permit permanently, with the UI reporting the link replaced.
-	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
-        SELECT id FROM guest_token WHERE grant_id = ? AND recipient_email = ?)`,
-		nowUTC(), grantID, recipientEmail); err != nil {
+	// Re-issue the link by REBINDING the recipient's existing token row to the new
+	// hash rather than replacing the row. The old link dies either way (hash-only
+	// storage, and the hash just changed), but the row's id survives — which matters
+	// twice over. A booking already made through the old link keeps running: the guest
+	// was told their car was on until the end of the day, and a re-send is not a
+	// decision to take it off, so deleting the row (or sweeping the override) would
+	// pull a valid car off the permit early and hand the visitor a fine. And because
+	// override.guest_token_id has no foreign key, keeping the id is also what keeps
+	// that booking REACHABLE: every later sweep joins guest_token, so a deleted row
+	// would strand the override beyond any revocation.
+	//
+	// Explicit revocation is the separate, deliberate act — RevokeGuestToken and the
+	// account-removal sweep still take the plate off, because there the household has
+	// said so and the UI promises exactly that.
+	var keepID int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id FROM guest_token WHERE grant_id = ? AND recipient_email = ? ORDER BY id DESC LIMIT 1`,
+		grantID, recipientEmail).Scan(&keepID); err != nil {
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM guest_token WHERE grant_id = ? AND recipient_email = ?`,
-		grantID, recipientEmail); err != nil {
+		`UPDATE guest_token SET token_hash = ?, created_at = ?, revoked_at = '', expires_at = '',
+             baseline_plate = '', baseline_until = '' WHERE id = ?`,
+		newHash, nowUTC(), keepID); err != nil {
 		return 0, err
 	}
+	// Any duplicate rows for this recipient are retired rather than deleted, for the
+	// same reachability reason; the recipient still shows exactly once, since the
+	// management list reads live tokens.
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO guest_token (grant_id, recipient_email, token_hash, created_at) VALUES (?, ?, ?, ?)`,
-		grantID, recipientEmail, newHash, nowUTC()); err != nil {
+		`UPDATE guest_token SET revoked_at = ? WHERE grant_id = ? AND recipient_email = ? AND id != ? AND revoked_at = ''`,
+		nowUTC(), grantID, recipientEmail, keepID); err != nil {
 		return 0, err
 	}
 	return permitID, tx.Commit()
@@ -306,22 +317,48 @@ func (s *Store) CreateQRGrant(ctx context.Context, owner, createdBy string, perm
 	if permitOK == 0 {
 		return 0, ErrNotFound
 	}
-	// Prune the owner's already-expired on-screen grants (cascades their tokens).
-	// Sweep their live overrides FIRST: an expired LINK can still have an unexpired
-	// booking (a 6pm scan good until midnight), and once the token row is pruned that
-	// override is an orphan no revocation can reach, because every sweep joins
-	// guest_token. Re-opening the visitor QR for the next guest would otherwise strand
-	// the previous visitor's plate on the permit.
-	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
-        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+	// Retire the owner's already-expired on-screen grants before opening a new one.
+	//
+	// A visitor QR token lasts 15 minutes; the booking it creates runs to the end of
+	// the day. So an expired grant routinely still has a live booking behind it — a
+	// 6pm scan good until midnight — and re-opening the QR for the next guest must not
+	// cancel it. Sweeping here did exactly that: it took a valid car off the permit
+	// hours early, owner-wide, for an action the resident sees as "show a new code".
+	//
+	// Deleting is no better, because override.guest_token_id has no foreign key: the
+	// booking would survive as an orphan that no revocation could ever match. So split
+	// the two cases. A grant with nothing live behind it is deleted outright; one that
+	// still backs a booking is DISABLED instead, which stops the stale link resolving
+	// (activation requires enabled = 1) while leaving the row that the revocation
+	// sweeps join through. The household keeps control of the plate; the guest keeps
+	// the day they were promised.
+	const expiredOnScreen = `SELECT g.id FROM guest_grant g
         WHERE g.owner = ? AND g.on_screen = 1
-          AND t.expires_at != '' AND t.expires_at <= ?)`, nowUTC(), owner, nowUTC()); err != nil {
+          AND EXISTS (SELECT 1 FROM guest_token t
+                      WHERE t.grant_id = g.id AND t.expires_at != '' AND t.expires_at <= ?)`
+	const backsLiveOverride = `EXISTS (SELECT 1 FROM override o
+        JOIN guest_token t2 ON t2.id = o.guest_token_id
+        WHERE t2.grant_id = guest_grant.id
+          AND o.guest_token_id != 0
+          AND (o.ends_at IS NULL OR o.ends_at = '' OR o.ends_at > ?))`
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_grant SET enabled = 0 WHERE id IN (`+expiredOnScreen+`) AND `+backsLiveOverride,
+		owner, nowUTC(), nowUTC()); err != nil {
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM guest_grant WHERE owner = ? AND on_screen = 1
-		 AND id IN (SELECT grant_id FROM guest_token WHERE expires_at != '' AND expires_at <= ?)`,
-		owner, nowUTC()); err != nil {
+		`DELETE FROM guest_grant WHERE id IN (`+expiredOnScreen+`) AND NOT `+backsLiveOverride,
+		owner, nowUTC(), nowUTC()); err != nil {
+		return 0, err
+	}
+	// Retiring a grant must also close its pending requests. They used to cascade away
+	// with the deleted row; a disabled grant keeps them, and they can never be approved
+	// (createOverrideGuarded requires enabled = 1), so the household would get an error
+	// on every attempt and the visitor would wait on a decision that cannot arrive.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_request SET status = 'denied', decided_at = ?, decided_by = ''
+		 WHERE status = 'pending' AND grant_id IN (SELECT id FROM guest_grant WHERE enabled = 0 AND owner = ? AND on_screen = 1)`,
+		nowUTC(), owner); err != nil {
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx,
@@ -407,18 +444,39 @@ func (s *Store) CreatePrintedGrant(ctx context.Context, owner, createdBy string,
 	if permitOK == 0 {
 		return 0, ErrNotFound
 	}
-	// Replacing the printed QR retires the old code, so sweep the live overrides it
-	// approved before its token rows go: afterwards nothing can match them (no foreign
-	// key, and every sweep joins guest_token), leaving a plate on the permit that the
-	// household can no longer take off through any control.
-	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
-        SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
-        WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1)`,
-		nowUTC(), owner, permitID); err != nil {
+	// Replacing the printed QR retires the old code. It does not withdraw approvals the
+	// household already gave: those visitors were told their car was on for the day, and
+	// printing a fresh poster is not a decision to take it off. RevokePrintedGrant is
+	// the control that does that, and it says so.
+	//
+	// So retire the old grants the same way as the on-screen ones: disable any that
+	// still back a live booking (the retired code stops resolving, but the token rows
+	// the revocation sweeps join through survive, since override.guest_token_id has no
+	// foreign key), and delete the rest.
+	const oldPrinted = `SELECT id FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`
+	const printedBacksLive = `EXISTS (SELECT 1 FROM override o
+        JOIN guest_token t2 ON t2.id = o.guest_token_id
+        WHERE t2.grant_id = guest_grant.id
+          AND o.guest_token_id != 0
+          AND (o.ends_at IS NULL OR o.ends_at = '' OR o.ends_at > ?))`
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_grant SET enabled = 0 WHERE id IN (`+oldPrinted+`) AND `+printedBacksLive,
+		owner, permitID, nowUTC()); err != nil {
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`, owner, permitID); err != nil {
+		`DELETE FROM guest_grant WHERE id IN (`+oldPrinted+`) AND NOT `+printedBacksLive,
+		owner, permitID, nowUTC()); err != nil {
+		return 0, err
+	}
+	// Retiring a grant must also close its pending requests. They used to cascade away
+	// with the deleted row; a disabled grant keeps them, and they can never be approved
+	// (createOverrideGuarded requires enabled = 1), so the household would get an error
+	// on every attempt and the visitor would wait on a decision that cannot arrive.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_request SET status = 'denied', decided_at = ?, decided_by = ''
+		 WHERE status = 'pending' AND grant_id IN (SELECT id FROM guest_grant WHERE enabled = 0 AND owner = ? AND permit_id = ? AND request_only = 1)`,
+		nowUTC(), owner, permitID); err != nil {
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx,
@@ -471,7 +529,8 @@ SELECT g.id, g.permit_id, COALESCE(p.label, ''), t.token_sealed, g.created_at
 FROM guest_grant g
 JOIN permit p ON p.id = g.permit_id
 JOIN guest_token t ON t.grant_id = g.id
-WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1`, owner, permitID).
+WHERE g.owner = ? AND g.permit_id = ? AND g.request_only = 1 AND g.enabled = 1
+ORDER BY g.id DESC LIMIT 1`, owner, permitID).
 		Scan(&g.GrantID, &g.PermitID, &g.PermitLabel, &g.TokenSealed, &created)
 	if err == sql.ErrNoRows {
 		return PrintedGrant{}, ErrNotFound
@@ -520,14 +579,22 @@ func (s *Store) RevokePrintedGrant(ctx context.Context, owner string, grantID in
 		return err
 	}
 	defer tx.Rollback()
+	// Scoped to every printed grant on this PERMIT, not just the id passed in.
+	// Replacing a poster now leaves the superseded grant behind (disabled) whenever it
+	// still backs a booking, and the household's UI only ever shows them the current
+	// one — so revoking by id alone would leave those earlier visitors' plates on the
+	// permit with no control that can reach them. Taking the poster down means all of
+	// it, which is what the household is told has happened.
+	const printedOnPermit = `SELECT g2.id FROM guest_grant g2
+        WHERE g2.owner = ? AND g2.request_only = 1
+          AND g2.permit_id = (SELECT permit_id FROM guest_grant WHERE id = ? AND owner = ? AND request_only = 1)`
 	if _, err := tx.ExecContext(ctx,
-		sweepLiveGuestOverrides+`IN (SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
-		     WHERE t.grant_id = ? AND g.owner = ? AND g.request_only = 1)`,
-		nowUTC(), grantID, owner); err != nil {
+		sweepLiveGuestOverrides+`IN (SELECT t.id FROM guest_token t WHERE t.grant_id IN (`+printedOnPermit+`))`,
+		nowUTC(), owner, grantID, owner); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx,
-		`DELETE FROM guest_grant WHERE id = ? AND owner = ? AND request_only = 1`, grantID, owner)
+		`DELETE FROM guest_grant WHERE id IN (`+printedOnPermit+`)`, owner, grantID, owner)
 	if err != nil {
 		return err
 	}
@@ -994,7 +1061,16 @@ WHERE id = ? AND revoked_at = ''
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`= ?`, nowUTC(), tokenID); err != nil {
+	// Sweep every token this recipient has held on the grant, not just the row being
+	// revoked. ResetGuestToken retires superseded duplicates in place rather than
+	// deleting them (their bookings must stay reachable), so a booking made through an
+	// earlier row is bound to an id the household's revoke button never names. Revoking
+	// a recipient has to mean the recipient, not one link they happen to hold.
+	if _, err := tx.ExecContext(ctx, sweepLiveGuestOverrides+`IN (
+        SELECT sib.id FROM guest_token sib
+        JOIN guest_token cur ON cur.grant_id = sib.grant_id
+                            AND cur.recipient_email = sib.recipient_email
+        WHERE cur.id = ?)`, nowUTC(), tokenID); err != nil {
 		return err
 	}
 	return tx.Commit()

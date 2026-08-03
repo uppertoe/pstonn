@@ -110,6 +110,16 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 					". p.stonn can only manage a permit you already hold: check you can sign in at the council's own ePermits site with this email address first. If your ePermits account uses a different email, sign out and sign back in to p.stonn with that address instead.")
 			return
 		}
+		if errors.Is(err, store.ErrSecondaryAccount) {
+			// The council sign-in actually SUCCEEDED; we refused to keep it because this
+			// address joined another household while the sign-in was in flight. Saying
+			// "a problem at our end" here would be a lie about their password and leave
+			// them retrying something that can never work.
+			s.message(w, http.StatusConflict,
+				"You've joined another p.stonn household, so this address now shares that household's permits instead of holding its own council link. "+
+					"Your council password was accepted — there is nothing wrong with it. If you meant to manage your own permits, leave the shared household from Settings first, then link again.")
+			return
+		}
 		s.message(w, http.StatusBadGateway, "Could not link your council account. This appears to be a problem at our end or on the council's site rather than your password. Please try again shortly.")
 		return
 	}

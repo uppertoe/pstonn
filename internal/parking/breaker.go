@@ -172,6 +172,15 @@ func (b *breaker) onSuccess(now time.Time, owner string, permit breakerPermit) (
 	}
 	if permit.probe && permit.gen == b.generation {
 		b.openUntil = time.Time{}
+		// Closing bumps the generation too, so that EVERY transition strictly increases
+		// it. Persistence orders writes by generation (SaveBreakerState applies the
+		// higher one), and open-then-close used to share a generation — which let a
+		// delayed "open" snapshot land after the "close" and resurrect a fleet-wide
+		// pause across a restart, with no pushback behind it. Same-generation writes
+		// now only ever carry a lastPushback touch, where either order is equivalent.
+		// Invalidating outstanding probes is correct as well: the circuit is closed, so
+		// a late probe result says nothing worth acting on.
+		b.generation++
 		return true
 	}
 	return false
