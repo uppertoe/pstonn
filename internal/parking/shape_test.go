@@ -372,3 +372,43 @@ func TestListPermitsStopsWhenPagingMakesNoProgress(t *testing.T) {
 		t.Error("an incomplete list was not reported to the operator")
 	}
 }
+
+// TestListPermitsRefusesAShiftingSnapshot pins that pagination fails closed when the
+// account changes underneath it. Completion used to be judged against whatever the
+// LATEST page claimed, so a count that shrank mid-read could be satisfied by rows
+// collected earlier while a permit that exists right now was never returned — and
+// drift would check the owner off as fully seen.
+func TestListPermitsRefusesAShiftingSnapshot(t *testing.T) {
+	const owner = "shifting@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+
+	row := func(id int64) string {
+		return fmt.Sprintf(`{"PKPermitID":%d,"FKPermitTypeID":3,"PermitNumber":"P%d","PermitType":"Resident",`+
+			`"PermitStatus":"Active","VehicleRego":"ABC%03d","StartDate":"2026-01-01T00:00:00",`+
+			`"EndDate":"2026-12-31T00:00:00","PermitTypeAllowsVehicleChangeByHolder":true}`, id, id, id)
+	}
+	f.mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("pageNumber") == "0" {
+			io.WriteString(w, `{"TotalItems":3,"PermitGrid":[`+row(1)+`]}`)
+			return
+		}
+		// The account "shrank" between pages: two rows now, and we already hold one, so
+		// a naive check would call this complete while permit 3 was never sent.
+		io.WriteString(w, `{"TotalItems":2,"PermitGrid":[`+row(2)+`]}`)
+	})
+
+	ps, complete, err := c.ListPermitsComplete(context.Background(), owner)
+	if err != nil {
+		t.Fatalf("ListPermitsComplete: %v", err)
+	}
+	if complete {
+		t.Fatalf("a list read across a changing account reported itself whole (%d rows); "+
+			"drift would advance its checkpoint having never seen every permit", len(ps))
+	}
+	if c.Stats().TruncatedGridAt.IsZero() {
+		t.Error("a snapshot we could not trust was not reported to the operator")
+	}
+}

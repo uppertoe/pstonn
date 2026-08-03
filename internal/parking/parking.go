@@ -1165,10 +1165,24 @@ func (c *Client) listPermits(ctx context.Context, owner string) ([]PermitInfo, b
 	}
 	var all []PermitInfo
 	seen := make(map[string]bool)
+	expected := -1 // the account size the FIRST page claimed
 	for page := 0; page < maxPermitPages; page++ {
 		rows, total, err := c.permitPage(ctx, owner, page)
 		if err != nil {
 			return nil, false, err
+		}
+		if expected < 0 {
+			expected = total
+		} else if total != expected {
+			// The account changed under us mid-read. Accepting the new count would let
+			// stale rows collected earlier satisfy a smaller total while a permit that
+			// exists right now was never returned — and drift would then check the owner
+			// off as fully seen. A snapshot we cannot trust is reported incomplete; the
+			// next pass reads it cleanly.
+			c.noteTruncatedGrid(len(all), expected)
+			log.Printf("parking: permit count for %s changed mid-read (%d -> %d at page %d); "+
+				"treating this list as incomplete", owner, expected, total, page)
+			return all, false, nil
 		}
 		added := 0
 		for _, p := range rows {
@@ -1179,16 +1193,16 @@ func (c *Client) listPermits(ctx context.Context, owner string) ([]PermitInfo, b
 			all = append(all, p)
 			added++
 		}
-		if len(all) >= total {
+		if len(all) >= expected {
 			return all, true, nil
 		}
 		if added == 0 {
 			// No progress and still short of the count: paging is not working the way we
 			// assumed, so report what we have and let the caller decide. Drift declines
 			// to check the owner off; the display paths show what they got.
-			c.noteTruncatedGrid(len(all), total)
+			c.noteTruncatedGrid(len(all), expected)
 			log.Printf("parking: permit list for %s stalled at %d of %d after %d page(s); "+
-				"acting on a partial list", owner, len(all), total, page+1)
+				"acting on a partial list", owner, len(all), expected, page+1)
 			return all, false, nil
 		}
 	}

@@ -605,8 +605,9 @@ func TestFleetUnderFailure(t *testing.T) {
 		{name: "every session killed (401)", failEvery: 1, failCode: 401, maxReqFactor: 4},
 		{name: "slow AND refusing", latencyMS: 100, failEvery: 4, failCode: 429, maxReqFactor: 3},
 		// Not an API refusal: the session COOKIE is dead, so authorize returns the login
-		// page. This is the churn incident's shape, and the only scenario that reaches
-		// the reconnect worker.
+		// page. This is the churn incident's shape. TestFleetReconnectRecovery below is
+		// what actually drains the queue; this case only measures the traffic the
+		// detection itself costs.
 		{name: "every cookie rejected (login page)", authDead: true, maxReqFactor: 4},
 	}
 
@@ -674,5 +675,71 @@ func TestFleetUnderFailure(t *testing.T) {
 					"not shedding work and a rollover would never land", passes, elapsed, budget)
 			}
 		})
+	}
+}
+
+// reconnectQueueLen is the depth of the owner-deduplicated reconnect queue.
+func (s *Scheduler) reconnectQueueLen() int {
+	s.reconnectMu.Lock()
+	defer s.reconnectMu.Unlock()
+	return len(s.reconnectQ)
+}
+
+// TestFleetReconnectRecovery drives the path the failure suite only reaches the edge
+// of: every household's council cookie is rejected at once, each is handed to the
+// reconnect worker, and then the council recovers. What must hold is that the queue
+// actually drains, that recovery costs a bounded number of requests rather than a
+// stampede of retries against an edge that just came back, and that nothing is left
+// stuck in the queue afterwards.
+func TestFleetReconnectRecovery(t *testing.T) {
+	requireFleet(t)
+	ctx := context.Background()
+	size := fleetSize(t, 50)
+	rig := newFleetRig(t, size)
+
+	// Every cookie dead. Detection hands each owner to the reconnect worker.
+	rig.council.authDead.Store(true)
+	for i := 0; i < 2; i++ {
+		rig.sched.reconcileAll(ctx)
+	}
+	detectCost := rig.council.total()
+	queued := rig.sched.reconnectQueueLen()
+	if queued == 0 {
+		t.Fatal("a fleet-wide cookie rejection queued nobody for reconnect; the churn " +
+			"incident's whole recovery path is unreachable")
+	}
+
+	// The council comes back. Drain the queue the way the worker does, one owner at a
+	// time, and bound the work: a single pass per queued owner must be enough to empty
+	// it, or the queue is re-enqueueing faster than it drains.
+	rig.council.authDead.Store(false)
+	before := rig.council.total()
+	drained := 0
+	for i := 0; i < queued*3 && rig.sched.reconnectQueueLen() > 0; i++ {
+		if rig.sched.drainOneReconnect(ctx) {
+			drained++
+		}
+	}
+	recoveryCost := rig.council.total() - before
+
+	t.Logf("\n"+
+		"    fleet ................. %d owners\n"+
+		"    detection cost ........ %d requests over 2 passes\n"+
+		"    queued for reconnect .. %d\n"+
+		"    drained ............... %d\n"+
+		"    recovery cost ......... %d requests (%.2f per queued owner)\n"+
+		"    still queued .......... %d\n",
+		size, detectCost, queued, drained, recoveryCost,
+		float64(recoveryCost)/float64(queued), rig.sched.reconnectQueueLen())
+
+	if n := rig.sched.reconnectQueueLen(); n != 0 {
+		t.Errorf("%d owner(s) still queued after draining; the queue is not converging and "+
+			"a fleet-wide kick would never finish recovering", n)
+	}
+	// Without saved passwords these owners can only be RETIRED (re-link required), which
+	// is the correct outcome — but it must cost a bounded amount to reach.
+	if perOwner := float64(recoveryCost) / float64(queued); perOwner > 4 {
+		t.Errorf("recovery cost %.2f requests per queued owner; a fleet-wide kick would "+
+			"stampede the edge that just came back", perOwner)
 	}
 }
