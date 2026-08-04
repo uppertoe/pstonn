@@ -292,6 +292,20 @@ func TestTemplatesRender(t *testing.T) {
 			p.Applying = true
 			return p
 		}, `Applying your change`},
+		// A typed-plate override day gets the striped bar. Without it the day fell
+		// back to the neutral bar and a covered day read as "nothing scheduled".
+		{"adhoc-override-bar", func() permitView {
+			p := samplePermitView(loc)
+			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
+			return p
+		}, `class="bar adhoc"`},
+		// An override day names the roster plate it displaced, so "usually A,
+		// currently B" is readable from the calendar popover.
+		{"override-usual-plate", func() permitView {
+			p := samplePermitView(loc)
+			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
+			return p
+		}, `usually ABC123`},
 	} {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {

@@ -311,6 +311,8 @@ type calView struct {
 	DayLabel  string // e.g. "Mon 21"
 	Reg       string
 	Color     string
+	Adhoc     bool   // covered by an override with a typed plate — no saved colour to show
+	Usual     string // the roster plate an override displaced, "" when not displaced
 	Source    string // "roster" | "override" | ""
 	HasOneoff bool
 	IsToday   bool

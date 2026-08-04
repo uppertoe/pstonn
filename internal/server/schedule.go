@@ -283,8 +283,21 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			src = string(r.Source)
 		}
 		calReg, _, calColor := dispReg(r.VehicleID, r.Registration)
+		// A day taken by a typed-plate override has no saved colour, which used to
+		// leave the neutral bar — a covered day that read as "nothing scheduled".
+		// The flag gives it a distinct bar instead. Usual names the roster plate the
+		// override displaced (popover/aria only), skipped when the override IS the
+		// rostered car so it never says "ABC123 · usually ABC123".
+		adhoc := r.Source == model.SourceOverride && r.Registration != ""
+		usual := ""
+		if r.Source == model.SourceOverride {
+			if reg := regByID[ruleByWeekday[day.Weekday()]]; reg != "" && !model.SamePlate(reg, calReg) {
+				usual = reg
+			}
+		}
 		cal = append(cal, calView{
 			DayLabel: day.Format("Mon 2"), Reg: calReg, Color: calColor,
+			Adhoc: adhoc, Usual: usual,
 			Source: src, HasOneoff: hasOneoff, IsToday: isToday, Past: past,
 		})
 	}

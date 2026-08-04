@@ -277,6 +277,11 @@
   .cday .omk { height:6px; display:flex; align-items:center; justify-content:center; margin-bottom:5px; }
   .cday .oneoff { width:5px; height:5px; border-radius:50%; background:var(--accent); }
   .cday .bar { height:6px; border-radius:4px; background:var(--line); }
+  {{/* A day covered by a typed one-off plate: no saved-vehicle colour exists, and
+       the neutral fallback bar made a covered day look identical to an empty one.
+       Accent stripes — the same accent as the .oneoff dot — say "covered, by a
+       one-off" without inventing a colour the legend can't explain. */}}
+  .cday .bar.adhoc { background:repeating-linear-gradient(-45deg, var(--accent) 0 3px, var(--accent-soft) 3px 7px); }
 
   /* popover — centred with the standalone translate property, NOT transform:
      the rise animation ends at transform:none (fill both), which would wipe a

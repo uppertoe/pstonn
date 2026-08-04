@@ -202,15 +202,15 @@
        the popover is a visual convenience and is hidden from assistive tech. */}}
   <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{.Source}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}"
+       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{.Source}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}"
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
     <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
-    <div class="bar" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
+    <div class="bar{{if .Adhoc}} adhoc{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">{{.DayLabel}}</p>
-      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
+      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
     </div>
   </div>
   {{end}}
