@@ -368,7 +368,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	// Throttle before comparing: the token is the only gate on the roster, and an
 	// unthrottled endpoint is an offline-speed guessing oracle. A watchdog polls
 	// every few minutes, so this is far above any legitimate use.
-	if !s.statusLimit.allow(clientIP(r)) {
+	if !s.statusLimit.allow(rateLimitKey(r)) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return

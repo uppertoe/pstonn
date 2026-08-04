@@ -129,8 +129,15 @@ func neutraliseLinks(label string) string {
 	return strings.TrimSpace(linkRun.ReplaceAllString(label, "(link removed)"))
 }
 
-// linkRun matches what the mail layer would turn into a clickable link.
-var linkRun = regexp.MustCompile(`(?i)\bhttps?://\S*`)
+// linkRun matches what the mail layer would turn into a clickable link, and must
+// be at least as broad as the linkifier (mailer.inlineURL, `https?://[^\s<>()]+`)
+// or a URL slips past here and is still hyperlinked there. It deliberately has NO
+// leading word boundary: `\bhttps` does not anchor inside `2https://evil` (the
+// boundary the linkifier does not require either), so a label like "2https://evil"
+// would otherwise survive the strip and reach the recipient as a live link. `\S*`
+// is strictly broader than the linkifier's character class, so nothing it would
+// wrap can escape this.
+var linkRun = regexp.MustCompile(`(?i)https?://\S*`)
 
 // quietDefer decides when a notification for this member should actually be
 // delivered. Members can set quiet hours (default 22:00–06:00 local): a message
@@ -324,7 +331,11 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 			m := outMessage{
 				Account: owner, Subject: subject, Body: body,
 				NtfyPriority: "default", NtfyTag: "calendar", NotBefore: nb,
-				DedupKey: fmt.Sprintf("expiry|%s|%s|%s", owner, permitLabel, date),
+				// Keyed on the MEMBER (d.email), not just the account: enqueueSplit
+				// suffixes push rows with a bare "|ntfy", so an owner-only key collides
+				// across two push-only household members and silently drops the second
+				// member's reminder. Every sibling fan-out keys on d.email for this reason.
+				DedupKey: fmt.Sprintf("expiry|%s|%s|%s|%s", owner, permitLabel, date, d.email),
 				Reason:   reasonAccount,
 			}
 			if wantEmail {

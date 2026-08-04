@@ -180,6 +180,40 @@ func TestSESHookSuppresses(t *testing.T) {
 	}
 }
 
+// TestSESHookRetriesOnWriteFailure (S19): a verified bounce/complaint whose
+// suppression write FAILS must not be acked with 200 — SNS only redelivers on a
+// non-2xx, and a dropped complaint is a permanent, unrecoverable reputation event.
+// A closed store stands in for the full or read-only volume that triggers this.
+func TestSESHookRetriesOnWriteFailure(t *testing.T) {
+	s, key := newSESTestServer(t)
+	if err := s.store.Close(); err != nil { // writes now fail; verification is unaffected (cert is cached)
+		t.Fatal(err)
+	}
+	complaint := `{"notificationType":"Complaint","complaint":{"complaintFeedbackType":"abuse",
+	  "complainedRecipients":[{"emailAddress":"angry@example.com"}]}}`
+	body := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "wf", TopicARN: testTopic,
+		Message: complaint, Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code != http.StatusInternalServerError {
+		t.Fatalf("write failure = %d, want 500 so SNS retries the dropped suppression", w.Code)
+	}
+}
+
+// TestSESHookAcksUnparseableEvent (S19): an unparseable event body will never parse
+// however many times it is redelivered, so it is acked (200) rather than forcing SNS
+// to hammer a permanently-bad body for the whole retry window.
+func TestSESHookAcksUnparseableEvent(t *testing.T) {
+	s, key := newSESTestServer(t)
+	body := signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "bad", TopicARN: testTopic,
+		Message: `{not json`, Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code != http.StatusOK {
+		t.Fatalf("unparseable event = %d, want 200 (never retryable)", w.Code)
+	}
+}
+
 // TestSESHookRejectsForgery is the security boundary: a forged bounce would let
 // anyone mute any user's notifications, so every unauthenticated shape must be
 // refused and must not write anything.

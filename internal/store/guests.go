@@ -148,10 +148,10 @@ func (s *Store) CreateGuestGrant(ctx context.Context, owner, createdBy string, p
 // would turn "scan and ask" into "scan and tap the resident's car onto the
 // permit", and the ephemeral on-screen grant is not a pass anyone manages. The UI
 // never offers either, so an update naming one is a crafted POST.
-func (s *Store) UpdateGuestGrant(ctx context.Context, owner string, grantID int64, label string, allowOvernight bool, vehicleIDs []int64) error {
+func (s *Store) UpdateGuestGrant(ctx context.Context, owner string, grantID int64, label string, allowOvernight bool, vehicleIDs []int64) (swept int64, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx,
@@ -159,13 +159,13 @@ func (s *Store) UpdateGuestGrant(ctx context.Context, owner string, grantID int6
 		 WHERE id = ? AND owner = ? AND on_screen = 0 AND request_only = 0`,
 		label, boolInt(allowOvernight), grantID, owner)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+		return 0, ErrNotFound
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_grant_vehicle WHERE grant_id = ?`, grantID); err != nil {
-		return err
+		return 0, err
 	}
 	for _, vid := range vehicleIDs {
 		r, err := tx.ExecContext(ctx,
@@ -173,13 +173,32 @@ func (s *Store) UpdateGuestGrant(ctx context.Context, owner string, grantID int6
 			 SELECT ?, ? WHERE EXISTS(SELECT 1 FROM vehicle WHERE id = ? AND owner = ?)`,
 			grantID, vid, vid, owner)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if n, _ := r.RowsAffected(); n == 0 {
-			return ErrNotFound
+			return 0, ErrNotFound
 		}
 	}
-	return tx.Commit()
+	// Unticking a car is a withdrawal of authority, so sweep the LIVE overrides this
+	// grant's links already steered with a car that is no longer allowed — otherwise the
+	// reconcile loop keeps re-asserting the removed car onto the permit for up to ~30
+	// more hours (ListOverrides does not join guest_token, so nothing else would ever
+	// catch it), while the owner is flashed "Guest pass updated." Only vehicle-backed
+	// rows are swept: a typed-plate booking is not tied to a saved car. The new allowed
+	// set was just written above, so `guest_grant_vehicle` is the authority to check.
+	sweep, err := tx.ExecContext(ctx, `
+DELETE FROM override
+WHERE guest_token_id != 0
+  AND (ends_at IS NULL OR ends_at = '' OR ends_at > ?)
+  AND vehicle_id IS NOT NULL
+  AND guest_token_id IN (SELECT id FROM guest_token WHERE grant_id = ?)
+  AND vehicle_id NOT IN (SELECT vehicle_id FROM guest_grant_vehicle WHERE grant_id = ?)`,
+		nowUTC(), grantID, grantID)
+	if err != nil {
+		return 0, err
+	}
+	swept, _ = sweep.RowsAffected()
+	return swept, tx.Commit()
 }
 
 // AddGuestTokens adds recipient tokens to an existing grant (scoped to owner),

@@ -505,44 +505,63 @@ WHERE (SELECT COUNT(1) FROM account_member WHERE owner = ?) < ?`,
 	return nil
 }
 
-// RemoveMember revokes a secondary's access, scoped to the owner so one account
-// cannot remove another's member.
-func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) (revokedPasses int64, err error) {
+// RemoveMember withdraws a person's relationship to this owner's account, scoped to
+// the owner so one account cannot reach into another's. It handles BOTH kinds of row
+// and is careful to keep them apart:
+//
+//   - An ACTIVE member (invite_pending = 0) held real access, so their per-person
+//     notification prefs, queued mail and any guest passes they minted are torn down,
+//     and wasActive is returned true so the caller revokes their sessions.
+//   - A PENDING invite (invite_pending = 1) granted NOTHING. The row belongs to this
+//     owner, but the address's notify_pref, queued mail and sessions belong to that
+//     person's OWN account — a mere offer must never destroy them. Withdrawing one
+//     deletes only the invite row and touches nothing else (wasActive = false).
+//
+// This asymmetry is the load-bearing gate: the teardown below deletes rows keyed by
+// the EMAIL alone (a person only ever has one notify_pref / one mailbox), so running
+// it for a pending invite would let any user wipe an unrelated stranger's notification
+// config, swallow their queued mail and force-revoke their sessions just by inviting
+// then "removing" their address. So the invite_pending check, not the membership
+// delete, is what guards the teardown.
+func (s *Store) RemoveMember(ctx context.Context, owner, memberEmail string) (revokedPasses int64, wasActive bool, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner)
+	var pending int
+	err = tx.QueryRowContext(ctx,
+		`SELECT invite_pending FROM account_member WHERE member_email = ? AND owner = ?`,
+		memberEmail, owner).Scan(&pending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, ErrNotFound
+	}
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	// Everything below deletes rows keyed by the EMAIL alone — notification prefs
-	// and queued mail are not scoped to an account, because a person only ever has
-	// one of each. So if that address was not actually a member of this account,
-	// this would be one household destroying an unrelated user's notification
-	// settings and swallowing their queued mail. Nothing downstream re-checks, so
-	// the membership delete has to be the gate: no row removed, nothing to clean up.
-	if n, err := res.RowsAffected(); err != nil {
-		return 0, err
-	} else if n == 0 {
-		return 0, ErrNotFound
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM account_member WHERE member_email = ? AND owner = ?`, memberEmail, owner); err != nil {
+		return 0, false, err
 	}
-	// Their personal notification prefs go with their access — but read the push
-	// topic out FIRST, because queued messages already carry it and dropping the
-	// row would lose the only handle we have on them.
+	if pending == 1 {
+		// A withdrawn offer. Nothing else is scoped to it — commit the single delete and
+		// return wasActive=false so the handler does not revoke the stranger's sessions.
+		return 0, false, tx.Commit()
+	}
+	// An active member losing access. Their personal notification prefs go with it —
+	// but read the push topic out FIRST, because queued messages already carry it and
+	// dropping the row would lose the only handle we have on them.
 	if err := dropQueuedPush(ctx, tx, memberEmail); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM notify_pref WHERE owner = ?`, memberEmail); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	n, err := revokeGrantsBy(ctx, tx, owner, memberEmail)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return n, tx.Commit()
+	return n, true, tx.Commit()
 }
 
 // RemoveMembership lets a secondary leave whatever account they belong to.

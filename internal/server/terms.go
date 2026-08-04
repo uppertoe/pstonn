@@ -110,7 +110,16 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 // notified. A secondary simply leaves the shared account (they never held the
 // council connection), leaving the primary's account untouched.
 func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
-	user, _, isPrimary := s.resolveAccount(r.Context())
+	// MUTATING handler: it must fail CLOSED. The lenient read-path resolver reports a
+	// primary as a secondary on a membership-lookup blip, which would send a real
+	// primary down the "just leave the shared account" branch — a no-op that reports
+	// success while their council session and sealed password stay connected, the exact
+	// opposite of the withdrawal they asked for. accountForWrite refuses (503) rather
+	// than guess, so an ambiguous lookup mutates nothing.
+	user, _, isPrimary, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 
 	if !isPrimary {

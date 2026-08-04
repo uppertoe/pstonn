@@ -333,6 +333,16 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	if len(hosts) == 0 {
 		return c.linkShapeErr(fmt.Errorf("%w: no council host is configured, so there is nothing to pin the credential POST to", ErrLoginOffHost))
 	}
+	// The scheme the flow must not drop below. loginHosts pins WHERE the password may
+	// go but discards the scheme, so a same-host https→http redirect would sail past
+	// the host check and put the password on the wire in clear (the credential POST
+	// target is resolved against the URL the redirect chain ends at). Pin the scheme to
+	// the configured authorize URL so a downgrade is refused at the redirect step,
+	// before it can quietly downgrade the login page's own URL.
+	wantScheme := "https"
+	if u, err := url.Parse(c.authURL); err == nil && u.Scheme != "" {
+		wantScheme = strings.ToLower(u.Scheme)
+	}
 	// A dedicated client that follows redirects and keeps a jar for this one
 	// login flow (c.http handles redirects manually and shares no cookies). The
 	// browser transport presents a real Chrome UA and client hints throughout.
@@ -354,6 +364,15 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 				// this is the signal that something is redirecting a credential flow
 				// away from the council, and the operator must see it even if the
 				// caller only reports "couldn't link your account" to the user.
+				log.Printf("parking: SECURITY: %v", err)
+				return err
+			}
+			// A right-host redirect can still be a scheme DOWNGRADE (https→http on the
+			// same host), which the host check above cannot see. Refuse it: following it
+			// would move the login page — and so the credential POST — onto cleartext.
+			if !redirectSchemeOK(req.URL.Scheme, wantScheme) {
+				err := fmt.Errorf("%w: refused a %q redirect on a %q council login flow (host %q)",
+					ErrLoginOffHost, safeExcerpt(req.URL.Scheme), wantScheme, safeExcerpt(req.URL.Host))
 				log.Printf("parking: SECURITY: %v", err)
 				return err
 			}
@@ -555,30 +574,60 @@ const (
 	fieldAntiforgery = "__RequestVerificationToken"
 )
 
-// parseLoginForm extracts the form action and all <input> name/value pairs from
-// the login page (values HTML-unescaped). It is intentionally lenient, a regex
-// over a stable server-rendered ASP.NET form rather than a full HTML parse; what
-// it harvests is then checked by checkLoginForm before anything is submitted.
+// parseLoginForm extracts the action and <input> name/value pairs of the login
+// FORM from the page (values HTML-unescaped). It is intentionally lenient, a regex
+// over a stable server-rendered ASP.NET form rather than a full HTML parse; what it
+// harvests is then checked by checkLoginForm before anything is submitted.
+//
+// Crucially it is FORM-SCOPED: it returns the action and inputs of the form that
+// actually carries the credential (Password) input, not the first form's action
+// married to every input on the page. A decorative form placed ABOVE the sign-in
+// form — a cookie banner, a language selector, a site search, all of which a routine
+// council template edit could add — would otherwise donate its action while the real
+// credential inputs were harvested from elsewhere, so this client would POST the
+// user's plaintext password to that unrelated endpoint and then misread the missing
+// session cookie as a wrong password (a fleet-wide unlink over a cosmetic change).
+// A page with no credential-bearing form yields an empty result, which checkLoginForm
+// turns into ErrLoginFormUnrecognised.
 func parseLoginForm(page string) (action string, fields map[string]string) {
 	fields = map[string]string{}
-	for _, tag := range reFormTag.FindAllString(page, -1) {
-		if v, ok := attrValue(reActAttr, tag); ok {
-			action = html.UnescapeString(v)
-			break
+	formTags := reFormTag.FindAllStringIndex(page, -1)
+	for i, loc := range formTags {
+		openEnd := loc[1] // just past this form's "<form ...>" tag
+		// This form's body runs to its </form>, but never past where the NEXT form
+		// begins (so a missing close tag cannot swallow the following form's inputs).
+		spanEnd := len(page)
+		if i+1 < len(formTags) {
+			spanEnd = formTags[i+1][0]
+		}
+		if c := strings.Index(strings.ToLower(page[openEnd:spanEnd]), "</form>"); c >= 0 {
+			spanEnd = openEnd + c
+		}
+		fs := map[string]string{}
+		for _, tag := range reInputTag.FindAllString(page[openEnd:spanEnd], -1) {
+			nm, ok := attrValue(reNameAttr, tag)
+			if !ok || nm == "" {
+				continue
+			}
+			val := ""
+			if v, ok := attrValue(reValAttr, tag); ok {
+				val = html.UnescapeString(v)
+			}
+			fs[nm] = val
+		}
+		// The sign-in form is the one holding the credential input. Match on content,
+		// not page order, so decoy forms cannot hijack the action.
+		if _, hasPass := fs[fieldPassword]; hasPass {
+			if v, ok := attrValue(reActAttr, page[loc[0]:loc[1]]); ok {
+				action = html.UnescapeString(v)
+			}
+			return action, fs
 		}
 	}
-	for _, tag := range reInputTag.FindAllString(page, -1) {
-		nm, ok := attrValue(reNameAttr, tag)
-		if !ok || nm == "" {
-			continue
-		}
-		val := ""
-		if v, ok := attrValue(reValAttr, tag); ok {
-			val = html.UnescapeString(v)
-		}
-		fields[nm] = val
-	}
-	return action, fields
+	// No form on the page carries a Password input: return nothing rather than blindly
+	// adopting some other form's action. checkLoginForm reports this as a page-shape
+	// change (FailUnexpected), which keeps sessions and passwords intact.
+	return "", fields
 }
 
 // attrValue returns an attribute's value and whether the attribute was PRESENT.
@@ -655,6 +704,19 @@ func (c *Client) loginHosts() map[string]bool {
 		}
 	}
 	return hosts
+}
+
+// redirectSchemeOK reports whether a login-flow redirect to reqScheme is acceptable
+// given wantScheme (the scheme of the configured authorize URL). An https flow must
+// never follow a hop to a non-https scheme — even to a configured council host —
+// because that downgrades the login page's URL and, with it, the target the plaintext
+// credential POST is resolved against. A flow configured on http (local/dev, or a
+// test server) has nothing to downgrade, so http hops are fine there.
+func redirectSchemeOK(reqScheme, wantScheme string) bool {
+	if strings.EqualFold(wantScheme, "https") {
+		return strings.EqualFold(reqScheme, "https")
+	}
+	return true
 }
 
 // resolveAction resolves a possibly-relative form action against the login page

@@ -72,6 +72,32 @@ func TestSpreadStaggersAScheduledRollover(t *testing.T) {
 	}
 }
 
+// S14: a short advance booking must never be starved by a spread slot that lands
+// after it ends. With a wide window (large fleet) the offset can exceed a brief
+// booking's whole life; without the clamp such a booking would be held past its end,
+// never applied and never reported, then silently dropped. Every permit's short
+// booking must be eligible for at least one minute of its window.
+func TestSpreadNeverStarvesAShortBooking(t *testing.T) {
+	// A 60m window: offsets spread across the whole hour, so ~half the fleet draws a
+	// slot beyond a 30-minute booking.
+	s := spreadScheduler(60*time.Minute, 450)
+	start := time.Date(2026, 8, 1, 23, 50, 0, 0, time.UTC)
+	end := start.Add(30 * time.Minute)
+	booking := model.Resolution{Source: model.SourceOverride, Since: start, Scheduled: true, Until: &end}
+	for id := int64(1); id <= 450; id++ {
+		eligible := false
+		for m := 0; m <= 30; m++ {
+			if s.spreadElapsed(id, booking, start.Add(time.Duration(m)*time.Minute)) {
+				eligible = true
+				break
+			}
+		}
+		if !eligible {
+			t.Fatalf("permit %d: a 30-minute booking was never eligible in its whole window (starved by its spread slot)", id)
+		}
+	}
+}
+
 // A permit must keep the SAME slot every day. A fresh draw each rollover would
 // re-pile permits at random and, worse, let one permit sit near the end of the
 // window repeatedly by luck.

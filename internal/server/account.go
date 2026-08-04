@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/identity"
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -261,18 +262,22 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	// Add atomically under the cap of two (the count check and insert are one
 	// statement, so concurrent adds cannot exceed it). The invite starts pending and
 	// grants nothing until accepted.
-	if err := s.store.AddMemberCapped(ctx, owner, email, 2); err != nil {
-		// The cap is a fact about the INVITER's own account, so reporting it precisely
-		// tells them nothing they could not already see on this page.
-		if errors.Is(err, store.ErrMemberLimit) {
-			s.message(w, http.StatusConflict, "You can share access with at most two people. Remove one first.")
-			return
-		}
+	err := s.store.AddMemberCapped(ctx, owner, email, 2)
+	// The cap is a fact about the INVITER's own account, so reporting it precisely
+	// tells them nothing they could not already see on this page.
+	if errors.Is(err, store.ErrMemberLimit) {
+		s.message(w, http.StatusConflict, "You can share access with at most two people. Remove one first.")
+		return
+	}
+	if err != nil {
 		// Anything else is a fact about the invited address — most likely that it
 		// already holds an invite or membership somewhere. Fall through to the same
-		// confirmation the success path renders, so the response cannot be used to
-		// probe. A pending invite grants nothing, so not creating one is safe.
-		log.Printf("add member %s to %s: %v", email, owner, err)
+		// confirmation AND the same audit entry the success path writes, so neither the
+		// response nor the owner's own activity log can be used to probe whether an
+		// address already uses p.stonn. A pending invite grants nothing, so not creating
+		// one is safe.
+		log.Printf("add member %s to %s: %v", notify.RedactEmail(email), notify.RedactEmail(owner), err)
+		s.logChange(ctx, owner, user, store.ActionMemberAdd, email, "")
 		s.inviteSent(w, r, email, false)
 		return
 	}
@@ -291,11 +296,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if e := s.notify.SendInvite(nctx, to, from); e != nil {
-				log.Printf("invite email to %s: %v", to, e)
+				log.Printf("invite email to %s: %v", notify.RedactEmail(to), e)
 			}
 		}(email, owner)
 	} else {
-		log.Printf("invite email to %s skipped (throttled or email not configured)", email)
+		log.Printf("invite email to %s skipped (throttled or email not configured)", notify.RedactEmail(email))
 	}
 	s.logChange(ctx, owner, user, store.ActionMemberAdd, email, "")
 	s.inviteSent(w, r, email, mailed)
@@ -402,23 +407,32 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	// Removal also revokes any guest pass or door QR that member minted — those
 	// are bearer links that would otherwise keep working after they lose access.
 	// Report the count: the primary needs to know their household's links changed.
-	revoked, err := s.store.RemoveMember(r.Context(), owner, email)
-	if err == nil {
-		// They have lost access to this household's data; a session issued while they
-		// had it must stop working now, not whenever its cookie happens to lapse.
-		s.revokeSessions(r.Context(), email)
-	}
+	// wasActive distinguishes revoking a real member from withdrawing a still-pending
+	// invitation: only the former is a loss of access, so only the former revokes
+	// sessions. Withdrawing an offer touches nothing that belongs to that address.
+	revoked, wasActive, err := s.store.RemoveMember(r.Context(), owner, email)
 	if errors.Is(err, store.ErrNotFound) {
-		// Not a member of this account: either a stale form or someone probing with
-		// another household's address. Either way there is nothing to remove, and
-		// saying so plainly avoids implying we know anything about that address.
-		s.message(w, http.StatusNotFound, "That person doesn't have shared access to this account.")
+		// Not associated with this account: a stale form, or someone probing another
+		// household's address. There is nothing to do — and the response must match the
+		// removal path so it cannot be used to confirm who else has an account. Same
+		// 303 and the same banner as a real removal (nothing was actually touched).
+		http.Redirect(w, r, "/settings?removed="+url.QueryEscape(email), http.StatusSeeOther)
 		return
 	}
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
+	if !wasActive {
+		// A pending invitation withdrawn. It granted nothing, so there is nothing to
+		// revoke and no session to end; just record it and confirm accurately.
+		s.logChange(r.Context(), owner, user, store.ActionMemberRemove, email, "invitation withdrawn")
+		http.Redirect(w, r, "/settings?withdrawn="+url.QueryEscape(email), http.StatusSeeOther)
+		return
+	}
+	// They have lost access to this household's data; a session issued while they had
+	// it must stop working now, not whenever its cookie happens to lapse.
+	s.revokeSessions(r.Context(), email)
 	detail := ""
 	if revoked > 0 {
 		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
@@ -434,14 +448,19 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 // leaveAccount lets a secondary give up their shared access, returning them to
 // their own (separate) account. A primary has nothing to leave.
 func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
-	user, _, isPrimary := s.resolveAccount(r.Context())
+	// MUTATING handler: fail CLOSED. On a membership-lookup blip the lenient resolver
+	// would report a secondary as a primary (isPrimary=true) and turn a genuine "leave"
+	// into a misleading "you own this account". accountForWrite refuses with a 503
+	// instead of guessing wrong, and — resolving the owner once here — also removes the
+	// second, separately-fallible resolveAccount call this used for the audit scope.
+	user, leftOwner, isPrimary, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	if isPrimary {
 		s.formError(w, r, "You own this account, so there is nothing to leave.")
 		return
 	}
-	// Log against the account they are leaving (resolved before the membership
-	// row goes), so the primary can see it happened.
-	_, leftOwner, _ := s.resolveAccount(r.Context())
 	revoked, err := s.store.RemoveMembership(r.Context(), user)
 	if err != nil {
 		s.serverError(w, err)
@@ -493,7 +512,7 @@ func (s *Server) councilConfirmApply(w http.ResponseWriter, r *http.Request) {
 	// throttle the token is an unmetered guessing oracle that also competes with
 	// the scheduler for the single SQLite connection.
 	limitBody(r)
-	if !s.confirmLimit.allow(clientIP(r)) {
+	if !s.confirmLimit.allow(rateLimitKey(r)) {
 		w.Header().Set("Retry-After", "60")
 		s.message(w, http.StatusTooManyRequests, "Too many attempts. Please wait a moment and try the link in your email again.")
 		return

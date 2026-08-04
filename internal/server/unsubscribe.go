@@ -54,7 +54,7 @@ func (s *Server) unsubscribeApply(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	log.Printf("unsubscribe: %s opted out of email", addr)
+	log.Printf("unsubscribe: %s opted out of email", notify.RedactEmail(addr))
 	noStore(w)
 	// A one-click POST from a mail provider wants a bare 200, not a page; a human
 	// who pressed the button wants confirmation. Both get this — it is small, and
@@ -71,7 +71,7 @@ func (s *Server) unsubscribeApply(w http.ResponseWriter, r *http.Request) {
 // travels in a URL, so a throttle is the only thing pacing someone walking tokens
 // or replaying one they found in a forwarded email. A real person clicks once.
 func (s *Server) unsubThrottled(w http.ResponseWriter, r *http.Request) bool {
-	if s.unsubLimit.allow(clientIP(r)) {
+	if s.unsubLimit.allow(rateLimitKey(r)) {
 		return false
 	}
 	w.Header().Set("Retry-After", "60")

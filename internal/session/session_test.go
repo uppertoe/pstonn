@@ -46,8 +46,10 @@ func TestIssueThenDecode(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 	cookies := w.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != cookieName {
-		t.Fatalf("expected one %s cookie, got %+v", cookieName, cookies)
+	// A secure manager issues under the __Host- name (which requires Secure + Path=/ +
+	// no Domain — the properties that stop a sibling subdomain shadowing it).
+	if len(cookies) != 1 || cookies[0].Name != hostCookieName {
+		t.Fatalf("expected one %s cookie, got %+v", hostCookieName, cookies)
 	}
 	c := cookies[0]
 	if !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" {
@@ -170,6 +172,33 @@ func TestAbsoluteMaxAgeIsEnforced(t *testing.T) {
 	}
 }
 
+// S1: a privileged (admin) session must be capped at the base ttl, not the full 7-day
+// maxAge, so sliding renewal cannot carry a stale `admin` claim forward for a week
+// after an IdP-side demotion. A non-admin session at the same age still lives.
+func TestAdminSessionCappedAtTTL(t *testing.T) {
+	m := testManager()
+	// Aged 13h: past the 12h ttl but well within the 7-day maxAge.
+	iat := time.Now().Add(-13 * time.Hour).Unix()
+	adminV := m.mint(t, payload{
+		Email:  "admin@example.com",
+		Groups: []string{"user", "admin"},
+		Exp:    time.Now().Add(time.Hour).Unix(),
+		Iat:    iat,
+	})
+	if _, ok, _ := m.decodeValue(adminV); ok {
+		t.Fatal("an admin session older than the base ttl must be refused, so a demotion cannot linger for the full maxAge")
+	}
+	userV := m.mint(t, payload{
+		Email:  "user@example.com",
+		Groups: []string{"user"},
+		Exp:    time.Now().Add(time.Hour).Unix(),
+		Iat:    iat,
+	})
+	if _, ok, _ := m.decodeValue(userV); !ok {
+		t.Fatal("a non-admin session of the same age must still be valid (only privileged sessions are capped short)")
+	}
+}
+
 // Cookies minted before Iat existed decode it as 0. They must keep working until
 // their own expiry — a deploy that signs everyone out is its own kind of incident —
 // but they must not be renewable, or they would live forever with no ceiling.
@@ -190,8 +219,22 @@ func TestClearExpiresTheCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	m.Clear(w)
 	cookies := w.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Value != "" || cookies[0].MaxAge >= 0 {
-		t.Fatalf("Clear must send an immediately-expiring empty cookie, got %+v", cookies)
+	// A secure manager expires BOTH the __Host- name and the legacy name, so a sign-out
+	// clears whichever the browser is still holding across the rename.
+	if len(cookies) != 2 {
+		t.Fatalf("Clear must expire both cookie names, got %+v", cookies)
+	}
+	var sawHost bool
+	for _, c := range cookies {
+		if c.Value != "" || c.MaxAge >= 0 {
+			t.Fatalf("Clear must send immediately-expiring empty cookies, got %+v", c)
+		}
+		if c.Name == hostCookieName {
+			sawHost = true
+		}
+	}
+	if !sawHost {
+		t.Fatalf("Clear did not expire the __Host- cookie: %+v", cookies)
 	}
 }
 

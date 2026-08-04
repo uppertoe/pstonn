@@ -99,3 +99,32 @@ func TestClientIPTrustsProxyOnly(t *testing.T) {
 		})
 	}
 }
+
+// rateLimitKey collapses an IPv6 caller to its /64, so a single delegated allocation
+// cannot draw an unlimited supply of distinct source addresses and defeat every per-IP
+// throttle. IPv4 keys on the full address.
+func TestRateLimitKeyMasksIPv6ToItsPrefix(t *testing.T) {
+	key := func(remoteAddr string) string {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remoteAddr // a direct public client, so no proxy header is trusted
+		return rateLimitKey(r)
+	}
+
+	if got := key("203.0.113.9:1234"); got != "203.0.113.9" {
+		t.Errorf("IPv4 key = %q, want the full address 203.0.113.9", got)
+	}
+
+	// Two different addresses inside one /64 must share a bucket...
+	a := key("[2001:db8:1:2:aaaa:bbbb:cccc:dddd]:443")
+	b := key("[2001:db8:1:2:1111:2222:3333:4444]:443")
+	if a != "2001:db8:1:2::/64" {
+		t.Errorf("IPv6 key = %q, want the /64 prefix 2001:db8:1:2::/64", a)
+	}
+	if a != b {
+		t.Errorf("two addresses in one /64 keyed differently: %q vs %q — the throttle is still per-address", a, b)
+	}
+	// ...while a different /64 is a different bucket.
+	if c := key("[2001:db8:1:3::1]:443"); c == a {
+		t.Errorf("a different /64 (%q) shared a bucket with %q", c, a)
+	}
+}

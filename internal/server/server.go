@@ -147,7 +147,7 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 // or semaphore simply means "no shedding", never a panic on a public route.
 func (s *Server) publicGuest(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.guestRead.allow(clientIP(r)) {
+		if !s.guestRead.allow(rateLimitKey(r)) {
 			w.Header().Set("Retry-After", "60")
 			s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and reload.")
 			return
@@ -171,7 +171,7 @@ func (s *Server) publicGuest(h http.HandlerFunc) http.HandlerFunc {
 // because a throttle must never be the reason a public route panics.
 func (s *Server) throttlePerIP(rl *rateLimiter, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !rl.allow(clientIP(r)) {
+		if !rl.allow(rateLimitKey(r)) {
 			w.Header().Set("Retry-After", "60")
 			s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and try again.")
 			return

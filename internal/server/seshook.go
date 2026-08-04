@@ -83,7 +83,7 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 	// cheap POST into one of our requests to AWS, indefinitely. SES delivers each
 	// event once and retries a handful of times, so a real topic is nowhere near
 	// this ceiling.
-	if !s.sesHookLimit.allow(clientIP(r)) {
+	if !s.sesHookLimit.allow(rateLimitKey(r)) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "too many requests", http.StatusTooManyRequests)
 		return
@@ -135,7 +135,18 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("ses hook: confirmed SNS subscription for topic %s", m.TopicARN)
 	case "Notification":
-		s.handleSESEvent(r, m.Message)
+		if err := s.handleSESEvent(r, m.Message); err != nil {
+			// A suppression write failed (a full data volume, a read-only remount). Ack
+			// it with 200 and SNS deletes the message — a bounce mostly self-heals on the
+			// next send, but a spam complaint is ONE-SHOT and the row it would create is
+			// never pruned, so a lost complaint is a reputation event we can never recover.
+			// Return 500 instead: SNS redelivers, and SuppressAddress is an idempotent
+			// upsert so the retry is safe. (Bounded by snsMaxSkew — SNS stops retrying
+			// past the freshness window — but that beats dropping it on the first failure.)
+			log.Printf("ses hook: suppression write failed, asking SNS to retry: %v", err)
+			http.Error(w, "temporary storage error", http.StatusInternalServerError)
+			return
+		}
 	case "UnsubscribeConfirmation":
 		// Someone unsubscribed our endpoint. That silently disables bounce handling,
 		// so make it loud rather than letting the app drift back to no feedback.
@@ -150,22 +161,32 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 // bounces and complaints suppress: a transient bounce (full mailbox, greylisting)
 // is exactly what the outbox's retry is for, and suppressing on it would mute a
 // user over a temporary condition.
-func (s *Server) handleSESEvent(r *http.Request, raw string) {
+// handleSESEvent records suppressions from one SES notification. It returns a
+// non-nil error ONLY when a suppression write failed and the event is worth
+// redelivering — the caller turns that into a 500 so SNS retries. An unparseable or
+// irrelevant payload returns nil (acked): it will never parse or suppress, so retries
+// would only have SNS hammer a body it can never accept for the whole retry window.
+func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 	var ev sesEvent
 	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
 		log.Printf("ses hook: unparseable SES event: %v", err)
-		return
+		return nil
 	}
 	kind := ev.NotificationType
 	if kind == "" {
 		kind = ev.EventType
 	}
 	ctx := r.Context()
+	// Remember the last write failure but keep processing the other recipients, so a
+	// single bad row does not drop the suppressions that CAN be recorded. Any failure
+	// still makes the whole event retry (the upsert is idempotent, so re-recording the
+	// ones that already landed is harmless).
+	var writeErr error
 	switch strings.ToLower(kind) {
 	case "bounce":
 		if !strings.EqualFold(ev.Bounce.BounceType, "Permanent") {
 			log.Printf("ses hook: %s/%s bounce — not suppressing (retryable)", ev.Bounce.BounceType, ev.Bounce.BounceSubType)
-			return
+			return nil
 		}
 		for _, rcpt := range ev.Bounce.BouncedRecipients {
 			detail := strings.TrimSpace(rcpt.Status + " " + rcpt.DiagnosticCode)
@@ -174,6 +195,7 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 			}
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressBounce, detail); err != nil {
 				log.Printf("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
+				writeErr = err
 				continue
 			}
 			// The address and the receiving server's diagnostic (which is free text
@@ -189,11 +211,12 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 		// the one kind that is never pruned and never user-clearable.
 		if strings.EqualFold(ev.Complaint.ComplaintFeedbackType, "not-spam") {
 			log.Printf("ses hook: ignoring a not-spam feedback report (the recipient un-junked our mail)")
-			return
+			return nil
 		}
 		for _, rcpt := range ev.Complaint.ComplainedRecipients {
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressComplaint, ev.Complaint.ComplaintFeedbackType); err != nil {
 				log.Printf("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
+				writeErr = err
 				continue
 			}
 			log.Printf("ses hook: suppressed %s (spam complaint)", notify.RedactEmail(rcpt.EmailAddress))
@@ -203,6 +226,7 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) {
 	default:
 		log.Printf("ses hook: ignoring SES event %q", kind)
 	}
+	return writeErr
 }
 
 // snsMaxSkew bounds how far an SNS message's own timestamp may be from now.

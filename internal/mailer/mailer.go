@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"mime"
 	"net"
 	"net/smtp"
@@ -253,7 +254,18 @@ func (m *Mailer) deliver(to string, msg []byte) error {
 	if err := w.Close(); err != nil {
 		return classify(err)
 	}
-	return c.Quit()
+	// A nil error from w.Close() means the server wrote the terminating "." and
+	// returned its 250: it has ACCEPTED the message. Whatever happens in QUIT after
+	// that — a relay that drops the connection right after 250, an EOF, the send
+	// deadline expiring during QUIT — does not un-send it. Returning that error would
+	// have the outbox mark the row failed and retry it, delivering the same message
+	// again (up to the retry cap) and finally alerting the operator that a delivered
+	// mail was "undeliverable". So the send is a success from here; a QUIT hiccup is
+	// logged, not surfaced.
+	if err := c.Quit(); err != nil {
+		log.Printf("mailer: QUIT failed after the message was accepted (already delivered, not retrying): %v", err)
+	}
+	return nil
 }
 
 // ErrPermanent marks a send that must never be retried: the server refused it

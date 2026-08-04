@@ -604,7 +604,7 @@ func TestUpdateGuestGrantCannotTouchAPrintedGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.UpdateGuestGrant(ctx, owner, grantID, "Mine now", true, []int64{vehID}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.store.UpdateGuestGrant(ctx, owner, grantID, "Mine now", true, []int64{vehID}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("updating a printed grant = %v, want ErrNotFound", err)
 	}
 	gc, err := s.store.GuestContextByTokenHash(ctx, hashGuestToken(raw))

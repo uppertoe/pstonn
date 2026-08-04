@@ -244,13 +244,14 @@ func noStore(w http.ResponseWriter) {
 // in-memory, restart-resettable mechanism) as the invite and guest-link throttles
 // the Server already carries.
 var (
-	// guestScanner records that we have heard from a scanner at all. It is only
+	// guestScanner records that we have heard from a scanner from one IP. It is only
 	// ENFORCED once a grant's pending queue reaches its reserved tail (see
 	// PendingGuestRequestsInReserve), but it is consulted on every request so the
 	// slots a scanner already took are counted against it: that is what makes the
-	// reserved slots genuinely reachable by someone else. The window covers the
+	// reserved slots reachable by someone at a DIFFERENT address. The window covers the
 	// hour-plus a pending row can live, because a bound shorter than the thing it
-	// bounds lets the same phone refill the queue as it drains.
+	// bounds lets the same phone refill the queue as it drains. It is a per-IP signal,
+	// so it bounds one phone but not several — see the honest limit noted at the gate.
 	guestScanner = newRateLimiter(1, 90*time.Minute)
 
 	// guestNudge bounds the "approve this?" nudge PER ACCOUNT. The nudge
@@ -645,7 +646,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
 		return
 	}
-	if !s.guest.allow(clientIP(r)) {
+	if !s.guest.allow(rateLimitKey(r)) {
 		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
 		return
 	}
@@ -806,7 +807,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
 		return
 	}
-	if !s.guest.allow(clientIP(r)) {
+	if !s.guest.allow(rateLimitKey(r)) {
 		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
 		return
 	}
@@ -1047,12 +1048,12 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 	}
 	if sup, serr := s.store.SuppressedAmong(ctx, []string{d.Contact}); serr != nil || len(sup) > 0 {
 		if serr != nil {
-			log.Printf("suppression check for %s: %v", d.Contact, serr)
+			log.Printf("suppression check for %s: %v", notify.RedactEmail(d.Contact), serr)
 		}
 		return d, false // undeliverable (or unknown): ask the account to pass it on
 	}
 	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, next); err != nil {
-		log.Printf("enqueue driver-displaced for %s: %v", d.Contact, err)
+		log.Printf("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return d, false
 	}
 	return d, true
@@ -1093,17 +1094,22 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Success feedback after deciding a printed-QR request (structured params, so
-	// the message is composed here, not reflected from the URL). The plate is
-	// rego-validated on the way in.
+	// Success feedback after deciding a printed-QR request. These values land in the
+	// green success banner — the most trusted element on a page whose whole premise is
+	// custody of a council password — and although our own redirects write them, nothing
+	// stops someone handing a signed-in user a crafted /guests?resent=… link. So each is
+	// VALIDATED on the read path (not just the write path, which the old comment here
+	// described): a plate must parse as a rego, a recipient as an email, or it is dropped.
+	// This mirrors settings.go, which was hardened for exactly this (H3); /guests was the
+	// untouched half.
 	switch q := r.URL.Query(); {
-	case q.Get("applied") != "":
-		base.Flash = q.Get("applied") + " is now on the permit."
-	case q.Get("approving") != "":
-		base.Flash = "Approved — " + q.Get("approving") + " is being put on the permit."
+	case validRego(normalizeReg(q.Get("applied"))):
+		base.Flash = normalizeReg(q.Get("applied")) + " is now on the permit."
+	case validRego(normalizeReg(q.Get("approving"))):
+		base.Flash = "Approved — " + normalizeReg(q.Get("approving")) + " is being put on the permit."
 	case q.Get("declined") != "":
 		base.Flash = "Request declined."
-	case q.Get("resent") != "":
+	case looksLikeEmail(q.Get("resent")):
 		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
 	}
 	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
@@ -1476,13 +1482,19 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, tooManyRecipients)
 		return
 	}
-	if err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs); err != nil {
+	swept, err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That pass or car isn't one you manage.")
 			return
 		}
 		s.serverError(w, err)
 		return
+	}
+	if swept > 0 {
+		// A car was unticked mid-booking: its live overrides were just removed, so ask
+		// reconcile to take it off the permit now rather than at the next tick.
+		s.kickScheduler()
 	}
 
 	// New recipients (if any) each get a fresh token + link.
@@ -1603,13 +1615,13 @@ func (s *Server) emailLinks(ctx context.Context, owner, permitLabel string, link
 	sent := 0
 	for _, l := range links {
 		if !s.guestLinkOut.allow("o:"+owner) || !s.guestLinkTo.allow("t:"+l.Email) {
-			log.Printf("guest link email to %s for %s throttled", l.Email, owner)
+			log.Printf("guest link email to %s for %s throttled", notify.RedactEmail(l.Email), notify.RedactEmail(owner))
 			continue
 		}
 		if err := s.notify.SendGuestLink(ctx, l.Email, owner, permitLabel, l.URL); err == nil {
 			sent++
 		} else {
-			log.Printf("guest link email to %s for %s: %v", l.Email, owner, err)
+			log.Printf("guest link email to %s for %s: %v", notify.RedactEmail(l.Email), notify.RedactEmail(owner), err)
 		}
 	}
 	return sent
@@ -2029,11 +2041,22 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 	mine, myNonce, haveMine := s.guestReqFromCookie(r, gc)
 	ownRepeat := haveMine && mine.Status == "pending" && model.SamePlate(mine.Plate, plate)
 	// A re-submission of one's own pending plate consumes no slot, so it is never
-	// throttled. Anything else counts against this scanner, and is refused once the
-	// queue has grown into the slots held for someone we have not heard from — five
-	// junk plates from one phone must not be able to lock the next real visitor out
-	// of the door for the hour-plus a pending row lives.
-	if !ownRepeat && !guestScanner.allow("greq:"+clientIP(r)) {
+	// throttled. Anything else is refused once the queue has grown into the reserved
+	// tail IF we have already heard from this requester — either their rate-limit key has
+	// spent its scanner token, or their browser already carries a still-pending request
+	// for this grant (the greq cookie). Counting the cookie too means a returning browser
+	// that hops to a fresh IP is still recognised, where the per-IP signal alone would
+	// not. The key is rateLimitKey, so an IPv6 caller is bucketed by its whole /64 — one
+	// delegated allocation can no longer masquerade as an unlimited supply of scanners.
+	//
+	// HONEST LIMIT: this bounds one phone, one persistent browser, and one IPv6 /64 to
+	// maxPendingGuestRequests-guestReqReserved slots, so a genuine visitor elsewhere still
+	// lands. It does NOT stop a flood from several genuinely distinct addresses (distinct
+	// IPv4s, or distinct /64s): each looks like a real newcomer, and a public door QR
+	// cannot tell them apart from real visitors without turning legitimate newcomers away.
+	// That residual is why approval, not the request, is the security boundary here.
+	heardFrom := !guestScanner.allow("greq:"+rateLimitKey(r)) || (haveMine && mine.Status == "pending")
+	if !ownRepeat && heardFrom {
 		if reserved, err := s.store.PendingGuestRequestsInReserve(r.Context(), gc.Grant.ID); err == nil && reserved {
 			s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please knock or contact them directly.")
 			return
@@ -2310,6 +2333,13 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		log.Printf("doorqr approve: no token for grant %d: %v", req.GrantID, terr)
 	}
 	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)", doorToken)
+	if errors.Is(cerr, store.ErrGuestOverrideRefused) {
+		// The permit is at its guest-booking sub-cap. Tell the owner plainly instead of
+		// returning a 500 (which is what a raw serverError here produced) — approving a
+		// door-QR request must not look like the app is broken.
+		s.message(w, http.StatusConflict, "This permit already has the maximum number of active guest bookings. Remove one before approving another.")
+		return
+	}
 	if cerr != nil {
 		s.serverError(w, cerr) // don't approve if we couldn't set up the change
 		return

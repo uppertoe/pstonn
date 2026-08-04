@@ -47,17 +47,32 @@ type Authenticator struct {
 // The victim notices nothing — and the next thing this app asks a signed-in user
 // for is their council password, which would be typed into an account they do not
 // control.
+// stateCookie is the legacy (unprefixed) name, still READ during the rename. When
+// cookies are secure the state cookie is written under the __Host- name instead, which
+// a browser only honours when it is Secure, Path=/ and Domain-less — the properties
+// that stop a sibling subdomain planting a same-named state cookie to seed a login-CSRF.
+// The prefix requires Secure and Path=/, so it is used only over HTTPS; the path moves
+// from /auth/ to / to satisfy it (the cookie is only read in the callback under /auth/,
+// which "/" still covers).
 const stateCookie = "pstonn_oauth_state"
+const hostStateCookie = "__Host-pstonn_oauth_state"
 
 // stateCookieTTL bounds the login round-trip. It matches the server-side state TTL
 // in internal/store, so neither half outlives the other.
 const stateCookieTTL = 15 * time.Minute
 
+func (a *Authenticator) stateCookieName() string {
+	if a.cookieSecure {
+		return hostStateCookie
+	}
+	return stateCookie
+}
+
 func (a *Authenticator) setStateCookie(w http.ResponseWriter, state string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
+		Name:     a.stateCookieName(),
 		Value:    state,
-		Path:     "/auth/",
+		Path:     "/",
 		HttpOnly: true,
 		Secure:   a.cookieSecure,
 		// Lax, not Strict: the callback is a top-level navigation FROM the identity
@@ -69,25 +84,37 @@ func (a *Authenticator) setStateCookie(w http.ResponseWriter, state string) {
 }
 
 func (a *Authenticator) clearStateCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
-		Value:    "",
-		Path:     "/auth/",
-		HttpOnly: true,
-		Secure:   a.cookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-	})
+	// Expire the name new logins use AND the legacy plain name at its old /auth/ path,
+	// so a login STARTED before the __Host- rename (whose cookie was written at
+	// Path=/auth/) is still cleared when it completes after the deploy. A cookie is
+	// keyed by (name, path), so the legacy one must be expired at the path it was set.
+	type ck struct{ name, path string }
+	targets := []ck{{a.stateCookieName(), "/"}, {stateCookie, "/auth/"}}
+	for _, t := range targets {
+		http.SetCookie(w, &http.Cookie{
+			Name:     t.name,
+			Value:    "",
+			Path:     t.path,
+			HttpOnly: true,
+			Secure:   a.cookieSecure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+		})
+	}
 }
 
 // stateMatchesBrowser reports whether the callback's state was issued to THIS
 // browser. Constant-time, though the value is 256 bits of crypto/rand so the
-// comparison is not the weak link.
+// comparison is not the weak link. It accepts EITHER cookie name so a login started
+// before the __Host- rename still completes.
 func stateMatchesBrowser(r *http.Request, state string) bool {
 	if state == "" {
 		return false
 	}
-	c, err := r.Cookie(stateCookie)
+	c, err := r.Cookie(hostStateCookie)
+	if err != nil || c.Value == "" {
+		c, err = r.Cookie(stateCookie)
+	}
 	if err != nil || c.Value == "" {
 		return false
 	}

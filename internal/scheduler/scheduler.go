@@ -193,9 +193,12 @@ type Scheduler struct {
 	nextTry map[int64]time.Time
 
 	// snapshotPath/lastSnapshot drive the daily VACUUM INTO backup snapshot
-	// (only touched from the warm loop, so no lock needed).
-	snapshotPath string
-	lastSnapshot time.Time
+	// (only touched from the warm loop, so no lock needed). lastSnapshotAttempt is
+	// stamped on every try (success or failure) so a FAILING snapshot backs off to
+	// hourly instead of repeating a full-size VACUUM every housekeeping tick.
+	snapshotPath        string
+	lastSnapshot        time.Time
+	lastSnapshotAttempt time.Time
 
 	// churnMu guards the session-lifecycle churn windows. A healthy fleet
 	// re-authenticates almost never (prod ran days of keep-warm with zero organic
@@ -845,6 +848,17 @@ func (s *Scheduler) maybeSnapshot(ctx context.Context) {
 	if s.snapshotPath == "" || time.Since(s.lastSnapshot) <= 24*time.Hour {
 		return
 	}
+	// Don't retry a failing snapshot every housekeeping tick (15 min). Snapshot writes
+	// a full-size copy (VACUUM INTO a temp file next to the live DB), so repeating it
+	// against a full or slow volume just pins the disk and can drive it to 100% many
+	// times an hour. Once one has been attempted and did not push lastSnapshot forward
+	// (i.e. it failed), wait at least an hour before trying again. The daily cadence is
+	// unaffected while snapshots succeed, because success advances lastSnapshot and the
+	// 24h guard above dominates.
+	if !s.lastSnapshotAttempt.IsZero() && time.Since(s.lastSnapshotAttempt) < time.Hour {
+		return
+	}
+	s.lastSnapshotAttempt = time.Now()
 	s.snapshotting.Store(true)
 	start := time.Now()
 	err := s.store.Snapshot(ctx, s.snapshotPath)
@@ -1514,12 +1528,12 @@ func (s *Scheduler) warnDisplaced(ctx context.Context, p model.Permit, d model.D
 	}
 	if sup, err := s.store.SuppressedAmong(ctx, []string{d.Contact}); err != nil || len(sup) > 0 {
 		if err != nil {
-			log.Printf("scheduler: suppression check for %s: %v", d.Contact, err)
+			log.Printf("scheduler: suppression check for %s: %v", notify.RedactEmail(d.Contact), err)
 		}
 		return false // undeliverable (or unknown): tell the account to pass it on
 	}
 	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, want); err != nil {
-		log.Printf("scheduler: enqueue driver-displaced for %s: %v", d.Contact, err)
+		log.Printf("scheduler: enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return false
 	}
 	return true
@@ -1817,6 +1831,16 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 			continue
 		}
 		s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
+		// Clear the delivered-notification fingerprint. The council now holds a plate we
+		// did not set, and the reconcile this kicks will re-assert the schedule over it.
+		// If the external edit RESTORED the previous plate, that re-assertion is the same
+		// prev→want transition as the original apply, so the transition key alone would
+		// dedup the "your permit was updated" notice away and the resident would never
+		// learn their deliberate manual change was reverted — the exact fine-risk case the
+		// notice exists for. Clearing forces the next apply to be treated as new.
+		if e := s.store.SetPermitNotifiedKey(ctx, p.ID, ""); e != nil {
+			log.Printf("scheduler: clear notified key for permit %s after drift: %v", p.CouncilPermitID, e)
+		}
 		drifted = true
 	}
 	if drifted {
@@ -2065,7 +2089,17 @@ func (s *Scheduler) spreadElapsed(permitID int64, res model.Resolution, now time
 	if elapsed >= window {
 		return true
 	}
-	return elapsed >= s.spreadOffset(permitID, window)
+	offset := s.spreadOffset(permitID, window)
+	// A short advance booking must never be starved by a slot that lands after it ends.
+	// The offset is drawn from the permit id across the whole window (up to ~an hour),
+	// so a booking whose window is shorter than its slot would reach its end while still
+	// being held here — never applied, never reported, and then silently dropped when
+	// Resolve stops returning it. If the booking would be over by the time its slot
+	// fires, act now: the whole point of the booking is this plate during its window.
+	if res.Until != nil && !res.Until.After(res.Since.Add(offset)) {
+		return true
+	}
+	return elapsed >= offset
 }
 
 // spreadSpacingFactor sets the target pace as a multiple of the per-operation drain:

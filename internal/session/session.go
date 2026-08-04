@@ -17,7 +17,18 @@ import (
 	"github.com/uppertoe/pstonn/internal/identity"
 )
 
+// cookieName is the legacy (unprefixed) session cookie name. It is still READ so a
+// session issued before the __Host- rename keeps working until it renews.
+//
+// hostCookieName carries the __Host- prefix, which a browser only honours when the
+// cookie is Secure, Path=/ and carries no Domain — exactly the properties that stop a
+// sibling subdomain under the same registrable domain from planting a same-named cookie
+// this server cannot tell apart from its own (the login-CSRF / session-fixation vector).
+// The prefix REQUIRES Secure, so it is used only when cookies are secure; over plain
+// HTTP (local dev) the browser would reject a __Host- cookie outright, so the plain name
+// is kept there.
 const cookieName = "pstonn_session"
+const hostCookieName = "__Host-pstonn_session"
 
 // Manager issues and validates session cookies.
 type Manager struct {
@@ -77,6 +88,26 @@ func (m *Manager) epochFor(email string) int64 {
 
 func normalise(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
+// issuedCookieName is the name new cookies are written under: the __Host--prefixed
+// name when cookies are secure (HTTPS), else the plain legacy name (a __Host- cookie
+// without Secure is rejected by the browser, which would break local dev over HTTP).
+func (m *Manager) issuedCookieName() string {
+	if m.secure {
+		return hostCookieName
+	}
+	return cookieName
+}
+
+// readCookie returns the session cookie, preferring the name new cookies use and
+// falling back to the legacy unprefixed name so a session issued before the __Host-
+// rename keeps working until it renews.
+func (m *Manager) readCookie(r *http.Request) (*http.Cookie, error) {
+	if c, err := r.Cookie(m.issuedCookieName()); err == nil {
+		return c, nil
+	}
+	return r.Cookie(cookieName)
+}
+
 type payload struct {
 	Email  string   `json:"e"`
 	Name   string   `json:"n"`
@@ -113,7 +144,7 @@ func (m *Manager) issue(w http.ResponseWriter, u identity.User, iat int64) error
 	b64 := base64.RawURLEncoding.EncodeToString(body)
 	value := b64 + "." + m.sign(b64)
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
+		Name:     m.issuedCookieName(),
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
@@ -125,17 +156,25 @@ func (m *Manager) issue(w http.ResponseWriter, u identity.User, iat int64) error
 	return nil
 }
 
-// Clear removes the session cookie.
+// Clear removes the session cookie. It expires BOTH names, so a sign-out clears the
+// cookie whether the browser holds a new __Host- one or a legacy unprefixed one from
+// before the rename.
 func (m *Manager) Clear(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   m.secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-	})
+	names := []string{m.issuedCookieName()}
+	if cookieName != names[0] { // only a second header when the names actually differ
+		names = append(names, cookieName)
+	}
+	for _, name := range names {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   m.secure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+		})
+	}
 }
 
 // Decode implements identity.Decoder: it validates the cookie signature and
@@ -153,7 +192,7 @@ func (m *Manager) Clear(w http.ResponseWriter) {
 // than whenever the cookie happened to lapse. A group change that is not accompanied
 // by a bump still waits for maxAge.
 func (m *Manager) Decode(w http.ResponseWriter, r *http.Request) (identity.User, bool) {
-	c, err := r.Cookie(cookieName)
+	c, err := m.readCookie(r)
 	if err != nil {
 		return identity.User{}, false
 	}
@@ -183,8 +222,19 @@ func (m *Manager) Decode(w http.ResponseWriter, r *http.Request) (identity.User,
 		return identity.User{}, false
 	}
 	// Past the absolute ceiling: refuse rather than renew, so the user goes back
-	// through the provider and their groups are re-read.
-	if p.Iat != 0 && now.Sub(time.Unix(p.Iat, 0)) >= m.maxAge {
+	// through the provider and their groups are re-read. A PRIVILEGED session gets a
+	// much shorter ceiling — the base ttl rather than the full maxAge — because sliding
+	// renewal carries the `admin` claim snapshotted at sign-in forward, and the provider
+	// is re-read only at re-authentication. Without this an IdP-side demotion would leave
+	// admin access live for up to maxAge (7 days); capping at ttl keeps a demotion's
+	// blast radius to the base TTL, no worse than before renewal existed. (App-side
+	// revocation via the epoch is immediate and unaffected; this covers the group-only
+	// change the epoch is not bumped for.)
+	ceiling := m.maxAge
+	if u.IsAdmin() {
+		ceiling = m.ttl
+	}
+	if p.Iat != 0 && now.Sub(time.Unix(p.Iat, 0)) >= ceiling {
 		return identity.User{}, false
 	}
 	// More than half spent, and renewable (Iat present, so not a legacy cookie):

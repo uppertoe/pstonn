@@ -23,6 +23,14 @@ func TestNeutraliseLinks(t *testing.T) {
 		"HTTP://evil.example",
 		"permit http://evil.example/x now",
 		"see https://evil.example/a and https://evil.example/b",
+		// S17: no whitespace boundary before the scheme. The old `\b` anchor did not
+		// fire inside "2https://…" (digit-then-letter is not a word boundary), so the
+		// URL slipped past the strip and the mail layer, which uses no boundary, still
+		// hyperlinked it. These must now be stripped.
+		"2https://evil.example/pay",
+		"pay:https://evil.example",
+		".https://evil.example/x",
+		"unitBhttps://evil.example",
 	} {
 		got := neutraliseLinks(hostile)
 		if strings.Contains(strings.ToLower(got), "http") {

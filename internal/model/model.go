@@ -170,6 +170,12 @@ type Resolution struct {
 	// watching, and 500 households sharing a midnight boundary is the worst burst
 	// the council sees) without ever delaying the second.
 	Scheduled bool
+
+	// Until is when this allocation stops being the right answer: a winning override's
+	// end, or nil for an open-ended roster day / SourceNone. The rollover spread needs
+	// it so a SHORT advance booking is never handed a spread slot that lands after the
+	// booking has already ended — which would leave it never applied and never reported.
+	Until *time.Time
 }
 
 // Resolve decides which vehicle should be allocated to a permit at time now.
@@ -212,7 +218,7 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		return Resolution{
 			VehicleID: best.VehicleID, Registration: best.Registration,
 			Source: SourceOverride, By: best.CreatedBy,
-			Since: since, Scheduled: scheduled,
+			Since: since, Scheduled: scheduled, Until: best.EndsAt,
 		}
 	}
 

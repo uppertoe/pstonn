@@ -216,6 +216,32 @@ func clientIP(r *http.Request) string {
 	return peer
 }
 
+// rateLimitKey is the per-caller key EVERY per-IP throttle keys on. It is clientIP with
+// an IPv6 address collapsed to its /64 network prefix.
+//
+// A single customer is routinely delegated a whole IPv6 /64 (or larger), so keying a
+// limiter on the full 128-bit address lets one attacker draw an effectively unlimited
+// supply of distinct source addresses from behind one allocation and defeat the throttle
+// entirely — the door-QR queue flood is the concrete case, but it applies to every
+// per-IP limiter. Masking to the /64 makes the whole allocation share one bucket.
+//
+// IPv4 is left as the full /32: v4 space is scarce and is one address per customer (or
+// CGNAT-shared many-to-one), so a /32 is the right unit and widening it would lump
+// unrelated users together. Use this — not clientIP — for anything that feeds .allow();
+// clientIP itself stays the exact observed address for diagnostics (e.g. the /status
+// echo that would surface a CDN edge address if the proxy posture regressed).
+func rateLimitKey(r *http.Request) string {
+	ip := clientIP(r)
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return ip // not an IP (already normalised, or an odd peer): key on it verbatim
+	}
+	if parsed.To4() != nil {
+		return ip // IPv4: the full address is the caller
+	}
+	return parsed.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
 // fromProxy reports whether a peer address is one we are willing to accept
 // forwarding headers from: loopback, a private range, or a link-local address.
 // An unparseable peer is treated as untrusted.
@@ -283,7 +309,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	// Throttle BEFORE parsing: the limiter has to gate the expensive work (the
 	// body parse), not just the send, or an unauthenticated flood still costs a
 	// full form parse per request.
-	if !s.contact.allow(clientIP(r)) {
+	if !s.contact.allow(rateLimitKey(r)) {
 		base.Warn = "You've sent a few messages already. Please wait a little while before sending another."
 		s.render(w, base)
 		return

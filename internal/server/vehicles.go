@@ -100,11 +100,20 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 	if uerr != nil {
 		log.Printf("vehicle usage for %s before delete: %v", owner, uerr)
 	}
-	if err := s.store.DeleteVehicle(r.Context(), owner, pathInt(r, "id")); err != nil {
+	deleted, err := s.store.DeleteVehicle(r.Context(), owner, pathInt(r, "id"))
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	// The delete happened either way, so the household hears about it either way.
+	if !deleted {
+		// The id matched no vehicle of this owner (a stale form, a double-submit, or a
+		// probe with someone else's id). Nothing was removed, so write no audit row and
+		// send no "a car was deleted" notification — those would be a false record of a
+		// destructive change, replayable to bury the household's real activity.
+		http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
+		return
+	}
+	// The delete happened, so the household hears about it.
 	// Gating this on a resolved plate meant a transient read error turned a
 	// cascading delete of roster days and bookings into a silent one — the exact
 	// invisible change the notice exists to surface.

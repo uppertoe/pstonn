@@ -266,10 +266,17 @@ func (s *Store) SetVehicleEmail(ctx context.Context, owner string, id int64, ema
 }
 
 // DeleteVehicle removes a vehicle, scoped to its owner (so one user cannot delete
-// another's vehicle by guessing an id).
-func (s *Store) DeleteVehicle(ctx context.Context, owner string, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE id = ? AND owner = ?`, id, owner)
-	return err
+// another's vehicle by guessing an id). It reports whether a row was actually
+// removed, so the caller does not write an audit row and fire a household-wide
+// "a car was deleted" notification for an id that matched nothing (a stale form, a
+// double-submit, or a probe against another owner's id).
+func (s *Store) DeleteVehicle(ctx context.Context, owner string, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE id = ? AND owner = ?`, id, owner)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // VehiclePaletteForTest exposes the palette so a test can assert the ordering

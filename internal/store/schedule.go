@@ -184,7 +184,12 @@ func (s *Store) createOverrideGuarded(ctx context.Context, permitID, vehicleID i
 	}
 	// The liveness EXISTS applies ONLY to real guest creates: guest_token_id 0 is a
 	// member-created override (CreateOverride delegates here), which has no token to
-	// check and must not be refused by one. The cap applies to both.
+	// check and must not be refused by one. The overall cap applies to both. The GUEST
+	// sub-cap (last clause) applies only to guest creates: it counts just guest rows
+	// against a smaller ceiling so a link holder cycling plates cannot fill the whole
+	// per-permit budget and lock the household out of booking their OWN permit — the
+	// owner path (CreateOverrideCapped) counts all rows against the larger overall cap,
+	// so the sub-cap always leaves room for the owner.
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
 SELECT ?, ?, ?, ?, ?, ?, ?, ?
@@ -192,9 +197,12 @@ WHERE (? = 0 OR EXISTS (
         SELECT 1 FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
         WHERE t.id = ? AND t.revoked_at = '' AND g.enabled = 1))
   AND (SELECT COUNT(*) FROM override
-       WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)) < ?`,
+       WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)) < ?
+  AND (? = 0 OR (SELECT COUNT(*) FROM override
+       WHERE permit_id = ? AND guest_token_id != 0 AND (ends_at IS NULL OR ends_at > ?)) < ?)`,
 		permitID, vid, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID,
-		guestTokenID, guestTokenID, permitID, nowUTC(), MaxLiveOverridesPerPermit)
+		guestTokenID, guestTokenID, permitID, nowUTC(), MaxLiveOverridesPerPermit,
+		guestTokenID, permitID, nowUTC(), MaxLiveGuestOverridesPerPermit)
 	if err != nil {
 		return 0, err
 	}
@@ -216,6 +224,14 @@ var ErrGuestOverrideRefused = errors.New("store: guest link is no longer active,
 // creates as well as member ones — capping only the member path left the public guest
 // and door-QR flows able to insert without limit, which is the larger surface.
 const MaxLiveOverridesPerPermit = 50
+
+// MaxLiveGuestOverridesPerPermit sub-caps how many live overrides GUEST links (and the
+// public door QR) may hold on one permit at once. It is deliberately well below
+// MaxLiveOverridesPerPermit so anonymous/guest traffic — which is the untrusted, higher-
+// volume surface — can never consume the whole per-permit budget and leave the owner
+// unable to book their own permit (the owner path counts against the larger cap). Plenty
+// for legitimate use, where a guest activation is a single row.
+const MaxLiveGuestOverridesPerPermit = 20
 
 // CreatePlateOverride books a one-off using a literal, unsaved number plate
 // (vehicle_id IS NULL). The plate is normalised by the caller.
@@ -300,12 +316,21 @@ func (s *Store) ActiveGuestOverridePlate(ctx context.Context, permitID, guestTok
 	if guestTokenID == 0 {
 		return "", false
 	}
+	// Resolve the plate THROUGH the vehicle. A guest who taps one of the link's saved
+	// cars creates a vehicle-backed override (vehicle_id set, registration empty), so a
+	// `registration != ''` filter made that row invisible — the revert button never
+	// rendered and the resident's own plate stayed off the permit till end of day with
+	// no guest-side remedy. For "tap your car" grants this was the ONLY activation path,
+	// so the affordance was inert throughout. Pick the newest guest override regardless
+	// of kind and read its plate from the join when the row carries no literal one.
 	var reg string
 	err := s.db.QueryRowContext(ctx, `
-SELECT registration FROM override
-WHERE permit_id = ? AND guest_token_id = ? AND registration != ''
-  AND starts_at <= ? AND (ends_at IS NULL OR ends_at > ?)
-ORDER BY created_at DESC, id DESC LIMIT 1`,
+SELECT COALESCE(NULLIF(o.registration, ''), v.registration, '')
+FROM override o
+LEFT JOIN vehicle v ON v.id = o.vehicle_id
+WHERE o.permit_id = ? AND o.guest_token_id = ?
+  AND o.starts_at <= ? AND (o.ends_at IS NULL OR o.ends_at > ?)
+ORDER BY o.created_at DESC, o.id DESC LIMIT 1`,
 		permitID, guestTokenID, now.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339)).Scan(&reg)
 	if err != nil {
 		return "", false

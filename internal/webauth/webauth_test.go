@@ -56,7 +56,8 @@ func startLogin(t *testing.T, a *Authenticator) (state string, cookie *http.Cook
 		t.Fatal("no state in the authorization redirect")
 	}
 	for _, c := range res.Cookies() {
-		if c.Name == stateCookie {
+		// A secure authenticator issues the state cookie under the __Host- name.
+		if c.Name == hostStateCookie {
 			cookie = c
 		}
 	}
@@ -193,8 +194,25 @@ func TestClearStateCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	a.clearStateCookie(w)
 	cookies := w.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != stateCookie || cookies[0].MaxAge >= 0 {
-		t.Fatalf("expected an immediately-expiring state cookie, got %+v", cookies)
+	// Clears the __Host- name at / AND the legacy plain name at its old /auth/ path, so a
+	// login started before the rename is still cleared on completion.
+	if len(cookies) != 2 {
+		t.Fatalf("expected the state cookie cleared under both names, got %+v", cookies)
+	}
+	var sawHost, sawLegacyAuthPath bool
+	for _, c := range cookies {
+		if c.MaxAge >= 0 || c.Value != "" {
+			t.Fatalf("Clear must send immediately-expiring empty cookies, got %+v", c)
+		}
+		if c.Name == hostStateCookie && c.Path == "/" {
+			sawHost = true
+		}
+		if c.Name == stateCookie && c.Path == "/auth/" {
+			sawLegacyAuthPath = true
+		}
+	}
+	if !sawHost || !sawLegacyAuthPath {
+		t.Fatalf("clearStateCookie must expire __Host-@/ and legacy@/auth/, got %+v", cookies)
 	}
 }
 

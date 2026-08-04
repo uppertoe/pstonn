@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -41,9 +42,12 @@ func TestOwnerIsolation(t *testing.T) {
 		t.Fatalf("bob vehicles = %+v, want just BBB222", v)
 	}
 
-	// Bob cannot delete Alice's vehicle by guessing its id.
-	if err := s.DeleteVehicle(ctx, bob, aVeh); err != nil {
+	// Bob cannot delete Alice's vehicle by guessing its id — and the owner-scoped
+	// delete reports that nothing was removed, so no false "deleted" audit/notice fires.
+	if deleted, err := s.DeleteVehicle(ctx, bob, aVeh); err != nil {
 		t.Fatal(err)
+	} else if deleted {
+		t.Fatal("Bob deleted Alice's vehicle across owners")
 	}
 	if v, _ := s.ListVehiclesFor(ctx, alice); len(v) != 1 {
 		t.Fatalf("alice vehicle deleted by bob: %+v", v)
@@ -234,13 +238,13 @@ func TestAccountMembers(t *testing.T) {
 	// after the membership delete is keyed by email alone (notification prefs,
 	// queued mail), so a silent no-op would have let one account wipe an unrelated
 	// person's settings.
-	if _, err := s.RemoveMember(ctx, "someone-else@example.com", gran); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.RemoveMember(ctx, "someone-else@example.com", gran); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("wrong owner removing a member: err = %v, want ErrNotFound", err)
 	}
 	if n, _ := s.CountMembers(ctx, primary); n != 2 {
 		t.Fatalf("wrong owner must not remove a member; count = %d, want 2", n)
 	}
-	if _, err := s.RemoveMember(ctx, primary, gran); err != nil {
+	if _, _, err := s.RemoveMember(ctx, primary, gran); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := s.CountMembers(ctx, primary); n != 1 {
@@ -1150,14 +1154,14 @@ func TestGuestGrantEdit(t *testing.T) {
 	}
 
 	// Update: relabel, allow overnight, swap the car set to {v1, v2}.
-	if err := s.UpdateGuestGrant(ctx, alice, gid, "Weekend", true, []int64{v1, v2}); err != nil {
+	if _, err := s.UpdateGuestGrant(ctx, alice, gid, "Weekend", true, []int64{v1, v2}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	// A foreign owner cannot update; a foreign car is rejected.
-	if err := s.UpdateGuestGrant(ctx, bob, gid, "x", false, []int64{v1}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.UpdateGuestGrant(ctx, bob, gid, "x", false, []int64{v1}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign update = %v, want ErrNotFound", err)
 	}
-	if err := s.UpdateGuestGrant(ctx, alice, gid, "x", false, []int64{bV}); !errors.Is(err, ErrNotFound) {
+	if _, err := s.UpdateGuestGrant(ctx, alice, gid, "x", false, []int64{bV}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign car update = %v, want ErrNotFound", err)
 	}
 
@@ -1954,6 +1958,11 @@ func TestRemoveMemberRevokesTheirPasses(t *testing.T) {
 	if err := s.AddMemberCapped(ctx, primary, member, 2); err != nil {
 		t.Fatal(err)
 	}
+	// Accept the invitation so they are an ACTIVE member: only a real member has access
+	// to lose, so only a real member's passes are swept (a pending invite grants nothing).
+	if err := s.AcceptInvite(ctx, member, primary); err != nil {
+		t.Fatal(err)
+	}
 	veh, err := s.CreateVehicle(ctx, primary, "CAR111", "Car")
 	if err != nil {
 		t.Fatal(err)
@@ -1985,7 +1994,7 @@ func TestRemoveMemberRevokesTheirPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	revoked, err := s.RemoveMember(ctx, primary, member)
+	revoked, _, err := s.RemoveMember(ctx, primary, member)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2029,6 +2038,201 @@ func TestRemoveMemberRevokesTheirPasses(t *testing.T) {
 	}
 	if _, err := s.GuestContextByTokenHash(ctx, "member-hash-2"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a departed member's guest link still resolves: %v", err)
+	}
+}
+
+// TestGuestOverridesSubCapProtectsOwner (S12): guest links share the permit's
+// override budget, so a link holder cycling plates could fill all 50 and lock the
+// household out of booking their OWN permit. Guest creates now have a smaller sub-cap
+// that always leaves room for the owner.
+func TestGuestOverridesSubCapProtectsOwner(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "owner@example.com"
+	permitID, err := s.UpsertPermit(ctx, owner, "VPP-CAP", "1", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantID, err := s.CreateGuestGrant(ctx, owner, owner, permitID, "pass", true, nil,
+		[]GuestRecipient{{Email: "v@example.com", TokenHash: "cap-hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokenID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM guest_token WHERE grant_id = ?`, grantID).Scan(&tokenID); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().Add(-time.Minute)
+	end := time.Now().Add(2 * time.Hour)
+	for i := 0; i < MaxLiveGuestOverridesPerPermit; i++ {
+		if _, err := s.CreateGuestPlateOverride(ctx, permitID, fmt.Sprintf("GST%03d", i), start, &end, "v", tokenID); err != nil {
+			t.Fatalf("guest override %d within the sub-cap was refused: %v", i, err)
+		}
+	}
+	// One past the guest sub-cap is refused...
+	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "GSTOVR", start, &end, "v", tokenID); !errors.Is(err, ErrGuestOverrideRefused) {
+		t.Fatalf("guest override past the sub-cap = %v, want ErrGuestOverrideRefused", err)
+	}
+	// ...but the OWNER can still book their own permit: the sub-cap left room under the
+	// overall cap, so a guest flood cannot lock the household out.
+	if _, err := s.CreateOverrideCapped(ctx, permitID, 0, "OWNER1", start, &end, owner, MaxLiveOverridesPerPermit); err != nil {
+		t.Fatalf("owner locked out of their own permit by guest bookings: %v", err)
+	}
+}
+
+// TestActiveGuestOverridePlateResolvesSavedCar (S15): a guest who taps one of the
+// link's saved cars creates a vehicle-backed override (no literal plate), which the
+// old `registration != ”` filter made invisible — so the "put it back" revert button
+// never rendered. The plate must resolve through the vehicle.
+func TestActiveGuestOverridePlateResolvesSavedCar(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "owner@example.com"
+	permitID, err := s.UpsertPermit(ctx, owner, "VPP-REVERT", "1", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	veh, err := s.CreateVehicle(ctx, owner, "MYCAR1", "My Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantID, err := s.CreateGuestGrant(ctx, owner, owner, permitID, "pass", false, []int64{veh},
+		[]GuestRecipient{{Email: "v@example.com", TokenHash: "rev-hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokenID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM guest_token WHERE grant_id = ?`, grantID).Scan(&tokenID); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().Add(-time.Minute)
+	end := time.Now().Add(2 * time.Hour)
+	if _, err := s.CreateGuestOverride(ctx, permitID, veh, start, &end, "v", tokenID); err != nil {
+		t.Fatal(err)
+	}
+	plate, ok := s.ActiveGuestOverridePlate(ctx, permitID, tokenID, time.Now())
+	if !ok || plate != "MYCAR1" {
+		t.Fatalf("ActiveGuestOverridePlate = (%q, %v), want (MYCAR1, true) — saved-car revert is dead", plate, ok)
+	}
+}
+
+// TestUpdateGuestGrantSweepsRemovedCar (S11): unticking a car from a pass is a
+// withdrawal of authority, so a live override that car is already steering must be
+// swept — otherwise reconcile keeps re-asserting it for up to ~30 hours.
+func TestUpdateGuestGrantSweepsRemovedCar(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const owner = "owner@example.com"
+	permitID, err := s.UpsertPermit(ctx, owner, "VPP-UPD", "1", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := s.CreateVehicle(ctx, owner, "KEEP01", "Keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drop, err := s.CreateVehicle(ctx, owner, "DROP01", "Drop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantID, err := s.CreateGuestGrant(ctx, owner, owner, permitID, "pass", false, []int64{keep, drop},
+		[]GuestRecipient{{Email: "v@example.com", TokenHash: "upd-hash"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokenID int64
+	if err := s.db.QueryRowContext(ctx, `SELECT id FROM guest_token WHERE grant_id = ?`, grantID).Scan(&tokenID); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(6 * time.Hour)
+	if _, err := s.CreateGuestOverride(ctx, permitID, drop, time.Now().Add(-time.Minute), &end, "v", tokenID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateGuestOverride(ctx, permitID, keep, time.Now().Add(-time.Minute), &end, "v", tokenID); err != nil {
+		t.Fatal(err)
+	}
+	// Untick DROP from the pass.
+	swept, err := s.UpdateGuestGrant(ctx, owner, grantID, "pass", false, []int64{keep})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept != 1 {
+		t.Fatalf("swept %d overrides, want 1 (the removed car's live booking)", swept)
+	}
+	ovs, err := s.ListOverrides(ctx, permitID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ovs) != 1 || ovs[0].VehicleID != keep {
+		t.Fatalf("live overrides after unticking DROP = %+v, want only the KEEP car's", ovs)
+	}
+}
+
+// TestWithdrawnInviteLeavesStrangerDataUntouched is the S6 abuse-case fix. A pending
+// invite grants nothing, so withdrawing one must never reach into the invited
+// address's OWN account: its notification prefs, queued push and sessions belong to
+// that person, not the inviter. Before the fix, invite-then-"remove" ran the full
+// active-member teardown against ANY address, letting any user wipe a stranger's
+// notification config and force-sign them out with one request pair.
+func TestWithdrawnInviteLeavesStrangerDataUntouched(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	const attacker, victim = "attacker@example.com", "victim@example.com"
+
+	// The victim runs their own account: a notify pref with a push topic, a queued push
+	// to that topic, and a session generation the app would bump on a real revocation.
+	if err := s.SetNotifyPref(ctx, NotifyPref{Owner: victim, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "victim-topic", QuietFrom: 22, QuietUntil: 6}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueOutbox(ctx, OutboxItem{Account: victim, DedupKey: "vk", NtfyTopic: "victim-topic", NtfyPriority: "default", Subject: "hi", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	epoch0, err := s.SessionEpoch(ctx, victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The attacker (a primary) invites the victim — a pending offer — then "removes" it.
+	if err := s.AddMemberCapped(ctx, attacker, victim, 2); err != nil {
+		t.Fatal(err)
+	}
+	revoked, wasActive, err := s.RemoveMember(ctx, attacker, victim)
+	if err != nil {
+		t.Fatalf("withdraw invite: %v", err)
+	}
+	if wasActive {
+		t.Fatal("withdrawing a pending invite reported an active-member removal")
+	}
+	if revoked != 0 {
+		t.Fatalf("withdrawing a pending invite revoked %d passes, want 0", revoked)
+	}
+
+	// The victim's own data is untouched.
+	pref, err := s.GetNotifyPref(ctx, victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pref.NtfyEnabled || pref.NtfyTopic != "victim-topic" {
+		t.Fatalf("victim's notify pref was altered by a stranger's withdrawn invite: %+v", pref)
+	}
+	if epoch, _ := s.SessionEpoch(ctx, victim); epoch != epoch0 {
+		t.Fatalf("victim's session epoch changed %d -> %d: a withdrawn invite force-signed them out", epoch0, epoch)
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE ntfy_topic = ?`, "victim-topic").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("victim's queued push was dropped by a stranger's withdrawn invite: %d rows remain, want 1", n)
+	}
+
+	// The pending invite itself is gone (the withdrawal really happened), and a repeat
+	// withdrawal now reports nothing to remove.
+	if _, ok, err := s.PendingInvite(ctx, victim); err != nil || ok {
+		t.Fatalf("pending invite was not withdrawn (ok=%v err=%v)", ok, err)
+	}
+	if _, _, err := s.RemoveMember(ctx, attacker, victim); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second withdrawal: got %v, want ErrNotFound", err)
 	}
 }
 
@@ -2905,6 +3109,10 @@ func setupGuestBooking(t *testing.T, s *Store, owner string) (permitID, grantID 
 	if err := s.AddMemberCapped(ctx, owner, "member@example.com", 5); err != nil {
 		t.Fatal(err)
 	}
+	// Accept so they are an ACTIVE member with access (and passes) to lose on removal.
+	if err := s.AcceptInvite(ctx, "member@example.com", owner); err != nil {
+		t.Fatal(err)
+	}
 	grantID, err := s.CreateGuestGrant(ctx, owner, "member@example.com", permitID, "pass", true, nil,
 		[]GuestRecipient{{Email: "visitor@example.com", TokenHash: "hash1"}})
 	if err != nil {
@@ -2935,7 +3143,7 @@ func TestRevocationRoutesSweepLiveOverrides(t *testing.T) {
 		s := newTestStore(t)
 		const owner = "owner1@example.com"
 		pid, _ := setupGuestBooking(t, s, owner)
-		if _, err := s.RemoveMember(ctx, owner, "member@example.com"); err != nil {
+		if _, _, err := s.RemoveMember(ctx, owner, "member@example.com"); err != nil {
 			t.Fatalf("remove member: %v", err)
 		}
 		assertNoLiveOverrides(t, s, pid)

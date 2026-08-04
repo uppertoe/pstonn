@@ -91,6 +91,80 @@ func TestParseLoginFormQuotingStyles(t *testing.T) {
 	}
 }
 
+// S5: a decorative form placed ABOVE the sign-in form (a cookie banner, a culture
+// selector) must not donate its action. The password is harvested from and posted to
+// the form that actually contains it — matched by content, not page order.
+func TestParseLoginFormIsFormScoped(t *testing.T) {
+	page := `
+<html><body>
+<form action="/idm/Home/SetCulture" method="post">
+  <input type="hidden" name="__RequestVerificationToken" value="CULTURE-TOKEN" />
+  <input name="culture" value="en-AU">
+  <button>Set language</button>
+</form>
+<form action="/idm/Account/Login?returnurl=%2Fcb" method="post">
+  <input name="Username" value="" />
+  <input name="Password" type="password" value="" />
+  <input name="__RequestVerificationToken" type="hidden" value="LOGIN-TOKEN" />
+</form>
+<form action="/idm/Account/ForgotPassword" method="post">
+  <input name="Email" value="">
+</form>
+</body></html>`
+
+	action, fields := parseLoginForm(page)
+	if want := "/idm/Account/Login?returnurl=%2Fcb"; action != want {
+		t.Fatalf("action = %q, want the sign-in form's action %q (a decoy form hijacked it)", action, want)
+	}
+	if got := fields[fieldAntiforgery]; got != "LOGIN-TOKEN" {
+		t.Fatalf("antiforgery = %q, want the login form's token; harvested across forms", got)
+	}
+	if _, ok := fields["culture"]; ok {
+		t.Fatalf("an input from a different form was harvested: %v", fields)
+	}
+	if _, ok := fields["Email"]; ok {
+		t.Fatalf("an input from the forgot-password form was harvested: %v", fields)
+	}
+	if err := checkLoginForm(fields); err != nil {
+		t.Fatalf("the real sign-in form must be accepted: %v", err)
+	}
+}
+
+// S5: a page with no credential-bearing form must yield nothing, so checkLoginForm
+// reports a page-shape change (FailUnexpected) rather than this client adopting some
+// unrelated form's action and posting the password there.
+func TestParseLoginFormNoCredentialForm(t *testing.T) {
+	page := `<form action="/search"><input name="q" value=""></form>`
+	action, fields := parseLoginForm(page)
+	if action != "" {
+		t.Fatalf("action = %q, want empty when no form carries a Password input", action)
+	}
+	if err := checkLoginForm(fields); !errors.Is(err, ErrLoginFormUnrecognised) {
+		t.Fatalf("checkLoginForm = %v, want ErrLoginFormUnrecognised", err)
+	}
+}
+
+// S4: an https login flow must refuse a scheme-DOWNGRADE redirect even to a
+// configured council host — following it would move the credential POST onto
+// cleartext. A flow configured on http (dev/tests) has nothing to downgrade.
+func TestRedirectSchemeOK(t *testing.T) {
+	cases := []struct {
+		req, want string
+		ok        bool
+	}{
+		{"https", "https", true},
+		{"http", "https", false}, // the downgrade the finding turns on
+		{"HTTPS", "https", true}, // case-insensitive
+		{"http", "http", true},   // http-configured flow: nothing to downgrade
+		{"https", "http", true},
+	}
+	for _, tc := range cases {
+		if got := redirectSchemeOK(tc.req, tc.want); got != tc.ok {
+			t.Fatalf("redirectSchemeOK(%q, %q) = %v, want %v", tc.req, tc.want, got, tc.ok)
+		}
+	}
+}
+
 // C4: an unrecognised page must NOT come back as ErrLoginRejected. That error is
 // "your password is wrong": it burns the user's attempt throttle and makes the
 // scheduler delete every saved session, so a portal HTML change would masquerade

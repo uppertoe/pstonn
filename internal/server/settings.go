@@ -68,6 +68,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			base.Flash = "Invitation recorded for " + invited + ". No email was sent, so you will need to tell them to sign in and accept it."
 		}
 	}
+	if wd := r.URL.Query().Get("withdrawn"); looksLikeEmail(wd) {
+		base.Flash = "Invitation to " + wd + " withdrawn. It granted no access, so nothing of theirs was changed."
+	}
 	if joined := r.URL.Query().Get("joined"); looksLikeEmail(joined) {
 		base.Flash = "You now share " + joined + "'s account."
 	}

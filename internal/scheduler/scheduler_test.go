@@ -1387,8 +1387,10 @@ func TestFailStreakClearsWithoutATarget(t *testing.T) {
 	if err != nil || len(vehicles) != 1 {
 		t.Fatalf("expected one saved vehicle, got %d (err=%v)", len(vehicles), err)
 	}
-	if err := st.DeleteVehicle(ctx, owner, vehicles[0].ID); err != nil {
+	if deleted, err := st.DeleteVehicle(ctx, owner, vehicles[0].ID); err != nil {
 		t.Fatal(err)
+	} else if !deleted {
+		t.Fatal("expected the owner's own vehicle to be deleted")
 	}
 	fc.setErr = nil
 	s.reconcileAll(ctx)
