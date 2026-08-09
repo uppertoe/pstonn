@@ -128,12 +128,12 @@
          shown plate IS the council's confirmed state — same footprint throughout, so
          the pill never shifts. The plate above stays the council-confirmed value the
          whole time; the spinner announces a pending change, it does not pre-show it. */}}
-    <span class="pslot">{{if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
+    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="Not confirmed on the permit yet — p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="Couldn't check with the council just now — this is the last confirmed plate. p.stonn will keep trying." aria-label="Couldn't confirm with the council; showing the last known plate">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
     {{if .PollNext}}{{/* Bounded self-refresh: re-fetches the card until the council
          confirms the settled plate or the attempt cap is hit (see armPlatePoll), so a
          just-made change swaps in without a reload while an outage still can't loop.
          display:none so the helper div is not a flex item nudging the pill's layout. */}}
-    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:5s" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"></div>
+    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"></div>
     {{end}}
   </div>
 </div>

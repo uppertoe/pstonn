@@ -254,6 +254,15 @@ type permitView struct {
 	// the card into a permanent poll — the concern that used to force fragments to
 	// arm no follow-up at all, which is why a just-made change never refreshed.
 	PollNext int
+	// PollDelay is how many seconds to wait before that next poll. It backs off across
+	// attempts (see platePollDelays) so a quick apply swaps in fast while a slow COLD
+	// council read still gets minutes of gentle retries instead of freezing the spinner.
+	PollDelay int
+	// PlateUnconfirmed is set when the self-refresh ran out of attempts with a read or
+	// apply still outstanding. The pill then shows an honest "couldn't confirm" mark
+	// (not a spinner frozen mid-check): the plate displayed is the last council-confirmed
+	// value, and the scheduler goes on retrying out of band.
+	PlateUnconfirmed bool
 }
 
 // expiredPermitView is the compact row shown for a permit p.stonn no longer acts

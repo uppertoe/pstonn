@@ -651,26 +651,42 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 
 // respondPermit re-renders just the permit's body for htmx swaps, or falls back
 // to a full-page redirect for non-htmx submits.
-// maxPlatePolls bounds how many times a card re-fetches itself to catch a plate
-// still settling at the council. At the 5s template interval that is ~50s — long
-// enough for a normal apply (the council read + write + confirm the scheduler
-// does, spaced), short enough that a council outage or a change the council keeps
-// refusing cannot turn the card into a permanent poll. Past the cap the card shows
-// the council's confirmed state and the "applying" spinner stays put until a
-// reload; the scheduler keeps retrying and notifies the user out of band.
-const maxPlatePolls = 10
+//
+// platePollDelays is the self-refresh cadence: the delay in SECONDS before each
+// successive poll, indexed by how many polls have already been served. It caps how
+// many times a card re-fetches itself to catch a plate still settling at the council
+// (its length is the bound), AND how long it waits between tries.
+//
+// It BACKS OFF on purpose. The old cadence was a flat 5s×10 (~50s), which barely
+// fitted two council attempts — so an idle-day dashboard load, which finds an empty
+// plate cache AND an expired access token and therefore must silent-renew before it
+// can even read (each attempt up to ~25s, and the council's edge occasionally makes
+// that slow), routinely outlasted the window and froze the "checking" spinner until a
+// reload. A few quick polls still swap in a normal apply fast; then it stretches to a
+// gentle ~30-60s heartbeat so a slow cold read gets several minutes of retries and
+// lands, while the bound still stops a genuine council outage from polling forever.
+// Past the cap the card keeps showing the last council-confirmed plate; the scheduler
+// goes on retrying and notifies out of band.
+var platePollDelays = []int{5, 5, 5, 10, 10, 15, 20, 30, 45, 60, 60, 60}
 
-// armPlatePoll sets PollNext: whether this card should re-fetch itself, and with
-// what next attempt number. It arms while a background refresh is running (stale
-// cache) OR a change is in flight (Applying), never past maxPlatePolls. attempt is
-// how many polls have already been served — 0 on a full page render or the
-// fragment a user action returns, higher on a self-refresh follow-up.
+// armPlatePoll sets PollNext (whether this card re-fetches itself, and the next
+// attempt number) and PollDelay (seconds to wait first). It arms while a background
+// refresh is running (stale cache) OR a change is in flight (Applying), never past the
+// cap. attempt is how many polls have already been served — 0 on a full page render or
+// the fragment a user action returns, higher on a self-refresh follow-up.
 func (pv *permitView) armPlatePoll(attempt int) {
-	if attempt < maxPlatePolls && (pv.PlateRefreshing || pv.Applying) {
+	outstanding := pv.PlateRefreshing || pv.Applying
+	if attempt < len(platePollDelays) && outstanding {
 		pv.PollNext = attempt + 1
+		pv.PollDelay = platePollDelays[attempt]
 		return
 	}
 	pv.PollNext = 0
+	pv.PollDelay = 0
+	// Out of polls with a read or apply STILL outstanding: surface an honest
+	// "couldn't confirm" mark rather than leaving a spinner frozen mid-check. A settled
+	// card (nothing outstanding) falls through with this false and shows the tick.
+	pv.PlateUnconfirmed = outstanding
 }
 
 func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner string, p model.Permit) {

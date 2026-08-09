@@ -320,13 +320,20 @@ func TestTemplatesRender(t *testing.T) {
 	// a change the council keeps refusing cannot loop the card forever.
 	capped := samplePermitView(loc)
 	capped.Applying = true
-	capped.armPlatePoll(maxPlatePolls)
+	capped.armPlatePoll(len(platePollDelays))
 	var cb bytes.Buffer
 	if err := templates.ExecuteTemplate(&cb, "permit-body", capped); err != nil {
 		t.Fatalf("render permit-body/poll-cap: %v", err)
 	}
 	if strings.Contains(cb.String(), "/permits/7/card") {
 		t.Fatalf("permit-body armed a follow-up poll at the attempt cap:\n%s", cb.String())
+	}
+	// And it must show the honest failure mark, not a spinner frozen mid-check.
+	if !strings.Contains(cb.String(), "pwarn") {
+		t.Fatalf("capped card with an outstanding change did not show the unconfirmed mark:\n%s", cb.String())
+	}
+	if strings.Contains(cb.String(), `class="pchk"`) {
+		t.Fatalf("capped card is still showing a spinner instead of the unconfirmed mark:\n%s", cb.String())
 	}
 
 	// The htmx fragment must render standalone (it's swapped in on schedule edits).
