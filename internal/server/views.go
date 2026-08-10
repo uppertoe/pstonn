@@ -40,9 +40,14 @@ type dashboardData struct {
 	ContactVal  string // contact form: the message text to redisplay after a validation error
 	ContactFrom string // contact form: the reply-to address to redisplay after a validation error
 	Relink      bool   // council session expired → prompt re-link
-	Flash       string // success (green)
-	Warn        string // problem / caution (amber)
-	Loc         *time.Location
+	// CapacityFull hides the onboarding link form from a NEW household when the
+	// deployment is at MaxAccounts, so the refusal arrives before terms are read
+	// and a third-party password is typed — not after, as a toast. councilLink
+	// keeps the authoritative (locked) check; this is the courtesy copy.
+	CapacityFull bool
+	Flash        string // success (green)
+	Warn         string // problem / caution (amber)
+	Loc          *time.Location
 	// shared access
 	Owner      string       // effective account owner (email) that scopes the data
 	IsPrimary  bool         // whether the signed-in user owns this account
@@ -453,6 +458,24 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
+		// A RETURNING household is not a signup. The paths that end a session
+		// (idle retirement, a rejected saved password, a manual disconnect)
+		// delete the row, so without this a household whose schedule has STOPPED
+		// RUNNING saw the same fresh "Link your council account" page as a
+		// newcomer — with their permits, cars and roster all still here and no
+		// hint that nothing is being applied meanwhile. Errors fall through to
+		// the plain signup rendering: wrongly quiet beats wrongly alarming.
+		if known, err := s.store.HasOwnData(ctx, owner); err == nil && known {
+			base.Relink = true
+			base.Warn = "Your permit schedule is paused: p.stonn is not connected to the council, so no plate changes are being made. Reconnect below to resume it."
+		} else if err == nil && s.cfg.MaxAccounts > 0 {
+			// A genuinely new household gets the capacity refusal HERE, before
+			// terms and a typed password — councilLink re-checks under the
+			// admission lock, so this read needs no locking and may be stale.
+			if n, cerr := s.store.CountLinkedAccounts(ctx); cerr == nil && n >= s.cfg.MaxAccounts {
+				base.CapacityFull = true
+			}
+		}
 		s.render(w, base)
 		return dashboardData{}, false
 	}

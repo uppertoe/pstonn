@@ -2163,6 +2163,26 @@ func (s *Scheduler) spreadElapsed(permitID int64, res model.Resolution, now time
 		return true
 	}
 	offset := s.spreadOffset(permitID, window)
+	// A BOOKING is a person naming exact times — "the nanny from 9" — and the
+	// visitor is standing at the kerb at its start, so every held minute is
+	// uncovered exposure while the calendar shows the day as handled. The full
+	// window exists for ROSTER rollovers, where whole streets share midnight and
+	// nobody is waiting at 00:00; overrides don't herd onto one boundary like
+	// that (and the governor still paces the wire), so they get a tight cap: a
+	// tenth of the booking, never more than spreadOverrideCap. The all-or-nothing
+	// guard below stopped a booking SHORTER than its slot from being starved
+	// outright, but an 8-hour booking with a 50-minute slot was still held the
+	// full 50 minutes.
+	if res.Source == model.SourceOverride {
+		if res.Until != nil {
+			if d := res.Until.Sub(res.Since); d > 0 && offset > d/10 {
+				offset = d / 10
+			}
+		}
+		if offset > spreadOverrideCap {
+			offset = spreadOverrideCap
+		}
+	}
 	// A short advance booking must never be starved by a slot that lands after it ends.
 	// The offset is drawn from the permit id across the whole window (up to ~an hour),
 	// so a booking whose window is shorter than its slot would reach its end while still
@@ -2174,6 +2194,12 @@ func (s *Scheduler) spreadElapsed(permitID int64, res model.Resolution, now time
 	}
 	return elapsed >= offset
 }
+
+// spreadOverrideCap bounds how long the rollover spread may hold an advance
+// BOOKING past its named start time, whatever the fleet-wide window works out
+// to. Ten minutes still staggers any small cluster of same-hour bookings while
+// keeping the promise the booking form made about when the plate changes.
+const spreadOverrideCap = 10 * time.Minute
 
 // spreadSpacingFactor sets the target pace as a multiple of the per-operation drain:
 // at 2, a shared boundary is retired at half the rate the governor would allow, so

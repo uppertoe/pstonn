@@ -98,6 +98,37 @@ func TestSpreadNeverStarvesAShortBooking(t *testing.T) {
 	}
 }
 
+// A timed BOOKING names exact times, and the visitor is at the kerb at its
+// start — so however wide the fleet's rollover window, an advance booking must
+// become eligible within minutes of its start, not up to an hour later while
+// the calendar shows the day as covered. (Rosters keep the full window: whole
+// streets share midnight, and nobody is waiting at 00:00.)
+func TestSpreadClampsTimedBookings(t *testing.T) {
+	// A large fleet: the roster window is the full 60m cap.
+	s := spreadScheduler(60*time.Minute, 900)
+	start := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC) // "the nanny from 9"
+	end := start.Add(8 * time.Hour)
+	booking := model.Resolution{Source: model.SourceOverride, Since: start, Scheduled: true, Until: &end}
+	for id := int64(1); id <= 900; id++ {
+		if !s.spreadElapsed(id, booking, start.Add(spreadOverrideCap)) {
+			t.Fatalf("permit %d: an 8h booking was still held %v after its start; timed bookings must be clamped", id, spreadOverrideCap)
+		}
+	}
+	// The clamp is override-only: at the same instant past midnight, a roster
+	// rollover is still being spread across the full window.
+	midnight := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	roster := model.Resolution{Source: model.SourceRoster, Since: midnight, Scheduled: true}
+	held := 0
+	for id := int64(1); id <= 900; id++ {
+		if !s.spreadElapsed(id, roster, midnight.Add(spreadOverrideCap)) {
+			held++
+		}
+	}
+	if held == 0 {
+		t.Fatal("the booking clamp leaked into roster rollovers; midnight smoothing is gone")
+	}
+}
+
 // A permit must keep the SAME slot every day. A fresh draw each rollover would
 // re-pile permits at random and, worse, let one permit sit near the end of the
 // window repeatedly by luck.

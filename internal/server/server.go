@@ -94,6 +94,9 @@ type Server struct {
 	// scheduler. Guarded by touchMu.
 	touchMu   sync.Mutex
 	lastTouch map[string]time.Time
+	// renameAlertOnce paces the "council may have renamed permit types" operator
+	// alert (see renderPicker): systemic, so once per process is enough.
+	renameAlertOnce sync.Once
 }
 
 // maxConcurrentGuest is how many public guest requests may be in flight at once.

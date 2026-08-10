@@ -80,6 +80,20 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	for _, p := range managed {
 		already[p.CouncilPermitID] = true
 	}
+	fallback := visitorNameFallback(permits)
+	if fallback && complete {
+		// The council appears to have renamed its permit types out from under the
+		// name-match — systemic (hits every new signup), so the operator must
+		// hear. Once per process: a rename doesn't unhappen between requests.
+		s.renameAlertOnce.Do(func() {
+			log.Printf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback offering engaged", owner)
+			nctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_ = s.notify.NotifyAdmin(nctx, "Council may have renamed permit types",
+				"An account holds permits with CanChangeVehicle=true but none whose type name contains \"visitor\". "+
+					"isVisitorPermit's name-match may be stale; the picker is offering changeable permits with a caution meanwhile. Check the council's current permit-type names.")
+		})
+	}
 	for _, p := range permits {
 		if already[p.CouncilPermitID] {
 			continue
@@ -88,7 +102,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// holder can change the vehicle can actually be scheduled. The rest are
 		// listed greyed-out with the reason, so the user sees them and isn't left
 		// wondering where a permit went.
-		visitor := isVisitorPermit(p.PermitType)
+		visitor := isVisitorPermit(p.PermitType) || (fallback && p.CanChangeVehicle)
 		addable := visitor && p.CanChangeVehicle
 		reason := ""
 		switch {
@@ -102,6 +116,9 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// nothing will ever be applied to it, and silently accepting it looks to the
 		// user like the app is working when it can't be.
 		warn := ""
+		if addable && fallback {
+			warn = fallbackWarn
+		}
 		if addable {
 			meta := model.Permit{Status: p.Status, EndDate: p.EndDate}
 			if meta.Inactive(time.Now(), s.cfg.DisplayLocation) {
@@ -136,6 +153,32 @@ const claimedByAnotherAccount = "That permit is already being scheduled through 
 func isVisitorPermit(permitType string) bool {
 	return strings.Contains(strings.ToLower(permitType), "visitor")
 }
+
+// visitorNameFallback reports whether the name-match should be bypassed for
+// this account: the council owns the display text, and a rename ("visitor" →
+// anything else) would otherwise make every permit unaddable overnight, with
+// the picker flatly asserting nothing on the account can be scheduled. When NO
+// permit matches the name but the council says at least one permit's vehicle
+// can be changed — its own authorization signal for exactly the operation
+// p.stonn performs — those permits are offered with a caution instead of a
+// dead end. Scoped to the no-match case on purpose: while the name works, it
+// stays the primary filter (other permit types can be CanChangeVehicle too).
+func visitorNameFallback(permits []parking.PermitInfo) bool {
+	anyChangeable := false
+	for _, p := range permits {
+		if isVisitorPermit(p.PermitType) {
+			return false
+		}
+		if p.CanChangeVehicle {
+			anyChangeable = true
+		}
+	}
+	return anyChangeable
+}
+
+// fallbackWarn is the caution shown on a permit offered via visitorNameFallback.
+const fallbackWarn = "This permit isn't named as a visitor permit, but the council allows its vehicle to be changed. " +
+	"Only add it if it's the permit your visitors park on."
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	user, owner, _, ok := s.accountForWrite(w, r)
@@ -194,8 +237,10 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Enforce the same rule the picker shows: p.stonn only schedules visitor
 	// permits whose vehicle the holder can change. This is the authoritative
-	// gate (the greyed-out picker button is only a UI hint).
-	if !isVisitorPermit(match.PermitType) {
+	// gate (the greyed-out picker button is only a UI hint). The name-fallback
+	// must match the picker's exactly, or a rename leaves the picker offering a
+	// permit this gate then refuses.
+	if !isVisitorPermit(match.PermitType) && !(visitorNameFallback(permits) && match.CanChangeVehicle) {
 		s.message(w, http.StatusForbidden, "p.stonn only manages visitor permits.")
 		return
 	}
@@ -243,7 +288,17 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		target = cpid
 	}
 	s.logChange(ctx, owner, user, store.ActionPermitAdd, target, "")
-	redirectHome(w, r)
+	// Land with the outcome said out loud. An EXPIRED permit is deliberately
+	// addable (its schedule can be copied onto a renewal), but it renders inside
+	// the collapsed "Expired permits" section — so the picker's "Manage" press
+	// used to land on a page where the just-added permit was nowhere visible and
+	// nothing acknowledged it. The active case gets a first-steps nudge instead.
+	meta := model.Permit{Status: match.Status, EndDate: match.EndDate}
+	if meta.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		http.Redirect(w, r, "/schedule?added=expired", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/schedule?added=1", http.StatusSeeOther)
 }
 
 // deletePermit stops p.stonn administering a permit: it drops the permit and its

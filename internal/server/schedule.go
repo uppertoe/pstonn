@@ -22,6 +22,16 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The post-addPermit landing (see addPermit): say what just happened, because
+	// an expired permit's card is inside the collapsed section below and an
+	// active one's next step (set a roster) is not self-evident to a newcomer.
+	switch r.URL.Query().Get("added") {
+	case "1":
+		base.Flash = "Permit added. Pick a car for each day of the week below, or make a one-off booking."
+	case "expired":
+		base.Warn = "That permit was added, but it is no longer active at the council, so nothing will be applied to it. " +
+			"It's under “Expired permits” below — renew it on the council's ePermits site, then copy its schedule onto the new permit when it appears here."
+	}
 	ctx := r.Context()
 	owner := base.Owner
 	now := time.Now().In(s.cfg.DisplayLocation)
