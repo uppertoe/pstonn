@@ -202,13 +202,9 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// renders a one-shot htmx follow-up so the refreshed plate swaps in without
 	// a manual reload.
 	plateRefreshing := false
-	var plateStale time.Duration // how long past plateMaxAge the shown reading is (0 while fresh)
-	if actual, age, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
+	if actual, _, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
 		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, plateMaxAge); err == nil {
 		plateRefreshing = !fresh
-		if !fresh {
-			plateStale = age - plateMaxAge
-		}
 		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
 		// case they were entered with, and overwriting our belief with a case variant
 		// makes the scheduler's next tick see a plate that differs from its target —
@@ -355,9 +351,14 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// reachable only by leaving the tab open for the whole poll budget, because
 		// every full render restarted at attempt 0 — so during a council outage a
 		// reloading user saw a spinner forever and never the "couldn't confirm"
-		// mark. Seeding from how long the reading has been stale makes a reload
-		// resume the clock instead of resetting it.
-		pollSeed: attemptForStaleness(plateStale),
+		// mark. Seeded from the REFRESH-FAILURE streak, not the cache entry's age:
+		// on a healthy system the first visit of the day serves an hours-old
+		// reading while a refresh lands within seconds, and age-based seeding
+		// declared that visit unconfirmable instantly — with no polls, so the
+		// fresh answer never even swapped in (shipped 2026-08-10, caught the same
+		// evening as "couldn't check" on every cold dashboard visit).
+		pollSeed: attemptForStaleness(s.council.RefreshFailingFor(p.Owner,
+			model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID})),
 	}
 	// Default to a first-attempt poll; a fragment response refines this with the
 	// real attempt count (see respondPermit). A full page render keeps attempt 0
@@ -699,22 +700,23 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 var platePollDelays = []int{5, 5, 5, 10, 10, 15, 20, 30, 45, 60, 60, 60}
 
 // plateMaxAge is how old a cached council reading may be before the dashboard
-// treats it as stale: shows the checking spinner, declines to adopt it into the
-// stored record, and (via attemptForStaleness) counts the staleness against the
-// poll budget.
+// treats it as stale: shows the checking spinner and declines to adopt it into
+// the stored record.
 const plateMaxAge = 5 * time.Minute
 
-// attemptForStaleness maps how long the shown reading has been stale onto the
-// poll attempt to resume from: the attempt a tab left open would have reached in
-// that time. Past the whole budget it returns the cap, which renders the honest
-// "couldn't confirm" mark immediately instead of a fresh spinner.
-func attemptForStaleness(stale time.Duration) int {
-	if stale <= 0 {
+// attemptForStaleness maps how long refreshes have been FAILING consecutively
+// (parking.RefreshFailingFor — not the cache entry's age, which merely says
+// nobody looked lately) onto the poll attempt to resume from: the attempt a tab
+// left open would have reached in that time. Past the whole budget it returns
+// the cap, which renders the honest "couldn't confirm" mark immediately instead
+// of a fresh spinner.
+func attemptForStaleness(failingFor time.Duration) int {
+	if failingFor <= 0 {
 		return 0
 	}
 	elapsed := time.Duration(0)
 	for i, d := range platePollDelays {
-		if elapsed >= stale {
+		if elapsed >= failingFor {
 			return i
 		}
 		elapsed += time.Duration(d) * time.Second

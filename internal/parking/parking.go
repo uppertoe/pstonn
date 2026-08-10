@@ -146,6 +146,7 @@ type Client struct {
 	http        *http.Client // redirects handled manually; cookies passed per-user
 	regCache    sync.Map     // regKey -> cachedReg, to bound council reads
 	regRefresh  sync.Map     // regKey -> struct{}, dedupes in-flight background plate refreshes
+	regFail     sync.Map     // regKey -> time.Time, start of the current refresh-failure streak (see RefreshFailingFor)
 	// regGen is a per-key generation, bumped by ForgetPermit, so a plate read that was
 	// already in flight when a permit was removed cannot resurrect the cache entry
 	// afterwards. Guarded by regGenMu (writes only; regCache reads stay lock-free).
@@ -897,6 +898,7 @@ func (c *Client) ForgetPermit(owner, councilPermitID string) {
 	c.regGen[key]++ // invalidate any refresh/write already in flight for this key
 	c.regGenMu.Unlock()
 	c.regCache.Delete(key)
+	c.regFail.Delete(key) // a permit nobody manages has no failure streak worth reporting
 }
 
 // regGeneration reads a key's current generation (0 if never forgotten).
@@ -921,7 +923,10 @@ func (c *Client) storeRegIfCurrent(key regKey, gen uint64, reg string) {
 // refreshCurrentVehicle fetches the permit's plate in the background, detached
 // from any request context so a closed tab doesn't cancel it, deduplicating
 // concurrent refreshes per permit. Failures are logged and the stale cache
-// entry is left in place for the next attempt.
+// entry is left in place for the next attempt; the failure STREAK is recorded
+// (regFail) so the UI can distinguish "the reading is old because nobody
+// looked" from "we have been trying and failing" — only the second deserves
+// the couldn't-confirm mark.
 func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 	key := regKey{owner, p.CouncilPermitID}
 	if _, inflight := c.regRefresh.LoadOrStore(key, struct{}{}); inflight {
@@ -935,10 +940,28 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 		reg, err := c.CurrentVehicle(ctx, owner, p)
 		if err != nil {
 			log.Printf("parking: background plate refresh for permit %s: %v", p.CouncilPermitID, err)
+			c.regFail.LoadOrStore(key, time.Now()) // keep the streak's START on repeats
 			return
 		}
+		c.regFail.Delete(key)
 		c.storeRegIfCurrent(key, gen, reg)
 	}()
+}
+
+// RefreshFailingFor reports how long background plate refreshes for this permit
+// have been failing CONSECUTIVELY — zero when the last attempt succeeded (or
+// none has run). This, not the cache entry's age, is the honest input to the
+// dashboard's couldn't-confirm clock: a healthy system's first visit of the day
+// serves an hours-old reading while a refresh lands within seconds, and seeding
+// the clock from raw age declared that visit unconfirmable before trying.
+func (c *Client) RefreshFailingFor(owner string, p model.Permit) time.Duration {
+	if c.sandbox != nil {
+		return 0
+	}
+	if v, ok := c.regFail.Load(regKey{owner, p.CouncilPermitID}); ok {
+		return time.Since(v.(time.Time))
+	}
+	return 0
 }
 
 // SetVehicle reallocates the permit to the given registration, the core action.

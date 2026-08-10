@@ -226,3 +226,65 @@ func TestCooldownBackoff(t *testing.T) {
 		t.Fatal("cooldown should clear after success")
 	}
 }
+
+// TestRefreshFailingForTracksTheStreakNotTheAge: the dashboard's couldn't-confirm
+// clock seeds from THIS, so its semantics carry real weight. A cache entry that is
+// merely old (nobody looked lately) must report zero — seeding from raw age made
+// every cold daily visit declare "couldn't check" instantly, with no polls, while
+// a perfectly healthy refresh was landing in the background (shipped and caught
+// 2026-08-10). Only consecutive refresh FAILURES start the clock, a success or
+// ForgetPermit clears it, and repeats keep the streak's original start.
+func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	c := &Client{store: st} // no session: any background refresh fails fast
+	ctx := context.Background()
+	p := model.Permit{CouncilPermitID: "14576"}
+	const owner = "o@example.com"
+	key := regKey{owner, p.CouncilPermitID}
+
+	// An old-but-healthy cache entry alone is NOT a failure streak.
+	c.regCache.Store(key, cachedReg{reg: "ABC123", at: time.Now().Add(-20 * time.Hour)})
+	if d := c.RefreshFailingFor(owner, p); d != 0 {
+		t.Fatalf("an aged cache with no failed refresh reported a %v streak; want 0", d)
+	}
+
+	// A stale read kicks a background refresh, which fails (no session) and must
+	// start the streak. Poll: the refresh runs on its own goroutine.
+	if _, _, _, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for c.RefreshFailingFor(owner, p) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("a failed background refresh never started the failure streak")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	first, ok := c.regFail.Load(key)
+	if !ok {
+		t.Fatal("streak start missing after a failure")
+	}
+
+	// A second failure keeps the ORIGINAL start (the streak measures the outage,
+	// not the latest attempt).
+	c.regFail.LoadOrStore(key, time.Now()) // what refreshCurrentVehicle does on repeat
+	if again, _ := c.regFail.Load(key); again != first {
+		t.Fatal("a repeat failure moved the streak's start; the clock would reset every attempt")
+	}
+
+	// Success clears it (simulate the success path's bookkeeping)...
+	c.regFail.Delete(key)
+	if d := c.RefreshFailingFor(owner, p); d != 0 {
+		t.Fatalf("streak survived a success: %v", d)
+	}
+	// ...and so does ForgetPermit.
+	c.regFail.Store(key, time.Now().Add(-time.Hour))
+	c.ForgetPermit(owner, p.CouncilPermitID)
+	if d := c.RefreshFailingFor(owner, p); d != 0 {
+		t.Fatalf("streak survived ForgetPermit: %v", d)
+	}
+}
