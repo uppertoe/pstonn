@@ -467,10 +467,10 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// The landing after a REJECTED council login (see councilLink): name both
 		// causes and offer the remedy as a button. Takes precedence over the
 		// relink/capacity banners — this person is mid-attempt, and the next step
-		// matters more than account status.
+		// matters more than account status. The banner's content lives in the
+		// template (it needs structure: lead line, button row, fallback link),
+		// not in this prose field.
 		if r.URL.Query().Get("link") == "rejected" {
-			base.Warn = "The council portal wouldn't accept that sign-in. Either the password is wrong, or there is no City of Stonnington ePermits account for " + user +
-				". Check you can sign in at the council's own ePermits site with this exact email — and if your ePermits account uses a different email address, that's the usual cause:"
 			base.LinkHelp = true
 		} else
 		// A RETURNING household is not a signup. The paths that end a session

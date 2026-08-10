@@ -118,8 +118,10 @@ func TestTemplatesRender(t *testing.T) {
 		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Reconnect your council account"},
 		{"capacity-full", dashboardData{User: user, State: "onboarding", IsPrimary: true, CapacityFull: true, Loc: loc}, "p.stonn is full at the moment"},
 		{"link-rejected offers sign-out", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true,
-			LogoutURL: "https://auth.example.com/logout", Warn: "The council portal wouldn't accept that sign-in.", Loc: loc},
-			"then sign back in with the email your ePermits account uses"},
+			LogoutURL: "https://auth.example.com/logout", Loc: loc},
+			"then sign back in with your ePermits email"},
+		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
+			"The usual fix: sign out, then sign back in with your ePermits email."},
 		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
 		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},

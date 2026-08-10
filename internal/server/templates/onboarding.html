@@ -3,17 +3,27 @@
 {{template "appbar" .}}
 <main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
-  {{if .Warn}}<div class="banner warn"{{if .LinkHelp}} style="align-items:flex-start"{{end}}>{{template "ic-alert"}} <span>{{.Warn}}
-    {{if and .LinkHelp .LogoutURL}}
-    {{/* The remedy as a button, not a journey: sign out lands on the auth page,
-         whose notice says which email to use. hx-boost off — a logout must be a
-         real navigation to the gateway, never an AJAX body swap. */}}
-    <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+  {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+  {{if .LinkHelp}}
+  {{/* Rejected council login: what happened (one line), the fix (a real button,
+       not a description of a journey — sign-out lands on the auth page, whose
+       notice names the right email), and a fallback check. hx-boost off on both
+       links: a logout must be a real navigation, and the council site is
+       another origin. */}}
+  <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
+    <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
+    Either the password is wrong, or your ePermits account isn&rsquo;t under <strong>{{.User.Email}}</strong>.
+    {{if .LogoutURL}}
+    <span style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
       <a href="{{.LogoutURL}}" hx-boost="false"><button type="button" class="sm">Sign out</button></a>
-      <span>then sign back in with the email your ePermits account uses.</span>
+      <span>then sign back in with your ePermits email &mdash; the usual fix.</span>
     </span>
+    {{else}}
+    <span style="display:block;margin-top:10px">The usual fix: sign out, then sign back in with your ePermits email.</span>
     {{end}}
-  </span></div>{{end}}
+    <span style="display:block;margin-top:10px;font-size:13px">Unsure of your details? Try them at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a> first.</span>
+  </span></div>
+  {{end}}
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
     {{if .IsPrimary}}
