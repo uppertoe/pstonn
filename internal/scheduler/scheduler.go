@@ -63,6 +63,10 @@ type Notifier interface {
 	// NotifyRelinkRequired tells the user to reconnect their council account;
 	// returns the number of channels that accepted it (0 = not reached).
 	NotifyRelinkRequired(ctx context.Context, owner string) int
+	// NotifyReconnectStalled tells the household automatic reconnection has been
+	// failing for a sustained stretch while their session is retained, so their
+	// schedule is paused; returns the number of channels that accepted it.
+	NotifyReconnectStalled(ctx context.Context, owner string) int
 	// NotifyPermitExpiry warns the account that a permit is approaching expiry;
 	// returns the number of channels that accepted it (0 = not reached).
 	NotifyPermitExpiry(ctx context.Context, owner, permitLabel string, expiry time.Time) int
@@ -269,6 +273,14 @@ const busyNotifyThreshold = 15
 // instead of a reassuring "still updating" they might sit on until a fine.
 const blockNotifyThreshold = 4
 
+// sessionNotifyThreshold is how many consecutive session-expired reconcile
+// attempts a wanted change must survive before the household is alarmed.
+// Attempts in this state are spaced ~8 minutes by the fixed deferRetry(3) in
+// the ErrSessionExpired branch, so this is roughly half an hour in which the
+// schedule wanted a different plate and automatic reconnection kept failing —
+// well past the point a routine expire-and-reconnect would have healed itself.
+const sessionNotifyThreshold = 4
+
 const systemAlertThrottle = 30 * time.Minute
 
 // maxNotifyConcurrency bounds simultaneous user-notification deliveries (SMTP dials
@@ -284,6 +296,16 @@ const (
 	reconnectBackoffMax = 1 * time.Hour
 	reconnectPoll       = 3 * time.Second
 )
+
+// reconnectStalledAlertAttempts is the backoff count at which the household is
+// told reconnection has stalled. recoverOrRetire deliberately never retires a
+// session over a transient failure or a changed council sign-in page, which
+// used to mean those states were reported to nobody but the operator — the
+// schedule silently stopped applying for as long as recovery kept deferring.
+// Five attempts is 5+10+20+40 minutes of backoff, so this fires after roughly
+// an hour and a quarter of failed reconnects: unambiguously stalled, not a
+// blip. Fired once per queue residency (attempts resets when the item leaves).
+const reconnectStalledAlertAttempts = 5
 
 // reconnectItem is one queued reconnect: when to next attempt it, when it first
 // entered the queue (for the backlog-age metric), the session generation it belongs
@@ -1306,11 +1328,15 @@ func (s *Scheduler) dequeueReconnect(owner string) {
 }
 
 // backoffReconnect reschedules owner after an exponential per-owner delay.
+// Once the attempt count says recovery has stalled rather than hiccuped, the
+// household is told — exactly once per queue residency — because every path
+// that lands here retains the session and would otherwise retry forever with
+// only the operator aware the schedule has stopped applying.
 func (s *Scheduler) backoffReconnect(owner string) {
 	s.reconnectMu.Lock()
-	defer s.reconnectMu.Unlock()
 	it, ok := s.reconnectQ[owner]
 	if !ok {
+		s.reconnectMu.Unlock()
 		return
 	}
 	it.attempts++
@@ -1320,6 +1346,11 @@ func (s *Scheduler) backoffReconnect(owner string) {
 	}
 	it.next = time.Now().Add(backoff)
 	s.reconnectQ[owner] = it
+	attempts := it.attempts
+	s.reconnectMu.Unlock()
+	if attempts == reconnectStalledAlertAttempts {
+		s.alertReconnectStalled(owner)
+	}
 }
 
 // ReconnectBacklog reports queue health for /status: total queued, how many are due
@@ -1517,6 +1548,36 @@ func (s *Scheduler) alertRelink(owner string) {
 	}()
 }
 
+// alertReconnectStalled tells a household that automatic reconnection has been
+// failing long enough to count as stalled (see reconnectStalledAlertAttempts)
+// while their session is deliberately retained — a council login outage or a
+// changed sign-in page. Distinct from alertRelink because "re-link now" is the
+// wrong instruction here: an interactive re-link goes through the same broken
+// login, and recovery resumes on its own once it is repaired. What the
+// household needs to know is that the schedule is paused meanwhile.
+func (s *Scheduler) alertReconnectStalled(owner string) {
+	if s.notifier == nil || !s.notifier.Enabled() {
+		return
+	}
+	claim := "reconnect-stalled|" + owner
+	if !s.claimNotify(claim) {
+		return
+	}
+	go func() {
+		defer s.releaseNotify(claim)
+		if s.notifyConc != nil {
+			s.notifyConc <- struct{}{}
+			defer func() { <-s.notifyConc }()
+		}
+		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if s.notifier.NotifyReconnectStalled(nctx, owner) == 0 {
+			_ = s.notifier.NotifyAdmin(nctx, "User could not be told their schedule is paused: "+owner,
+				fmt.Sprintf("%s's council session expired and auto-reconnect has been failing for over an hour, but no notification could be delivered to them. Their schedule is not being applied; they may get a fine.", owner))
+		}
+	}()
+}
+
 // warnDisplaced emails the driver whose car just came off the permit, reporting
 // whether the warning will genuinely reach them. A suppressed address never will, so
 // claiming otherwise leaves nobody to tell the driver. (A send-rate throttle is not
@@ -1554,6 +1615,18 @@ func (s *Scheduler) logApply(ctx context.Context, permitID int64, reg, source, s
 		!(last.Status == status && last.Registration == reg && last.Detail == detail) {
 		_ = s.store.RecordApply(ctx, permitID, reg, source, status, detail)
 	}
+}
+
+// failureKeyDay stamps failure dedup keys with the local date. The durable
+// notified-key dedups "this exact outcome", but a failure that persists across
+// a day boundary is a NEW exposure — a different day's visitor sitting on the
+// wrong plate — and used to be silently swallowed by the previous day's key:
+// Monday's "we couldn't update your permit" suppressed Tuesday's and
+// Wednesday's identical failures, so the household heard exactly once however
+// many visitors were exposed. Success keys stay undated; re-confirming an
+// identical success adds nothing.
+func (s *Scheduler) failureKeyDay() string {
+	return time.Now().In(s.loc).Format("2006-01-02")
 }
 
 // notifyUser delivers an apply outcome to the user with guaranteed-retry
@@ -1684,7 +1757,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Reason:      reason,
 		Action:      action,
 		Transient:   kind != parking.FailRejected,
-	}, "error|"+want+"|"+reason)
+	}, "error|"+want+"|"+reason+"|"+s.failureKeyDay())
 }
 
 // describeFailure turns a failure classification into a plain-English reason and
@@ -2378,6 +2451,36 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 	if p.FailStreak == 0 {
 		return
 	}
+	// An episode that ends because the TARGET went away is not a recovery. A
+	// 9am–5pm booking the council blocked all day used to end exactly here at
+	// 5pm: the override left Resolve's output, want reverted to a plate already
+	// on the permit, and the streak was cleared with nothing ever sent — so the
+	// last word the household had was the reassuring "still updating, p.stonn
+	// will keep trying automatically", about a visitor who was uncovered the
+	// whole day. Tell them the change never landed. The last activity row still
+	// carries the failing target; when it instead MATCHES the current plate, the
+	// change did land (someone fixed it at the portal, or a guest's inline apply)
+	// and there is nothing to retract. Streak-gated like the original notice: an
+	// episode too brief to have alarmed anyone is too brief to retract.
+	if p.FailStreak >= failNotifyThreshold {
+		if last, err := s.store.LastApply(ctx, p.ID); err == nil && last.Status == "error" &&
+			last.Registration != "" && !model.SamePlate(last.Registration, p.ActiveRegistration) {
+			reason := fmt.Sprintf("That change is no longer scheduled — the booking ended or the schedule moved on — and it was never applied: the permit showed %s the whole time.", p.ActiveRegistration)
+			s.logApply(ctx, p.ID, last.Registration, last.Source, "error", reason)
+			s.notifyUser(ctx, p, notify.ApplyOutcome{
+				Owner:       p.Owner,
+				PermitLabel: permitLabel(p),
+				Reg:         last.Registration,
+				OK:          false,
+				CurrentReg:  p.ActiveRegistration,
+				Reason:      reason,
+				Action: "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
+					"If " + last.Registration + " parked there during the booking, it was not covered.",
+				// Not transient: this must not sit behind a quiet-hours hold and
+				// arrive as a stale correction long after the next booking started.
+			}, "unapplied|"+last.Registration+"|"+s.failureKeyDay())
+		}
+	}
 	s.clearFailStreak(ctx, p.ID)
 	s.clearRetry(p.ID)
 }
@@ -2632,11 +2735,20 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		}
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		if n >= threshold {
+			// The confirmed state is part of the key. With a bare "busy|"+want, the
+			// common ordering — soft notice at 15 ticks, breaker confirms the block
+			// after — left the urgent "act now to avoid a fine" escalation deduped
+			// by the reassuring notice it was supposed to override, so the one
+			// message blockNotifyThreshold exists for was unreachable.
+			key := "busy|" + want + "|" + s.failureKeyDay()
+			if confirmed {
+				key = "busy-blocked|" + want + "|" + s.failureKeyDay()
+			}
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
 				OK: false, CurrentReg: p.ActiveRegistration,
 				Reason: reason, Action: action, Transient: true, Urgent: confirmed,
-			}, "busy|"+want)
+			}, key)
 		}
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
@@ -2662,6 +2774,26 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// and enqueues it there with a properly captured generation.
 		if g, ok := parking.SessionGenOf(err); ok {
 			s.enqueueReconnect(ctx, p.Owner, g)
+		}
+		// Recovery usually lands within a couple of reconnect attempts, but
+		// "usually" was previously load-bearing: this branch wrote no activity
+		// row, no fail streak and no notification, so a reconnect that kept
+		// deferring (a council login outage, a changed sign-in page) left the
+		// permit showing the wrong plate indefinitely with the household told
+		// nothing. Record it like every other failure and alarm once the streak
+		// says recovery has stalled. Not fed into passStats: a mass expiry is
+		// routine and already has its own systemic alert (session-churn), so it
+		// must not trip the multi-user-fail alarm.
+		reason := "p.stonn's sign-in to the council expired and signing back in hasn't succeeded yet, so your permit could not be updated."
+		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
+		if n := s.bumpFailStreak(ctx, p.ID); n >= sessionNotifyThreshold {
+			s.notifyUser(ctx, p, notify.ApplyOutcome{
+				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
+				OK: false, CurrentReg: p.ActiveRegistration,
+				Reason:    reason,
+				Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
+				Transient: true, Urgent: true,
+			}, "session|"+want+"|"+s.failureKeyDay())
 		}
 		s.deferRetry(p.ID, 3)
 		return true

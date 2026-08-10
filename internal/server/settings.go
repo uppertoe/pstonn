@@ -90,7 +90,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		pref.NtfyTopic = notify.RandomTopic()
 		_ = s.store.SetNotifyPref(ctx, pref)
 	}
-	base.Notify = s.notifyViewOf(user, pref)
+	base.Notify = s.notifyViewOf(ctx, user, pref)
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
 		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"))
@@ -122,7 +122,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 // renderNotify renders the swappable notifications fragment (auto-save target),
 // or falls back to a redirect for a non-htmx request.
 func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user string, pref store.NotifyPref, status, errMsg string) {
-	nv := s.notifyViewOf(user, pref)
+	nv := s.notifyViewOf(r.Context(), user, pref)
 	nv.Status, nv.Error = status, errMsg
 	if r.Header.Get("HX-Request") != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -132,6 +132,38 @@ func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user strin
 		return
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// resumeEmail clears the acting user's own self-service unsubscribe, restoring
+// routine email. A dedicated endpoint rather than a side effect of saveNotify so
+// the Settings banner can offer one button that touches nothing else (posting a
+// partial form through saveNotify would clobber the other preferences). Only an
+// unsubscribe is clearable — a bounce or complaint stays until the operator
+// intervenes, which is exactly what the banner says for those.
+func (s *Server) resumeEmail(w http.ResponseWriter, r *http.Request) {
+	user, _, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	pref, err := s.store.GetNotifyPref(r.Context(), user)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	status := "Email resumed."
+	if cleared, err := s.store.UnsuppressIfUnsubscribed(r.Context(), user); err != nil {
+		s.serverError(w, err)
+		return
+	} else if !cleared {
+		status = "" // nothing to clear (or not clearable: bounce/complaint)
+	} else {
+		log.Printf("resubscribe: %s resumed email from the Settings banner", user)
+	}
+	// The banner state changed, so force the fragment to re-render even though
+	// the form normally saves with hx-swap:none.
+	w.Header().Set("HX-Retarget", "#notify-body")
+	w.Header().Set("HX-Reswap", "innerHTML")
+	s.renderNotify(w, r, user, pref, status, "")
 }
 
 // saveNotify auto-saves the user's channel choices on every toggle, requiring at
@@ -174,13 +206,22 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 	// it — so the "only tell me when something's wrong" preference was unreachable.
 	pref.FailuresOnly = r.FormValue("failures_only") != ""
 	// Quiet hours: hold overnight notices and deliver them at a chosen local hour.
-	nudged := false
+	nudged, nudgeMsg := false, "The two times must differ; end time moved."
 	if r.FormValue("quiet_enabled") != "" {
 		pref.QuietFrom = clampHour(r.FormValue("quiet_from"), 22)
 		pref.QuietUntil = clampHour(r.FormValue("quiet_until"), 6)
 		if pref.QuietFrom == pref.QuietUntil {
 			pref.QuietUntil = (pref.QuietFrom + 1) % 24 // equal would disable; nudge apart
 			nudged = true
+		}
+		// The hold applies to failure notices too, so an over-wide window is a
+		// day of "your permit couldn't be updated" sitting unread. Cap it here so
+		// the form reflects what will actually happen (quietDefer enforces the
+		// same bound at delivery for values stored before the cap existed).
+		if span := ((pref.QuietUntil - pref.QuietFrom) + 24) % 24; span > notify.MaxQuietHours {
+			pref.QuietUntil = (pref.QuietFrom + notify.MaxQuietHours) % 24
+			nudged = true
+			nudgeMsg = fmt.Sprintf("Quiet hours are capped at %d hours; end time moved.", notify.MaxQuietHours)
 		}
 	} else {
 		pref.QuietFrom, pref.QuietUntil = 0, 0 // equal ⇒ disabled (immediate delivery)
@@ -193,7 +234,7 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		// The saved value differs from what the form shows; re-render to sync.
 		w.Header().Set("HX-Retarget", "#notify-body")
 		w.Header().Set("HX-Reswap", "innerHTML")
-		s.renderNotify(w, r, user, pref, "The two times must differ; end time moved.", "")
+		s.renderNotify(w, r, user, pref, nudgeMsg, "")
 		return
 	}
 	s.renderNotify(w, r, user, pref, "Saved", "")

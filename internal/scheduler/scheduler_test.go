@@ -236,6 +236,7 @@ type fakeNotifier struct {
 	adminNotes    []string
 	adminErr      error // when set, NotifyAdmin records the attempt but returns this
 	relinks       []string
+	stalled       []string // owners told auto-reconnect has stalled (session retained)
 	displaced     []string // guest emails told their car came off the permit
 	expiries      []string // "owner:permitLabel" per expiry warning sent
 	expiryDeliver int      // channels to report delivered (0 => 1)
@@ -270,6 +271,21 @@ func (f *fakeNotifier) NotifyRelinkRequired(_ context.Context, owner string) int
 	defer f.mu.Unlock()
 	f.relinks = append(f.relinks, owner)
 	return 1
+}
+
+func (f *fakeNotifier) NotifyReconnectStalled(_ context.Context, owner string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stalled = append(f.stalled, owner)
+	return 1
+}
+
+// stalledSnap copies the stalled-alert log under lock (deliveries fire from
+// goroutines).
+func (f *fakeNotifier) stalledSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.stalled...)
 }
 
 func (f *fakeNotifier) NotifyPermitExpiry(_ context.Context, owner, permitLabel string, expiry time.Time) int {

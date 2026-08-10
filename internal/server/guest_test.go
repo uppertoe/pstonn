@@ -376,16 +376,18 @@ func isolateGuestBounds(t *testing.T) {
 
 // TestGuestRequestInvalidPlateStaysRedacted (E1): the rejected-plate reply is a
 // PUBLIC page — a printed QR is on a wall — and it fires for an ordinary visitor
-// typing "ABC-123", not just for an attacker. It must carry the same redaction as
-// every other request-only render: no permit label (the owner's own text,
-// typically an address), no owner email.
+// mistyping their plate, not just for an attacker. It must carry the same
+// redaction as every other request-only render: no permit label (the owner's own
+// text, typically an address), no owner email. ("ABC-123" no longer triggers it:
+// normalizeReg strips display separators, so the trigger here is a plate that is
+// genuinely too long once normalised.)
 func TestGuestRequestInvalidPlateStaysRedacted(t *testing.T) {
 	s := newGuestTestServer(t)
 	isolateGuestBounds(t)
 	const owner, label = "owner@example.com", "Flat3-12ExampleSt"
 	_, _, raw := seedDoorQR(t, s, owner, label)
 
-	body := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"plate": {"ABC-123"}}).Body.String()
+	body := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"plate": {"ABC1234567"}}).Body.String()
 	if !strings.Contains(body, "Enter a valid number plate") {
 		t.Fatalf("no plate-format guidance in the reply: %s", body)
 	}

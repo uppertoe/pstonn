@@ -128,7 +128,11 @@
          shown plate IS the council's confirmed state — same footprint throughout, so
          the pill never shifts. The plate above stays the council-confirmed value the
          whole time; the spinner announces a pending change, it does not pre-show it. */}}
-    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="Not confirmed on the permit yet — p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="Couldn't check with the council just now — this is the last confirmed plate. p.stonn will keep trying." aria-label="Couldn't confirm with the council; showing the last known plate">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
+    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="Not confirmed on the permit yet — p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="Couldn't check with the council — showing the last plate it confirmed, which may be out of date. p.stonn keeps trying." aria-label="Couldn't confirm with the council; showing the last known plate">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
+    {{/* The pill's failure states used to live entirely in title= — hover-only,
+         which does not exist on the phone this page is checked from. The one
+         state that means "do not trust the plate above" gets visible words. */}}
+    {{if .PlateUnconfirmed}}<span class="pnote">{{if .Applying}}change not confirmed{{else}}couldn&rsquo;t check &mdash; may be out of date{{end}}</span>{{end}}
     {{if .PollNext}}{{/* Bounded self-refresh: re-fetches the card until the council
          confirms the settled plate or the attempt cap is hit (see armPlatePoll), so a
          just-made change swaps in without a reload while an outage still can't loop.
@@ -164,6 +168,17 @@
     <button type="submit" class="sm">{{template "ic-copy"}} Copy schedule</button>
   </form>
 </div>
+{{end}}
+
+{{/* An entirely empty schedule used to render as seven "none" chips under a
+     green "on permit now ✓" — which reads as SET UP AND WORKING to a newcomer
+     who just linked, when in fact this permit will never change. Say so, once,
+     until the first roster day or booking exists. */}}
+{{if and .RosterEmpty (not .Overrides)}}
+<div class="banner warn" style="margin-top:14px;align-items:flex-start">{{template "ic-alert"}} <span>
+  <strong>Nothing is scheduled yet, so p.stonn will not change this permit.</strong>
+  Pick a car for each day below, or make a one-off booking &mdash; until then the permit stays exactly as it is at the council.
+</span></div>
 {{end}}
 
 <p class="sub">Weekly roster</p>
@@ -202,15 +217,16 @@
        the popover is a visual convenience and is hidden from assistive tech. */}}
   <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{.Source}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}"
+       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{if eq .Source "roster"}}weekly roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}{{if .Unconfirmed}}. Not confirmed with the council — the permit may still show a different plate{{else if .Applying}}. Change still applying — not on the permit yet{{end}}"
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
     <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
-    <div class="bar{{if .Adhoc}} adhoc{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
+    <div class="bar{{if .Adhoc}} adhoc{{end}}{{if .Unconfirmed}} unconf{{else if .Applying}} applying{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">{{.DayLabel}}</p>
-      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{.Source}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
+      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{if eq .Source "roster"}}weekly roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
+      {{if .Unconfirmed}}<br><span class="calwarn">not confirmed with the council</span>{{else if .Applying}}<br><span class="muted">still applying &mdash; not on the permit yet</span>{{end}}
     </div>
   </div>
   {{end}}
@@ -295,7 +311,7 @@
        to the current page. x-init runs htmx.process synchronously at teleport so
        the AJAX path is deterministic; the method/action make even an un-enhanced
        submit POST to the right endpoint (full reload) rather than silently no-op. */}}
-  <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override"
+  <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override" data-plate-confirm="plate"
         hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
         x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
@@ -335,7 +351,7 @@
       </div>
       <div class="segpane" :class="{hide: mode!='plate'}">
         <label class="fld">Number plate
-          <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" style="text-transform:uppercase">
+          <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
         </label>
         <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
       </div>

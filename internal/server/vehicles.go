@@ -60,8 +60,14 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 		label = string(rs[:maxLabelRunes])
 	}
 	if !validRego(reg) {
-		s.formError(w, r, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+		s.formError(w, r, plateFormatMsg)
 		return
+	}
+	// The form marks the label required, but that is a courtesy, not a limit: a
+	// crafted or stale-tab POST with no label used to store "" and render a blank
+	// chip in the roster picker. The plate is the one name every car has.
+	if label == "" {
+		label = reg
 	}
 	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label); err != nil {
 		if errors.Is(err, store.ErrDuplicate) {

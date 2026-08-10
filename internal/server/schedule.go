@@ -192,15 +192,26 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// renders a one-shot htmx follow-up so the refreshed plate swaps in without
 	// a manual reload.
 	plateRefreshing := false
-	if actual, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
-		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, 5*time.Minute); err == nil {
+	var plateStale time.Duration // how long past plateMaxAge the shown reading is (0 while fresh)
+	if actual, age, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
+		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, plateMaxAge); err == nil {
 		plateRefreshing = !fresh
+		if !fresh {
+			plateStale = age - plateMaxAge
+		}
 		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
 		// case they were entered with, and overwriting our belief with a case variant
 		// makes the scheduler's next tick see a plate that differs from its target —
 		// so it performs a real council write and tells the household their permit was
 		// updated (and emails a displaced driver) for a change that changes nothing.
-		if !model.SamePlate(actual, p.ActiveRegistration) {
+		//
+		// Adopt only a FRESH reading. The maxAge reasoning below assumed the reading
+		// was at most a few minutes old, but a stale entry has no upper bound (the
+		// refresh path keeps it through failures), and other writers touch the stored
+		// plate without touching this cache — so with the council down, a days-old
+		// cached plate could win the CAS against a NEWER stored plate and rewrite the
+		// record backwards. The refresh already running will adopt on the next render.
+		if fresh && !model.SamePlate(actual, p.ActiveRegistration) {
 			// Compare-and-swap: this reading may be up to maxAge old, and an apply can
 			// commit a newer plate while a render is in flight (the card self-polls
 			// exactly while applies settle). A blind write would regress the record to a
@@ -330,9 +341,17 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		Detail:          permitDetail(p),
 		PlateRefreshing: plateRefreshing,
 		Applying:        applying,
+		// The honesty clock must survive a reload: PlateUnconfirmed used to be
+		// reachable only by leaving the tab open for the whole poll budget, because
+		// every full render restarted at attempt 0 — so during a council outage a
+		// reloading user saw a spinner forever and never the "couldn't confirm"
+		// mark. Seeding from how long the reading has been stale makes a reload
+		// resume the clock instead of resetting it.
+		pollSeed: attemptForStaleness(plateStale),
 	}
 	// Default to a first-attempt poll; a fragment response refines this with the
-	// real attempt count (see respondPermit). A full page render keeps attempt 0.
+	// real attempt count (see respondPermit). A full page render keeps attempt 0
+	// (floored at pollSeed either way).
 	pv.armPlatePoll(0)
 	fillExpiry(&pv, now)
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
@@ -544,7 +563,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case plate != "":
 		if !validRego(plate) {
-			s.formError(w, r, "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+			s.formError(w, r, plateFormatMsg)
 			return
 		}
 		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, 0, plate, startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
@@ -669,24 +688,65 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 // goes on retrying and notifies out of band.
 var platePollDelays = []int{5, 5, 5, 10, 10, 15, 20, 30, 45, 60, 60, 60}
 
+// plateMaxAge is how old a cached council reading may be before the dashboard
+// treats it as stale: shows the checking spinner, declines to adopt it into the
+// stored record, and (via attemptForStaleness) counts the staleness against the
+// poll budget.
+const plateMaxAge = 5 * time.Minute
+
+// attemptForStaleness maps how long the shown reading has been stale onto the
+// poll attempt to resume from: the attempt a tab left open would have reached in
+// that time. Past the whole budget it returns the cap, which renders the honest
+// "couldn't confirm" mark immediately instead of a fresh spinner.
+func attemptForStaleness(stale time.Duration) int {
+	if stale <= 0 {
+		return 0
+	}
+	elapsed := time.Duration(0)
+	for i, d := range platePollDelays {
+		if elapsed >= stale {
+			return i
+		}
+		elapsed += time.Duration(d) * time.Second
+	}
+	return len(platePollDelays)
+}
+
 // armPlatePoll sets PollNext (whether this card re-fetches itself, and the next
 // attempt number) and PollDelay (seconds to wait first). It arms while a background
 // refresh is running (stale cache) OR a change is in flight (Applying), never past the
 // cap. attempt is how many polls have already been served — 0 on a full page render or
-// the fragment a user action returns, higher on a self-refresh follow-up.
+// the fragment a user action returns, higher on a self-refresh follow-up — and is
+// floored at pollSeed, so a reload during an outage resumes the honesty clock at the
+// reading's real age rather than resetting it to a fresh spinner.
 func (pv *permitView) armPlatePoll(attempt int) {
+	if pv.pollSeed > attempt {
+		attempt = pv.pollSeed
+	}
 	outstanding := pv.PlateRefreshing || pv.Applying
 	if attempt < len(platePollDelays) && outstanding {
 		pv.PollNext = attempt + 1
 		pv.PollDelay = platePollDelays[attempt]
-		return
+	} else {
+		pv.PollNext = 0
+		pv.PollDelay = 0
+		// Out of polls with a read or apply STILL outstanding: surface an honest
+		// "couldn't confirm" mark rather than leaving a spinner frozen mid-check. A settled
+		// card (nothing outstanding) falls through with this false and shows the tick.
+		pv.PlateUnconfirmed = outstanding
 	}
-	pv.PollNext = 0
-	pv.PollDelay = 0
-	// Out of polls with a read or apply STILL outstanding: surface an honest
-	// "couldn't confirm" mark rather than leaving a spinner frozen mid-check. A settled
-	// card (nothing outstanding) falls through with this false and shows the tick.
-	pv.PlateUnconfirmed = outstanding
+	// Today's calendar cell mirrors the pill. The calendar renders INTENT (what
+	// the schedule wants), which for future days is the only truth there is — but
+	// today it sat pixel-identical to a confirmed day even when the apply had been
+	// failing for days, and the only contradicting signal was a 13px icon in the
+	// pill above. Stamped here because this is the one place that knows the final
+	// Applying/PlateUnconfirmed state for the render.
+	for i := range pv.Cal {
+		if pv.Cal[i].IsToday {
+			pv.Cal[i].Applying = pv.Applying && !pv.PlateUnconfirmed
+			pv.Cal[i].Unconfirmed = pv.PlateUnconfirmed
+		}
+	}
 }
 
 func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner string, p model.Permit) {

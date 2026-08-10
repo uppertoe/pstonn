@@ -127,6 +127,33 @@
 
 {{/* =================== NOTIFY BODY (swappable, auto-saves) =================== */}}
 {{define "notify-body"}}
+{{/* Suppression banner: without this, "Email me" sat happily ticked while the
+     suppression list silently dropped every message — including after a one-click
+     unsubscribe a mail scanner can trigger without the user knowing. */}}
+{{if and .EmailAvailable .Suppressed}}
+  {{if eq .SuppressedWhy "unsubscribed"}}
+  <div class="banner warn" role="alert" style="margin-bottom:14px;align-items:flex-start">{{template "ic-alert"}} <span>
+    <strong>Routine email to {{.UserEmail}} is paused.</strong>
+    This address unsubscribed via an email link &mdash; sometimes a mail scanner presses that button without you knowing.
+    Emergency alerts (a failure you must act on) still get through; everything else is being dropped.
+    <form hx-post="/notifications/resume-email" hx-target="#notify-body" hx-swap="innerHTML" style="margin-top:8px">
+      <button type="submit" class="sm">Resume email</button>
+    </form>
+  </span></div>
+  {{else if eq .SuppressedWhy "bounce"}}
+  <div class="banner warn" role="alert" style="margin-bottom:14px;align-items:flex-start">{{template "ic-alert"}} <span>
+    <strong>Email to {{.UserEmail}} is not being delivered.</strong>
+    Messages to it bounced, so p.stonn has stopped sending &mdash; nothing, including emergency alerts, reaches this address.
+    If the mailbox is working again, <a href="/contact">get in touch</a> and we'll clear it.
+  </span></div>
+  {{else}}
+  <div class="banner warn" role="alert" style="margin-bottom:14px;align-items:flex-start">{{template "ic-alert"}} <span>
+    <strong>Email to {{.UserEmail}} is stopped.</strong>
+    This address reported p.stonn mail as spam, so nothing more will be sent to it.
+    If that wasn't you, <a href="/contact">get in touch</a>.
+  </span></div>
+  {{end}}
+{{end}}
 {{/* hx-swap:none — a clean save must not re-render (the swap made checkboxes and
      time selects visibly flash); the server forces a swap via HX-Retarget/HX-Reswap
      only when it rejected or adjusted the submitted state. guard() blocks unticking

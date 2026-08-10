@@ -22,9 +22,9 @@
       <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
       {{end}}
     </div>
-    <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px">
+    <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
       <input class="grow" name="label" placeholder="Label (e.g. Mum's Corolla)" required>
-      <input name="registration" placeholder="PLATE" required style="text-transform:uppercase;width:130px">
+      <input name="registration" placeholder="PLATE" required maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:130px">
       <button type="submit">{{template "ic-plus"}} Add</button>
     </form>
     <p class="empty-note" style="margin-top:10px">A driver email is optional. It is used to pre-fill guest passes, so that person can set their own car on the permit. See <a href="/guests">Guests</a>.</p>

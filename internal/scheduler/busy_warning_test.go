@@ -63,3 +63,54 @@ func TestBusyWarningEscalatesOnConfirmedBlock(t *testing.T) {
 		t.Fatalf("block threshold %d must be shorter than the busy threshold %d", blockNotifyThreshold, busyNotifyThreshold)
 	}
 }
+
+// TestBusyEscalationSurvivesEarlierSoftNotice pins the common REAL ordering: the
+// council starts refusing, the household gets the soft "still updating, we'll
+// keep trying" notice, and only THEN does the fleet breaker confirm the block.
+// With the old "busy|"+plate key both notices deduped to one, so the urgent
+// "change the vehicle yourself now to avoid a fine" message — the exact
+// escalation blockNotifyThreshold exists for — could never be delivered in that
+// order.
+func TestBusyEscalationSurvivesEarlierSoftNotice(t *testing.T) {
+	ctx := context.Background()
+	const owner, cid = "escalate@example.com", "esc-1"
+	st := newStore(t)
+	seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
+
+	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy} // breaker closed: isolated hiccup
+	nf := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+
+	// Phase 1: sustained-but-unconfirmed busy delivers the soft notice.
+	for i := 0; i < busyNotifyThreshold; i++ {
+		s.reconcileAll(ctx)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(nf.outcomeSnap()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the soft busy notice never arrived")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if o := nf.outcomeSnap()[0]; o.Urgent {
+		t.Fatalf("the unconfirmed notice should be soft, got %+v", o)
+	}
+
+	// Phase 2: the breaker opens. The next failing tick must escalate URGENTLY
+	// even though a notice for this plate was already delivered today.
+	fc.mu.Lock()
+	fc.blocked = true
+	fc.mu.Unlock()
+	s.reconcileAll(ctx)
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		outs := nf.outcomeSnap()
+		if len(outs) >= 2 && outs[len(outs)-1].Urgent {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the urgent confirmed-block escalation was deduped by the earlier soft notice; outcomes: %+v", outs)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

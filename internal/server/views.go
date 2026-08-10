@@ -2,12 +2,14 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -147,17 +149,31 @@ type notifyView struct {
 	FailuresOnly   bool   // only notify when something needs attention
 	Status         string // transient confirmation after auto-save
 	Error          string // transient error (e.g. tried to turn everything off)
+	// Suppressed surfaces the mail-suppression list in Settings. Without it the
+	// page showed "Email me" happily ticked while every message was being dropped
+	// — an unsubscribe (which a mail scanner can trigger via the one-click POST)
+	// was invisible right where the user would look to check their email works.
+	Suppressed     bool
+	SuppressedWhy  string // store.SuppressUnsubscribed / SuppressBounce / SuppressComplaint
+	SuppressedInfo bool   // an IsSuppressed lookup succeeded (distinguishes "no" from "unknown")
 }
 
 // notifyViewOf builds the settings view of a member's notification preferences.
-func (s *Server) notifyViewOf(user string, pref store.NotifyPref) notifyView {
-	return notifyView{
+func (s *Server) notifyViewOf(ctx context.Context, user string, pref store.NotifyPref) notifyView {
+	nv := notifyView{
 		EmailAvailable: s.notify.EmailAvailable(), NtfyAvailable: s.notify.NtfyAvailable(),
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
 		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
 		QuietEnabled: pref.QuietFrom != pref.QuietUntil, QuietFrom: pref.QuietFrom, QuietUntil: pref.QuietUntil,
 		FailuresOnly: pref.FailuresOnly,
 	}
+	if bad, why, err := s.store.IsSuppressed(ctx, user); err == nil {
+		nv.SuppressedInfo = true
+		nv.Suppressed, nv.SuppressedWhy = bad, why
+	} else {
+		log.Printf("settings: suppression lookup for %s: %v", notify.RedactEmail(user), err)
+	}
+	return nv
 }
 
 // legendVehicles narrows the colour key at the top of the Schedule page to the
@@ -263,6 +279,12 @@ type permitView struct {
 	// (not a spinner frozen mid-check): the plate displayed is the last council-confirmed
 	// value, and the scheduler goes on retrying out of band.
 	PlateUnconfirmed bool
+	// pollSeed floors the attempt number armPlatePoll works from, derived from how
+	// long the shown council reading has been stale — so a reload during an outage
+	// resumes the poll budget where the outage left it instead of restarting the
+	// spinner from zero. Never rendered; template access is impossible (unexported)
+	// and unneeded.
+	pollSeed int
 }
 
 // expiredPermitView is the compact row shown for a permit p.stonn no longer acts
@@ -326,6 +348,12 @@ type calView struct {
 	HasOneoff bool
 	IsToday   bool
 	Past      bool // earlier this week; shown dimmed for context
+	// Today-only confirmation state, mirroring the status pill (see armPlatePoll).
+	// The calendar renders INTENT — for future days the only truth there is — but
+	// today's cell must not paint a plate the council hasn't confirmed with the
+	// same solid bar as a confirmed one.
+	Applying    bool // a change is in flight; the bar's plate isn't on the permit yet
+	Unconfirmed bool // polls exhausted with the change/read still outstanding
 }
 
 type overrideView struct {

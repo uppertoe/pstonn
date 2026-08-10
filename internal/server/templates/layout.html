@@ -152,16 +152,34 @@
         if (p && p.textContent.trim()) msg = p.textContent.trim();
       } catch (err) {}
     }
-    showToast(msg);
+    // Sticky: these are the important paragraphs (a refused council login, a
+    // permit claimed by another account, the capacity message) — a 5-second,
+    // unselectable flash of 400 characters is unreadable and unquotable, and
+    // it carried the only explanation of what to do next.
+    showToast(msg, true);
   });
   var toastTimer;
-  function showToast(msg) {
+  {{/* sticky: persist until dismissed, selectable (so the message can be read
+       at leisure and copied into a support request); otherwise a 5s flash for
+       short validation notes whose form is still on screen. */}}
+  function showToast(msg, sticky) {
     var t = document.getElementById('toast');
     if (!t) return;
-    t.textContent = msg;
-    t.classList.add('on');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
+    t.textContent = msg;
+    t.classList.toggle('sticky', !!sticky);
+    if (sticky) {
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'toast-x';
+      x.setAttribute('aria-label', 'Dismiss');
+      x.textContent = '×';
+      x.addEventListener('click', function () { t.classList.remove('on'); });
+      t.appendChild(x);
+    } else {
+      toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
+    }
+    t.classList.add('on');
   }
 </script>
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>
@@ -221,6 +239,26 @@ window.popClamp = window.popClamp || function (el) {
     var name = el.getAttribute('data-dispatch');
     if (name) window.dispatchEvent(new CustomEvent(name));
   });
+  {{/* Typed-plate read-back. The council stores any well-formed string, real
+       car or not, so a typo that stays alphanumeric (O vs 0, I vs 1) sails
+       through every server check and is then confirmed as a success — the one
+       mistake in the whole flow nothing downstream can catch. Forms carrying
+       data-plate-confirm="<field>" get the generic confirm dialog with the
+       typed plate read back, composed here at submit time. Registered BEFORE
+       the data-confirm interceptor below (same capture phase, document target:
+       listeners run in registration order) so the message is in place when it
+       reads dataset.confirm. Skipped when the plate field is hidden (the
+       one-off form's saved-car mode) or empty. */}}
+  document.addEventListener('submit', function (e) {
+    var f = e.target, field = f.dataset && f.dataset.plateConfirm;
+    if (!field || f.__confirmed) return;
+    var inp = f.querySelector('[name="' + field + '"]');
+    var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
+    if (!inp || inp.offsetParent === null || !v) { delete f.dataset.confirm; return; }
+    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
+      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches — continue';
+  }, true);
   {{/* Capture phase so this runs (and stops htmx's own element handler) before
        any boosted submit; the __confirmed pass-through lets the re-submit
        continue down the normal path. */}}

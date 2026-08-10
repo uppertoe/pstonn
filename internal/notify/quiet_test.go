@@ -30,6 +30,12 @@ func TestQuietDefer(t *testing.T) {
 		{"disabled (equal) → immediate even at 2am", 0, 0, at(2, 0), time.Time{}},
 		{"non-wrap window 1..5, 3am → 5am", 1, 5, at(3, 0), time.Date(2026, 7, 21, 5, 0, 0, 0, loc)},
 		{"non-wrap window 1..5, 6am → immediate", 1, 5, at(6, 0), time.Time{}},
+		// The span cap: a 07:00→06:00 window is 23 hours of hold, which for a
+		// deferred failure notice is a full day of visitors on the wrong plate.
+		// Clamped to MaxQuietHours, so 07:30 releases at 19:00 the same day...
+		{"23h window is clamped to 12h", 7, 6, at(7, 30), time.Date(2026, 7, 21, 7+MaxQuietHours, 0, 0, 0, loc)},
+		// ...and a time past the clamped end is outside the window entirely.
+		{"past the clamped end → immediate", 7, 6, at(20, 0), time.Time{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

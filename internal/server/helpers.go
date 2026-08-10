@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/uppertoe/pstonn/internal/model"
 )
 
 // formError reports a user-facing validation problem for a form submission. For
@@ -105,15 +107,30 @@ func redirectHome(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/schedule", http.StatusSeeOther)
 }
 
-func normalizeReg(s string) string {
-	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
-}
+// normalizeReg canonicalises user-typed plate input with the same rule every
+// plate comparison uses (model.NormPlate). This used to be a second, narrower
+// normaliser (ASCII spaces only), so a pasted plate carrying a tab, a
+// non-breaking space, or a display hyphen ("ABC-123") failed validation with a
+// message that never named the offending character — for input SamePlate would
+// happily have matched.
+func normalizeReg(s string) string { return model.NormPlate(s) }
+
+// plateFormatMsg is the shared validation error for a plate that is not 2–8
+// alphanumerics after normalisation. It nudges the reader toward the trap that
+// actually produces fines — visually confusable characters — because the
+// council will store whatever well-formed string it is given (see validRego).
+const plateFormatMsg = "Enter a valid number plate: 2–8 letters and numbers, e.g. ABC123. " +
+	"Check it against the plate itself — letter O vs zero 0 and letter I vs one 1 are easy to mix up."
 
 // validRego reports whether s (already normalised: upper-case, no spaces) is a
 // plausible number plate: 2–8 alphanumeric characters. It is a sanity gate to
-// catch typos and junk, not a strict format check — Australian plates vary by
-// state and custom plates differ, so we stay lenient; the council makes the
-// authoritative check when the plate is actually set.
+// catch junk, not a strict format check — Australian plates vary by state and
+// custom plates differ, so we stay lenient. Note what the council does NOT
+// check: a live capture showed it stores any well-formed string, existing car
+// or not, so a typo that stays alphanumeric ("ABC1230" for "ABCI23O") passes
+// here, passes there, and is confirmed as success. The read-back confirmation
+// dialog on plate entry (layout.html, data-plate-confirm) is the only guard
+// for that class of mistake.
 func validRego(s string) bool {
 	if len(s) < 2 || len(s) > 8 {
 		return false

@@ -153,21 +153,21 @@ func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
 	key := regKey{owner, p.CouncilPermitID}
 
 	// Nothing cached yet: a miss, not a blocking fetch.
-	if _, fresh, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) || fresh {
+	if _, _, fresh, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) || fresh {
 		t.Fatalf("empty cache: want ErrNoCachedPlate and not fresh, got fresh=%v, %v", fresh, err)
 	}
 
 	// Fresh cache is served and reported fresh.
 	c.regCache.Store(key, cachedReg{reg: "ABC123", at: time.Now()})
-	if got, fresh, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); err != nil || got != "ABC123" || !fresh {
+	if got, _, fresh, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); err != nil || got != "ABC123" || !fresh {
 		t.Fatalf("fresh cache: got %q fresh=%v, %v", got, fresh, err)
 	}
 
 	// A stale value is still served (revalidation happens in the background),
 	// reported non-fresh so the UI can offer a follow-up fetch.
 	c.regCache.Store(key, cachedReg{reg: "ABC123", at: time.Now().Add(-time.Hour)})
-	if got, fresh, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); err != nil || got != "ABC123" || fresh {
-		t.Fatalf("stale cache: got %q fresh=%v, %v", got, fresh, err)
+	if got, age, fresh, err := c.CurrentVehicleCached(ctx, owner, p, 5*time.Minute); err != nil || got != "ABC123" || fresh || age < time.Hour {
+		t.Fatalf("stale cache: got %q fresh=%v age=%v, %v", got, fresh, age, err)
 	}
 }
 
@@ -190,21 +190,21 @@ func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
 
 	// The new holder of the same council permit gets a cache MISS, not the previous
 	// household's plate.
-	if got, fresh, err := c.CurrentVehicleCached(ctx, second, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) || got != "" || fresh {
+	if got, _, fresh, err := c.CurrentVehicleCached(ctx, second, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) || got != "" || fresh {
 		t.Fatalf("second owner read the first owner's cached plate: %q fresh=%v, %v", got, fresh, err)
 	}
 	// The original owner still sees their own.
-	if got, _, err := c.CurrentVehicleCached(ctx, first, p, 5*time.Minute); err != nil || got != "OLD111" {
+	if got, _, _, err := c.CurrentVehicleCached(ctx, first, p, 5*time.Minute); err != nil || got != "OLD111" {
 		t.Fatalf("first owner lost their own entry: %q, %v", got, err)
 	}
 
 	// Stopping management drops it, and only theirs.
 	c.regCache.Store(regKey{second, p.CouncilPermitID}, cachedReg{reg: "NEW222", at: time.Now()})
 	c.ForgetPermit(first, p.CouncilPermitID)
-	if _, _, err := c.CurrentVehicleCached(ctx, first, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) {
+	if _, _, _, err := c.CurrentVehicleCached(ctx, first, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) {
 		t.Fatalf("ForgetPermit left the entry behind: %v", err)
 	}
-	if got, _, err := c.CurrentVehicleCached(ctx, second, p, 5*time.Minute); err != nil || got != "NEW222" {
+	if got, _, _, err := c.CurrentVehicleCached(ctx, second, p, 5*time.Minute); err != nil || got != "NEW222" {
 		t.Fatalf("ForgetPermit evicted another owner's entry: %q, %v", got, err)
 	}
 }

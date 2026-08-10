@@ -66,6 +66,11 @@
   /* Toast for server-side validation errors (surfaced from a 422 response). */
   #toast { position:fixed; left:50%; bottom:24px; transform:translate(-50%,140%); z-index:120; max-width:min(92vw,420px); padding:12px 16px; border-radius:12px; background:var(--danger-soft); color:var(--danger); border:1px solid var(--danger); box-shadow:var(--shadow-lg); font-size:14px; line-height:1.45; opacity:0; transition:transform .25s cubic-bezier(.4,0,.2,1),opacity .25s; pointer-events:none; }
   #toast.on { transform:translate(-50%,0); opacity:1; }
+  {{/* Sticky error panel: stays until dismissed, and the text can be selected
+       and copied — these are the long "what happened and what to do" messages. */}}
+  #toast.sticky { pointer-events:auto; user-select:text; -webkit-user-select:text; padding-right:38px; }
+  .toast-x { position:absolute; top:6px; right:8px; border:0; background:none; color:inherit; font-size:18px; line-height:1; padding:4px; cursor:pointer; opacity:.7; }
+  .toast-x:hover { opacity:1; }
   @keyframes htmxslide { 0%{left:-35%} 100%{left:100%} }
 
   /* ---- app bar ---- */
@@ -282,6 +287,12 @@
        Accent stripes — the same accent as the .oneoff dot — say "covered, by a
        one-off" without inventing a colour the legend can't explain. */}}
   .cday .bar.adhoc { background:repeating-linear-gradient(-45deg, var(--accent) 0 3px, var(--accent-soft) 3px 7px); }
+  {{/* Today's cell when the shown plate is NOT the council-confirmed state: a
+       change mid-apply hatches in the day's own colour; polls-exhausted amber.
+       Both must beat the cell's inline background colour, hence !important. */}}
+  .cday .bar.applying { background:repeating-linear-gradient(-45deg, var(--muted) 0 3px, var(--line) 3px 7px) !important; }
+  .cday .bar.unconf { background:repeating-linear-gradient(-45deg, var(--warn) 0 3px, var(--warn-soft) 3px 7px) !important; }
+  .calwarn { color:var(--warn); font-size:12px; }
 
   /* popover — centred with the standalone translate property, NOT transform:
      the rise animation ends at transform:none (fill both), which would wipe a
@@ -597,6 +608,7 @@
   .pslot .pok svg { width:13px; height:13px; stroke-width:2.4; }
   .pslot .pwarn { display:inline-flex; color:var(--warn); }
   .pslot .pwarn svg { width:13px; height:13px; stroke-width:2.4; }
+  .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
   .link-quiet:hover { color:var(--primary); }

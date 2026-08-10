@@ -50,6 +50,7 @@ type guestActView struct {
 	OwnerEmail     string         // account holder, shown for trust
 	PermitLabel    string         // which permit this affects
 	CurrentReg     string         // what is on the permit right now ("" if unknown)
+	CheckedAgo     string         // how long ago CurrentReg was confirmed with the council; "" while fresh ("4 hr ago" turns "on now" into "last known")
 	Cars           []vehicleView  // the cars this link may activate
 	AllowOvernight bool           // whether the overnight checkbox is offered
 	AllowPlate     bool           // whether the visitor may type an arbitrary plate
@@ -351,12 +352,31 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 	}
 	current := permit.ActiveRegistration
 	if s.council != nil { // a council hiccup (or, in tests, no client at all) must not fail the page
-		if actual, _, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+		if actual, _, _, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
 			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
 			current = actual
 		}
 	}
 	return current
+}
+
+// guestPlateCheckedAgo reports how long ago the plate shown to a guest was
+// actually confirmed with the council, as display text — "" while the reading is
+// fresh (or unknown). The guest page's "On the permit now" line is the single
+// most load-bearing sentence in the app for a visitor about to walk away from
+// their car, and it used to state a cached value as present-tense fact with no
+// age bound: during a council outage "now" could be days old.
+func (s *Server) guestPlateCheckedAgo(ctx context.Context, permit model.Permit) string {
+	if s.council == nil {
+		return ""
+	}
+	_, age, fresh, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+		model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute)
+	if err != nil || fresh {
+		return ""
+	}
+	now := time.Now()
+	return agoText(now, now.Add(-age))
 }
 
 // revertPlate decides whether a guest may revert, and to what: the captured
@@ -525,6 +545,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 	if !gc.Grant.RequestOnly {
 		view.OwnerEmail = permit.Owner
 		view.CurrentReg = current
+		view.CheckedAgo = s.guestPlateCheckedAgo(ctx, permit)
 		want, decidedAt, until := s.guestDesired(ctx, permit)
 		// Offer "put it back" only while THIS link's activation is still the winning
 		// plate. If the owner (or their schedule) has since booked over it, the guest
@@ -558,7 +579,7 @@ func guestFP(v guestActView) string {
 	if v.Stalled {
 		stalled = "1"
 	}
-	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + v.RevertPlate + "|" + v.UntilText))
+	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + v.RevertPlate + "|" + v.UntilText + "|" + v.CheckedAgo))
 	return hex.EncodeToString(sum[:6])
 }
 
@@ -679,7 +700,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	var overrideID int64
 	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
 		if !validRego(plate) {
-			s.renderGuestMenu(w, r, gc, permit, current, "", "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+			s.renderGuestMenu(w, r, gc, permit, current, "", plateFormatMsg)
 			return
 		}
 		reg = plate
@@ -1272,8 +1293,12 @@ func agoText(now, t time.Time) string {
 		return "just now"
 	case d < time.Hour:
 		return fmt.Sprintf("%d min ago", int(d.Minutes()))
-	default:
+	case d < 48*time.Hour:
 		return fmt.Sprintf("%d hr ago", int(d.Hours()))
+	default:
+		// The stale-plate caption can be days old (a cached reading has no upper
+		// age bound during a council outage); "78 hr ago" hides that.
+		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
 	}
 }
 
@@ -2030,10 +2055,10 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		// Re-rendered through the shared view builder, which is where the request-only
 		// redaction lives. Assembling the view here instead put the permit's LABEL on a
 		// page anyone who scans a poster can reach — the owner's own text, typically an
-		// address or apartment number — and this branch is not even adversarial: it is
-		// what an ordinary visitor sees for "ABC-123", because validRego rejects the
-		// hyphen.
-		s.renderGuestMenu(w, r, gc, permit, "", "", "Enter a valid number plate (letters and numbers, e.g. ABC123).")
+		// address or apartment number — and this branch is not even adversarial:
+		// normalizeReg now absorbs the ordinary-visitor spellings ("ABC-123", a pasted
+		// non-breaking space), but a mistyped length or a stray symbol still lands here.
+		s.renderGuestMenu(w, r, gc, permit, "", "", plateFormatMsg)
 		return
 	}
 	// This browser's own remembered request, resolved before anything is created: it

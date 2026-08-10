@@ -854,24 +854,30 @@ var ErrNoCachedPlate = errors.New("parking: no cached plate yet")
 // slow portal (the council client's 30s timeout outlives the HTTP server's 20s
 // WriteTimeout, so a sync call here turns a slow council into a dropped
 // connection — a 502 at the proxy). A stale value is served while one refresh
-// per permit runs; fresh reports whether the value is within maxAge, so a
-// caller can offer a follow-up fetch once the refresh lands. Keeps the
+// per permit runs; fresh reports whether the value is within maxAge, and age is
+// how old the reading actually is — which matters because a stale entry has NO
+// upper bound (refresh failures deliberately leave it in place), so "not fresh"
+// alone hides the difference between six minutes and three days. Callers that
+// show the plate to a person must show the age once it is stale. Keeps the
 // dashboard's "on permit now" truthful and catches plates changed directly in
 // the portal.
-func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, fresh bool, err error) {
+func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, age time.Duration, fresh bool, err error) {
 	if c.sandbox != nil {
 		reg, err = c.sandboxCurrentVehicle(p) // in-memory: no cache needed
-		return reg, true, err
+		return reg, 0, true, err
 	}
 	v, ok := c.regCache.Load(regKey{owner, p.CouncilPermitID})
-	if ok && time.Since(v.(cachedReg).at) < maxAge {
-		return v.(cachedReg).reg, true, nil
+	if ok {
+		age = time.Since(v.(cachedReg).at)
+		if age < maxAge {
+			return v.(cachedReg).reg, age, true, nil
+		}
 	}
 	c.refreshCurrentVehicle(owner, p)
 	if ok {
-		return v.(cachedReg).reg, false, nil // stale but real; the refresh catches drift
+		return v.(cachedReg).reg, age, false, nil // stale but real; the refresh catches drift
 	}
-	return "", false, ErrNoCachedPlate
+	return "", 0, false, ErrNoCachedPlate
 }
 
 // ForgetPermit drops an owner's cached plate for a permit. Call it when the app

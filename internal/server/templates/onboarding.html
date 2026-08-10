@@ -16,6 +16,14 @@
       <label class="fld">Council email (your verified sign-in)
         <input type="email" value="{{.User.Email}}" autocomplete="username" disabled>
       </label>
+      {{/* The pinned username is a hard rule (you may only link your own council
+           account), but the form never said so — the requirement surfaced only in
+           the failure toast after a rejected login, which also burns one of the
+           council's own lockout-budget attempts. Say it before the password. */}}
+      <p class="empty-note" style="margin-top:-4px">
+        Your ePermits account must use this same email. If it uses a different address,
+        sign out of p.stonn and sign back in with that one &mdash; the email can&rsquo;t be changed here.
+      </p>
       <label class="fld">Council password
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>

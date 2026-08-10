@@ -114,10 +114,16 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		// 2.5s = ~240 hits/10 min, and several visitors can share one NAT address),
 		// so this is deliberately loose: it exists to stop a firehose from one
 		// source, not to police normal polling.
-		guestRead:       newRateLimiter(1200, 10*time.Minute),
-		guestLinkOut:    newRateLimiter(20, time.Hour),     // <=20 guest-link emails / hour per owner
-		guestLinkTo:     newRateLimiter(5, 24*time.Hour),   // <=5 guest-link emails / day per recipient
-		councilTry:      newRateLimiter(5, 15*time.Minute), // 5 council password attempts / 15 min per user
+		guestRead:    newRateLimiter(1200, 10*time.Minute),
+		guestLinkOut: newRateLimiter(20, time.Hour),   // <=20 guest-link emails / hour per owner
+		guestLinkTo:  newRateLimiter(5, 24*time.Hour), // <=5 guest-link emails / day per recipient
+		// 3, not 5: the council's own lockout budget is ~5 failed logins, and our
+		// throttle used to hand a determined-but-mistaken user exactly that many
+		// before pausing them — so a resident retrying a mistyped password locked
+		// their REAL council account. Three failed tries here means the password
+		// is wrong (or the ePermits account uses a different email); more retries
+		// only spend the council's budget on the same mistake.
+		councilTry:      newRateLimiter(3, 15*time.Minute), // 3 council password attempts / 15 min per user
 		testNotifyLimit: newRateLimiter(5, time.Hour),      // 5 test notifications / hour per user
 		councilRead:     newRateLimiter(12, 5*time.Minute), // 12 uncached council reads / 5 min per user
 		// The watchdog polls every 10 minutes, so this is ~30x real use: it exists
@@ -223,6 +229,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /account/invite/decline", s.withUser(s.declineInvite))
 	mux.HandleFunc("GET /schedule/legend", s.withConsent(s.legendFragment))
 	mux.HandleFunc("POST /notifications", s.withConsent(s.saveNotify))
+	mux.HandleFunc("POST /notifications/resume-email", s.withConsent(s.resumeEmail))
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
 	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))
 	// Public, token-only: the renewal-confirm link from the reminder email.

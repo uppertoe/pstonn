@@ -5,6 +5,7 @@ package model
 import (
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Vehicle is a registration that may be allocated to a shared visitor permit.
@@ -88,15 +89,20 @@ func (p Permit) Inactive(now time.Time, loc *time.Location) bool {
 	return !now.Before(ExpiryDeadline(p.EndDate, loc))
 }
 
-// NormPlate canonicalises a registration for comparison. The council echoes
-// plates back in whatever case and spacing they were entered with, and no two
-// real cars differ only by case or by a space, so neither may make two spellings
-// of one plate look like two different cars.
+// NormPlate canonicalises a registration. The council echoes plates back in
+// whatever case and spacing they were entered with, and no two real cars differ
+// only by case, by a space, or by a display separator ("ABC-123", "ABC·123"),
+// so none of those may make two spellings of one plate look like two different
+// cars. Whitespace is the Unicode class, not a hand-picked list: a pasted plate
+// carries whatever the source document used (a non-breaking space, most
+// commonly), and this is also the rule user input is normalised with (see
+// server.normalizeReg) — two normalisers with two answers is how a plate gets
+// stored in a spelling the comparison sites would never produce.
 func NormPlate(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+		if unicode.IsSpace(r) || r == '-' || r == '.' || r == '·' {
 			continue
 		}
 		b.WriteRune(r)

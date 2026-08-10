@@ -139,6 +139,15 @@ func neutraliseLinks(label string) string {
 // wrap can escape this.
 var linkRun = regexp.MustCompile(`(?i)https?://\S*`)
 
+// MaxQuietHours caps the quiet-hours window. The hold applies to failure
+// notices too (the transient kind), and an uncapped window let a 07:00→06:00
+// setting park "your permit couldn't be updated" for 23 hours — a full day of
+// visitors on the wrong plate behind one settings choice. Half a day covers
+// every real overnight window while bounding the worst case. Enforced both at
+// save (settings) and here at delivery, so a stored wider window from before
+// the cap still cannot hold a message past it.
+const MaxQuietHours = 12
+
 // quietDefer decides when a notification for this member should actually be
 // delivered. Members can set quiet hours (default 22:00–06:00 local): a message
 // generated inside that window is held and released at the window's end (so a
@@ -150,6 +159,9 @@ func (s *Service) quietDefer(pref store.NotifyPref, now time.Time) time.Time {
 	from, until := pref.QuietFrom, pref.QuietUntil
 	if from == until || from < 0 || from > 23 || until < 0 || until > 23 {
 		return time.Time{} // disabled or malformed → immediate
+	}
+	if span := ((until - from) + 24) % 24; span > MaxQuietHours {
+		until = (from + MaxQuietHours) % 24
 	}
 	lt := now.In(s.loc)
 	h := lt.Hour()
@@ -200,6 +212,25 @@ var ErrSuppressed = errors.New("address is suppressed (previous bounce or compla
 // address bounces we still want every future attempt made (and the failure
 // logged), rather than the app quietly muting its own alarm channel.
 func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason string) error {
+	return s.sendEmailWith(ctx, to, subject, body, reason, false)
+}
+
+// sendEmailCritical is sendEmail for safety-critical mail: messages whose miss
+// can cost the household a fine (an action-needed apply failure, a re-link
+// prompt, a stalled reconnect, a disconnection). A recipient's own unsubscribe
+// does not stop these — unsubscribing opts out of the routine notification
+// stream, not of being told their permit is no longer being managed, and the
+// unsubscribe page says exactly that. A bounce or a complaint still blocks:
+// those addresses are dead or asked-us-to-stop-via-their-provider, and mailing
+// them anyway damages deliverability for every user of the sending domain.
+// (Outbox rows never need this: an action-needed outcome bypasses the
+// quiet-hours hold and is sent inline, so queued rows are routine by
+// construction.)
+func (s *Service) sendEmailCritical(ctx context.Context, to, subject, body, reason string) error {
+	return s.sendEmailWith(ctx, to, subject, body, reason, true)
+}
+
+func (s *Service) sendEmailWith(ctx context.Context, to, subject, body, reason string, critical bool) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -208,7 +239,10 @@ func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason strin
 			// Fail OPEN: a lookup error must not stop a permit notification going out.
 			log.Printf("notify: suppression lookup for %s: %v", RedactEmail(to), err)
 		} else if bad {
-			return fmt.Errorf("%w: %s", ErrSuppressed, why)
+			if !(critical && why == store.SuppressUnsubscribed) {
+				return fmt.Errorf("%w: %s", ErrSuppressed, why)
+			}
+			log.Printf("notify: critical notice to unsubscribed %s goes out anyway (unsubscribe mutes routine mail, not safety alerts)", RedactEmail(to))
 		}
 	}
 	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to)}
@@ -267,10 +301,38 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 		body += "\n\nRe-link: " + s.appURL
 	}
 	body += "\nCouncil portal: " + councilPortalURL
-	// Tell EVERYONE on the account (owner + secondaries) -- a lapsed council
-	// connection can land the whole household a fine, and secondaries help manage
-	// the permit. Re-link is important, so always email each member's verified
-	// address (channel opt-outs don't apply); push to each member's topic too.
+	return s.broadcastAccount(ctx, owner, "relink", subject, body)
+}
+
+// NotifyReconnectStalled tells the household p.stonn cannot sign back in to the
+// council even though their link is still held (a council login outage or a
+// changed sign-in page), so their schedule is paused until reconnection
+// succeeds. Deliberately NOT a re-link prompt: an interactive re-link goes
+// through the same broken login flow, so the honest instruction is to manage
+// the permit at the council directly until service resumes. Returns the number
+// of channels that accepted the message.
+func (s *Service) NotifyReconnectStalled(ctx context.Context, owner string) int {
+	subject := "p.stonn can't reach the council — your permit schedule is paused"
+	body := "p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. " +
+		"Until it can, your visitor permit schedule is NOT being applied.\n\n" +
+		"That means any change your schedule should make will not happen: if a different car needs to be on the permit, " +
+		"change the vehicle yourself on the council website now, or that car is not covered and can be fined.\n\n" +
+		"p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. " +
+		"If this persists, it will email you again if re-linking becomes necessary."
+	body += "\n\nCouncil portal: " + councilPortalURL
+	if s.appURL != "" {
+		body += "\nOpen p.stonn: " + s.appURL
+	}
+	return s.broadcastAccount(ctx, owner, "reconnect-stalled", subject, body)
+}
+
+// broadcastAccount delivers an account-critical message to EVERYONE on the
+// account (owner + secondaries) — these are the messages where a miss can land
+// the whole household a fine, so each member's verified address is emailed
+// (channel opt-outs don't apply; suppression in sendEmail still does), plus
+// push to each member's topic. tag labels delivery-failure log lines. Returns
+// the number of channels that accepted the message.
+func (s *Service) broadcastAccount(ctx context.Context, owner, tag, subject, body string) int {
 	members, err := s.store.AccountEmails(ctx, owner)
 	if err != nil {
 		members = []string{owner}
@@ -279,15 +341,15 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	for _, m := range members {
 		mpref, _ := s.store.GetNotifyPref(ctx, m)
 		if s.mail.Enabled() {
-			if e := s.sendEmail(ctx, m, subject, body, reasonAccount); e != nil {
-				log.Printf("notify relink email %s: %v", RedactEmail(m), e)
+			if e := s.sendEmailCritical(ctx, m, subject, body, reasonAccount); e != nil {
+				log.Printf("notify %s email %s: %v", tag, RedactEmail(m), e)
 			} else {
 				delivered++
 			}
 		}
 		if mpref.NtfyEnabled && s.ntfyBase != "" && mpref.NtfyTopic != "" {
 			if e := s.sendNtfy(ctx, mpref.NtfyTopic, subject, body, "high", "warning"); e != nil {
-				log.Printf("notify relink ntfy %s: %v", RedactEmail(m), e)
+				log.Printf("notify %s ntfy %s: %v", tag, RedactEmail(m), e)
 			} else {
 				delivered++
 			}
@@ -671,7 +733,14 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 
 		reached := false
 		if wantEmail {
-			if e := s.sendEmail(ctx, d.email, subject, emailBody, reasonAccount); e != nil {
+			// An action-needed failure ("change the plate yourself now or someone
+			// gets a fine") rides the critical path: a self-service unsubscribe
+			// mutes routine confirmations, not this.
+			send := s.sendEmail
+			if o.actionNeeded() {
+				send = s.sendEmailCritical
+			}
+			if e := send(ctx, d.email, subject, emailBody, reasonAccount); e != nil {
 				errs = append(errs, "email "+d.email+": "+e.Error())
 			} else {
 				reached = true
@@ -736,7 +805,9 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 	const body = "You declined p.stonn's updated terms, so your council account has been disconnected and your permit is no longer being managed.\n\nPlease check your visitor permit with the council. To reconnect, sign in again and accept the terms."
 	var errs []string
 	if s.mail.Enabled() {
-		if e := s.sendEmail(ctx, owner, subject, body, reasonAccount); e != nil {
+		// "Your permit is no longer being managed" is a safety notice, not a
+		// courtesy: an unsubscribe must not swallow it.
+		if e := s.sendEmailCritical(ctx, owner, subject, body, reasonAccount); e != nil {
 			errs = append(errs, "email: "+e.Error())
 		}
 	}

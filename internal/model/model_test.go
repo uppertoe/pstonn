@@ -237,9 +237,13 @@ func TestSamePlate(t *testing.T) {
 	same := []struct{ a, b string }{
 		{"ABC123", "abc123"},
 		{"ABC123", "AbC123"},
-		{"ABC123", "ABC 123"},  // the portal echoes back whatever spacing was typed
-		{"ABC123", " ABC123 "}, // ...and whatever padding
-		{"", ""},               // both unknown
+		{"ABC123", "ABC 123"},      // the portal echoes back whatever spacing was typed
+		{"ABC123", " ABC123 "},     // ...and whatever padding
+		{"ABC123", "ABC-123"},      // display separators are not part of the rego
+		{"ABC123", "ABC·123"},      // ...in any script
+		{"ABC123", "ABC 123"},      // a pasted plate carries the source's whitespace (NBSP)
+		{"ABC123", "ABC\t123\r\n"}, // ...or a copied table cell's
+		{"", ""},                   // both unknown
 	}
 	for _, c := range same {
 		if !SamePlate(c.a, c.b) {

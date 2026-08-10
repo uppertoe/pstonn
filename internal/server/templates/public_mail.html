@@ -11,15 +11,17 @@
     <h1>Emails stopped</h1>
     <p class="gresult">We've stopped emailing <strong>{{.Unsub.Address}}</strong>.</p>
     <p class="empty-note" style="margin-top:14px">
-      If this address belongs to a p.stonn account, your permit schedule keeps running as normal &mdash; you just won't get email about it.
+      If this address belongs to a p.stonn account, your permit schedule keeps running as normal &mdash; you just won't get routine email about it.
+      One exception: if something goes wrong that could get someone fined &mdash; a plate change that needs you to act, or p.stonn losing its council connection &mdash; you'll still get that one email, because staying silent there isn't safe.
       Sign in and turn email back on in Settings whenever you like.
     </p>
     {{else}}
     <h1>Stop emails to this address?</h1>
     <p class="gresult">We'll stop sending anything to <strong>{{.Unsub.Address}}</strong>.</p>
     <p class="empty-note" style="margin-top:12px">
-      Worth knowing first: if this address manages a visitor parking permit through p.stonn, these emails are how you find out when a plate change fails.
-      Stopping them means a problem could go unnoticed until someone gets a fine. You can turn email back on in Settings after signing in.
+      Worth knowing first: if this address manages a visitor parking permit through p.stonn, this stops the routine emails &mdash; confirmations, reminders, minor hiccups.
+      Emergencies still get through: a failure that needs you to act right now to avoid a fine will still be emailed, because staying silent there isn't safe.
+      You can turn email back on in Settings after signing in.
     </p>
     <form method="post" action="{{.Unsub.Path}}" style="margin-top:18px">
       <button type="submit" class="danger">Stop emailing me</button>
