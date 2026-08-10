@@ -3,7 +3,17 @@
 {{template "appbar" .}}
 <main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
-  {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+  {{if .Warn}}<div class="banner warn"{{if .LinkHelp}} style="align-items:flex-start"{{end}}>{{template "ic-alert"}} <span>{{.Warn}}
+    {{if and .LinkHelp .LogoutURL}}
+    {{/* The remedy as a button, not a journey: sign out lands on the auth page,
+         whose notice says which email to use. hx-boost off — a logout must be a
+         real navigation to the gateway, never an AJAX body swap. */}}
+    <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+      <a href="{{.LogoutURL}}" hx-boost="false"><button type="button" class="sm">Sign out</button></a>
+      <span>then sign back in with the email your ePermits account uses.</span>
+    </span>
+    {{end}}
+  </span></div>{{end}}
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
     {{if .IsPrimary}}
@@ -35,8 +45,8 @@
            the failure toast after a rejected login, which also burns one of the
            council's own lockout-budget attempts. Say it before the password. */}}
       <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email. If it uses a different address,
-        sign out of p.stonn and sign back in with that one &mdash; the email can&rsquo;t be changed here.
+        Your ePermits account must use this same email &mdash; it can&rsquo;t be changed here.
+        If it uses a different address, {{if .LogoutURL}}<a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}}sign out{{end}} and sign back in with that one.
       </p>
       <label class="fld">Council password
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>

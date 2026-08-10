@@ -45,9 +45,15 @@ type dashboardData struct {
 	// and a third-party password is typed — not after, as a toast. councilLink
 	// keeps the authoritative (locked) check; this is the courtesy copy.
 	CapacityFull bool
-	Flash        string // success (green)
-	Warn         string // problem / caution (amber)
-	Loc          *time.Location
+	// LinkHelp renders the rejected-council-login remedy on the onboarding page:
+	// a real sign-out button plus "sign back in with your ePermits email". The
+	// instruction existed in three places as prose; the affordance existed in
+	// none of them, and the icon-only account menu is where the remedy went to
+	// die on a phone.
+	LinkHelp bool
+	Flash    string // success (green)
+	Warn     string // problem / caution (amber)
+	Loc      *time.Location
 	// shared access
 	Owner      string       // effective account owner (email) that scopes the data
 	IsPrimary  bool         // whether the signed-in user owns this account
@@ -458,6 +464,15 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
+		// The landing after a REJECTED council login (see councilLink): name both
+		// causes and offer the remedy as a button. Takes precedence over the
+		// relink/capacity banners — this person is mid-attempt, and the next step
+		// matters more than account status.
+		if r.URL.Query().Get("link") == "rejected" {
+			base.Warn = "The council portal wouldn't accept that sign-in. Either the password is wrong, or there is no City of Stonnington ePermits account for " + user +
+				". Check you can sign in at the council's own ePermits site with this exact email — and if your ePermits account uses a different email address, that's the usual cause:"
+			base.LinkHelp = true
+		} else
 		// A RETURNING household is not a signup. The paths that end a session
 		// (idle retirement, a rejected saved password, a manual disconnect)
 		// delete the row, so without this a household whose schedule has STOPPED

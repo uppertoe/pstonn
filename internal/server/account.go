@@ -103,12 +103,14 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, parking.ErrLoginRejected) {
 			// The council tells us only that no session cookie came back, so we
 			// genuinely cannot distinguish a wrong password from "no ePermits account
-			// exists for this email". Name both, rather than blaming the password —
-			// for a curious first-time visitor the second is the likelier cause, and
-			// wrongly asserting the first sends them round a 5-attempt lockout.
-			s.message(w, http.StatusBadGateway,
-				"The council portal wouldn't accept that sign-in. Either the password is wrong, or there is no City of Stonnington ePermits account for "+user+
-					". p.stonn can only manage a permit you already hold: check you can sign in at the council's own ePermits site with this email address first. If your ePermits account uses a different email, sign out and sign back in to p.stonn with that address instead.")
+			// exists for this email". This failure needs a NEXT STEP, not just an
+			// explanation: the likely remedy is signing out and back in with the
+			// ePermits email, and a toast can describe that journey but not offer
+			// it. Land back on the onboarding page instead (same pattern as the
+			// post-addPermit outcomes), where appShell renders the two causes and
+			// a real sign-out button (LinkHelp). Observed live 2026-08-10: the
+			// first community sign-up hit this exact wall three times and left.
+			http.Redirect(w, r, "/schedule?link=rejected", http.StatusSeeOther)
 			return
 		}
 		if errors.Is(err, store.ErrSecondaryAccount) {
