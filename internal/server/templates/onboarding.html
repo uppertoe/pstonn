@@ -78,7 +78,10 @@
       </label>
       <button type="submit">{{template "ic-link"}} Link account</button>
     </form>
-    <p class="empty-note" style="margin-top:12px">Use a password you have not used elsewhere. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
+    {{/* This field asks for their EXISTING council password — they can't choose
+         it here, so "use a password you haven't used elsewhere" read as
+         nonsense. The real advice is about reuse of that council password. */}}
+    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
     {{end}}
     {{else}}
     <h2>Waiting for the account owner</h2>
