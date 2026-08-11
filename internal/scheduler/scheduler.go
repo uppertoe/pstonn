@@ -1289,6 +1289,14 @@ func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string, gen int6
 	}
 }
 
+// NoteSessionExpired queues recovery for a session some OTHER component proved
+// dead — the parking client's background reads, wired via OnSessionExpired in
+// main. The queue's own dedup makes repeated reports (a dashboard polling every
+// few seconds) free, and the generation requirement is enforced by the caller.
+func (s *Scheduler) NoteSessionExpired(owner string, gen int64) {
+	s.enqueueReconnect(context.Background(), owner, gen)
+}
+
 // CancelReconnect drops any queued reconnect for owner. Called after a manual link,
 // unlink or account deletion so stale recovery work is discarded promptly (the
 // generation check is the hard safety; this is the fast path).

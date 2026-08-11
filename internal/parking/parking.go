@@ -147,6 +147,16 @@ type Client struct {
 	regCache    sync.Map     // regKey -> cachedReg, to bound council reads
 	regRefresh  sync.Map     // regKey -> struct{}, dedupes in-flight background plate refreshes
 	regFail     sync.Map     // regKey -> time.Time, start of the current refresh-failure streak (see RefreshFailingFor)
+	// OnSessionExpired, when set (main.go wires it to the scheduler's reconnect
+	// queue), is called whenever a BACKGROUND read discovers the session is dead.
+	// Recovery used to be triggered only by the scheduler's own council touches
+	// (keep-warm, applies) on the premise that keep-warm noticed deaths within
+	// its interval — true at the original ~45-75m interval, silently false once
+	// it was stretched to ~9h for traffic reduction. That left the dashboard
+	// proving a session dead every few seconds while recovery slept for hours
+	// (observed live 2026-08-11). Called from refresh goroutines: must be safe
+	// for concurrent use, and cheap on repeats (the queue dedupes per owner).
+	OnSessionExpired func(owner string, gen int64)
 	// regGen is a per-key generation, bumped by ForgetPermit, so a plate read that was
 	// already in flight when a permit was removed cannot resurrect the cache entry
 	// afterwards. Guarded by regGenMu (writes only; regCache reads stay lock-free).
@@ -941,11 +951,26 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 		if err != nil {
 			log.Printf("parking: background plate refresh for permit %s: %v", p.CouncilPermitID, err)
 			c.regFail.LoadOrStore(key, time.Now()) // keep the streak's START on repeats
+			c.noteExpired(owner, err)
 			return
 		}
 		c.regFail.Delete(key)
 		c.storeRegIfCurrent(key, gen, reg)
 	}()
+}
+
+// noteExpired reports a generation-tagged session expiry to OnSessionExpired.
+// Untagged errors are dropped on purpose: without the generation the receiver
+// cannot bind recovery to the session that actually failed (a fresh re-link
+// racing the report could be retired by mistake), which is the same rule the
+// scheduler's own expiry branch follows.
+func (c *Client) noteExpired(owner string, err error) {
+	if c.OnSessionExpired == nil {
+		return
+	}
+	if gen, ok := SessionGenOf(err); ok {
+		c.OnSessionExpired(owner, gen)
+	}
 }
 
 // RefreshFailingFor reports how long background plate refreshes for this permit

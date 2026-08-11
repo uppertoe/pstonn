@@ -159,6 +159,11 @@ func run() error {
 		// file is always a coherent database to restore from.
 		SnapshotPath: filepath.Join(filepath.Dir(cfg.SQLitePath), "backup-snapshot.db"),
 	})
+	// Any component that PROVES a session dead must be able to start recovery.
+	// Without this hook, a death discovered by the dashboard's background reads
+	// waited for the next keep-warm pass — up to ~9h at the traffic-reduced warm
+	// interval — while the page visibly failed every few seconds.
+	council.OnSessionExpired = sched.NoteSessionExpired
 	// State the rollover guarantee at startup rather than leaving it implicit: with
 	// a shared boundary (midnight, overwhelmingly) the question that matters is not
 	// the window setting but when every permit is actually expected to have

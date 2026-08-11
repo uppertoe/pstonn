@@ -288,3 +288,29 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 		t.Fatalf("streak survived ForgetPermit: %v", d)
 	}
 }
+
+// TestNoteExpiredReportsOnlyTaggedExpiries: the read-path expiry hook (wired to
+// the scheduler's reconnect queue) must fire for a generation-tagged session
+// expiry and stay silent otherwise — an untagged expiry cannot be safely bound
+// to a session, and a non-expiry error is not recovery's business. This hook is
+// what stops a dashboard-discovered death waiting ~9h for the next keep-warm
+// pass (observed live 2026-08-11).
+func TestNoteExpiredReportsOnlyTaggedExpiries(t *testing.T) {
+	c := &Client{}
+	var got []int64
+	c.OnSessionExpired = func(owner string, gen int64) {
+		if owner != "o@example.com" {
+			t.Fatalf("hook got owner %q", owner)
+		}
+		got = append(got, gen)
+	}
+	c.noteExpired("o@example.com", withSessionGen(ErrSessionExpired, 42)) // tagged → fires
+	c.noteExpired("o@example.com", ErrSessionExpired)                     // untagged → silent
+	c.noteExpired("o@example.com", ErrCouncilBusy)                        // not an expiry → silent
+	if len(got) != 1 || got[0] != 42 {
+		t.Fatalf("hook calls = %v, want exactly [42]", got)
+	}
+	// A nil hook must be safe: the client is usable without a scheduler.
+	c.OnSessionExpired = nil
+	c.noteExpired("o@example.com", withSessionGen(ErrSessionExpired, 7))
+}
