@@ -131,9 +131,12 @@ jobs:
           cache-to: type=gha,mode=max
 
       # Ping the self-hosted Renovate runner for an IMMEDIATE first-party digest
-      # pass, so a new image deploys in minutes instead of waiting for the 4-hourly
+      # pass, so a new image deploys in minutes instead of waiting for the daily
       # cron. Renovate opens + auto-merges the pin bump in markbot-server, which
       # fires the ntfy deploy trigger. Soft-skips if the token isn't configured.
+      # The payload names the owner/repo that needs the pass so the runner only
+      # spins up that one matrix job scoped to that one repo (~2 billed minutes
+      # instead of ~10 for a full-fleet pass).
       - name: Ping Renovate for an immediate digest bump
         if: github.ref == 'refs/heads/main'
         env:
@@ -143,5 +146,8 @@ jobs:
             echo "RENOVATE_DISPATCH_TOKEN not set; skipping (the cron still covers it)."
             exit 0
           fi
-          gh api repos/uppertoe/renovate-runner/dispatches -f event_type=renovate
+          gh api repos/uppertoe/renovate-runner/dispatches \
+            -f event_type=renovate \
+            -f 'client_payload[owner]=uppertoe' \
+            -f 'client_payload[repository]=uppertoe/markbot-server'
           echo "Pinged renovate-runner for an immediate first-party digest pass."
