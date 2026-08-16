@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -527,7 +528,7 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	if legacy {
 		// An unbound legacy ciphertext. It opens, and the re-login below re-seals it
 		// bound, so this heals itself on the very next reconnect.
-		log.Printf("parking: saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", owner)
+		log.Printf("parking: saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", redact.Email(owner))
 	}
 	if err != nil {
 		// A decrypt failure (e.g. DATA_ENCRYPTION_KEY rotated) is deterministic:
@@ -535,7 +536,7 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 		// Map it to ErrNoSavedPassword so the retire-and-notify path fires and the
 		// dashboard prompts a manual re-link — the same mapping openCookie applies
 		// to the identical failure on the session cookie.
-		log.Printf("parking: unseal saved password for %s failed (%v); treating as no saved password (manual re-link required)", owner, err)
+		log.Printf("parking: unseal saved password for %s failed (%v); treating as no saved password (manual re-link required)", redact.Email(owner), err)
 		return ErrNoSavedPassword
 	}
 	// The council username is pinned to the owner's verified email at link time,

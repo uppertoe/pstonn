@@ -22,6 +22,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/identity"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/session"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -255,7 +256,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 	// than trusted, since silence is not a guarantee.
 	if claims.EmailVerified == nil || !*claims.EmailVerified {
 		log.Printf("oidc: refusing sign-in for %q: email_verified is %v (the email is the account key, so it must be verified)",
-			u.Email, claims.EmailVerified)
+			redact.Email(u.Email), claims.EmailVerified)
 		http.Error(w, "your identity provider did not confirm this email address is verified, so sign-in was refused", http.StatusUnauthorized)
 		return
 	}
@@ -263,7 +264,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("app login: %s", u.Email)
+	log.Printf("app login: %s", redact.Email(u.Email))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

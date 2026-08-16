@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -104,7 +105,7 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 	// reassign the emptied days before a car parks on an unscheduled one.
 	usage, uerr := s.store.VehicleUsageFor(r.Context(), owner, pathInt(r, "id"))
 	if uerr != nil {
-		log.Printf("vehicle usage for %s before delete: %v", owner, uerr)
+		log.Printf("vehicle usage for %s before delete: %v", redact.Email(owner), uerr)
 	}
 	deleted, err := s.store.DeleteVehicle(r.Context(), owner, pathInt(r, "id"))
 	if err != nil {

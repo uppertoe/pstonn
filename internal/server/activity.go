@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/uppertoe/pstonn/internal/redact"
 	"log"
 	"net/http"
 )
@@ -47,7 +48,7 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Best-effort: the apply log is the more important half, so don't fail the
 		// page over the change log.
-		log.Printf("activity: list changes for %s: %v", base.Owner, err)
+		log.Printf("activity: list changes for %s: %v", redact.Email(base.Owner), err)
 	}
 	if len(changes) > limit {
 		changes, base.ChangesMore = changes[:limit], true

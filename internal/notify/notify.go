@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/mailer"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -83,36 +84,11 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 	}
 }
 
-// RedactEmail reduces an address to something safe to leave in a log while still
-// being useful: the provider is what an operator debugging a delivery problem
-// needs, and the mailbox is what identifies a household. Logs outlive the data
-// they describe (they are shipped, rotated, and read by whoever is on call),
-// while the addresses themselves are already in the DB for anyone entitled to
-// them, so there is nothing to gain by writing them twice.
-func RedactEmail(a string) string {
-	a = strings.TrimSpace(a)
-	if a == "" {
-		return "(none)"
-	}
-	at := strings.LastIndex(a, "@")
-	if at <= 0 {
-		return "***" // not an address shape; say nothing about it
-	}
-	local := []rune(a[:at])
-	return string(local[:1]) + "***" + strings.ToLower(a[at:])
-}
-
-// redactEmails is RedactEmail over a recipient list.
-func redactEmails(list []string) string {
-	if len(list) == 0 {
-		return "(none)"
-	}
-	out := make([]string, 0, len(list))
-	for _, a := range list {
-		out = append(out, RedactEmail(a))
-	}
-	return strings.Join(out, ", ")
-}
+// RedactEmail and redactEmails are thin wrappers over the shared redact package,
+// kept so notify's many existing callers don't churn. The reasoning (logs are
+// the leakiest surface, the full address stays in the DB) now lives in redact.
+func RedactEmail(a string) string       { return redact.Email(a) }
+func redactEmails(list []string) string { return redact.Emails(list) }
 
 // neutraliseLinks strips whole URLs out of owner-supplied free text (a permit
 // label) before it reaches mail we send to people who never opted in.

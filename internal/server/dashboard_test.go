@@ -93,7 +93,8 @@ func TestTemplatesRender(t *testing.T) {
 	}{
 		{"landing", dashboardData{State: "landing", Loc: loc}, "Schedule your City of Stonnington"},
 		{"landing-signedin", dashboardData{State: "landing", SignedIn: true, Loc: loc}, "Open the app"},
-		{"security", dashboardData{State: "security", Loc: loc}, "security model"},
+		{"security", dashboardData{State: "security", Loc: loc}, "The short version"},
+		{"security-encryption", dashboardData{State: "security", Loc: loc}, "AES-256-GCM"},
 		{"how", dashboardData{State: "how", Loc: loc}, "get a Stonnington ePermit"},
 		{"how-demos", dashboardData{State: "how", Loc: loc}, "data-demo=\"roster\""},
 		{"contact", dashboardData{State: "contact", Contact: true, Loc: loc}, "Send message"},

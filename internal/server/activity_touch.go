@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"log"
 	"time"
 )
@@ -51,6 +52,6 @@ func (s *Server) touchActivity(ctx context.Context, user string) {
 		return
 	}
 	if err := s.store.TouchAccountActive(ctx, owner); err != nil {
-		log.Printf("touch activity for %s: %v", owner, err)
+		log.Printf("touch activity for %s: %v", redact.Email(owner), err)
 	}
 }

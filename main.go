@@ -282,19 +282,26 @@ func run() error {
 // A dedicated key is REQUIRED in production. Without one we would otherwise fall
 // back to an ephemeral key that changes every restart, silently making every
 // stored council session undecryptable (users appear linked but nothing applies).
-// So a missing key is fatal unless the app is in local/dev mode
-// (DEV_IDENTITY_EMAIL set), where an ephemeral key is acceptable for iteration.
+// So a missing key is fatal unless the app is in local/dev mode — either
+// DEV_IDENTITY_EMAIL (local auth bypass) or COUNCIL_SANDBOX (faked council). Both
+// are local-only signals that refuse to start beside any production signal, and
+// DATA_ENCRYPTION_KEY is itself a production signal — so this can never weaken a
+// real deployment. Sandbox in particular fakes the council, so the only thing the
+// cipher protects (council sessions and saved passwords) is itself fake; an
+// ephemeral key loses nothing real. Treating only DEV_IDENTITY_EMAIL as dev left
+// a catch-22: a sandbox run with no DEV_IDENTITY_EMAIL (to preview the signed-out
+// experience) demanded a key it was then forbidden to hold.
 // We deliberately do NOT derive the key from SESSION_SECRET: coupling the two
 // means rotating the cookie-signing secret would brick every stored session.
 func buildSecretBox(cfg *config.Config) (*secretbox.Box, error) {
 	if len(cfg.DataEncryptionKey) == 32 {
 		return secretbox.New(cfg.DataEncryptionKey)
 	}
-	if cfg.DevIdentityEmail == "" {
+	if cfg.DevIdentityEmail == "" && !cfg.Council.Sandbox {
 		return nil, errors.New("DATA_ENCRYPTION_KEY is required in production: set it to 64 hex chars (openssl rand -hex 32). " +
 			"Without it, stored council sessions cannot survive a restart.")
 	}
-	log.Print("WARNING: DATA_ENCRYPTION_KEY not set; using an ephemeral key (DEV_IDENTITY_EMAIL is set, so local/dev mode). " +
+	log.Print("WARNING: DATA_ENCRYPTION_KEY not set; using an ephemeral key (local/dev mode: DEV_IDENTITY_EMAIL or COUNCIL_SANDBOX is set). " +
 		"Stored council sessions will not survive a restart.")
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/uppertoe/pstonn/internal/identity"
+	"github.com/uppertoe/pstonn/internal/redact"
 )
 
 // newScriptNonce mints the per-response CSP script nonce. 16 bytes is well past
@@ -203,7 +204,7 @@ func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrim
 		// read (a secondary just sees their own empty account for a moment). A MUTATING
 		// handler must NOT use this: it would write into that phantom own-account. Those
 		// use resolveAccountStrict and fail closed — see its doc.
-		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", user, err)
+		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", redact.Email(user), err)
 		return user, user, false
 	}
 	return user, owner, isPrimary
@@ -232,7 +233,7 @@ func (s *Server) resolveAccountStrict(ctx context.Context) (user, owner string, 
 func (s *Server) accountForWrite(w http.ResponseWriter, r *http.Request) (user, owner string, isPrimary, ok bool) {
 	user, owner, isPrimary, err := s.resolveAccountStrict(r.Context())
 	if err != nil {
-		log.Printf("accountForWrite %s: membership lookup failed; refusing the mutation: %v", user, err)
+		log.Printf("accountForWrite %s: membership lookup failed; refusing the mutation: %v", redact.Email(user), err)
 		s.message(w, http.StatusServiceUnavailable, "We couldn't confirm your account just now. Please try again in a moment.")
 		return "", "", false, false
 	}

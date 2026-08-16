@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -67,7 +68,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if used, lerr := s.legendColors(ctx, owner, vviews, now); lerr == nil {
 		base.LegendVehicles, base.LegendMore = legendVehicles(vviews, used)
 	} else {
-		log.Printf("legend colours for %s: %v", owner, lerr)
+		log.Printf("legend colours for %s: %v", redact.Email(owner), lerr)
 	}
 	base.Permits = pvs
 	base.ExpiredPermits = expired

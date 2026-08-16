@@ -14,6 +14,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -69,18 +70,18 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		// them before any counting.
 		known, kerr := s.store.HasOwnData(r.Context(), user)
 		if kerr != nil {
-			log.Printf("capacity check for %s: %v", user, kerr)
+			log.Printf("capacity check for %s: %v", redact.Email(user), kerr)
 			s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
 			return
 		}
 		if !known {
 			n, cerr := s.store.CountLinkedAccounts(r.Context())
 			if cerr != nil {
-				log.Printf("capacity check for %s: %v", user, cerr)
+				log.Printf("capacity check for %s: %v", redact.Email(user), cerr)
 				s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
 				return
 			} else if n >= s.cfg.MaxAccounts {
-				log.Printf("capacity: refused a new link for %s (%d/%d accounts)", user, n, s.cfg.MaxAccounts)
+				log.Printf("capacity: refused a new link for %s (%d/%d accounts)", redact.Email(user), n, s.cfg.MaxAccounts)
 				s.message(w, http.StatusServiceUnavailable,
 					"p.stonn is full at the moment. It's run by one person for a small number of Stonnington households, and taking on more right now would make it slower and less reliable for everyone already using it. "+
 						"Please try again in a while, or get in touch and I'll let you know when there's room.")
@@ -95,7 +96,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	linkCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	if err := s.council.Link(linkCtx, user, user, password, savePassword, true, 0); err != nil {
-		log.Printf("council link for %s: %v", user, err)
+		log.Printf("council link for %s: %v", redact.Email(user), err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
 			return
@@ -351,7 +352,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	// owner and is not something the accept flow can undo cleanly.
 	isP, err := s.store.IsPrimary(ctx, u.Email)
 	if err != nil {
-		log.Printf("acceptInvite: cannot check primary status for %s: %v", u.Email, err)
+		log.Printf("acceptInvite: cannot check primary status for %s: %v", redact.Email(u.Email), err)
 		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
 		return
 	}
@@ -361,7 +362,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	has, err := s.store.HasOwnData(ctx, u.Email)
 	if err != nil {
-		log.Printf("acceptInvite: cannot check own data for %s: %v", u.Email, err)
+		log.Printf("acceptInvite: cannot check own data for %s: %v", redact.Email(u.Email), err)
 		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
 		return
 	}
@@ -528,7 +529,7 @@ func (s *Server) councilConfirmApply(w http.ResponseWriter, r *http.Request) {
 			Confirm: &confirmView{Stale: true}})
 		return
 	}
-	log.Printf("council session for %s confirmed via email link", owner)
+	log.Printf("council session for %s confirmed via email link", redact.Email(owner))
 	v := &confirmView{Done: true}
 	if s.cfg.Council.SessionMaxAge > 0 {
 		v.Until = time.Now().Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 January 2006")
@@ -552,7 +553,7 @@ func (s *Server) revokeSessions(ctx context.Context, email string) {
 	}
 	epoch, err := s.store.BumpSessionEpoch(ctx, email)
 	if err != nil {
-		log.Printf("SECURITY: could not revoke sessions for %s (%v); an existing sign-in may keep working until it expires", email, err)
+		log.Printf("SECURITY: could not revoke sessions for %s (%v); an existing sign-in may keep working until it expires", redact.Email(email), err)
 		return
 	}
 	if s.sessions != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 	"rsc.io/qr"
@@ -1016,7 +1017,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 	// will, and notify's dedup key includes the plate, so cycling plates meant one
 	// email and one push per attempt with nothing in the way.
 	if !guestApplyNotify.allow("ga:" + permit.Owner) {
-		log.Printf("guest apply notify for %s throttled", permit.Owner)
+		log.Printf("guest apply notify for %s throttled", redact.Email(permit.Owner))
 		return
 	}
 	// Enqueue durably (a fast insert): unlike the scheduler's apply-notify, this
@@ -1027,7 +1028,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 		DisplacedReg: d.Reg, DisplacedTold: told,
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {
-		log.Printf("guest apply notify enqueue for %s: %v", permit.Owner, err)
+		log.Printf("guest apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 	}
 }
 
@@ -1193,7 +1194,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 	undeliverable, err := s.store.SuppressedAmong(ctx, allRecipients)
 	if err != nil {
 		// Best-effort annotation: never fail the page over it.
-		log.Printf("guests: suppression lookup for %s: %v", owner, err)
+		log.Printf("guests: suppression lookup for %s: %v", redact.Email(owner), err)
 		undeliverable = map[string]string{}
 	}
 	for _, d := range details {
@@ -2180,14 +2181,14 @@ func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, pl
 	// rationed, because the alarm is the part a stranger with a poster can aim at a
 	// household at 3am.
 	if !guestNudge.allow("n:" + permit.Owner) {
-		log.Printf("guest request nudge for %s throttled", permit.Owner)
+		log.Printf("guest request nudge for %s throttled", redact.Email(permit.Owner))
 		return
 	}
 	// Enqueue durably (a fast DB insert) so the holder's "approve this?" nudge
 	// survives a restart and is retried — the printed-QR flow depends on it.
 	url := s.cfg.PublicBaseURL + "/guests"
 	if err := s.notify.NotifyGuestRequest(ctx, permit.Owner, permitLabel(permit), plate, url); err != nil {
-		log.Printf("guest request notify enqueue for %s: %v", permit.Owner, err)
+		log.Printf("guest request notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 	}
 }
 
@@ -2431,7 +2432,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 			DisplacedReg: d.Reg, DisplacedTold: told,
 		}
 		if err := s.notify.EnqueueApply(bg, outcome); err != nil {
-			log.Printf("doorqr apply notify enqueue for %s: %v", permit.Owner, err)
+			log.Printf("doorqr apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 		}
 	} else {
 		log.Printf("doorqr approve %s on permit %d: %v", req.Plate, permit.ID, applyErr)

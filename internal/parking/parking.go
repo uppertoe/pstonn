@@ -37,6 +37,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -352,10 +353,10 @@ func (c *Client) openCookie(owner, sealed string) (string, error) {
 	if legacy {
 		// Sealed before ciphertexts were bound to their owner and purpose. It still
 		// opens, and the next renew re-seals it bound; nothing to do but note it.
-		log.Printf("parking: cookie for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", owner)
+		log.Printf("parking: cookie for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", redact.Email(owner))
 	}
 	if err != nil {
-		log.Printf("parking: unseal cookie for %s failed (%v); treating as expired session (re-link required)", owner, err)
+		log.Printf("parking: unseal cookie for %s failed (%v); treating as expired session (re-link required)", redact.Email(owner), err)
 		return "", ErrSessionExpired
 	}
 	return cookie, nil
@@ -1235,7 +1236,7 @@ func (c *Client) listPermits(ctx context.Context, owner string) ([]PermitInfo, b
 			// next pass reads it cleanly.
 			c.noteTruncatedGrid(len(all), expected)
 			log.Printf("parking: permit count for %s changed mid-read (%d -> %d at page %d); "+
-				"treating this list as incomplete", owner, expected, total, page)
+				"treating this list as incomplete", redact.Email(owner), expected, total, page)
 			return all, false, nil
 		}
 		added := 0
@@ -1256,13 +1257,13 @@ func (c *Client) listPermits(ctx context.Context, owner string) ([]PermitInfo, b
 			// to check the owner off; the display paths show what they got.
 			c.noteTruncatedGrid(len(all), expected)
 			log.Printf("parking: permit list for %s stalled at %d of %d after %d page(s); "+
-				"acting on a partial list", owner, len(all), expected, page+1)
+				"acting on a partial list", redact.Email(owner), len(all), expected, page+1)
 			return all, false, nil
 		}
 	}
 	c.noteTruncatedGrid(len(all), expected)
 	log.Printf("parking: permit list for %s still incomplete after %d pages; acting on a partial list",
-		owner, maxPermitPages)
+		redact.Email(owner), maxPermitPages)
 	return all, false, nil
 }
 

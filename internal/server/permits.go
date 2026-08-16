@@ -10,6 +10,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -57,7 +58,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		if errors.Is(err, parking.ErrSessionExpired) {
 			base.Relink = true
 		} else {
-			log.Printf("list council permits for %s: %v", owner, err)
+			log.Printf("list council permits for %s: %v", redact.Email(owner), err)
 			base.Warn = "Couldn't reach the council to load your permits. Try re-linking."
 		}
 		s.render(w, base)
@@ -86,7 +87,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// name-match — systemic (hits every new signup), so the operator must
 		// hear. Once per process: a rename doesn't unhappen between requests.
 		s.renameAlertOnce.Do(func() {
-			log.Printf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback offering engaged", owner)
+			log.Printf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback offering engaged", redact.Email(owner))
 			nctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			_ = s.notify.NotifyAdmin(nctx, "Council may have renamed permit types",
@@ -211,7 +212,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
 			return
 		}
-		log.Printf("addPermit list council permits for %s: %v", owner, err)
+		log.Printf("addPermit list council permits for %s: %v", redact.Email(owner), err)
 		s.message(w, http.StatusBadGateway, "Couldn't reach the council to confirm the permit. Try again shortly.")
 		return
 	}

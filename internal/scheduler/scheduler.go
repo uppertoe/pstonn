@@ -23,6 +23,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -1072,7 +1073,7 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", cs.Owner, r)
+			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", redact.Email(cs.Owner), r)
 			s.systemAlert(ctx, "panic-keepwarm-session", "A session panicked during keep-warm",
 				fmt.Sprintf("Keep-warm for %s panicked and was skipped so the rest of the pass could continue: %v", cs.Owner, r))
 		}
@@ -1092,15 +1093,15 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 		retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, now.Add(-s.sessionMaxAge))
 		switch {
 		case err != nil:
-			log.Printf("scheduler: retire session %s: %v", cs.Owner, err)
+			log.Printf("scheduler: retire session %s: %v", redact.Email(cs.Owner), err)
 		case retired:
-			log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", cs.Owner)
+			log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", redact.Email(cs.Owner))
 			// The renewal reminder (maybeRemind) is email-only and best-effort, so
 			// it must not be the sole signal: tell the user their permit just
 			// stopped being managed, exactly as the expired-cookie path does.
 			s.alertRelink(cs.Owner)
 		default:
-			log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", cs.Owner)
+			log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", redact.Email(cs.Owner))
 		}
 		return
 	}
@@ -1120,7 +1121,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 		switch err := s.council.Refresh(ctx, cs.Owner); {
 		case err == nil:
 			alive = true
-			log.Printf("scheduler: kept session for %s warm", cs.Owner)
+			log.Printf("scheduler: kept session for %s warm", redact.Email(cs.Owner))
 		case errors.Is(err, parking.ErrSessionExpired):
 			// Hand recovery to the reconnect worker and move on — never reconnect inline
 			// in the warm pass. alive stays false; the worker re-warms via a kick on a
@@ -1136,7 +1137,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 		case errors.Is(err, parking.ErrCouncilBusy):
 			// Portal pushing back; the client is already backing off. Stay quiet.
 		default:
-			log.Printf("scheduler: keep-warm %s: %v", cs.Owner, err)
+			log.Printf("scheduler: keep-warm %s: %v", redact.Email(cs.Owner), err)
 		}
 	}
 
@@ -1166,7 +1167,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			} else {
 				s.noteDriftFailure(ctx, cs.Owner, derr)
 			}
-			log.Printf("scheduler: drift check %s: %v", cs.Owner, derr)
+			log.Printf("scheduler: drift check %s: %v", redact.Email(cs.Owner), derr)
 			// A drift read is often how we learn the cookie was killed council-side just
 			// AFTER a successful warm — the churn incident's signature. Without this the
 			// expiry was only logged: updated_at is fresh so keep-warm won't re-probe for
@@ -1182,7 +1183,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			// we may be failing precisely because it is throttling us. Treating the failed
 			// write as a drift failure keeps the backoff on and lets it widen.
 			if err := s.markDriftChecked(ctx, cs.Owner); err != nil {
-				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", cs.Owner, err)
+				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", redact.Email(cs.Owner), err)
 				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
 			} else {
 				s.noteDriftSuccess(cs.Owner) // clear any backoff from earlier failures
@@ -1412,7 +1413,7 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 	processed = true // we have an item; a panic below is still "processed" (it gets a backoff)
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: reconnect worker panicked on %s (recovered): %v", owner, r)
+			log.Printf("scheduler: reconnect worker panicked on %s (recovered): %v", redact.Email(owner), r)
 			s.systemAlert(ctx, "panic-reconnect", "Reconnect worker panicked",
 				fmt.Sprintf("Recovering the session for %s panicked and was recovered; it will be retried. %v", owner, r))
 			s.backoffReconnect(owner)
@@ -1449,7 +1450,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 		// A TRANSIENT read failure (SQLite contention — likeliest during exactly the
 		// mass-expiry this queue exists for) must not drop the task, which is the same
 		// mistake the failed-delete path already corrects.
-		log.Printf("scheduler: reconnect guard read for %s failed; retrying later: %v", owner, err)
+		log.Printf("scheduler: reconnect guard read for %s failed; retrying later: %v", redact.Email(owner), err)
 		return reconnectDeferred
 	case cur.Generation != gen:
 		return reconnectRetired // superseded: the current session is not ours to touch
@@ -1461,18 +1462,18 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 	switch rerr := s.council.Reconnect(rctx, owner); {
 	case rerr == nil:
 		s.noteReconnect(owner)
-		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", owner)
+		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", redact.Email(owner))
 		return reconnectRecovered
 	case errors.Is(rerr, store.ErrSessionSuperseded):
 		// The login succeeded at the council but the generation-conditioned save landed
 		// nowhere — the session changed under us (a relink or a password opt-out during
 		// the attempt). Discard; the current session is correct as it stands.
-		log.Printf("scheduler: reconnect for %s superseded by a concurrent session change; discarding", owner)
+		log.Printf("scheduler: reconnect for %s superseded by a concurrent session change; discarding", redact.Email(owner))
 		return reconnectRetired
 	case errors.Is(rerr, parking.ErrNoSavedPassword):
 		// No credentials to retry with → retire and prompt a manual re-link.
 	case errors.Is(rerr, parking.ErrLoginRejected):
-		log.Printf("scheduler: auto-reconnect for %s rejected (saved password no longer valid)", owner)
+		log.Printf("scheduler: auto-reconnect for %s rejected (saved password no longer valid)", redact.Email(owner))
 	case errors.Is(rerr, parking.ErrLoginFormUnrecognised):
 		// The sign-in page shape changed: this breaks reconnect AND interactive
 		// re-link for EVERY user, and retrying cannot fix it. Alert as systemic and
@@ -1485,14 +1486,14 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 		return reconnectDeferred
 	default:
 		// Transient — keep the session + saved password and retry after a backoff.
-		log.Printf("scheduler: auto-reconnect for %s deferred (transient): %v", owner, rerr)
+		log.Printf("scheduler: auto-reconnect for %s deferred (transient): %v", redact.Email(owner), rerr)
 		return reconnectDeferred
 	}
 	// Retire — but ONLY the generation we observed, so a relink during the attempt
 	// survives. A delete FAILURE keeps the task (don't lose the recovery work).
 	switch deleted, derr := s.store.DeleteCouncilSessionIfGen(ctx, owner, gen); {
 	case derr != nil:
-		log.Printf("scheduler: unlink expired session %s: %v", owner, derr)
+		log.Printf("scheduler: unlink expired session %s: %v", redact.Email(owner), derr)
 		s.systemAlert(ctx, "retire-delete", "Could not retire an unrecoverable session",
 			fmt.Sprintf("The session for %s could not be auto-reconnected and deleting it failed: %v. It will be retried; if this persists the account is stuck half-linked.", owner, derr))
 		return reconnectDeferred
@@ -1500,7 +1501,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 		// Superseded by a fresh link/reconnect during the attempt: nothing to retire.
 		return reconnectRetired
 	default:
-		log.Printf("scheduler: session for %s expired; unlinked (re-link required)", owner)
+		log.Printf("scheduler: session for %s expired; unlinked (re-link required)", redact.Email(owner))
 		s.alertRelink(owner) // proactively tell the user, don't wait for fine time
 		return reconnectRetired
 	}
@@ -1690,7 +1691,7 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 			// mean the ones that failed are never retried — on a shared account that can
 			// be the person who actually parks the car, and for an OK:false outcome that
 			// is the fine. Leave the key unset so the next pass re-delivers.
-			log.Printf("scheduler: partial notify for %s (delivered=%d): %v — not recording, will retry", o.Owner, delivered, err)
+			log.Printf("scheduler: partial notify for %s (delivered=%d): %v — not recording, will retry", redact.Email(o.Owner), delivered, err)
 			return
 		}
 		if delivered != 0 { // >0 delivered, or -1 intentionally suppressed
@@ -1698,14 +1699,14 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 				// The notice went out but recording it as sent failed, so the next pass
 				// would re-send. Surface it rather than discarding: a persistent failure
 				// here means repeated messages to the user.
-				log.Printf("scheduler: delivered notice to %s but could not persist its dedup key for permit %d (may re-send): %v", o.Owner, p.ID, e)
+				log.Printf("scheduler: delivered notice to %s but could not persist its dedup key for permit %d (may re-send): %v", redact.Email(o.Owner), p.ID, e)
 				s.systemAlert(nctx, "notify-dedup", "Notification sent but not recorded",
 					fmt.Sprintf("A permit notification for %s was delivered, but saving it as sent failed: %v. If this persists the same notice may be delivered repeatedly.", o.Owner, e))
 			}
 			return
 		}
 		if err != nil {
-			log.Printf("scheduler: notify %s failed (will retry): %v", o.Owner, err)
+			log.Printf("scheduler: notify %s failed (will retry): %v", redact.Email(o.Owner), err)
 		}
 		if adminKey != key {
 			outcome := "was updated"
@@ -1717,7 +1718,7 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 			if ae := s.notifier.NotifyAdmin(nctx, "User could not be notified: "+o.Owner, body); ae == nil {
 				_ = s.store.SetPermitAdminKey(nctx, p.ID, key)
 			} else {
-				log.Printf("scheduler: admin escalation for %s failed: %v", o.Owner, ae)
+				log.Printf("scheduler: admin escalation for %s failed: %v", redact.Email(o.Owner), ae)
 			}
 		}
 	}()
@@ -2090,7 +2091,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 	}
 	token, err := randToken()
 	if err != nil {
-		log.Printf("scheduler: reminder token for %s: %v", cs.Owner, err)
+		log.Printf("scheduler: reminder token for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
 	url := s.publicBaseURL + "/council/confirm?token=" + token
@@ -2099,11 +2100,11 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 	// broken one every warm tick. Recording first makes the emailed link valid by
 	// construction; if the send then fails we roll the mark back so it can be retried.
 	if err := s.store.MarkReminderSent(ctx, cs.Owner, token); err != nil {
-		log.Printf("scheduler: mark reminder for %s: %v", cs.Owner, err)
+		log.Printf("scheduler: mark reminder for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
 	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.loc), url); err != nil {
-		log.Printf("scheduler: send reminder to %s: %v", cs.Owner, err)
+		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the
 		// rollback would then fail for the same reason — leaving the session marked
@@ -2112,7 +2113,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		// duplicate the old ordering risked.
 		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner); cerr != nil {
-			log.Printf("scheduler: roll back reminder mark for %s: %v", cs.Owner, cerr)
+			log.Printf("scheduler: roll back reminder mark for %s: %v", redact.Email(cs.Owner), cerr)
 		}
 		cancel()
 		// The reminder is email-only. If it keeps failing through the window the
@@ -2122,7 +2123,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
 		return
 	}
-	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", cs.Owner, deadline.In(s.loc).Format("2006-01-02"))
+	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.loc).Format("2006-01-02"))
 }
 
 // spreadElapsed reports whether a permit may act on a SCHEDULED change yet.
@@ -2552,7 +2553,7 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 		return
 	}
 	log.Printf("scheduler: permit %s: the %s points at vehicle %d, which is not one of %s's saved cars; permit still shows %q",
-		p.CouncilPermitID, res.Source, res.VehicleID, p.Owner, p.ActiveRegistration)
+		p.CouncilPermitID, res.Source, res.VehicleID, redact.Email(p.Owner), p.ActiveRegistration)
 	const reason = "The car this permit is scheduled to use is no longer saved, so p.stonn has not changed the permit."
 	const action = "Open p.stonn and choose a car for today, or add the car back."
 	s.logApply(ctx, p.ID, p.ActiveRegistration, string(res.Source), "error", reason)

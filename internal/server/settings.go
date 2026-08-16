@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/uppertoe/pstonn/internal/notify"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -157,7 +158,7 @@ func (s *Server) resumeEmail(w http.ResponseWriter, r *http.Request) {
 	} else if !cleared {
 		status = "" // nothing to clear (or not clearable: bounce/complaint)
 	} else {
-		log.Printf("resubscribe: %s resumed email from the Settings banner", user)
+		log.Printf("resubscribe: %s resumed email from the Settings banner", redact.Email(user))
 	}
 	// The banner state changed, so force the fragment to re-render even though
 	// the form normally saves with hx-swap:none.
@@ -197,9 +198,9 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 	// Only clears a self-requested unsubscribe — never a bounce or a complaint.
 	if email {
 		if cleared, err := s.store.UnsuppressIfUnsubscribed(r.Context(), user); err != nil {
-			log.Printf("resubscribe %s: %v", user, err)
+			log.Printf("resubscribe %s: %v", redact.Email(user), err)
 		} else if cleared {
-			log.Printf("resubscribe: %s re-enabled email after unsubscribing", user)
+			log.Printf("resubscribe: %s re-enabled email after unsubscribing", redact.Email(user))
 		}
 	}
 	// Failures-only: the sender has always honoured this, but nothing ever wrote
@@ -275,7 +276,7 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	if err := s.notify.SendTest(r.Context(), user); err != nil {
 		// Details (SMTP hosts, dial errors, ntfy URLs) go to the log, not the
 		// browser.
-		log.Printf("test notify %s: %v", user, err)
+		log.Printf("test notify %s: %v", redact.Email(user), err)
 		s.message(w, http.StatusBadGateway, "Couldn't send the test notification. Check your channels in Settings, and ask the operator to check the logs if it keeps failing.")
 		return
 	}

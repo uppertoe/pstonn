@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/identity"
+	"github.com/uppertoe/pstonn/internal/redact"
 )
 
 // defaultTermsMD is the built-in agreement, editable as markdown. Operators can
@@ -130,7 +131,7 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, err)
 			return
 		}
-		log.Printf("secondary %s declined updated terms, left the shared account", user)
+		log.Printf("secondary %s declined updated terms, left the shared account", redact.Email(user))
 		msg := "You declined the terms. Your shared access has been removed. The account owner's data is unaffected."
 		if s.logoutURL() != "" {
 			s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ".")
@@ -148,12 +149,12 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sched.CancelReconnect(user) // session gone; drop any queued reconnect
 	if wasLinked {
-		log.Printf("user %s declined updated terms, council account disconnected", user)
+		log.Printf("user %s declined updated terms, council account disconnected", redact.Email(user))
 		go func() {
 			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if e := s.notify.NotifyDisconnected(nctx, user); e != nil {
-				log.Printf("notify disconnect %s: %v", user, e)
+				log.Printf("notify disconnect %s: %v", redact.Email(user), e)
 			}
 		}()
 	}

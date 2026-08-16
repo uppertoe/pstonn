@@ -2,10 +2,32 @@
    app's own classes, and built entirely on the app's design tokens so light/dark
    themes track the rest of the site. Vehicle dot colours reuse the section hues. */
 
-.demos { --v1: var(--sec-schedule); --v2: var(--sec-vehicles); --v3: var(--sec-activity); }
+.features { --v1: var(--sec-schedule); --v2: var(--sec-vehicles); --v3: var(--sec-activity);
+  display: flex; flex-direction: column; gap: 48px; margin: 8px 0 12px; }
 
-.dm-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
-@media (max-width: 680px) { .dm-grid { grid-template-columns: 1fr; } }
+/* Each feature is an explainer beside its demo. Because every demo is its own
+   full-width row, no card has to height-match a neighbour (the problem the 2x2
+   gallery had), and each demo gets room — the roster's 7 day cells fit their
+   plates comfortably instead of barely. Rows alternate the demo side on wide
+   screens; on narrow screens everything stacks, text above its demo. */
+.feature { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 26px 46px; align-items: center; }
+/* Alternate the demo side, but keep the demo in the WIDER track either way —
+   otherwise the roster's 7 day cells land in the narrow column and clip plates. */
+.features > .feature:nth-child(even) { grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); }
+.features > .feature:nth-child(even) .feature-text { order: 2; }
+.feature-text h2 { margin: 0 0 9px; font-size: 20px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
+.feature-text p { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.6; }
+.feature-demo { width: 100%; }
+@media (max-width: 760px) {
+  /* Stack every feature (text above its demo). The even-row desktop overrides
+     have higher specificity, so they must be reset at matching specificity or
+     they leak into mobile and keep even rows (roster, guest) cramped two-up. */
+  .feature,
+  .features > .feature:nth-child(even) { grid-template-columns: 1fr; gap: 15px; }
+  .features > .feature .feature-text,
+  .features > .feature:nth-child(even) .feature-text { order: 0; }
+  .feature-demo { max-width: 420px; margin-inline: auto; }
+}
 
 .dm figure, figure.dm { margin: 0; }
 .dm-label { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; padding-left: 2px; }
@@ -28,13 +50,16 @@
 
 /* weekly roster */
 .dm-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+/* On narrow screens the demo is full-width and 7 columns get cramped, so wrap to
+   4 like the real app's roster does — plates get plenty of room. */
+@media (max-width: 760px) { .dm-week { grid-template-columns: repeat(4, 1fr); } }
 .dm-day { position: relative; overflow: hidden; height: 62px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: 6px 3px; display: flex; flex-direction: column; align-items: center; gap: 6px; transition: border-color .25s, box-shadow .25s, transform .18s; }
 .dm-day.today { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
 .dm-day.tap { transform: scale(.93); }
 .dm-dname { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .dm-chip { display: flex; flex-direction: column; align-items: center; gap: 3px; opacity: 0; transform: translateY(4px) scale(.9); transition: opacity .3s, transform .3s cubic-bezier(.2,.9,.3,1.3); }
 .dm-chip.show { opacity: 1; transform: none; }
-.dm-chip .dm-rego { font-size: 11px; }
+.dm-chip .dm-rego { font-size: 9px; letter-spacing: 0; }
 .dm-empty { color: var(--line); font-size: 16px; line-height: 1; margin-top: 6px; }
 
 .dm-picker { position: absolute; z-index: 6; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 6px; width: 158px; opacity: 0; transform: translateY(-6px) scale(.96); transform-origin: top left; pointer-events: none; transition: opacity .2s, transform .2s; }
@@ -56,7 +81,7 @@
 .dm-cursor { position: absolute; z-index: 8; left: 0; top: 0; width: 20px; height: 20px; pointer-events: none; opacity: 0; transition: transform .5s cubic-bezier(.5,0,.2,1), opacity .3s; filter: drop-shadow(0 2px 3px rgba(0,0,0,.28)); }
 .dm-cursor.on { opacity: 1; }
 
-.dm-caption { margin-top: 14px; text-align: center; min-height: 38px; font-size: 13px; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+.dm-caption { margin-top: 14px; text-align: center; min-height: 44px; font-size: 13px; color: var(--muted); display: flex; align-items: center; justify-content: center; }
 .dm-caption span { display: inline-block; opacity: 0; transform: translateY(4px); transition: opacity .35s, transform .35s; }
 .dm-caption span.show { opacity: 1; transform: none; }
 .dm-caption b { color: var(--ink); font-weight: 650; }
@@ -104,6 +129,27 @@
 .dm-result .chk svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .dm-result .msg { font-size: 12px; line-height: 1.4; color: var(--ink); }
 .dm-result .msg b { font-weight: 650; }
+
+/* hand a visitor access (guest link / QR) */
+.dm-gsub { font-size: 11.5px; color: var(--muted); margin-bottom: 10px; line-height: 1.4; }
+.dm-gcars { display: flex; flex-direction: column; gap: 7px; }
+.dm-gcar { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px 11px; background: var(--surface);
+  opacity: 0; transform: translateY(4px); transition: opacity .3s, transform .3s cubic-bezier(.2,.9,.3,1.3), border-color .2s, background .2s; }
+.dm-gcar.in { opacity: 1; transform: none; }
+.dm-gcar.on { border-color: color-mix(in srgb, var(--primary) 55%, var(--line)); background: color-mix(in srgb, var(--primary) 7%, var(--surface)); }
+.dm-gcar .dm-cname { margin-left: 1px; }
+.dm-gcar .dm-tick { margin-left: auto; color: var(--ok); display: grid; place-items: center; opacity: 0; transform: scale(.7); transition: opacity .2s, transform .2s cubic-bezier(.2,.9,.3,1.4); }
+.dm-gcar .dm-tick svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.dm-gcar.on .dm-tick { opacity: 1; transform: none; }
+/* until-text on its OWN reserved line: min-height keeps the space whether or not
+   the text is present, so it fading in mid-animation can't reflow the tile. */
+.dm-guntil { min-height: 15px; margin-top: 3px; color: var(--muted); font-weight: 600; font-size: 11px; }
+
+/* pretend QR, ties the card to the "link or QR" feature. Always dark-on-white
+   (a QR is), independent of theme. */
+.dm-qrwrap { display: flex; align-items: center; gap: 12px; margin: 4px 0 13px; }
+.dm-qr { display: block; width: 56px; height: 56px; background: #fff; border-radius: 9px; padding: 5px; box-sizing: border-box; box-shadow: var(--shadow); flex: 0 0 auto; }
+.dm-qrcap { font-size: 11px; color: var(--muted); line-height: 1.45; }
 
 /* mini demo for the landing hero */
 .dm-mini { max-width: 340px; margin: 0 auto; }

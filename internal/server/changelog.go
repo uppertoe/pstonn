@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -17,7 +18,7 @@ import (
 // at all, so on a shared account there was no way to answer "who changed this?".
 func (s *Server) logChange(ctx context.Context, owner, actor, action, target, detail string) {
 	if err := s.store.RecordChange(ctx, owner, actor, action, target, detail); err != nil {
-		log.Printf("changelog %s %s: %v", action, owner, err)
+		log.Printf("changelog %s %s: %v", action, redact.Email(owner), err)
 	}
 }
 
@@ -34,7 +35,7 @@ func (s *Server) notifyDestructive(ctx context.Context, owner, actor, summary st
 		return
 	}
 	if err := s.notify.NotifyAccountChange(ctx, owner, actor, summary); err != nil {
-		log.Printf("notify account change for %s: %v", owner, err)
+		log.Printf("notify account change for %s: %v", redact.Email(owner), err)
 	}
 }
 

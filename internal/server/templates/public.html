@@ -48,53 +48,67 @@
 {{end}}
 
 {{define "page-security"}}
-{{/* ================= PUBLIC ABOUT ================= */}}
+{{/* ================= PUBLIC SECURITY & DATA ================= */}}
 {{template "publicheader" .}}
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>p.stonn is a free, unofficial tool that schedules changes to your City of Stonnington visitor parking permit. It is not affiliated with, endorsed by, or connected to the City of Stonnington. For a walk-through of what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
+    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. For what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
 
-    <h2 class="about-h2">The security model</h2>
-    <ul>
-      <li>p.stonn holds a live session to your council account, continuously renewed so it can act on your schedule while you're not here. That session can view and change your permit. It is encrypted at rest with a key held on this server.</li>
-      <li>The connection lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). We email a one-click link before that happens. This is deliberate: we don't want to keep access to the council account of someone who has moved away or stopped using the service.</li>
-      <li><strong>What is and isn't encrypted:</strong> your council session, its access token, your council password (if you saved it), and the codes behind your door and visitor QRs are encrypted with AES-256-GCM. Everything else &mdash; your number plates, your schedule, your permit details, email addresses, and the activity and change logs &mdash; is stored unencrypted in the database on this server.</li>
-      <li>This is necessary to reliably connect to your Stonnington ePermit account.</li>
-      <li>If this server, its database, or its encryption key were compromised, your council session could be exposed and misused. Encryption reduces this risk but does not remove it. No online service can promise perfect security.</li>
-      <li><strong>Your council password is saved by default</strong>, encrypted, so the app can sign back in on its own when the council ends the session &mdash; without it, a lapsed session stops the app updating your permit until you re-link. Untick &ldquo;Save my password&rdquo; when you link, or turn it off later in Settings, and it is erased and never stored again.</li>
-      <li>On p.stonn.org your login email is verified by a one-time code, and you can only ever link the council account whose email matches it. (Self-hosters: the app trusts whatever verified email its sign-in layer supplies.)</li>
-      <li>Please ensure that your Stonnington ePermit password is unique to your council account, so nothing else of yours is exposed if this service is ever compromised.</li>
-      <li>You can revoke p.stonn's access at any time by disconnecting in Settings, which takes effect immediately. Changing your council password also ends the stored session, though an access token already issued may keep working for up to about an hour.</li>
-      <li>Before using this service, you should consider whether you are comfortable with a third party holding access to your council account. Do not rely on it for anything you can't afford to have go wrong.</li>
-    </ul>
+    <h2 class="about-h2">The short version</h2>
+    <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
+    <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and you can delete everything you&rsquo;ve stored on request. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
+    <p class="sec-more">The detail is below &mdash; open any section that matters to you.</p>
 
-    <h2 class="about-h2">Your data</h2>
-    <ul>
-      <li>About you: your email, your vehicles and their plates, your schedule, your permit details, a log of the changes it applied, a log of who on your account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</li>
-      <li>About other people, where you've used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the number plates visitors typed in at a printed door QR. If we ever can't deliver mail to an address, we keep that address on a do-not-email list so we stop trying.</li>
-      <li>How long we keep things: the activity and change logs, 90 days. A visitor's plate from a door QR, 7 days from the scan &mdash; whether you approved it, declined it, or never got to it. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content at all &mdash; it is stripped the moment they go out. The server's own operational logs contain email addresses, plates and permit identifiers; they are capped in size and rotate away, so they hold recent activity rather than a permanent history.</li>
-      <li>The &ldquo;do not email&rdquo; list: an address that bounced or unsubscribed ages out after 2 years. An address that reported us as spam is kept indefinitely &mdash; we will not let a request to stop expire quietly.</li>
-      <li>Your data is used only to operate this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where the feature requires it: with the email provider that delivers your notifications, with the push server if you turn push on, and with the council itself when it changes your permit.</li>
-      <li>Honesty requires saying: the person running this server could technically read what the server can read. What you get is their commitment not to, this page saying so publicly, and the small, personal scale of the service.</li>
-      <li>&ldquo;Delete all my data&rdquo; in Settings removes everything from the live database straight away: your session, saved password, schedule, vehicles, guest passes, logs, and anything still queued to be emailed to you. It also removes your traces from other people's accounts if you were a member of one &mdash; including any guest passes you created there.</li>
-      <li>Backups are the one exception. Encrypted backups run daily and are thinned on a schedule &mdash; roughly the last week daily, the last month weekly, then monthly for about half a year. So deleted data can persist in a backup for up to about six months before it is permanently gone. It is not reachable through the app, and the backups are encrypted with a key held separately from the server.</li>
-    </ul>
+    <details class="sec"><summary>What&rsquo;s encrypted, and what isn&rsquo;t</summary>
+      <p>Encrypted with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your door and visitor QR links.</p>
+      <p>Stored as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it. It is kept readable because that is what running the service reliably needs.</p>
+    </details>
+
+    <details class="sec"><summary>How the connection ends</summary>
+      <p>It lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). About a week before, p.stonn emails a one-click link to keep it going. This is deliberate: it should not hold access to the council account of someone who has moved away or stopped using it.</p>
+      <p>You can also end it yourself any time &mdash; disconnect in Settings (immediate), or change your council password, which ends the stored session (an access token already issued may keep working for up to about an hour).</p>
+    </details>
+
+    <details class="sec"><summary>Your council password, and signing in</summary>
+      <p>Saved by default, encrypted, so p.stonn can sign back in on its own when the council ends a session &mdash; without it, a lapsed session stops your schedule until you reconnect by hand. Untick &ldquo;Save my password&rdquo; when you link, or turn it off later in Settings, and it is erased and never stored again.</p>
+      <p>Your p.stonn sign-in is separate: a one-time code to your verified email. You can only ever link the council account whose email matches it. (Self-hosters: the app trusts whatever verified email its sign-in layer supplies.)</p>
+    </details>
+
+    <details class="sec"><summary>What data p.stonn holds</summary>
+      <p><strong>About you:</strong> your email, your vehicles and their plates, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
+      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the plates visitors typed at a printed door QR. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
+    </details>
+
+    <details class="sec"><summary>How long it is kept</summary>
+      <p>Activity and change logs: 90 days. A visitor&rsquo;s plate from a door QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
+    </details>
+
+    <details class="sec"><summary>How your data is used</summary>
+      <p>Only to run this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where a feature needs it: with the email provider that delivers your notifications, the push server if you turn push on, and the council itself when it changes your permit.</p>
+      <p>The person running this server can technically read anything the server can read. What you have is their word that they will not, said publicly here, and the small scale of the service.</p>
+    </details>
+
+    <details class="sec"><summary>Deleting your data</summary>
+      <p>&ldquo;Delete all my data&rdquo; in Settings clears everything from the live database straight away: your session, saved password, schedule, vehicles, guest passes, logs, and anything queued to be emailed to you. It also removes your traces from any account you were a member of, including guest passes you created there.</p>
+      <p>Backups are the exception: encrypted backups run daily and thin out over time (roughly the last week daily, the last month weekly, then monthly for about six months), so deleted data can linger in a backup for up to about six months before it is gone for good. Backups are not reachable through the app and are encrypted with a key held separately from the server.</p>
+    </details>
+
+    <details class="sec"><summary>If the server were compromised</summary>
+      <p>If this server, its database, or its encryption key were exposed, your council session could be misused. Encryption reduces that risk but does not remove it &mdash; which is why the password you use should be unique to your council account. No online service can promise perfect security, so don&rsquo;t rely on p.stonn for anything you can&rsquo;t afford to have go wrong.</p>
+    </details>
 
     <h2 class="about-h2">Notifications</h2>
-    <ul>
-      <li>p.stonn attempts to notify you (by email and/or push) each time it changes your permit or fails to. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Delivery is not guaranteed.</li>
-      <li>You remain responsible for checking your permit and for any fines. Treat notifications as a convenience rather than a guarantee.</li>
-    </ul>
+    <p>p.stonn tries to tell you, by email and/or push, each time it changes your permit or can&rsquo;t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Treat it as a convenience, not a guarantee &mdash; you remain responsible for your permit and for any fines.</p>
 
     <h2 class="about-h2">For the City of Stonnington</h2>
-    <p>If you work for the council and have questions or concerns about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident's own login, on their own permit. It changes a permit only when that resident's own schedule requires it, spaces and jitters its requests, and backs off when the portal pushes back &mdash; roughly 50&ndash;70 requests a day for one household. To reach the portal it replays the ePermits web app's own login form and sends browser request headers, because the protection layer in front of it refuses non-browser clients; we'd much rather use a supported route. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
+    <p>If you work for the council and have questions or concerns about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident's own login, on their own permit. It changes a permit only when that resident's own schedule requires it, spaces and jitters its requests, and backs off when the portal pushes back. A single plate change is three requests &mdash; read the current vehicle, change it, read back to confirm &mdash; which is fewer than a resident opening the ePermits site in a browser to do the same by hand; across a day, keeping the session alive included, one household&rsquo;s traffic is roughly 50&ndash;70 requests. To reach the portal it replays the ePermits web app's own login form and sends browser request headers, because the protection layer in front of it refuses non-browser clients; we'd much rather use a supported route. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
 
     <h2 class="about-h2">No promises</h2>
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
   </section>
 
-  <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">← Back</a></p>
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>
 </main>
 
 {{end}}
@@ -111,23 +125,33 @@
     <p>I built it to take a chore off my household's plate. I hope it does the same for yours.</p>
   </section>
 
-  <p class="whyhead">How it works</p>
-  <div class="demos">
-    <div class="dm-grid">
+  <div class="features">
 
-      <figure class="dm" data-demo="connect">
-        <figcaption class="dm-label"><span class="t">Connect once</span><span class="s">p.stonn keeps an encrypted session</span></figcaption>
+    <section class="feature">
+      <div class="feature-text">
+        <h2>Connect once</h2>
+        <p>Sign in with your City of Stonnington ePermits details one time. p.stonn keeps an encrypted connection so it can update your permit on your schedule &mdash; you don&rsquo;t sign in again each time.</p>
+      </div>
+      <div class="feature-demo">
+        <figure class="dm" data-demo="connect">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Connect council account</h2></div>
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Link your council account</h2></div>
           <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
           <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
           <div class="dm-btn">{{template "ic-link"}} Link account</div>
-          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> p.stonn keeps an encrypted session so it can act for you.</div></div>
+          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> p.stonn keeps an encrypted session so it can update your permit for you.</div></div>
         </div>
-      </figure>
+        </figure>
+      </div>
+    </section>
 
-      <figure class="dm" data-demo="roster">
-        <figcaption class="dm-label"><span class="t">Set a weekly schedule</span><span class="s">a car for each day</span></figcaption>
+    <section class="feature">
+      <div class="feature-text">
+        <h2>A car for each day</h2>
+        <p>Set which registration is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
+      </div>
+      <div class="feature-demo">
+        <figure class="dm" data-demo="roster">
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
@@ -144,10 +168,17 @@
           <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
         </div>
         <div class="dm-caption"><span></span></div>
-      </figure>
+        </figure>
+      </div>
+    </section>
 
-      <figure class="dm" data-demo="oneoff">
-        <figcaption class="dm-label"><span class="t">Book a one-off</span><span class="s">for a visit that breaks the routine</span></figcaption>
+    <section class="feature">
+      <div class="feature-text">
+        <h2>One-off bookings</h2>
+        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; book a car for a set window. Your weekly schedule takes back over the moment it ends.</p>
+      </div>
+      <div class="feature-demo">
+        <figure class="dm" data-demo="oneoff">
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
@@ -158,10 +189,45 @@
           <div class="dm-booking"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span> <span class="when">Sat 12 &ndash; Sun 13 Jul</span></div>
           <div class="dm-cal"></div>
         </div>
-      </figure>
+        </figure>
+      </div>
+    </section>
 
-      <figure class="dm" data-demo="notify">
-        <figcaption class="dm-label"><span class="t">Know it happened</span><span class="s">every change, or if one fails</span></figcaption>
+    <section class="feature">
+      <div class="feature-text">
+        <h2>Hand a visitor access</h2>
+        <p>Send a private link or show a QR, and the visitor puts their own car on the permit &mdash; no account needed. There&rsquo;s also a printable door QR: a visitor scans it and requests a spot, and nothing changes until you approve it from your phone.</p>
+      </div>
+      <div class="feature-demo">
+        <figure class="dm" data-demo="guest">
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Visitor pass</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-qrwrap">
+            <img class="dm-qr" src="/static/demo-qr.svg" alt="Example visitor-pass QR code" width="56" height="56">
+            <span class="dm-qrcap">Send it as a private link, or show it as a QR &mdash; the visitor opens it and picks their car.</span>
+          </div>
+          <div class="dm-gsub">Tap your car to put it on the permit.</div>
+          <div class="dm-gcars">
+            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+        </div>
+        </figure>
+      </div>
+    </section>
+
+    <section class="feature">
+      <div class="feature-text">
+        <h2>Know it happened</h2>
+        <p>p.stonn emails or pushes you whenever it changes your permit, or when it can&rsquo;t. Delivery is best-effort, not a guarantee, so you stay responsible for your permit &mdash; but you&rsquo;ll usually know the moment anything changes.</p>
+      </div>
+      <div class="feature-demo">
+        <figure class="dm" data-demo="notify">
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic">{{template "ic-bell"}}</span> Notifications</h2></div>
           <div class="dm-toggles">
@@ -171,10 +237,10 @@
           <div class="dm-push"><span class="badge" style="background:var(--ok)">{{template "ic-check"}}</span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg">Your visitor permit is now <b>ABC123</b> (Nan's car).</div></div></div>
           <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>Still trying</b> &mdash; you'll hear when it's done.</div></div></div>
         </div>
-      </figure>
+        </figure>
+      </div>
+    </section>
 
-    </div>
-    <p class="dm-foot">A demonstration with made-up plates and names. Not a real permit.</p>
   </div>
 
   <section class="paper">

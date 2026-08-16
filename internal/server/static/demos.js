@@ -75,7 +75,15 @@
       return [
         [150, function () { reset(); say("Pick a car for each day."); }],
         [700, function () { moveTo(cells[0]); }],
-        [1300, function () { place(.82); tap(0); var c = center(cells[0]); picker.style.left = Math.max(6, c.x - 18) + "px"; picker.style.top = (c.y + 12) + "px"; }],
+        [1300, function () {
+          place(.82); tap(0); var c = center(cells[0]);
+          // Clamp inside the phone so overflow:hidden can never clip the picker
+          // (it did at phone widths, where the card is shorter than the dropdown).
+          var pw = picker.offsetWidth, ph2 = picker.offsetHeight, PW = phone.clientWidth, PH = phone.clientHeight;
+          var left = Math.max(6, Math.min(c.x - 18, PW - pw - 6));
+          var top = Math.max(6, Math.min(c.y + 12, PH - ph2 - 6));
+          picker.style.left = left + "px"; picker.style.top = top + "px";
+        }],
         [1480, function () { place(1); picker.classList.add("show"); }],
         [2000, function () { var o = picker.querySelector('[data-v="1"]'); o.classList.add("hot"); moveTo(o); }],
         [2560, function () { place(.82); }],
@@ -149,7 +157,33 @@
     loop(steps, 6600);
   }
 
-  var inits = { mini: initMini, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect };
+  /* ---------- Demo E: hand a visitor access (guest link / QR) ---------- */
+  function initGuest(root) {
+    var cars = [].slice.call(root.querySelectorAll(".dm-gcar"));
+    var gdot = root.querySelector("[data-gdot]"), grego = root.querySelector("[data-grego]");
+    var guntil = root.querySelector("[data-guntil]"), sync = root.querySelector(".dm-sync");
+    var CHOICE = 2; // the visitor picks car 2 (XYZ789, "Nanny")
+    function pick() { return cars.filter(function (c) { return c.getAttribute("data-g") === String(CHOICE); })[0]; }
+    function settle() {
+      var car = CARS[CHOICE];
+      gdot.style.background = car.v; grego.textContent = car.rego; guntil.textContent = "until the end of today";
+    }
+    if (reduced) {
+      cars.forEach(function (c) { c.classList.add("in"); });
+      pick().classList.add("on"); settle(); return;
+    }
+    function reset() {
+      cars.forEach(function (c) { c.classList.remove("in", "on"); });
+      gdot.style.background = "var(--line)"; grego.textContent = "·"; guntil.textContent = "";
+    }
+    var steps = [[150, reset]];
+    cars.forEach(function (c, i) { steps.push([500 + i * 200, function () { c.classList.add("in"); }]); });
+    steps.push([1650, function () { pick().classList.add("on"); }]);
+    steps.push([2050, function () { settle(); if (sync) { sync.classList.add("pulse"); setTimeout(function () { sync.classList.remove("pulse"); }, 600); } }]);
+    loop(steps, 6600);
+  }
+
+  var inits = { mini: initMini, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guest: initGuest };
   function initDemos() {
     document.querySelectorAll("[data-demo]").forEach(function (root) {
       if (root.dataset.demoInit) return; // already running
