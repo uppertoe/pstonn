@@ -325,6 +325,7 @@ type AdminAccount struct {
 	Plates          []string // active plate on each managed permit
 	LastApplyAt     time.Time
 	LastApplyStatus string // status of the most recent apply_log row for the account
+	MaxFailStreak   int    // highest live consecutive-failure count across the owner's permits (0 = nothing failing now)
 }
 
 // AdminAccounts returns an operational summary for every known account (anyone who
@@ -341,7 +342,8 @@ SELECT o.owner,
   (SELECT COUNT(*) FROM permit p WHERE p.owner = o.owner),
   (SELECT COUNT(*) FROM account_member m WHERE m.owner = o.owner),
   COALESCE((SELECT al.status FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), ''),
-  COALESCE((SELECT al.at     FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), '')
+  COALESCE((SELECT al.at     FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), ''),
+  (SELECT COALESCE(MAX(fail_streak), 0) FROM permit p WHERE p.owner = o.owner)
 FROM (
   SELECT owner FROM council_session
   UNION SELECT owner FROM permit
@@ -365,7 +367,7 @@ ORDER BY o.owner`)
 		var emailEn, ntfyEn int
 		if err := rows.Scan(&a.Owner, &a.MemberOf, &cookie, &linked, &active, &warmed, &expiry,
 			&emailEn, &ntfyEn, &a.NtfyTopic, &a.ConsentVersion, &a.PermitCount, &a.MemberCount,
-			&a.LastApplyStatus, &lastAt); err != nil {
+			&a.LastApplyStatus, &lastAt, &a.MaxFailStreak); err != nil {
 			return nil, err
 		}
 		a.Linked = cookie != ""

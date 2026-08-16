@@ -177,11 +177,16 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if a.LastApplyStatus != "" {
-			row.LastApply = a.LastApplyStatus
-			if !a.LastApplyAt.IsZero() {
-				row.LastApply += " · " + agoText(now, a.LastApplyAt)
+			label := a.LastApplyStatus
+			bad, cleared := applyFailureState(a.LastApplyStatus, a.MaxFailStreak)
+			if cleared {
+				label += " (cleared)"
 			}
-			if a.LastApplyStatus != "success" {
+			if !a.LastApplyAt.IsZero() {
+				label += " · " + agoText(now, a.LastApplyAt)
+			}
+			row.LastApply = label
+			if bad {
 				row.LastApplyBad = true
 				needsAttention = true
 			}
@@ -554,6 +559,24 @@ func councilRowStatus(a store.AdminAccount, keptWarm bool, now time.Time, maxAge
 	default:
 		return "ok", "OK", false
 	}
+}
+
+// applyFailureState classifies an account's newest apply-log outcome for the admin
+// table. A non-success row is a LIVE fault only while the permit is still in a failure
+// streak; once the streak clears (a later pass found the scheduled plate back in
+// place) the row is stale audit history — the "error" simply stays the newest apply_log
+// row for up to 90 days. Reporting that as "needs attention" turns a resolved transient
+// blip into a permanent alarm, so gate the red flag on the live streak and label a
+// settled former failure "cleared". Only "error" is a fault: "changed" records an
+// external edit at the portal and is informational, never attention-worthy.
+func applyFailureState(status string, maxFailStreak int) (bad, cleared bool) {
+	if status != "error" {
+		return false, false
+	}
+	if maxFailStreak > 0 {
+		return true, false
+	}
+	return false, true
 }
 
 // idleSince is the clock the re-authorise bound is measured against, mirroring

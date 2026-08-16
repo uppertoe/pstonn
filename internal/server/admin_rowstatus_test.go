@@ -49,3 +49,29 @@ func TestCouncilRowStatus(t *testing.T) {
 		})
 	}
 }
+
+// A transient council failure leaves an "error" as the newest apply_log row for up to
+// 90 days. It must only read as a live fault while the permit is still failing (streak
+// > 0); once settled (streak 0, plate back in place) it is cleared history — this is
+// lily's case, where an old blip kept the panel showing "needs attention".
+func TestApplyFailureState(t *testing.T) {
+	cases := []struct {
+		status      string
+		maxStreak   int
+		wantBad     bool
+		wantCleared bool
+	}{
+		{"success", 0, false, false},
+		{"error", 3, true, false},  // still failing → live fault
+		{"error", 0, false, true},  // settled transient failure → cleared history, no alarm
+		{"changed", 0, false, false}, // external portal edit → informational, never a fault
+		{"", 0, false, false},
+	}
+	for _, tc := range cases {
+		bad, cleared := applyFailureState(tc.status, tc.maxStreak)
+		if bad != tc.wantBad || cleared != tc.wantCleared {
+			t.Errorf("applyFailureState(%q, %d) = (bad=%v, cleared=%v), want (bad=%v, cleared=%v)",
+				tc.status, tc.maxStreak, bad, cleared, tc.wantBad, tc.wantCleared)
+		}
+	}
+}
