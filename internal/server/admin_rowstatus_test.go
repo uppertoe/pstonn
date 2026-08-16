@@ -62,8 +62,8 @@ func TestApplyFailureState(t *testing.T) {
 		wantCleared bool
 	}{
 		{"success", 0, false, false},
-		{"error", 3, true, false},  // still failing → live fault
-		{"error", 0, false, true},  // settled transient failure → cleared history, no alarm
+		{"error", 3, true, false},    // still failing → live fault
+		{"error", 0, false, true},    // settled transient failure → cleared history, no alarm
 		{"changed", 0, false, false}, // external portal edit → informational, never a fault
 		{"", 0, false, false},
 	}
