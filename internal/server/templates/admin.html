@@ -23,15 +23,15 @@
       {{range .Admin.Rows}}
       <tr>
         <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{end}}</td>
-        <td><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
-        <td>{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td>{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td>{{.Permits}}</td>
-        <td>{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td class="adm-notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
-        <td>{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td>{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td>{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td data-label="Council"><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
+        <td data-label="Last warm">{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td data-label="Re-link by">{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td data-label="Permits">{{.Permits}}</td>
+        <td data-label="On permit">{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td class="adm-notify" data-label="Notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
+        <td data-label="Terms">{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td data-label="Shared">{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        <td data-label="Last apply">{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
       </tr>
       {{else}}
       <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
@@ -57,10 +57,10 @@
         {{range .Admin.Suppressed}}
         <tr>
           <td class="adm-acct">{{.Address}}</td>
-          <td><span class="adm-pill {{if eq .Reason "complaint"}}relink{{else}}stale{{end}}">{{.Reason}}</span></td>
-          <td>{{.Ago}}</td>
-          <td>{{.Hits}}</td>
-          <td class="adm-sub">{{.Detail}}</td>
+          <td data-label="Reason"><span class="adm-pill {{if eq .Reason "complaint"}}relink{{else}}stale{{end}}">{{.Reason}}</span></td>
+          <td data-label="Last reported">{{.Ago}}</td>
+          <td data-label="Times">{{.Hits}}</td>
+          <td class="adm-sub" data-label="Detail">{{.Detail}}</td>
         </tr>
         {{end}}
         </tbody>

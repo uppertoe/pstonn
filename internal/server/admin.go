@@ -122,9 +122,24 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	scheduled, err := s.store.OwnersWithSchedule(r.Context())
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
 	now := time.Now()
 	loc := s.cfg.DisplayLocation
 	maxAge := s.cfg.Council.SessionMaxAge
+	// A keep-warm is "stale" only once a scheduled session is genuinely near lapsing:
+	// keep-warm renews every WarmInterval and must succeed before IdleWindow, so the
+	// safety margin before the idle window is the real deadline. The old fixed 6h
+	// predated WARM_INTERVAL=8h and flagged every healthy session in the 6–8h gap
+	// after each renew. Unscheduled owners are not kept warm at all, so their ageing
+	// is expected and never attention-worthy — mirror the /status counts.
+	warmStaleAfter := s.cfg.Council.IdleWindow - s.cfg.Council.WarmSafetyMargin
+	if warmStaleAfter <= 0 {
+		warmStaleAfter = s.cfg.Council.WarmInterval
+	}
 
 	v := &adminView{Total: len(accounts), StatusEnabled: s.cfg.StatusToken != ""}
 	last := s.sched.LastReconcile()
@@ -145,22 +160,11 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		if a.NtfyEnabled {
 			row.NtfyTopic = a.NtfyTopic
 		}
-		// Council / keep-warm status. The re-authorise deadline is IDLE-based, so it
-		// must be read off the same clock decideWarm retires on — using linked_at
-		// showed a false "Re-link due", and a date months in the past, for any active
-		// household that happened to link more than maxAge ago.
-		needsAttention := false
-		switch {
-		case !a.Linked:
-			row.Status, row.StatusLabel = "unlinked", "Not linked"
-		case maxAge > 0 && !idleSince(a).IsZero() && now.Sub(idleSince(a)) >= maxAge:
-			row.Status, row.StatusLabel = "relink", "Re-link due"
-			needsAttention = true
-		case a.WarmedAt.IsZero() || now.Sub(a.WarmedAt) > 6*time.Hour:
-			row.Status, row.StatusLabel = "stale", "Keep-warm stale"
-			needsAttention = true
-		default:
-			row.Status, row.StatusLabel = "ok", "OK"
+		// Council / keep-warm status.
+		_, keptWarm := scheduled[a.Owner]
+		var needsAttention bool
+		row.Status, row.StatusLabel, needsAttention = councilRowStatus(a, keptWarm, now, maxAge, warmStaleAfter)
+		if row.Status == "ok" {
 			v.WarmOK++
 		}
 		if a.Linked {
@@ -529,6 +533,27 @@ func sealRoster(key []byte, roster []store.RosterEntry) (string, error) {
 		return "", err
 	}
 	return box.Seal(string(plain))
+}
+
+// councilRowStatus classifies one account's council connection for the admin table,
+// returning the status key, its label, and whether it warrants operator attention.
+// keptWarm is whether the owner has an active schedule: only those sessions are kept
+// warm, so only they can be "stale" — an unscheduled session's ageing is expected,
+// not a fault (this mirrors what councilSessionCounts reports on /status). The re-link
+// bound is idle-based (see idleSince); warmStaleAfter is the keep-warm renew deadline,
+// derived from the configured idle window and interval rather than a fixed constant so
+// it tracks WARM_INTERVAL instead of flagging healthy sessions between renews.
+func councilRowStatus(a store.AdminAccount, keptWarm bool, now time.Time, maxAge, warmStaleAfter time.Duration) (status, label string, attention bool) {
+	switch {
+	case !a.Linked:
+		return "unlinked", "Not linked", false
+	case maxAge > 0 && !idleSince(a).IsZero() && now.Sub(idleSince(a)) >= maxAge:
+		return "relink", "Re-link due", true
+	case keptWarm && (a.WarmedAt.IsZero() || now.Sub(a.WarmedAt) > warmStaleAfter):
+		return "stale", "Keep-warm stale", true
+	default:
+		return "ok", "OK", false
+	}
 }
 
 // idleSince is the clock the re-authorise bound is measured against, mirroring
