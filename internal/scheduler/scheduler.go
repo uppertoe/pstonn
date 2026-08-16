@@ -2486,34 +2486,45 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 	if p.FailStreak == 0 {
 		return
 	}
-	// An episode that ends because the TARGET went away is not a recovery. A
-	// 9am–5pm booking the council blocked all day used to end exactly here at
-	// 5pm: the override left Resolve's output, want reverted to a plate already
-	// on the permit, and the streak was cleared with nothing ever sent — so the
-	// last word the household had was the reassuring "still updating, p.stonn
-	// will keep trying automatically", about a visitor who was uncovered the
-	// whole day. Tell them the change never landed. The last activity row still
-	// carries the failing target; when it instead MATCHES the current plate, the
-	// change did land (someone fixed it at the portal, or a guest's inline apply)
-	// and there is nothing to retract. Streak-gated like the original notice: an
-	// episode too brief to have alarmed anyone is too brief to retract.
+	// A failure episode is ending: the scheduled plate is back in place, so nothing
+	// needs the council. Close out the last logged failure so the audit trail doesn't
+	// sit on a stale "error" — which of the two ways it ends depends on whether the
+	// plate we failed to set is now the one on the permit. Streak-gated like the
+	// original retraction notice: an episode too brief to have alarmed anyone is too
+	// brief to annotate, and the /admin panel already reads a settled short blip as
+	// "cleared" off the (now zero) fail streak.
 	if p.FailStreak >= failNotifyThreshold {
-		if last, err := s.store.LastApply(ctx, p.ID); err == nil && last.Status == "error" &&
-			last.Registration != "" && !model.SamePlate(last.Registration, p.ActiveRegistration) {
-			reason := fmt.Sprintf("That change is no longer scheduled — the booking ended or the schedule moved on — and it was never applied: the permit showed %s the whole time.", p.ActiveRegistration)
-			s.logApply(ctx, p.ID, last.Registration, last.Source, "error", reason)
-			s.notifyUser(ctx, p, notify.ApplyOutcome{
-				Owner:       p.Owner,
-				PermitLabel: permitLabel(p),
-				Reg:         last.Registration,
-				OK:          false,
-				CurrentReg:  p.ActiveRegistration,
-				Reason:      reason,
-				Action: "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
-					"If " + last.Registration + " parked there during the booking, it was not covered.",
-				// Not transient: this must not sit behind a quiet-hours hold and
-				// arrive as a stale correction long after the next booking started.
-			}, "unapplied|"+last.Registration+"|"+s.failureKeyDay())
+		if last, err := s.store.LastApply(ctx, p.ID); err == nil && last.Status == "error" && last.Registration != "" {
+			if model.SamePlate(last.Registration, p.ActiveRegistration) {
+				// The plate we failed to set is now confirmed ON the permit: the change
+				// landed after all — a transient false-negative, a later retry, or someone
+				// set it at the portal / a guest's inline apply. Record the recovery so the
+				// activity log and /admin read fail→resolved instead of a permanent error.
+				// Audit only: a resolved blip needs no notification.
+				s.logApply(ctx, p.ID, last.Registration, last.Source, "success",
+					"recovered after a transient failure — the permit is confirmed on this vehicle")
+			} else {
+				// The failing target went AWAY without ever landing. A 9am–5pm booking the
+				// council blocked all day used to end exactly here at 5pm: want reverted to
+				// a plate already on the permit and the streak was cleared with nothing ever
+				// sent — so the household's last word was the reassuring "still updating,
+				// p.stonn will keep trying", about a visitor uncovered the whole day. Tell
+				// them it never applied.
+				reason := fmt.Sprintf("That change is no longer scheduled — the booking ended or the schedule moved on — and it was never applied: the permit showed %s the whole time.", p.ActiveRegistration)
+				s.logApply(ctx, p.ID, last.Registration, last.Source, "error", reason)
+				s.notifyUser(ctx, p, notify.ApplyOutcome{
+					Owner:       p.Owner,
+					PermitLabel: permitLabel(p),
+					Reg:         last.Registration,
+					OK:          false,
+					CurrentReg:  p.ActiveRegistration,
+					Reason:      reason,
+					Action: "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
+						"If " + last.Registration + " parked there during the booking, it was not covered.",
+					// Not transient: this must not sit behind a quiet-hours hold and
+					// arrive as a stale correction long after the next booking started.
+				}, "unapplied|"+last.Registration+"|"+s.failureKeyDay())
+			}
 		}
 	}
 	s.clearFailStreak(ctx, p.ID)

@@ -73,11 +73,14 @@ func TestSettleRetractsANeverAppliedBooking(t *testing.T) {
 	}
 }
 
-// TestSettleStaysQuietWhenTheChangeLanded: the counterpart — if the failing
+// TestSettleRecordsRecoveryWhenTheChangeLanded: the counterpart — if the failing
 // target ends up ON the permit (someone set it at the portal, a guest's inline
-// apply committed it), there is nothing to retract, and a "was never applied"
-// message would be flatly wrong.
-func TestSettleStaysQuietWhenTheChangeLanded(t *testing.T) {
+// apply committed it, or the transient error was a false-negative), a "was never
+// applied" retraction would be flatly wrong. Instead settle closes the episode out
+// as a RECOVERY: no notification (a resolved blip needs none), but a "success" row
+// is written so the audit log and /admin read fail→resolved rather than sitting on
+// the stale "error".
+func TestSettleRecordsRecoveryWhenTheChangeLanded(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	const owner = "landed@example.com"
@@ -90,6 +93,10 @@ func TestSettleStaysQuietWhenTheChangeLanded(t *testing.T) {
 	for i := 0; i < failNotifyThreshold+1; i++ {
 		s.reconcileAll(ctx)
 	}
+	// Sanity: the episode left an "error" as the newest apply-log row.
+	if last, err := st.LastApply(ctx, pid); err != nil || last.Status != "error" {
+		t.Fatalf("precondition: want newest apply row 'error', got %q (err %v)", last.Status, err)
+	}
 	// The wanted plate lands out of band (portal fix / guest inline commit).
 	if err := st.SetPermitActive(ctx, pid, "AAA111"); err != nil {
 		t.Fatal(err)
@@ -97,9 +104,21 @@ func TestSettleStaysQuietWhenTheChangeLanded(t *testing.T) {
 	fc.setErr = nil
 	s.reconcileAll(ctx)
 	time.Sleep(50 * time.Millisecond)
+
+	// No retraction: the change DID land, so "never applied" would be wrong.
 	for _, o := range nf.outcomeSnap() {
 		if strings.Contains(o.Reason, "never applied") {
 			t.Fatalf("retraction sent for a change that DID land: %+v", o)
 		}
+	}
+	// But the audit trail is closed out: the newest row is now a recovery success on
+	// the plate that had been failing, so nothing reads as a permanent error.
+	last, err := st.LastApply(ctx, pid)
+	if err != nil {
+		t.Fatalf("reading last apply: %v", err)
+	}
+	if last.Status != "success" || last.Registration != "AAA111" || !strings.Contains(last.Detail, "recovered") {
+		t.Fatalf("want a recovery success row for AAA111, got status=%q reg=%q detail=%q",
+			last.Status, last.Registration, last.Detail)
 	}
 }
