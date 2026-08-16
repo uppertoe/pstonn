@@ -86,7 +86,7 @@
 
     <details class="sec"><summary>How your data is used</summary>
       <p>Only to run this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where a feature needs it: with the email provider that delivers your notifications, the push server if you turn push on, and the council itself when it changes your permit.</p>
-      <p>The person running this server can technically read anything the server can read. What you have is their word that they will not, said publicly here, and the small scale of the service.</p>
+      <p>The server administrator can technically see what is stored on the server &mdash; that is true of any self-hosted tool. p.stonn is small and personal, and your data is used only to run the service for you: never sold, never shared beyond what a feature needs, and never looked at for anything else.</p>
     </details>
 
     <details class="sec"><summary>Deleting your data</summary>
@@ -95,14 +95,14 @@
     </details>
 
     <details class="sec"><summary>If the server were compromised</summary>
-      <p>If this server, its database, or its encryption key were exposed, your council session could be misused. Encryption reduces that risk but does not remove it &mdash; which is why the password you use should be unique to your council account. No online service can promise perfect security, so don&rsquo;t rely on p.stonn for anything you can&rsquo;t afford to have go wrong.</p>
+      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can &mdash; to view what is held in your ePermits account and manage the permits in it. That is the ceiling on the risk: it is one council&rsquo;s permits account, not your bank, your rates, or myGov, and changing your ePermits password shuts the session out immediately. Encryption makes that exposure unlikely, using a password that is unique to your council account keeps any fallout contained there, and &mdash; as with any online service &mdash; none of this is an absolute guarantee.</p>
     </details>
 
     <h2 class="about-h2">Notifications</h2>
     <p>p.stonn tries to tell you, by email and/or push, each time it changes your permit or can&rsquo;t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Treat it as a convenience, not a guarantee &mdash; you remain responsible for your permit and for any fines.</p>
 
     <h2 class="about-h2">For the City of Stonnington</h2>
-    <p>If you work for the council and have questions or concerns about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident's own login, on their own permit. It changes a permit only when that resident's own schedule requires it, spaces and jitters its requests, and backs off when the portal pushes back. A single plate change is three requests &mdash; read the current vehicle, change it, read back to confirm &mdash; which is fewer than a resident opening the ePermits site in a browser to do the same by hand; across a day, keeping the session alive included, one household&rsquo;s traffic is roughly 50&ndash;70 requests. To reach the portal it replays the ePermits web app's own login form and sends browser request headers, because the protection layer in front of it refuses non-browser clients; we'd much rather use a supported route. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
+    <p>If you work for the council and have questions about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident&rsquo;s own login, on their own permit, and only when that resident&rsquo;s schedule needs a change. It signs in the same way the ePermits website does, then uses the council&rsquo;s own permit API to change the vehicle &mdash; and on those API requests it identifies itself as p.stonn, with a link back to this site. It keeps its load light: a single plate change is three requests (read the current vehicle, change it, read back to confirm), fewer than a resident doing the same by hand in a browser; between changes it makes one request every couple of hours to keep the session from lapsing, and reads the permit a few times a day to stay in sync. All told that is on the order of 20&ndash;30 requests across a whole day for one household, spaced out and backing off if the portal is busy. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
 
     <h2 class="about-h2">No promises</h2>
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
