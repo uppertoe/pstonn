@@ -2,7 +2,7 @@ module github.com/uppertoe/pstonn
 
 go 1.25.0
 
-toolchain go1.25.12
+toolchain go1.25.13
 
 require (
 	github.com/coreos/go-oidc/v3 v3.20.0
