@@ -1,0 +1,31 @@
+#!/bin/sh
+# Pre-push guard: run the same fast checks CI's `test` job runs, so a gofmt slip
+# or a failing test is caught here instead of reddening CI (and pinging ops).
+#
+# Enabled per-clone with:   git config core.hooksPath .githooks
+# Bypass in a pinch with:   git push --no-verify
+#
+# govulncheck is deliberately NOT here (it is slow and needs the network); it
+# stays in CI, and renovate keeps the toolchain pins fresh so it rarely reddens.
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-push: gofmt…"
+unformatted="$(gofmt -l internal/ main.go)"
+if [ -n "$unformatted" ]; then
+  echo "✗ gofmt: these files need formatting — run: gofmt -w internal/ main.go" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
+
+echo "pre-push: go vet…"
+go vet ./...
+
+echo "pre-push: go build…"
+CGO_ENABLED=0 go build ./...
+
+echo "pre-push: go test -race…"
+go test -race ./...
+
+echo "pre-push: ✓ all checks passed"
