@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -146,6 +147,41 @@ func (s *Server) robotsTxt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// faviconICO answers the /favicon.ico that browsers and crawlers request at the
+// root regardless of the <link> tags. The inline SVG icon covers modern tabs; this
+// serves the 192px PNG so the bare .ico fetch is a 200, not a 404, everywhere else.
+func (s *Server) faviconICO(w http.ResponseWriter, r *http.Request) {
+	b, err := fs.ReadFile(staticSub, "icon-192.png")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	_, _ = w.Write(b)
+}
+
+// siteManifest is the site-wide web app manifest (the guest links have their own,
+// scoped to /g/). It names the app and points at the 192/512 icons so Android's
+// "Add to home screen" and general PWA metadata are complete.
+func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	fmt.Fprint(w, `{
+  "name": "p.stonn — Stonnington visitor parking permits",
+  "short_name": "p.stonn",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0d9488",
+  "background_color": "#eceff5",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}`)
 }
 
 // sitemapXML lists the indexable public pages so a search engine discovers them

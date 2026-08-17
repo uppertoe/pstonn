@@ -1,12 +1,42 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/uppertoe/pstonn/internal/config"
 )
+
+func TestFaviconAndManifest(t *testing.T) {
+	s := &Server{cfg: &config.Config{}}
+
+	rr := httptest.NewRecorder()
+	s.faviconICO(rr, httptest.NewRequest("GET", "/favicon.ico", nil))
+	if rr.Code != 200 {
+		t.Fatalf("favicon.ico: code=%d (icon-192.png missing from the embed?)", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "image/png") {
+		t.Errorf("favicon.ico Content-Type = %q, want image/png", ct)
+	}
+	if rr.Body.Len() < 100 {
+		t.Errorf("favicon.ico body is %d bytes, expected a real PNG", rr.Body.Len())
+	}
+
+	rr = httptest.NewRecorder()
+	s.siteManifest(rr, httptest.NewRequest("GET", "/site.webmanifest", nil))
+	var m map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &m); err != nil {
+		t.Fatalf("manifest is not valid JSON: %v\n%s", err, rr.Body.String())
+	}
+	if m["name"] == nil || m["start_url"] != "/" {
+		t.Errorf("manifest missing name/start_url: %v", m)
+	}
+	if icons, ok := m["icons"].([]any); !ok || len(icons) != 2 {
+		t.Errorf("manifest should list the 192 + 512 icons, got %v", m["icons"])
+	}
+}
 
 func TestSeoForIndexability(t *testing.T) {
 	// The public content pages must be fully indexable.
