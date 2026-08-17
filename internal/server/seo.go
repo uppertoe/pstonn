@@ -76,7 +76,7 @@ var faqItems = []faqItem{
 	},
 	{
 		"Which council does p.stonn work with?",
-		"The City of Stonnington's visitor parking permits (the ePermits system). It does not support other councils yet.",
+		"The City of Stonnington's visitor parking permits (the ePermits system) — covering Prahran, Windsor, South Yarra, Toorak, Armadale, Malvern, Malvern East and Kooyong. It does not support other councils yet.",
 	},
 }
 
