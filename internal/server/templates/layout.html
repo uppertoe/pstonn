@@ -4,7 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="htmx-config" content='{"globalViewTransitions":true}'>
-<title>p.stonn Visitor Permit Scheduler</title>
+<title>{{.Title}}</title>
+{{if .CanonicalPath}}{{/* indexable public page: description, canonical, and share tags */}}
+<meta name="description" content="{{.Description}}">
+<link rel="canonical" href="{{.BaseURL}}{{.CanonicalPath}}">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="p.stonn">
+<meta property="og:title" content="{{.Title}}">
+<meta property="og:description" content="{{.Description}}">
+<meta property="og:url" content="{{.BaseURL}}{{.CanonicalPath}}">
+<meta property="og:image" content="{{.BaseURL}}{{asset "icon-180.png"}}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{.Title}}">
+<meta name="twitter:description" content="{{.Description}}">
+{{else}}<meta name="robots" content="noindex,nofollow">{{end}}
+{{with .JSONLD}}<script type="application/ld+json"{{with $.Nonce}} nonce="{{.}}"{{end}}>{{.}}</script>{{end}}
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="{{asset "icon-180.png"}}">
 <meta name="theme-color" content="#0d9488">
@@ -292,6 +307,7 @@ window.popClamp = window.popClamp || function (el) {
 {{if eq .State "landing"}}{{template "page-landing" .}}
 {{- else if eq .State "security"}}{{template "page-security" .}}
 {{- else if eq .State "how"}}{{template "page-how" .}}
+{{- else if eq .State "faq"}}{{template "page-faq" .}}
 {{- else if eq .State "contact"}}{{template "page-contact" .}}
 {{- else if eq .State "guest"}}{{template "page-guest" .}}
 {{- else if eq .State "guest-wait"}}{{template "page-guest-wait" .}}

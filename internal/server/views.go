@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"html/template"
 	"log"
 	"net/http"
 	"time"
@@ -34,12 +35,21 @@ type dashboardData struct {
 	OIDCEnabled bool
 	State       string // "landing" | "terms" | "onboarding" | "picker" | "app"
 	Page        string // when State=="app": "schedule" | "vehicles" | "activity" | "settings"
-	LogoutURL   string // sign-out link (app OIDC or forward-auth provider); "" hides it
-	SignedIn    bool   // landing: whether the visitor already has an identity
-	Contact     bool   // whether the public contact link/form is available
-	ContactVal  string // contact form: the message text to redisplay after a validation error
-	ContactFrom string // contact form: the reply-to address to redisplay after a validation error
-	Relink      bool   // council session expired → prompt re-link
+	// SEO fields, filled by render() from the State (see seoFor). BaseURL is the
+	// public origin (PUBLIC_BASE_URL); CanonicalPath is "" for non-indexable pages
+	// (app/guest/token), which suppresses the canonical/OG tags and emits noindex.
+	BaseURL       string
+	Title         string
+	Description   string
+	CanonicalPath string
+	JSONLD        template.JS // JSON-LD structured data for this page, or ""
+	FAQ           []faqItem   // only the FAQ page fills this
+	LogoutURL     string      // sign-out link (app OIDC or forward-auth provider); "" hides it
+	SignedIn      bool        // landing: whether the visitor already has an identity
+	Contact       bool        // whether the public contact link/form is available
+	ContactVal    string      // contact form: the message text to redisplay after a validation error
+	ContactFrom   string      // contact form: the reply-to address to redisplay after a validation error
+	Relink        bool        // council session expired → prompt re-link
 	// CapacityFull hides the onboarding link form from a NEW household when the
 	// deployment is at MaxAccounts, so the refusal arrives before terms are read
 	// and a third-party password is typed — not after, as a toast. councilLink
@@ -419,6 +429,12 @@ func (s *Server) render(w http.ResponseWriter, data dashboardData) {
 	// forgotten on one page — and a missing nonce means every inline script on it
 	// silently stops running.
 	data.Nonce = scriptNonce(w)
+	// SEO, derived centrally from the page State so every page (public or app) gets
+	// consistent tags and no handler has to remember them. Non-indexable states get
+	// an empty CanonicalPath, which the head turns into a noindex.
+	data.BaseURL = s.cfg.PublicBaseURL
+	data.Title, data.Description, data.CanonicalPath = seoFor(data.State)
+	data.JSONLD = jsonLDFor(data.State, data.BaseURL)
 	// Execute into a buffer first: writing straight to w means a mid-render
 	// failure (a nil pointer in a view model) ships a truncated page with a 200
 	// that looks like success. Pages are small; the copy is negligible.

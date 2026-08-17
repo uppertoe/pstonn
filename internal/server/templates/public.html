@@ -267,6 +267,27 @@
 
 {{end}}
 
+{{define "page-faq"}}
+{{/* ================= PUBLIC FAQ ================= */}}
+{{/* Questions in a resident's own words. The Q&A come from the same Go slice that
+     builds the FAQPage structured data (see seo.go), so a search result and this
+     page can never drift apart. */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="landing about">
+  <section class="paper">
+    <h1 class="about-h1">Frequently asked questions</h1>
+    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with the council. For what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
+    {{range .FAQ}}
+    <div class="faq-item">
+      <h2 class="about-h2">{{.Q}}</h2>
+      <p>{{.A}}</p>
+    </div>
+    {{end}}
+    <p class="faq-more">More detail on what is stored and how it is protected is on the <a href="/security" hx-boost="false">Security &amp; data</a> page.</p>
+  </section>
+</main>
+{{end}}
+
 {{define "page-contact"}}
 {{/* ================= PUBLIC CONTACT ================= */}}
 {{template "publicheader" .}}
