@@ -24,15 +24,15 @@ func seoFor(state string) (title, desc, canonPath string) {
 	switch state {
 	case "landing":
 		return "Stonnington visitor parking permits, on a schedule — p.stonn",
-			"Free tool to schedule which car is on your City of Stonnington visitor parking permit: a weekly roster, a permanent link for family, or a QR code for tradies. Open source, unofficial.",
+			"Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.",
 			"/"
 	case "how":
 		return "How p.stonn manages your Stonnington visitor permit",
-			"Connect your Stonnington ePermits login once, then p.stonn puts the right car on your visitor permit to your weekly schedule — plus one-off changes, guest links and printed QR codes.",
+			"Connect your Stonnington ePermits login once; p.stonn sets your visitor permit to your weekly car schedule, plus one-off changes and guest QR links.",
 			"/how"
 	case "security":
 		return "Security & data — p.stonn",
-			"What p.stonn encrypts, how long it keeps anything, what a breach could and couldn't reach, and how to delete it all. A free, unofficial City of Stonnington parking tool.",
+			"What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial Stonnington parking tool.",
 			"/security"
 	case "contact":
 		return "Contact — p.stonn",
@@ -40,7 +40,7 @@ func seoFor(state string) (title, desc, canonPath string) {
 			"/contact"
 	case "faq":
 		return "FAQ — p.stonn visitor parking permit scheduler",
-			"Answers about scheduling your City of Stonnington visitor parking permit with p.stonn: recurring visitor parking, sharing with family, cost, safety, and whether it is affiliated with the council.",
+			"Answers about scheduling your City of Stonnington visitor parking permit with p.stonn — recurring visitor parking, sharing with family, cost, and safety.",
 			"/faq"
 	default:
 		// App, guest, confirm and token pages: a stable generic title, never indexed.
