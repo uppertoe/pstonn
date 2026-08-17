@@ -38,20 +38,40 @@
     ch.classList.add("show");
   }
 
-  /* ---------- mini demo (landing hero) ---------- */
-  function initMini(root) {
+  /* ---------- landing showcase: a captioned story on one phone ----------
+     Four beats — build the weekly schedule, sync it to the council permit,
+     notify, then share a guest link — so the hero conveys the whole feature
+     set instead of a single static week. Overlay cards slide over the phone
+     top for the notify + share beats. */
+  function initShowcase(root) {
     var week = root.querySelector("[data-week]");
     var pdot = root.querySelector("[data-pdot]"), prego = root.querySelector("[data-prego]");
-    var sync = root.querySelector(".dm-sync");
+    var sync = root.querySelector(".dm-sync"), cap = root.querySelector("[data-cap] span");
+    var push = root.querySelector("[data-push]"), guest = root.querySelector("[data-guest]");
     var cells = buildCells(week, false);
-    function reset() { cells.forEach(function (c) { c.classList.remove("today"); c.querySelector(".dm-empty").style.display = ""; c.querySelector(".dm-chip").classList.remove("show"); }); if (pdot) pdot.style.background = "var(--line)"; if (prego) prego.textContent = "·"; }
-    function done() { cells[TODAY].classList.add("today"); if (pdot) pdot.style.background = CARS[PLAN[TODAY]].v; if (prego) prego.textContent = CARS[PLAN[TODAY]].rego; }
-    if (reduced) { PLAN.forEach(function (id, i) { fill(cells[i], id, false); }); done(); return; }
-    var steps = [[100, reset]];
-    PLAN.forEach(function (id, i) { steps.push([400 + i * 230, function () { fill(cells[i], id, false); }]); });
-    steps.push([400 + 7 * 230 + 250, done]);
-    steps.push([400 + 7 * 230 + 400, function () { if (sync) { sync.classList.add("pulse"); setTimeout(function () { sync.classList.remove("pulse"); }, 600); } }]);
-    loop(steps, 400 + 7 * 230 + 2600);
+    function say(h) { if (!cap) return; cap.classList.remove("show"); setTimeout(function () { cap.innerHTML = h; cap.classList.add("show"); }, 170); }
+    function settle() { cells[TODAY].classList.add("today"); if (pdot) pdot.style.background = CARS[PLAN[TODAY]].v; if (prego) prego.textContent = CARS[PLAN[TODAY]].rego; }
+    function reset() {
+      cells.forEach(function (c) { c.classList.remove("today"); c.querySelector(".dm-empty").style.display = ""; c.querySelector(".dm-chip").classList.remove("show"); });
+      if (pdot) pdot.style.background = "var(--line)"; if (prego) prego.textContent = "·";
+      show(push, false); show(guest, false);
+    }
+    if (reduced) {
+      PLAN.forEach(function (id, i) { fill(cells[i], id, false); }); settle();
+      if (cap) { cap.innerHTML = "A weekly schedule that keeps your council permit in sync."; cap.classList.add("show"); }
+      return;
+    }
+    var steps = [[100, reset], [260, function () { say("Set which car is on your permit each day."); }]];
+    PLAN.forEach(function (id, i) { steps.push([620 + i * 200, function () { fill(cells[i], id, false); }]); });
+    steps.push([2300, function () { say("<b>p.stonn sets your council permit to match &mdash; automatically.</b>"); }]);
+    steps.push([2560, function () { settle(); if (sync) { sync.classList.add("pulse"); setTimeout(function () { sync.classList.remove("pulse"); }, 600); } }]);
+    steps.push([4300, function () { say("You get an email or push each time it changes."); }]);
+    steps.push([4500, function () { show(push, true); }]);
+    steps.push([6600, function () { show(push, false); }]);
+    steps.push([7050, function () { say("Or share a link so visitors set their own car."); }]);
+    steps.push([7250, function () { show(guest, true); }]);
+    steps.push([9500, function () { show(guest, false); }]);
+    loop(steps, 10600);
   }
 
   /* ---------- Demo A: weekly roster (full, with cursor + picker) ---------- */
@@ -183,7 +203,7 @@
     loop(steps, 6600);
   }
 
-  var inits = { mini: initMini, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guest: initGuest };
+  var inits = { showcase: initShowcase, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guest: initGuest };
   function initDemos() {
     document.querySelectorAll("[data-demo]").forEach(function (root) {
       if (root.dataset.demoInit) return; // already running

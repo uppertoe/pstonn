@@ -13,7 +13,7 @@
     <p class="lnote">You'll need an existing City of Stonnington <strong>ePermits</strong> account, with a visitor permit on it, using the same email address. p.stonn schedules a permit you already hold &mdash; it can't apply for one. <a href="/how" hx-boost="false">What you need &rarr;</a></p>
   </section>
   <div class="demos">
-    <div class="dm-mini" data-demo="mini">
+    <div class="dm-mini dm-showcase" data-demo="showcase">
       <div class="dm-phone">
         <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample</span></div>
         <div class="dm-week" data-week></div>
@@ -21,8 +21,19 @@
           <div><div class="plab">Visitor permit</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
           <div class="dm-sync">{{template "ic-check"}}</div>
         </div>
+        {{/* Overlay cards for the notify + share beats: they slide in over the phone
+             top, one at a time, driven by initShowcase. */}}
+        <div class="dm-push dm-over" data-push>
+          <div class="badge" style="background:var(--primary)">{{template "ic-bell"}}</div>
+          <div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg"><b>XYZ789</b> is on your permit today.</div></div>
+        </div>
+        <div class="dm-push dm-over" data-guest>
+          <div class="badge" style="background:var(--v2)">{{template "ic-link"}}</div>
+          <div class="bd"><div class="ttl">Guest link shared</div><div class="msg">A visitor sets <b>their own car</b> &mdash; no account needed.</div></div>
+        </div>
       </div>
-      <p class="dm-foot"><a href="/how" hx-boost="false">See how it works &rarr;</a></p>
+      <div class="dm-caption" data-cap><span></span></div>
+      <p class="dm-foot"><a href="/how" hx-boost="false">See all the features &rarr;</a></p>
     </div>
   </div>
   <section class="lsteps">
@@ -122,7 +133,7 @@
     <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
     <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
     <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
-    <p>I built it to take a chore off my household's plate. I hope it does the same for yours.</p>
+    <p>I got tired of logging in to swap the plate every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
   </section>
 
   <div class="features">

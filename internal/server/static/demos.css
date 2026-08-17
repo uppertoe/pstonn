@@ -156,6 +156,16 @@
 .dm-mini .dm-day { height: 54px; }
 .dm-mini .dm-permit { margin-top: 12px; }
 
+/* The vehicle-dot colour vars are declared on .features for the /how demos; the
+   landing showcase lives outside .features, so declare them here too — otherwise
+   the car dots and the share badge resolve to an undefined var and vanish. */
+.dm-showcase { --v1: var(--sec-schedule); --v2: var(--sec-vehicles); --v3: var(--sec-activity); }
+
+/* landing showcase: the notify + share cards slide in over the phone's top edge,
+   one at a time (driven by initShowcase). Absolutely positioned so they overlay
+   the header for those beats without reflowing the week + permit below. */
+.dm-over { position: absolute; top: 12px; left: 12px; right: 12px; margin: 0; z-index: 7; }
+
 .dm-foot { text-align: center; margin-top: 26px; font-size: 12px; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
