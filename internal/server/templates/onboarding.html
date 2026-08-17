@@ -24,6 +24,21 @@
     <span style="display:block;margin-top:10px;font-size:13px">Unsure of your details? Try them at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a> first.</span>
   </span></div>
   {{end}}
+  {{if .LinkThrottled}}
+  {{/* Too many council sign-in attempts: the wait is real (it protects their
+       council account from its own lockout), but it must arrive WITH the likely
+       fixes so the pause becomes checking time rather than giving-up time. Same
+       remedies as the rejected banner: the sign-out button and the council's
+       own site as the place to verify credentials meanwhile. */}}
+  <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
+    <strong>Paused after several sign-in tries &mdash; please wait about 15 minutes.</strong><br>
+    Too many attempts in a row could lock your real council account, so p.stonn stops first.
+    <span style="display:block;margin-top:10px">While you wait, two things worth checking:</span>
+    <span style="display:block;margin-top:6px">&bull; Your password &mdash; try it at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a>. If it fails there too, use their password reset.</span>
+    <span style="display:block;margin-top:6px">&bull; Your email &mdash; your ePermits account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
+    {{- if .LogoutURL}} <a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}} sign out{{end}} and sign back in here with that one.</span>
+  </span></div>
+  {{end}}
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
     {{if .IsPrimary}}

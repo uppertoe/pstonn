@@ -316,6 +316,34 @@ func TestAuthorizationMatrix(t *testing.T) {
 	})
 }
 
+// TestCouncilLinkThrottleRedirectsToGuidance: once the per-user attempt budget is
+// spent, councilLink lands back on the onboarding page (where the throttled
+// banner pairs the wait with the likely fixes) instead of a dead-end 429 message
+// page — which was the last thing a real early sign-up saw before leaving. The
+// council client stays nil: the throttle must refuse before any credential is
+// forwarded.
+func TestCouncilLinkThrottleRedirectsToGuidance(t *testing.T) {
+	ctx := context.Background()
+	s := newAuthzServer(t)
+	s.councilTry = newRateLimiter(4, 15*time.Minute)
+	const owner = "owner@example.com"
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if !s.councilTry.allow(owner) {
+			t.Fatalf("attempt %d throttled, want the full budget available", i+1)
+		}
+	}
+	w := s.doReq("POST", "/council/link", owner, "http://app.example.com", url.Values{"council_password": {"pw"}})
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("throttled POST /council/link = %d, want 303", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/schedule?link=throttled" {
+		t.Fatalf("throttled redirect = %q, want /schedule?link=throttled", loc)
+	}
+}
+
 // TestGuestTokenAuthz covers the token roles: an unknown or revoked token gets the
 // same neutral answer as a valid-but-dead one, a request-only (printed door QR)
 // token cannot activate or revert, and a door-QR page discloses none of the

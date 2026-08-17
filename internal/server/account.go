@@ -44,7 +44,12 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	// on the user's real account (the username is pinned to their email, so this
 	// is no oracle against anyone else's).
 	if !s.councilTry.allow(user) {
-		s.message(w, http.StatusTooManyRequests, "Too many attempts in a short time. Please wait 15 minutes and try again.")
+		// Land back on the onboarding page (same pattern as link=rejected), where
+		// the banner pairs the wait with the likely fixes. The bare 429 message
+		// page was the last thing the second community sign-up saw before leaving
+		// (observed live 2026-08-11: three rejected logins, two throttle walls,
+		// gone). A 429 status can't carry that page: this is a browser form flow.
+		http.Redirect(w, r, "/schedule?link=throttled", http.StatusSeeOther)
 		return
 	}
 	// Capacity check, before we take their password anywhere near the council.

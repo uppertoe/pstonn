@@ -123,6 +123,11 @@ func TestTemplatesRender(t *testing.T) {
 			"then sign back in with your ePermits email"},
 		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
 			"The usual fix: sign out, then sign back in with your ePermits email."},
+		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true,
+			LogoutURL: "https://auth.example.com/logout", Loc: loc},
+			"please wait about 15 minutes"},
+		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
+			"your ePermits account must be under"},
 		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
 		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},

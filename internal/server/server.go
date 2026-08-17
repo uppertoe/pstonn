@@ -120,16 +120,19 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		guestRead:    newRateLimiter(1200, 10*time.Minute),
 		guestLinkOut: newRateLimiter(20, time.Hour),   // <=20 guest-link emails / hour per owner
 		guestLinkTo:  newRateLimiter(5, 24*time.Hour), // <=5 guest-link emails / day per recipient
-		// 3, not 5. The council's actual lockout policy is UNKNOWN — nothing in
+		// 4, not 5. The council's actual lockout policy is UNKNOWN — nothing in
 		// the live captures shows one being tripped, and whether lockout is even
 		// enabled is the council's server-side config. What is known: ASP.NET
 		// Core Identity (which Duende sites commonly sit on) ships a default of
-		// 5 failed attempts → lockout when enabled. Under that uncertainty the
-		// throttle stays below the most common default with margin: three failed
-		// tries means the password is wrong or the ePermits account uses a
-		// different email, and more retries only risk the user's REAL council
-		// account on the same mistake.
-		councilTry:      newRateLimiter(3, 15*time.Minute), // 3 council password attempts / 15 min per user
+		// 5 failed attempts → lockout when enabled. Four stays strictly below
+		// that default while giving one careful retry after the third rejection —
+		// which is where a typo case converts (observed live 2026-08-11: a real
+		// sign-up burned all three on what looked like retypes, hit the wall and
+		// left). The backstop if the budget is ever exhausted anyway: this window
+		// (15 min) outlasts ASP.NET Identity's default 5-minute lockout, so a
+		// locked council account is unlocked again before we permit another try —
+		// the throttle can never hold a lockout open.
+		councilTry:      newRateLimiter(4, 15*time.Minute), // 4 council password attempts / 15 min per user
 		testNotifyLimit: newRateLimiter(5, time.Hour),      // 5 test notifications / hour per user
 		councilRead:     newRateLimiter(12, 5*time.Minute), // 12 uncached council reads / 5 min per user
 		// The watchdog polls every 10 minutes, so this is ~30x real use: it exists

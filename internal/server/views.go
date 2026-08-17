@@ -61,9 +61,15 @@ type dashboardData struct {
 	// none of them, and the icon-only account menu is where the remedy went to
 	// die on a phone.
 	LinkHelp bool
-	Flash    string // success (green)
-	Warn     string // problem / caution (amber)
-	Loc      *time.Location
+	// LinkThrottled renders the too-many-attempts landing on the onboarding page.
+	// The throttle used to answer with a bare 429 message page — a dead end that
+	// was the last thing an early sign-up saw before leaving. The wait is real,
+	// but it should arrive WITH the likely fix (wrong password vs wrong ePermits
+	// email) so the pause becomes checking time, not giving-up time.
+	LinkThrottled bool
+	Flash         string // success (green)
+	Warn          string // problem / caution (amber)
+	Loc           *time.Location
 	// shared access
 	Owner      string       // effective account owner (email) that scopes the data
 	IsPrimary  bool         // whether the signed-in user owns this account
@@ -488,6 +494,8 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// not in this prose field.
 		if r.URL.Query().Get("link") == "rejected" {
 			base.LinkHelp = true
+		} else if r.URL.Query().Get("link") == "throttled" {
+			base.LinkThrottled = true
 		} else
 		// A RETURNING household is not a signup. The paths that end a session
 		// (idle retirement, a rejected saved password, a manual disconnect)
