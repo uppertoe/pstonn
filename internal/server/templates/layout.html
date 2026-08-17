@@ -19,7 +19,7 @@
 <meta name="twitter:title" content="{{.Title}}">
 <meta name="twitter:description" content="{{.Description}}">
 {{else}}<meta name="robots" content="noindex,nofollow">{{end}}
-{{with .JSONLD}}<script type="application/ld+json"{{with $.Nonce}} nonce="{{.}}"{{end}}>{{.}}</script>{{end}}
+{{if .JSONLD}}<script type="application/ld+json"{{with .Nonce}} nonce="{{.}}"{{end}}>{{.JSONLD}}</script>{{end}}
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="{{asset "icon-180.png"}}">
 <meta name="theme-color" content="#0d9488">
