@@ -51,7 +51,7 @@ func TestOutboxStopsWhenBookkeepingFails(t *testing.T) {
 			st.Close()
 		}
 	})
-	svc := New(st, nil, srv.URL, "", "", "", "", time.UTC, nil)
+	svc := New(st, nil, srv.URL, "", "", "", "", time.UTC, nil, nil)
 
 	if err := svc.enqueue(ctx, outMessage{
 		Account: "owner@example.com", NtfyTopic: "pstonn-test", Subject: "Permit updated", Body: "body",
@@ -89,7 +89,7 @@ func TestOutboxRecordsParkedRowOnRecovery(t *testing.T) {
 	defer st.Close()
 
 	srv, pushes := countingNtfy(t, nil)
-	svc := New(st, nil, srv.URL, "", "", "", "", time.UTC, nil)
+	svc := New(st, nil, srv.URL, "", "", "", "", time.UTC, nil, nil)
 	if err := svc.enqueue(ctx, outMessage{
 		Account: "owner@example.com", NtfyTopic: "pstonn-test", Subject: "Permit updated", Body: "body",
 	}); err != nil {
@@ -125,7 +125,7 @@ func TestOutboxRecordsParkedRowOnRecovery(t *testing.T) {
 func TestDeliverPushesMixedRowOnce(t *testing.T) {
 	ctx := context.Background()
 	srv, pushes := countingNtfy(t, nil)
-	svc := New(nil, nil, srv.URL, "", "", "", "", time.UTC, nil)
+	svc := New(nil, nil, srv.URL, "", "", "", "", time.UTC, nil, nil)
 
 	mixed := store.OutboxItem{
 		ID: 1, Recipients: []string{"someone@example.com"}, NtfyTopic: "pstonn-test",

@@ -1,8 +1,10 @@
 package notify
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +42,7 @@ func TestEnqueueApplyPerMemberPrefs(t *testing.T) {
 	// A mailer that is "enabled" (Host+From) so EnqueueApply addresses email; it is
 	// never drained here, so nothing is actually sent.
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key")) // no ntfy configured
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil) // no ntfy configured
 
 	if err := svc.EnqueueApply(ctx, ApplyOutcome{Owner: primary, PermitLabel: "VPP1", Reg: "ABC123", OK: true}); err != nil {
 		t.Fatal(err)
@@ -105,9 +107,9 @@ func TestNotifyGuestRequestPerMemberFanout(t *testing.T) {
 	}
 
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "https://ntfy.test", "", "", "", "", time.UTC, []byte("test-unsub-key"))
+	svc := New(st, m, "https://ntfy.test", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
 
-	if err := svc.NotifyGuestRequest(ctx, primary, "VPP1", "TRD441", "https://p.example/guests"); err != nil {
+	if err := svc.NotifyGuestRequest(ctx, primary, "VPP1", "TRD441", "https://p.example/guests", 41); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,7 +137,7 @@ func TestNotifyGuestRequestPerMemberFanout(t *testing.T) {
 
 	// A re-scan of the same plate while the nudges are pending dedups silently —
 	// nobody is notified twice.
-	if err := svc.NotifyGuestRequest(ctx, primary, "VPP1", "TRD441", ""); err != nil {
+	if err := svc.NotifyGuestRequest(ctx, primary, "VPP1", "TRD441", "", 41); err != nil {
 		t.Fatal(err)
 	}
 	due, err = st.DueOutbox(ctx, time.Now().UTC(), 10)
@@ -177,7 +179,7 @@ func TestQueuedMailCarriesProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"))
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
 
 	cases := []struct {
 		name string
@@ -191,7 +193,7 @@ func TestQueuedMailCarriesProvenance(t *testing.T) {
 			return nil
 		}},
 		{"guest request", func() error {
-			return svc.NotifyGuestRequest(ctx, owner, "VPP1", "XYZ789", "")
+			return svc.NotifyGuestRequest(ctx, owner, "VPP1", "XYZ789", "", 41)
 		}},
 	}
 	for _, c := range cases {
@@ -215,6 +217,48 @@ func TestQueuedMailCarriesProvenance(t *testing.T) {
 		if r.Reason == "" {
 			t.Errorf("queued mail to %v (subject %q) has no provenance reason: "+
 				"it will send with no \"why you received this\" footer", r.Recipients, r.Subject)
+		}
+	}
+}
+
+// TestGuestRequestLinkEmailOnly is the channel-split guarantee for the no-sign-in
+// decide link: the EMAIL body carries the signed capability, the ntfy push does
+// NOT. An ntfy topic is readable by anyone who learns its name — by design it
+// may leak information, but it must never carry the power to put a plate on the
+// permit.
+func TestGuestRequestLinkEmailOnly(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const owner = "lily@example.com"
+	// Both channels on for the same person, so the split is visible on one member.
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "own-topic"}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "https://ntfy.test", "", "https://p.example", "", "", time.UTC, nil, DeriveDecideKey(bytes.Repeat([]byte{7}, 32)))
+
+	if err := svc.NotifyGuestRequest(ctx, owner, "VPP1", "TRD441", "https://p.example/guests", 41); err != nil {
+		t.Fatal(err)
+	}
+	due, err := st.DueOutbox(ctx, time.Now().UTC(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 2 {
+		t.Fatalf("outbox = %d due messages, want 2 (email + push for the one member)", len(due))
+	}
+	for _, it := range due {
+		hasLink := strings.Contains(it.Body, "/r/41/")
+		switch {
+		case it.NtfyTopic == "" && !hasLink:
+			t.Errorf("email body is missing the decide link:\n%s", it.Body)
+		case it.NtfyTopic != "" && hasLink:
+			t.Errorf("ntfy push body carries the decide capability:\n%s", it.Body)
 		}
 	}
 }

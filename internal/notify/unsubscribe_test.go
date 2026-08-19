@@ -32,7 +32,7 @@ func TestDeriveUnsubKeyRefusesShortKey(t *testing.T) {
 // nothing verifies — including a token computed the way the old code would have,
 // from the world-known constant.
 func TestUnsubKeylessDeploymentIsNotForgeable(t *testing.T) {
-	svc := New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, DeriveUnsubKey(nil))
+	svc := New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, DeriveUnsubKey(nil), nil)
 	if url := svc.UnsubscribeURL("guest@example.com"); url != "" {
 		t.Fatalf("UnsubscribeURL with no signing key = %q, want no link at all", url)
 	}
@@ -123,7 +123,7 @@ func TestUnsubLegacyTokenSunset(t *testing.T) {
 // TestUnsubscribeURLShape: the address is in the path so the endpoint needs no
 // stored row, and the token is the only thing binding the link to that address.
 func TestUnsubscribeURLShape(t *testing.T) {
-	svc := New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, DeriveUnsubKey(realKey))
+	svc := New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, DeriveUnsubKey(realKey), nil)
 	url := svc.UnsubscribeURL("Guest@Example.com")
 	if !strings.HasPrefix(url, "https://app.example.com/u/") {
 		t.Fatalf("unsubscribe URL = %q", url)

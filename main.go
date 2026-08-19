@@ -129,7 +129,10 @@ func run() error {
 	// Unsubscribe links are signed with a key derived from the at-rest key, so no
 	// per-recipient row is needed to offer an opt-out to people with no account.
 	unsubKey := notify.DeriveUnsubKey(cfg.DataEncryptionKey)
-	notifier := notify.New(st, mail, cfg.Ntfy.BaseURL, cfg.Ntfy.Token, cfg.PublicBaseURL, cfg.AdminEmail, cfg.AdminNtfyTopic, cfg.DisplayLocation, unsubKey)
+	// The guest-request decide links (one-tap approve/decline from the email) use
+	// their own derived key, so neither token can ever verify as the other.
+	decideKey := notify.DeriveDecideKey(cfg.DataEncryptionKey)
+	notifier := notify.New(st, mail, cfg.Ntfy.BaseURL, cfg.Ntfy.Token, cfg.PublicBaseURL, cfg.AdminEmail, cfg.AdminNtfyTopic, cfg.DisplayLocation, unsubKey, decideKey)
 	log.Printf("notifications: email=%v ntfy=%v contact-form=%v admin-alerts=%v", mail.Enabled(), cfg.Ntfy.Enabled(), cfg.ContactEnabled(), notifier.AdminConfigured())
 	if !notifier.AdminConfigured() {
 		log.Print("WARNING: no admin alert channel configured (set ADMIN_EMAIL and/or ADMIN_NTFY_TOPIC); systemic failures will only be logged")

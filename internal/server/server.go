@@ -89,6 +89,13 @@ type Server struct {
 	snsCert *certCache
 	// unsubKey verifies the signed per-address unsubscribe links in outgoing mail.
 	unsubKey []byte
+	// decideKey verifies the signed no-sign-in approve/decline links in
+	// guest-request emails (minted in internal/notify/decide.go).
+	decideKey []byte
+	// decideLimit throttles the decide-link endpoint; like unsubLimit it sits
+	// outside the session/CSRF gate, so per-IP pacing is the only brake on
+	// someone walking request ids under a forged or found link.
+	decideLimit *rateLimiter
 	// lastTouch throttles idle-clock writes: one per person per hour is ample
 	// against a 90-day bound, and the store shares one connection with the
 	// scheduler. Guarded by touchMu.
@@ -147,10 +154,12 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		// produces nothing like this volume.
 		sesHookLimit: newRateLimiter(60, 10*time.Minute), // 60 events / 10 min per IP
 		// One click per email, plus a provider's one-click POST and the odd retry.
-		unsubLimit: newRateLimiter(20, 10*time.Minute), // 20 attempts / 10 min per IP
-		guestSlots: make(chan struct{}, maxConcurrentGuest),
-		snsCert:    newCertCache(),
-		unsubKey:   notify.DeriveUnsubKey(cfg.DataEncryptionKey),
+		unsubLimit:  newRateLimiter(20, 10*time.Minute), // 20 attempts / 10 min per IP
+		decideLimit: newRateLimiter(20, 10*time.Minute), // 20 decide-link hits / 10 min per IP
+		guestSlots:  make(chan struct{}, maxConcurrentGuest),
+		snsCert:     newCertCache(),
+		unsubKey:    notify.DeriveUnsubKey(cfg.DataEncryptionKey),
+		decideKey:   notify.DeriveDecideKey(cfg.DataEncryptionKey),
 	}
 }
 
@@ -249,6 +258,11 @@ func (s *Server) Handler() http.Handler {
 	// one-click). No login — most recipients have no account.
 	mux.HandleFunc("GET /u/{addr}/{token}", s.unsubscribePage)
 	mux.HandleFunc("POST /u/{addr}/{token}", s.unsubscribeApply)
+	// No-sign-in guest-request decide links from the notification email. Public
+	// like /u/: the signed token is the authentication. Must be listed in the
+	// Caddy @public matcher or the gateway bounces it to the login page.
+	mux.HandleFunc("GET /r/{id}/{addr}/{token}", s.guestDecidePage)
+	mux.HandleFunc("POST /r/{id}/{addr}/{token}", s.guestDecideApply)
 
 	// Public, signature-verified: SES bounce/complaint events via SNS. Registered
 	// only when a topic ARN is configured, so an unwired deployment 404s rather

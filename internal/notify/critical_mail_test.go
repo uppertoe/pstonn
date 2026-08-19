@@ -29,7 +29,7 @@ func TestCriticalMailSurvivesUnsubscribe(t *testing.T) {
 	// A configured-but-unreachable mailer: the suppression gate runs before the
 	// dial, so ErrSuppressed vs any-other-error is exactly the decision under test.
 	m := mailer.New(config.SMTPConfig{Host: "smtp.invalid", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"))
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
 
 	const addr = "muted@example.com"
 	if err := st.SuppressAddress(ctx, addr, store.SuppressUnsubscribed, "one-click"); err != nil {

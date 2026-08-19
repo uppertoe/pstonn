@@ -25,7 +25,7 @@ func newUnsubServer(t *testing.T) (*Server, *notify.Service) {
 	// 32 bytes: DeriveUnsubKey refuses anything shorter, because a key derived from
 	// a short secret is guessable and an unsubscribe link must not be forgeable.
 	key := notify.DeriveUnsubKey([]byte("test-at-rest-key-0123456789abcdef"))
-	svc := notify.New(st, nil, "", "", "https://app.example.com", "", "", time.UTC, key)
+	svc := notify.New(st, nil, "", "", "https://app.example.com", "", "", time.UTC, key, nil)
 	return &Server{
 		cfg:      &config.Config{DisplayLocation: time.UTC},
 		store:    st,
@@ -166,7 +166,7 @@ func TestUnsubscribeTokenBinding(t *testing.T) {
 	// Two distinct 32-byte at-rest keys (the only length DeriveUnsubKey accepts).
 	key := notify.DeriveUnsubKey([]byte("k1-0123456789abcdef0123456789abcd"))
 	other := notify.DeriveUnsubKey([]byte("k2-0123456789abcdef0123456789abcd"))
-	svc := notify.New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, key)
+	svc := notify.New(nil, nil, "", "", "https://app.example.com", "", "", time.UTC, key, nil)
 
 	link := svc.UnsubscribeURL("A@Example.com")
 	tok := link[strings.LastIndex(link, "/")+1:]

@@ -43,6 +43,10 @@ type Service struct {
 	// unsubKey signs unsubscribe links. Most recipients of our mail have no
 	// account, so a stateless per-address token is the only opt-out they can have.
 	unsubKey []byte
+	// decideKey signs the no-sign-in approve/decline links in guest-request
+	// emails (see decide.go). Separate from unsubKey so neither token can ever
+	// verify as the other.
+	decideKey []byte
 	// displacedTo throttles the displaced-driver notice per recipient. That mail
 	// goes to a third party who never signed up for anything, off a plate the
 	// account holder chooses, so a plate flipping back and forth (or an owner
@@ -60,7 +64,7 @@ type Service struct {
 // New builds a Service. mail may be nil (email disabled); ntfyBase may be empty
 // (push disabled). adminEmail/adminTopic receive operator alerts (either may be
 // empty).
-func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEmail, adminTopic string, loc *time.Location, unsubKey []byte) *Service {
+func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEmail, adminTopic string, loc *time.Location, unsubKey, decideKey []byte) *Service {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -75,6 +79,7 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		loc:        loc,
 		http:       &http.Client{Timeout: 10 * time.Second},
 		unsubKey:   unsubKey,
+		decideKey:  decideKey,
 		// Roughly three times what a real recipient sees: a guest whose car is
 		// displaced hears about it when the booking ends, so once or twice a day. Far
 		// below what makes an unsolicited mail stream feel like harassment, and well
@@ -895,7 +900,7 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 // failures-only does not apply (this is a question, not an outcome), and quiet
 // hours are NOT honoured — the visitor is standing at the door now, and the
 // request expires unanswered within the hour.
-func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string) error {
+func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string, reqID int64) error {
 	subject := fmt.Sprintf("Approve %s on your %s?", plate, permitLabel)
 	lines := []string{
 		fmt.Sprintf("Someone at your door scanned your printed QR and is asking to put %s on your %s.", plate, permitLabel),
@@ -921,17 +926,30 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 			// anyone, and one member's rows never dedup away another member's.
 			DedupKey: fmt.Sprintf("guestreq|%s|%s|%s|%s", d.email, owner, permitLabel, plate),
 		}
+		// The email additionally carries this member's signed one-tap decide link.
+		// EMAIL ONLY, never the push: an ntfy topic is readable by anyone who
+		// learns its name, and a topic that leaked must stay read-only — it must
+		// not start carrying the capability to put a plate on the permit. So the
+		// member's email and ntfy nudges are enqueued as SEPARATE messages with
+		// different bodies (same dedup key; enqueueSplit's per-target suffix
+		// already keeps the rows distinct).
 		if d.pref.EmailEnabled && s.mail.Enabled() {
-			m.Recipients = []string{d.email}
+			em := m
+			em.Recipients = []string{d.email}
+			if link := s.GuestDecideURL(reqID, d.email); link != "" {
+				em.Body = body + "\n\nOr approve or decline in one tap, no sign-in needed:\n" + link +
+					"\n(This link can only answer this one request, and only from your address.)"
+			}
+			if e := s.enqueueSplit(ctx, em); e != nil {
+				errs = append(errs, d.email+": "+e.Error())
+			}
 		}
 		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
-			m.NtfyTopic = d.pref.NtfyTopic
-		}
-		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
-			continue // this member opted out of every channel
-		}
-		if e := s.enqueueSplit(ctx, m); e != nil {
-			errs = append(errs, d.email+": "+e.Error())
+			pm := m
+			pm.NtfyTopic = d.pref.NtfyTopic
+			if e := s.enqueueSplit(ctx, pm); e != nil {
+				errs = append(errs, d.email+": "+e.Error())
+			}
 		}
 	}
 	if len(errs) > 0 {

@@ -125,7 +125,24 @@ type dashboardData struct {
 	Wait            *guestWaitView     // public "waiting for approval" page (State "guest-wait")
 	Admin           *adminView         // admin dashboard (State "admin")
 	Unsub           *unsubView         // public unsubscribe confirm/result (State "unsubscribe")
+	Decide          *decideView        // public no-sign-in guest-request decide page (State "guestdecide")
 	Confirm         *confirmView       // public renewal-confirm page (State "confirm")
+}
+
+// decideView drives the no-sign-in approve/decline page reached from the
+// guest-request email. Status is the request as stored (pending | approved |
+// denied | expired); Outcome is what a just-performed POST did ("" on a plain
+// view): applied | approving | declined | revoked.
+type decideView struct {
+	Plate       string
+	PermitLabel string // "" if the permit has since been removed
+	Requested   string // human local time of the scan
+	Path        string // POST target (the same signed path)
+	Status      string
+	DecidedBy   string
+	Until       string // human "until ..." phrase on an approval
+	Viewer      string // the recipient this link authorises (shown for audit clarity)
+	Outcome     string
 }
 
 // unsubView drives the public unsubscribe page. Address is the one address the

@@ -2113,7 +2113,7 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		s.renderGuestResult(w, "", true, "A request for "+plate+" is already waiting for the resident to approve. There's nothing more to do here — if it isn't approved shortly, try knocking.")
 		return
 	}
-	s.notifyGuestRequest(r.Context(), permit, plate)
+	s.notifyGuestRequest(r.Context(), permit, plate, reqID)
 	// Remember the request in this browser (the one that made it), so a later
 	// re-scan of the same door code shows its fate instead of a blank form.
 	s.setGuestReqCookie(w, reqID, nonce)
@@ -2172,7 +2172,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 // with the resident (the scheduler keeps retrying regardless).
 const guestApplyTimeout = 8 * time.Minute
 
-func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, plate string) {
+func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, plate string, reqID int64) {
 	if s.notify == nil {
 		return
 	}
@@ -2187,7 +2187,7 @@ func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, pl
 	// Enqueue durably (a fast DB insert) so the holder's "approve this?" nudge
 	// survives a restart and is retried — the printed-QR flow depends on it.
 	url := s.cfg.PublicBaseURL + "/guests"
-	if err := s.notify.NotifyGuestRequest(ctx, permit.Owner, permitLabel(permit), plate, url); err != nil {
+	if err := s.notify.NotifyGuestRequest(ctx, permit.Owner, permitLabel(permit), plate, url, reqID); err != nil {
 		log.Printf("guest request notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 	}
 }
@@ -2307,6 +2307,33 @@ func (s *Server) denyGuestRequest(w http.ResponseWriter, r *http.Request) {
 	s.decideRequest(w, r, false)
 }
 
+// decideOutcome is what running a decision produced, so the two front doors —
+// the signed-in approvals page and the signed email link — can each respond in
+// their own idiom (redirects with query flags versus a rendered outcome page)
+// while sharing one implementation of the delicate approve path.
+type decideOutcome struct {
+	kind  decideKind
+	plate string
+	err   error
+}
+
+type decideKind int
+
+const (
+	decideErr            decideKind = iota // err holds the cause
+	decideAlreadyDecided                   // decline raced: no longer pending
+	decideDeclined
+	decideGone    // approve: request/permit gone, not ours, or raced
+	decideCapFull // permit at its guest-booking sub-cap
+	decideRevoked // door QR revoked between approval and apply
+	decideApplied // approved and the council confirmed the plate
+	decideApproving
+)
+
+// decideCapFullMessage is shown when an approval hits the guest-booking
+// sub-cap; shared by both front doors so the wording can never drift.
+const decideCapFullMessage = "This permit already has the maximum number of active guest bookings. Remove one before approving another."
+
 // decideRequest approves or denies a pending printed-QR request. On approval it
 // puts the plate on the permit (end of day) and applies it best-effort.
 func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve bool) {
@@ -2314,7 +2341,35 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	if !ok {
 		return
 	}
-	id := pathInt(r, "id")
+	out := s.runDecideRequest(r, owner, user, pathInt(r, "id"), approve)
+	switch out.kind {
+	case decideErr:
+		s.serverError(w, out.err)
+	case decideAlreadyDecided:
+		http.Redirect(w, r, "/guests?alreadydecided=1", http.StatusSeeOther)
+	case decideDeclined:
+		http.Redirect(w, r, "/guests?declined=1", http.StatusSeeOther)
+	case decideGone:
+		http.Redirect(w, r, "/guests", http.StatusSeeOther)
+	case decideCapFull:
+		s.message(w, http.StatusConflict, decideCapFullMessage)
+	case decideRevoked:
+		http.Redirect(w, r, "/guests?revoked=1", http.StatusSeeOther)
+	default: // decideApplied / decideApproving
+		q := url.Values{}
+		if out.kind == decideApplied {
+			q.Set("applied", out.plate)
+		} else {
+			q.Set("approving", out.plate)
+		}
+		http.Redirect(w, r, "/guests?"+q.Encode(), http.StatusSeeOther)
+	}
+}
+
+// runDecideRequest is the shared decision core: owner scopes the request, user
+// is recorded as the decider in the change log. Callers have already
+// authenticated user as a member of owner's account (session or signed link).
+func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64, approve bool) decideOutcome {
 	now := time.Now().In(s.cfg.DisplayLocation)
 
 	if !approve {
@@ -2324,15 +2379,12 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 			// first. Record NOTHING: the change log is the household's account of who
 			// authorised a plate change, so logging a decline that never happened would
 			// misattribute a plate that is in fact going ON the permit.
-			http.Redirect(w, r, "/guests?alreadydecided=1", http.StatusSeeOther)
-			return
+			return decideOutcome{kind: decideAlreadyDecided}
 		case err != nil:
-			s.serverError(w, err)
-			return
+			return decideOutcome{kind: decideErr, err: err}
 		}
 		s.logChange(r.Context(), owner, user, store.ActionRequestNo, "", "")
-		http.Redirect(w, r, "/guests?declined=1", http.StatusSeeOther)
-		return
+		return decideOutcome{kind: decideDeclined}
 	}
 
 	// Approve: set up the plate override BEFORE finalising the approval, so we can
@@ -2340,13 +2392,11 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	// on (which would strand the visitor and mislead the holder).
 	req, rerr := s.store.GuestRequestByID(r.Context(), id)
 	if rerr != nil || req.Status != "pending" {
-		http.Redirect(w, r, "/guests", http.StatusSeeOther) // gone / already decided
-		return
+		return decideOutcome{kind: decideGone} // gone / already decided
 	}
 	permit, perr := s.store.GetPermit(r.Context(), req.PermitID)
 	if perr != nil || permit.Owner != owner {
-		http.Redirect(w, r, "/guests", http.StatusSeeOther) // not ours / permit removed
-		return
+		return decideOutcome{kind: decideGone} // not ours / permit removed
 	}
 	end := dayEndLocal(now, 0)
 	// Tagged with the door QR's own token, so removing the poster (or pausing guest
@@ -2361,14 +2411,12 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)", doorToken)
 	if errors.Is(cerr, store.ErrGuestOverrideRefused) {
 		// The permit is at its guest-booking sub-cap. Tell the owner plainly instead of
-		// returning a 500 (which is what a raw serverError here produced) — approving a
-		// door-QR request must not look like the app is broken.
-		s.message(w, http.StatusConflict, "This permit already has the maximum number of active guest bookings. Remove one before approving another.")
-		return
+		// returning a 500 — approving a door-QR request must not look like the app is
+		// broken.
+		return decideOutcome{kind: decideCapFull}
 	}
 	if cerr != nil {
-		s.serverError(w, cerr) // don't approve if we couldn't set up the change
-		return
+		return decideOutcome{kind: decideErr, err: cerr} // don't approve if we couldn't set up the change
 	}
 	if _, err := s.store.DecideGuestRequest(r.Context(), owner, id, true, untilPhrase(now, false), user, end); err != nil {
 		// The approval didn't land — raced with a concurrent deny (ErrNotFound: the
@@ -2377,11 +2425,9 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		// live plate the scheduler would put on the permit.
 		_ = s.store.DeleteOverride(r.Context(), owner, ovID)
 		if errors.Is(err, store.ErrNotFound) {
-			http.Redirect(w, r, "/guests", http.StatusSeeOther)
-			return
+			return decideOutcome{kind: decideGone}
 		}
-		s.serverError(w, err)
-		return
+		return decideOutcome{kind: decideErr, err: err}
 	}
 	// Best-effort synchronous apply for instant feedback; the scheduler converges
 	// otherwise. SetVehicle returns nil only once the council confirms the plate.
@@ -2395,8 +2441,8 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	// racing the reconcile loop could otherwise leave the council holding the roster
 	// plate while the row claims the visitor's, and the visitor is standing at the
 	// door believing they are covered. A claim we cannot get means we simply don't
-	// apply here — the override is saved, so the scheduler applies it, and the
-	// redirect already has a wording for "approving" versus "applied".
+	// apply here — the override is saved, so the scheduler applies it, and both
+	// front doors have a wording for "approving" versus "applied".
 	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
 	applyErr := error(errApplyBusy)
 	if claimed {
@@ -2409,8 +2455,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 			cancel()                                    // this path returns early; don't leak the apply context
 			_ = s.store.DeleteOverride(bg, owner, ovID) // don't leave it for the scheduler
 			s.kickScheduler()
-			http.Redirect(w, r, "/guests?revoked=1", http.StatusSeeOther)
-			return
+			return decideOutcome{kind: decideRevoked}
 		}
 		if applyErr = s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, req.Plate); e != nil {
@@ -2441,13 +2486,10 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 	s.sched.Kick()
 
 	s.logChange(bg, owner, user, store.ActionRequestOK, req.Plate, "")
-	q := url.Values{}
 	if confirmed {
-		q.Set("applied", req.Plate)
-	} else {
-		q.Set("approving", req.Plate)
+		return decideOutcome{kind: decideApplied, plate: req.Plate}
 	}
-	http.Redirect(w, r, "/guests?"+q.Encode(), http.StatusSeeOther)
+	return decideOutcome{kind: decideApproving, plate: req.Plate}
 }
 
 // guestCreateMessage turns a refused guest-override insert into something true for the

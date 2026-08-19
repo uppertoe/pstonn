@@ -451,12 +451,12 @@ func TestGuestRequestNudgeThrottledPerAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Push-only, so a queued nudge is countable without an SMTP server.
-	s.notify = notify.New(s.store, nil, "https://push.example", "", "http://app.example.com", "", "", time.UTC, nil)
+	s.notify = notify.New(s.store, nil, "https://push.example", "", "http://app.example.com", "", "", time.UTC, nil, nil)
 	if err := s.store.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, NtfyEnabled: true, NtfyTopic: "t", QuietFrom: 22, QuietUntil: 6}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 9; i++ {
-		s.notifyGuestRequest(ctx, permit, fmt.Sprintf("PLT%03d", i))
+		s.notifyGuestRequest(ctx, permit, fmt.Sprintf("PLT%03d", i), int64(i+1))
 	}
 	// Far-future "now" so a held (quiet-hours) row is counted too: the point is how
 	// many notifications exist at all, not when they go out.
@@ -483,7 +483,7 @@ func TestGuestApplyNotifyThrottledPerAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.notify = notify.New(s.store, nil, "https://push.example", "", "http://app.example.com", "", "", time.UTC, nil)
+	s.notify = notify.New(s.store, nil, "https://push.example", "", "http://app.example.com", "", "", time.UTC, nil, nil)
 	if err := s.store.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, NtfyEnabled: true, NtfyTopic: "t", QuietFrom: 22, QuietUntil: 6}); err != nil {
 		t.Fatal(err)
 	}

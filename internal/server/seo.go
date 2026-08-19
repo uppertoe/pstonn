@@ -137,7 +137,7 @@ func (s *Server) robotsTxt(w http.ResponseWriter, r *http.Request) {
 	for _, p := range []string{
 		"/schedule", "/account", "/vehicles", "/permits", "/guests",
 		"/settings", "/notifications", "/admin", "/auth/", "/council/",
-		"/g/", "/u/", "/status",
+		"/g/", "/u/", "/r/", "/status",
 	} {
 		fmt.Fprintf(&b, "Disallow: %s\n", p)
 	}
