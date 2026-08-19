@@ -28,24 +28,55 @@ func (s *Server) formError(w http.ResponseWriter, r *http.Request, msg string) {
 	s.message(w, http.StatusBadRequest, msg)
 }
 
+// message renders the branded notice page: the terminal answer for most
+// guards and failures (a refused council link, a throttle, an invalid signed
+// link). It styles through the normal template set so errors stop looking
+// like a different, broken product — with the old dependency-free bare page
+// kept underneath as the fallback, because this sink is also where render()
+// itself lands when the template set is the thing that is broken.
 func (s *Server) message(w http.ResponseWriter, code int, msg string) {
+	s.messagePage(w, code, messageView{Text: msg})
+}
+
+func (s *Server) messagePage(w http.ResponseWriter, code int, mv messageView) {
+	// A Server built without config (some tests) can't fill the page chrome;
+	// the bare page needs nothing.
+	if s.cfg == nil {
+		s.bareMessage(w, code, mv)
+		return
+	}
+	data := dashboardData{State: "message", Loc: s.cfg.DisplayLocation, Contact: s.cfg.ContactEnabled(), Message: &mv}
+	buf, err := s.renderBuf(w, data)
+	if err != nil {
+		log.Printf("render message page: %v", err)
+		s.bareMessage(w, code, mv)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
-	// Escape msg: callers pass server-constructed strings today, but escaping
-	// here removes the reflected-XSS foot-gun if a future caller ever forwards
-	// user input into this sink.
-	//
-	// Always offer a way onward. This page is where most failures land (a refused
-	// council link, a permit another account already manages, a rejected form),
-	// and for several of them the only real recourse is a human — so when the
-	// contact form is configured, link it here rather than leaving "← Back" as the
-	// only affordance.
+	_, _ = buf.WriteTo(w)
+}
+
+// bareMessage is the last-resort page: hand-built markup with zero template
+// dependencies, so it can report a broken template set. Escape everything:
+// callers pass server-constructed strings today, but escaping here removes
+// the reflected-XSS foot-gun if a future caller ever forwards user input.
+// Always offer a way onward — for several of the failures that land here the
+// only real recourse is a human, so link the contact form when configured.
+func (s *Server) bareMessage(w http.ResponseWriter, code int, mv messageView) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
 	contact := ""
 	if s.cfg != nil && s.cfg.ContactEnabled() {
 		contact = ` &middot; <a href="/contact">Contact us</a>`
 	}
+	link := ""
+	if mv.LinkLabel != "" && safeLinkHref(mv.LinkHref) {
+		link = fmt.Sprintf(` <a href="%s">%s</a>%s`, template.HTMLEscapeString(mv.LinkHref),
+			template.HTMLEscapeString(mv.LinkLabel), template.HTMLEscapeString(mv.After))
+	}
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#1a2233">`+
-		`<p>%s</p><p><a href="/">&larr; Back</a>%s</p>`, template.HTMLEscapeString(msg), contact)
+		`<p>%s%s</p><p><a href="/">&larr; Back</a>%s</p>`, template.HTMLEscapeString(mv.Text), link, contact)
 }
 
 // safeLinkHref reports whether href may be emitted as an href by the helpers
@@ -90,12 +121,7 @@ func (s *Server) messageWithLink(w http.ResponseWriter, code int, msg, label, hr
 		s.message(w, code, msg)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(code)
-	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><body style="font:16px system-ui;max-width:36rem;margin:4rem auto;padding:0 1rem;color:#1a2233">`+
-		`<p>%s <a href="%s">%s</a>%s</p><p><a href="/">&larr; Back</a></p>`,
-		template.HTMLEscapeString(msg), template.HTMLEscapeString(href),
-		template.HTMLEscapeString(label), template.HTMLEscapeString(after))
+	s.messagePage(w, code, messageView{Text: msg, LinkLabel: label, LinkHref: href, After: after})
 }
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {
@@ -167,4 +193,12 @@ func clampHour(s string, def int) int {
 func atoi64(s string) int64 {
 	n, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
 	return n
+}
+
+// notFound is the app-level 404: reached for unclaimed sub-paths of routed
+// prefixes (the gateway already refuses unknown top-level paths). The wording
+// covers the likeliest real cause — a truncated link from an email or chat.
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	s.message(w, http.StatusNotFound,
+		"There's nothing at this address. If you followed a link from an email or message, it may have been cut short — try copying the whole link.")
 }

@@ -115,3 +115,20 @@
   </section>
 </main>
 {{end}}
+
+{{define "page-message"}}
+{{/* ============ STYLED MESSAGE / ERROR PAGE ============
+     The terminal notice most guards and failures land on (messagePage in
+     helpers.go): throttles, refusals, invalid signed links, the app-level 404.
+     Kept deliberately plain — one card, the text, a way onward — because it is
+     rendered at the exact moment something didn't work, and chrome is the last
+     thing that moment needs. The hand-built bare page in bareMessage stays the
+     fallback when THIS template set is what broke. */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    <p class="gresult">{{.Message.Text}}{{if .Message.LinkLabel}} <a href="{{.Message.LinkHref}}">{{.Message.LinkLabel}}</a>{{.Message.After}}{{end}}</p>
+    <p class="empty-note" style="margin-top:16px"><a href="/" hx-boost="false">&larr; Back to p.stonn</a>{{if .Contact}} &middot; <a href="/contact">Contact us</a>{{end}}</p>
+  </section>
+</main>
+{{end}}

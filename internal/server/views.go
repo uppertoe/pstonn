@@ -125,8 +125,20 @@ type dashboardData struct {
 	Wait            *guestWaitView     // public "waiting for approval" page (State "guest-wait")
 	Admin           *adminView         // admin dashboard (State "admin")
 	Unsub           *unsubView         // public unsubscribe confirm/result (State "unsubscribe")
+	Message         *messageView       // styled message/error page (State "message")
 	Decide          *decideView        // public no-sign-in guest-request decide page (State "guestdecide")
 	Confirm         *confirmView       // public renewal-confirm page (State "confirm")
+}
+
+// messageView drives the styled message/error page (State "message"): the
+// terminal notice every guard and failure path lands on. LinkLabel/LinkHref
+// render an optional inline action (href pre-validated by messageWithLink;
+// html/template's URL filter backstops it), After is trailing text.
+type messageView struct {
+	Text      string
+	LinkLabel string
+	LinkHref  string
+	After     string
 }
 
 // decideView drives the no-sign-in approve/decline page reached from the
@@ -446,29 +458,37 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 }
 
 func (s *Server) render(w http.ResponseWriter, data dashboardData) {
-	// Take the nonce from the response's own CSP header rather than from the
-	// caller. Every dashboardData is built by a handler (several of which construct
-	// it as a literal), so anything the caller had to remember would eventually be
-	// forgotten on one page — and a missing nonce means every inline script on it
-	// silently stops running.
-	data.Nonce = scriptNonce(w)
-	// SEO, derived centrally from the page State so every page (public or app) gets
-	// consistent tags and no handler has to remember them. Non-indexable states get
-	// an empty CanonicalPath, which the head turns into a noindex.
-	data.BaseURL = s.cfg.PublicBaseURL
-	data.Title, data.Description, data.CanonicalPath = seoFor(data.State)
-	data.JSONLD = jsonLDFor(data.State, data.BaseURL)
-	// Execute into a buffer first: writing straight to w means a mid-render
-	// failure (a nil pointer in a view model) ships a truncated page with a 200
-	// that looks like success. Pages are small; the copy is negligible.
-	var buf bytes.Buffer
-	if err := templates.ExecuteTemplate(&buf, "dashboard", data); err != nil {
+	buf, err := s.renderBuf(w, data)
+	if err != nil {
 		log.Printf("render dashboard: %v", err)
-		s.message(w, http.StatusInternalServerError, "Something went wrong rendering this page. Please try again.")
+		// The BARE page, deliberately: the styled message page renders through
+		// this same template set, so a broken template must land somewhere that
+		// depends on nothing.
+		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "Something went wrong rendering this page. Please try again."})
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = buf.WriteTo(w)
+}
+
+// renderBuf executes the page into a buffer: writing straight to w means a
+// mid-render failure (a nil pointer in a view model) ships a truncated page
+// with a 200 that looks like success. Pages are small; the copy is negligible.
+// The nonce comes from the response's own CSP header rather than the caller —
+// anything a handler had to remember would eventually be forgotten on one
+// page, and a missing nonce means every inline script silently stops running.
+// SEO fields derive centrally from State; non-indexable states get an empty
+// CanonicalPath, which the head turns into a noindex.
+func (s *Server) renderBuf(w http.ResponseWriter, data dashboardData) (*bytes.Buffer, error) {
+	data.Nonce = scriptNonce(w)
+	data.BaseURL = s.cfg.PublicBaseURL
+	data.Title, data.Description, data.CanonicalPath = seoFor(data.State)
+	data.JSONLD = jsonLDFor(data.State, data.BaseURL)
+	var buf bytes.Buffer
+	if err := templates.ExecuteTemplate(&buf, "dashboard", data); err != nil {
+		return nil, err
+	}
+	return &buf, nil
 }
 
 // appShell resolves the signed-in user and the pre-app gating (must be linked,

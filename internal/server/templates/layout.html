@@ -321,6 +321,7 @@ window.popClamp = window.popClamp || function (el) {
 {{- else if eq .State "guest-result"}}{{template "page-guest-result" .}}
 {{- else if eq .State "unsubscribe"}}{{template "page-unsubscribe" .}}
 {{- else if eq .State "guestdecide"}}{{template "page-guestdecide" .}}
+{{- else if eq .State "message"}}{{template "page-message" .}}
 {{- else if eq .State "confirm"}}{{template "page-confirm" .}}
 {{- else if eq .State "terms"}}{{template "page-terms" .}}
 {{- else if eq .State "onboarding"}}{{template "page-onboarding" .}}

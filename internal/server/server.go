@@ -285,7 +285,13 @@ func (s *Server) Handler() http.Handler {
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
 	mux.HandleFunc("GET /g/req/{id}", s.publicGuest(s.guestRequestStatus))
 
-	mux.HandleFunc("GET /{$}", s.landing)                   // public, not behind forward-auth
+	mux.HandleFunc("GET /{$}", s.landing) // public, not behind forward-auth
+	// Catch-all 404: anything no route claims gets the styled message page
+	// instead of the mux's bare text. Registered at "/" (the landing owns the
+	// exact root via /{$}). Known trade: a wrong-METHOD request on a real path
+	// now lands here as a 404 rather than the mux's automatic 405 — nothing
+	// machine-facing relies on 405s, and a person sees the same "nothing here".
+	mux.HandleFunc("/", s.notFound)
 	mux.HandleFunc("GET /security", s.security)             // public
 	mux.HandleFunc("GET /how", s.how)                       // public
 	mux.HandleFunc("GET /faq", s.faq)                       // public
