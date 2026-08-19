@@ -151,9 +151,9 @@ func changeText(c store.Change) string {
 		}
 		return "resumed guest passes"
 	case store.ActionDoorQRCreate:
-		return "created a printed door QR for " + c.Target
+		return "created a printed QR code for " + c.Target
 	case store.ActionDoorQRRevoke:
-		return "removed a printed door QR" + optional(c.Target, " for ") + " — any printed copy stopped working"
+		return "removed a printed QR code" + optional(c.Target, " for ") + " — any printed copy stopped working"
 	case store.ActionRequestOK:
 		return "approved a visitor's request for " + c.Target
 	case store.ActionRequestNo:

@@ -114,7 +114,7 @@ func TestComposeApplyCopy(t *testing.T) {
 
 	// A printed-QR approval is attributed to the approving member, not to a link.
 	_, db, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "doorqr", By: "mum@example.com", OK: true})
-	if !strings.Contains(db, "mum@example.com") || !strings.Contains(db, "printed door QR") {
+	if !strings.Contains(db, "mum@example.com") || !strings.Contains(db, "printed QR code") {
 		t.Fatalf("door-QR copy missing approver/context: %q", db)
 	}
 

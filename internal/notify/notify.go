@@ -520,7 +520,7 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 		const confirm = "\n\nNothing to do — this is just your confirmation it went through."
 		switch {
 		case o.Source == "doorqr":
-			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s approved a visitor's request from the printed door QR, so it overrides your schedule until that booking ends — then your roster takes over again.",
+			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s approved a visitor's request from your printed QR code, so it overrides your schedule until that booking ends — then your roster takes over again.",
 				o.PermitLabel, car, o.By)
 		case o.Source == "guest":
 			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.",
@@ -903,7 +903,7 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string, reqID int64) error {
 	subject := fmt.Sprintf("Approve %s on your %s?", plate, permitLabel)
 	lines := []string{
-		fmt.Sprintf("Someone at your door scanned your printed QR and is asking to put %s on your %s.", plate, permitLabel),
+		fmt.Sprintf("Someone scanned your printed QR code and is asking to put %s on your %s.", plate, permitLabel),
 		"",
 		"Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.",
 	}

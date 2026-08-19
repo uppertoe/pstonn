@@ -72,7 +72,7 @@
     <p class="sec-more">The detail is below &mdash; open any section that matters to you.</p>
 
     <details class="sec"><summary>What&rsquo;s encrypted, and what isn&rsquo;t</summary>
-      <p>Encrypted with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your door and visitor QR links.</p>
+      <p>Encrypted with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your printed and visitor QR links.</p>
       <p>Stored as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it. It is kept readable because that is what running the service reliably needs.</p>
     </details>
 
@@ -88,11 +88,11 @@
 
     <details class="sec"><summary>What data p.stonn holds</summary>
       <p><strong>About you:</strong> your email, your vehicles and their plates, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
-      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the plates visitors typed at a printed door QR. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
+      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the plates visitors typed at a printed QR code. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
     </details>
 
     <details class="sec"><summary>How long it is kept</summary>
-      <p>Activity and change logs: 90 days. A visitor&rsquo;s plate from a door QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
+      <p>Activity and change logs: 90 days. A visitor&rsquo;s plate from a printed QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
     </details>
 
     <details class="sec"><summary>How your data is used</summary>
@@ -207,7 +207,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>Hand a visitor access</h2>
-        <p>Send a private link or show a QR, and the visitor puts their own car on the permit &mdash; no account needed. There&rsquo;s also a printable door QR: a visitor scans it and requests a spot, and nothing changes until you approve it from your phone.</p>
+        <p>Send a private link or show a QR, and the visitor puts their own car on the permit &mdash; no account needed. There&rsquo;s also a printable QR code: a visitor scans it and requests a spot, and nothing changes until you approve it from your phone.</p>
       </div>
       <div class="feature-demo">
         <figure class="dm" data-demo="guest">

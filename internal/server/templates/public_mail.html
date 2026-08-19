@@ -91,16 +91,16 @@
     <p class="gresult">Nothing goes on the permit. The visitor&rsquo;s page will tell them it wasn&rsquo;t approved.</p>
     {{else if eq .Decide.Outcome "revoked"}}
     <h1>That printed code was removed</h1>
-    <p class="gresult">Someone in your household removed the printed door QR between this request arriving and your answer, so nothing was applied.</p>
+    <p class="gresult">Someone in your household removed the printed QR code between this request arriving and your answer, so nothing was applied.</p>
     {{else if eq .Decide.Status "pending"}}
     <h1>Approve <span class="reg">{{.Decide.Plate}}</span>?</h1>
-    <p class="gresult">Someone at your door scanned your printed QR at {{.Decide.Requested}} and is asking to put <span class="reg">{{.Decide.Plate}}</span> on your {{if .Decide.PermitLabel}}{{.Decide.PermitLabel}}{{else}}visitor permit{{end}}.</p>
+    <p class="gresult">Someone scanned your printed QR code at {{.Decide.Requested}} and is asking to put <span class="reg">{{.Decide.Plate}}</span> on your {{if .Decide.PermitLabel}}{{.Decide.PermitLabel}}{{else}}visitor permit{{end}}.</p>
     <p class="empty-note" style="margin-top:12px">Approving covers their car until the end of today. Nothing is on the permit until you approve, and the request expires on its own within an hour of the scan.</p>
     <form method="post" action="{{.Decide.Path}}" style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
       <button type="submit" name="decision" value="approve">{{template "ic-check"}} Approve until end of today</button>
       <button type="submit" name="decision" value="decline" class="ghost">Decline</button>
     </form>
-    <p class="empty-note" style="margin-top:14px">Answering as {{.Decide.Viewer}}. Not sure whose car this is? Ask at the door &mdash; this only arrives when someone is standing at your printed code.</p>
+    <p class="empty-note" style="margin-top:14px">Answering as {{.Decide.Viewer}}. Not sure whose car this is? This can only come from a scan of your printed code &mdash; check with whoever you expected to be using it.</p>
     {{else if eq .Decide.Status "approved"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
     <h1>Already approved</h1>
@@ -110,7 +110,7 @@
     <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> declined this request{{else}}This request was declined{{end}}, so <span class="reg">{{.Decide.Plate}}</span> did not go on the permit.</p>
     {{else}}
     <h1>This request has expired</h1>
-    <p class="gresult">Nobody answered within the hour, so nothing went on the permit. If your visitor is still at the door, they can simply scan the code again.</p>
+    <p class="gresult">Nobody answered within the hour, so nothing went on the permit. If your visitor is still waiting, they can simply scan the code again.</p>
     {{end}}
   </section>
 </main>

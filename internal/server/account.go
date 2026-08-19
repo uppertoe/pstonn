@@ -487,7 +487,7 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 	if revoked > 0 {
 		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
 		s.notifyDestructive(r.Context(), leftOwner, user, fmt.Sprintf(
-			"%s left the account. %d guest pass(es) or door QR(s) they created have stopped working.", user, revoked))
+			"%s left the account. %d guest pass(es) or printed QR(s) they created have stopped working.", user, revoked))
 	}
 	s.logChange(r.Context(), leftOwner, user, store.ActionMemberLeave, "", detail)
 	redirectHome(w, r)

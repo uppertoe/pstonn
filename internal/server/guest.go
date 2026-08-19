@@ -1870,7 +1870,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 		// Pausing kills every guest link at once — a visitor at the kerb just sees
 		// "no longer active", so the household should know it was deliberate.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" paused all guest passes on your p.stonn account. Existing guest links and printed door QRs will not work until they are resumed, and p.stonn is taking any car a guest had put on a permit back off now — check the permit directly if this is urgent.")
+			user+" paused all guest passes on your p.stonn account. Existing guest links and printed QR codes will not work until they are resumed, and p.stonn is taking any car a guest had put on a permit back off now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
@@ -2294,7 +2294,7 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" removed a printed door QR on your p.stonn account. Any copy already printed and put up has stopped working, and p.stonn is taking any car approved through it back off the permit now — check the permit directly if this is urgent.")
+			user+" removed a printed QR code on your p.stonn account. Any copy already printed and put up has stopped working, and p.stonn is taking any car approved through it back off the permit now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
