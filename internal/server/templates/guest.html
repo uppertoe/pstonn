@@ -7,6 +7,12 @@
     <h1>{{.Guest.PermitLabel}}</h1>
     <div id="gbody">{{template "guest-body" .}}</div>
   </section>
+  {{/* The one line of marketing in the whole product, and it lives here on
+       purpose: every visitor who uses a guest link is a permit-zone visitor —
+       exactly the demographic — experiencing the product at its best (parked,
+       covered, no account). Quiet, outside the card, and the only nav on an
+       otherwise dead-end page. */}}
+  <p class="gcredit">Visiting a household with its own visitor permit to juggle? <a href="/" hx-boost="false">p.stonn</a> runs it like this &mdash; free, for City of Stonnington residents.</p>
 </main>
 
 {{end}}
@@ -22,6 +28,12 @@
          reader announces approved / denied / on-the-permit as it changes. */}}
     <div aria-live="polite">{{template "guest-req-status" .Wait}}</div>
   </section>
+  {{/* The one line of marketing in the whole product, and it lives here on
+       purpose: every visitor who uses a guest link is a permit-zone visitor —
+       exactly the demographic — experiencing the product at its best (parked,
+       covered, no account). Quiet, outside the card, and the only nav on an
+       otherwise dead-end page. */}}
+  <p class="gcredit">Visiting a household with its own visitor permit to juggle? <a href="/" hx-boost="false">p.stonn</a> runs it like this &mdash; free, for City of Stonnington residents.</p>
 </main>
 
 {{end}}
