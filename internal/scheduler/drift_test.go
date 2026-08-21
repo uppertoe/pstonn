@@ -365,7 +365,11 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	const owner = "paged@example.com"
-	seedSession(t, st, owner)
+	// Session only: this test seeds its OWN permit ("14576") below and counts exactly
+	// one, so it must not also get seedSession's generic warm-permit.
+	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: "seed"}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
 	pid, err := st.UpsertPermit(ctx, owner, "14576", "14", "Permit")
 	if err != nil {
 		t.Fatalf("permit: %v", err)

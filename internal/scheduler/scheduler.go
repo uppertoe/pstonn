@@ -1045,8 +1045,8 @@ func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
 // read on its OWN per-owner cadence (driftDue) — decoupled from warming, which used
 // to trigger a grid read on every renew and so doubled keep-warm's council traffic.
 // To be light on the council it jitters each session's thresholds (touches don't
-// align or look mechanical), skips owners with no schedule to act on (their
-// dashboard use keeps them warm), and spaces the council calls within a pass.
+// align or look mechanical), skips owners with no permit to act on (their
+// session is left to lapse), and spaces the council calls within a pass.
 func (s *Scheduler) keepWarm(ctx context.Context) {
 	sessions, err := s.store.ListCouncilSessions(ctx)
 	if err != nil {
@@ -1107,10 +1107,13 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	}
 	// Approaching-deadline reminder is independent of whether we renew now.
 	s.maybeRemind(ctx, cs, now)
-	// Warm and drift both apply only to owners with a schedule to act on: a
-	// linked user who has not built one needs no live session (their dashboard
-	// use renews it when they visit), and nothing to drift-check against.
-	if has, err := s.store.OwnerHasSchedule(ctx, cs.Owner); err != nil || !has {
+	// Warm and drift apply to any owner who manages a permit — schedulers and
+	// QR-only households alike. A live session is only useful for acting on a
+	// permit, so an account that linked but added none is left to lapse; everyone
+	// else is kept warm (the sliding session holds indefinitely on authorize-only
+	// touches, so this keeps the cookie alive and the saved password dormant rather
+	// than replaying a login on each cold use).
+	if has, err := s.store.OwnerHasPermit(ctx, cs.Owner); err != nil || !has {
 		return
 	}
 

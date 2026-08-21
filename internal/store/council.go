@@ -254,29 +254,25 @@ func (s *Store) TouchAccountActive(ctx context.Context, owner string) error {
 	return err
 }
 
-// OwnerHasSchedule reports whether the owner has anything the scheduler could act
-// on, at least one weekly rule or override on one of their permits. Sessions for
-// users who have linked but not set up a schedule need not be kept warm.
-func (s *Store) OwnerHasSchedule(ctx context.Context, owner string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `
-SELECT
-  (SELECT COUNT(*) FROM weekly_rule wr JOIN permit p ON wr.permit_id = p.id WHERE p.owner = ?) +
-  (SELECT COUNT(*) FROM override o     JOIN permit p ON o.permit_id  = p.id WHERE p.owner = ?)`,
-		owner, owner).Scan(&n)
-	return n > 0, err
+// OwnerHasPermit reports whether the owner manages at least one permit. A linked
+// account with no permit has nothing for a live council session to act on — keep-warm
+// exists to serve a permit — so such sessions are left to lapse. Covers schedulers
+// AND QR-only households (both hold a permit); excludes accounts that linked but
+// never added one (e.g. a resident with no visitor permit to manage).
+func (s *Store) OwnerHasPermit(ctx context.Context, owner string) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM permit WHERE owner = ?)`, owner).Scan(&exists)
+	return exists == 1, err
 }
 
-// OwnersWithSchedule returns the set of owners with at least one weekly rule or
-// override — the owners keep-warm actually maintains. The warm-margin status
-// metrics use it to ignore intentionally un-warmed sessions (a linked account with
-// no schedule is left to lapse between dashboard visits), which would otherwise
-// read as a perpetual near-expiry alarm. One batched query, not one per session.
-func (s *Store) OwnersWithSchedule(ctx context.Context) (map[string]struct{}, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT p.owner FROM permit p
-WHERE EXISTS (SELECT 1 FROM weekly_rule wr WHERE wr.permit_id = p.id)
-   OR EXISTS (SELECT 1 FROM override o WHERE o.permit_id = p.id)`)
+// OwnersWithPermit returns the set of owners that manage at least one permit — the
+// owners keep-warm actually maintains. The warm-margin status metrics use it to
+// ignore intentionally un-warmed sessions (a linked account with NO permit is left
+// to lapse), which would otherwise read as a perpetual near-expiry alarm. One
+// batched query, not one per session.
+func (s *Store) OwnersWithPermit(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT owner FROM permit`)
 	if err != nil {
 		return nil, err
 	}

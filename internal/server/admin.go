@@ -122,7 +122,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	scheduled, err := s.store.OwnersWithSchedule(r.Context())
+	warmed, err := s.store.OwnersWithPermit(r.Context())
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -130,12 +130,12 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	loc := s.cfg.DisplayLocation
 	maxAge := s.cfg.Council.SessionMaxAge
-	// A keep-warm is "stale" only once a scheduled session is genuinely near lapsing:
+	// A keep-warm is "stale" only once a warmed session is genuinely near lapsing:
 	// keep-warm renews every WarmInterval and must succeed before IdleWindow, so the
 	// safety margin before the idle window is the real deadline. The old fixed 6h
 	// predated WARM_INTERVAL=8h and flagged every healthy session in the 6–8h gap
-	// after each renew. Unscheduled owners are not kept warm at all, so their ageing
-	// is expected and never attention-worthy — mirror the /status counts.
+	// after each renew. Owners with no permit are not kept warm at all, so their
+	// ageing is expected and never attention-worthy — mirror the /status counts.
 	warmStaleAfter := s.cfg.Council.IdleWindow - s.cfg.Council.WarmSafetyMargin
 	if warmStaleAfter <= 0 {
 		warmStaleAfter = s.cfg.Council.WarmInterval
@@ -161,7 +161,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			row.NtfyTopic = a.NtfyTopic
 		}
 		// Council / keep-warm status.
-		_, keptWarm := scheduled[a.Owner]
+		_, keptWarm := warmed[a.Owner]
 		var needsAttention bool
 		row.Status, row.StatusLabel, needsAttention = councilRowStatus(a, keptWarm, now, maxAge, warmStaleAfter)
 		if row.Status == "ok" {
@@ -264,8 +264,8 @@ type sessionCounts struct {
 	// expiryWarningMargin of the estimated idle cliff — 0 in healthy operation.
 	// MinMargin: the worst session's remaining seconds to the cliff (negative =
 	// already past the estimate; omitted when no sessions). All four cover only
-	// scheduled (kept-warm) owners — an un-warmed session's expected lapse is not a
-	// fault.
+	// warmed owners (those with a permit) — an un-warmed session's expected lapse is
+	// not a fault.
 	OverdueWarm      int  `json:"overdue_warm"`
 	NearExpiry       int  `json:"near_expiry"`
 	MinMarginSeconds *int `json:"min_margin_seconds,omitempty"`
@@ -292,13 +292,13 @@ type sessionCounts struct {
 // healthy fleet keeps min-margin near (idleWindow - warmInterval) and NearExpiry at
 // zero; a stalled warm loop makes margins shrink and NearExpiry climb.
 //
-// Only sessions whose owner is in scheduled — the ones keep-warm actually
-// maintains — contribute to the warm-risk figures. A linked owner with no schedule
-// is deliberately left to lapse between dashboard visits, so its (expected) shrinking
-// margin must not read as a perpetual alarm. NearExpiry uses expiryWarningMargin,
+// Only sessions whose owner is in warmed — the ones keep-warm actually
+// maintains — contribute to the warm-risk figures. A linked owner with no permit
+// is deliberately left to lapse, so its (expected) shrinking margin must not read
+// as a perpetual alarm. NearExpiry uses expiryWarningMargin,
 // kept independent of warmInterval so raising the warm interval does not flag healthy
 // sessions hours before their renew is even due.
-func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmInterval, idleWindow, expiryWarningMargin time.Duration, scheduled map[string]struct{}) sessionCounts {
+func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmInterval, idleWindow, expiryWarningMargin time.Duration, warmed map[string]struct{}) sessionCounts {
 	sc := sessionCounts{}
 	haveMargin := false
 	var minMargin time.Duration
@@ -307,8 +307,8 @@ func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmIn
 			continue
 		}
 		sc.Linked++
-		if _, ok := scheduled[cs.Owner]; !ok {
-			continue // not kept warm: its lapse is expected, not a fault
+		if _, ok := warmed[cs.Owner]; !ok {
+			continue // not kept warm (no permit): its lapse is expected, not a fault
 		}
 		if cs.UpdatedAt.IsZero() {
 			continue
@@ -413,13 +413,13 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	scheduled, err := s.store.OwnersWithSchedule(r.Context())
+	warmed, err := s.store.OwnersWithPermit(r.Context())
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
 	now := time.Now()
-	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, scheduled)
+	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, warmed)
 	counts.Expiries1h, counts.Reconnects1h, counts.ExpiredOwners1h = s.sched.SessionChurn()
 	counts.ReconnectQueued, counts.ReconnectDue, counts.ReconnectOldestSeconds = s.sched.ReconnectBacklog()
 	last := s.sched.LastReconcile()
@@ -542,8 +542,8 @@ func sealRoster(key []byte, roster []store.RosterEntry) (string, error) {
 
 // councilRowStatus classifies one account's council connection for the admin table,
 // returning the status key, its label, and whether it warrants operator attention.
-// keptWarm is whether the owner has an active schedule: only those sessions are kept
-// warm, so only they can be "stale" — an unscheduled session's ageing is expected,
+// keptWarm is whether the owner manages a permit: only those sessions are kept
+// warm, so only they can be "stale" — an owner with no permit ages as expected,
 // not a fault (this mirrors what councilSessionCounts reports on /status). The re-link
 // bound is idle-based (see idleSince); warmStaleAfter is the keep-warm renew deadline,
 // derived from the configured idle window and interval rather than a fixed constant so

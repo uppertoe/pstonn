@@ -755,67 +755,51 @@ func TestLastApply(t *testing.T) {
 	}
 }
 
-// TestOwnerHasSchedule reflects whether the owner has any rule/override.
-func TestOwnerHasSchedule(t *testing.T) {
+// TestOwnerHasPermit reflects whether the owner manages at least one permit.
+func TestOwnerHasPermit(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const owner = "u@example.com"
-	if has, err := s.OwnerHasSchedule(ctx, owner); err != nil || has {
-		t.Fatalf("empty owner has schedule = %v, %v", has, err)
+	if has, err := s.OwnerHasPermit(ctx, owner); err != nil || has {
+		t.Fatalf("empty owner has permit = %v, %v", has, err)
 	}
-	veh, _ := s.CreateVehicle(ctx, owner, "REG1", "car")
-	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
-	if err := s.SetRule(ctx, pid, time.Monday, veh); err != nil {
+	if _, err := s.UpsertPermit(ctx, owner, "p1", "14", "P"); err != nil {
 		t.Fatal(err)
 	}
-	if has, err := s.OwnerHasSchedule(ctx, owner); err != nil || !has {
-		t.Fatalf("owner with a rule has schedule = %v, %v", has, err)
+	if has, err := s.OwnerHasPermit(ctx, owner); err != nil || !has {
+		t.Fatalf("owner with a permit = %v, %v", has, err)
 	}
 }
 
-// OwnersWithSchedule is the batched form the /status warm-risk metrics use to ignore
-// intentionally un-warmed (scheduleless) sessions. It must return exactly the owners
-// with a weekly rule OR an override, and nobody else.
-func TestOwnersWithSchedule(t *testing.T) {
+// OwnersWithPermit is the batched form the /status warm-risk metrics use to ignore
+// intentionally un-warmed (permit-less) sessions. It must return exactly the owners
+// that manage a permit, and nobody else.
+func TestOwnersWithPermit(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
-	const ruleOwner, overrideOwner, bareOwner = "rule@example.com", "override@example.com", "bare@example.com"
+	const permitOwner, bareOwner = "permit@example.com", "bare@example.com"
 
-	rv, _ := s.CreateVehicle(ctx, ruleOwner, "REG1", "car")
-	rp, _ := s.UpsertPermit(ctx, ruleOwner, "rp", "14", "P")
-	if err := s.SetRule(ctx, rp, time.Monday, rv); err != nil {
+	if _, err := s.UpsertPermit(ctx, permitOwner, "pp", "14", "P"); err != nil {
 		t.Fatal(err)
 	}
-
-	ov, _ := s.CreateVehicle(ctx, overrideOwner, "REG2", "car")
-	op, _ := s.UpsertPermit(ctx, overrideOwner, "op", "14", "P")
-	if _, err := s.CreateOverride(ctx, op, ov, time.Now(), nil, overrideOwner); err != nil {
-		t.Fatal(err)
-	}
-
-	// bareOwner has a linked session and a permit but no rule and no override.
+	// bareOwner has a linked session but NO permit — the resident-with-no-visitor-
+	// permit case; must not be kept warm.
 	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: bareOwner, Cookie: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertPermit(ctx, bareOwner, "bp", "14", "P"); err != nil {
-		t.Fatal(err)
-	}
 
-	set, err := s.OwnersWithSchedule(ctx)
+	set, err := s.OwnersWithPermit(ctx)
 	if err != nil {
-		t.Fatalf("OwnersWithSchedule: %v", err)
+		t.Fatalf("OwnersWithPermit: %v", err)
 	}
-	if _, ok := set[ruleOwner]; !ok {
-		t.Errorf("owner with a weekly rule is missing from the set: %v", set)
-	}
-	if _, ok := set[overrideOwner]; !ok {
-		t.Errorf("owner with an override is missing from the set: %v", set)
+	if _, ok := set[permitOwner]; !ok {
+		t.Errorf("owner with a permit is missing from the set: %v", set)
 	}
 	if _, ok := set[bareOwner]; ok {
-		t.Errorf("owner with no rule/override must not be in the set: %v", set)
+		t.Errorf("owner with no permit must not be in the set: %v", set)
 	}
-	if len(set) != 2 {
-		t.Errorf("set = %v, want exactly the two scheduled owners", set)
+	if len(set) != 1 {
+		t.Errorf("set = %v, want exactly the one permit owner", set)
 	}
 }
 

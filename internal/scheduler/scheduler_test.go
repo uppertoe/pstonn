@@ -453,6 +453,12 @@ func seedSession(t *testing.T, s *store.Store, owner string) {
 	if err := s.SaveCouncilSession(context.Background(), store.CouncilSession{Owner: owner, Cookie: "seed"}); err != nil {
 		t.Fatal(err)
 	}
+	// Keep-warm gates on managing a permit (a live session is only useful to act on
+	// one), so seed one — the common case for the warm/retire tests. The no-permit
+	// case has its own test (TestKeepWarmSkipsNoPermit).
+	if _, err := s.UpsertPermit(context.Background(), owner, "seed-"+owner, "14", "P"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestKeepWarmRetiresPastBound: a zero max-age makes every session instantly
@@ -818,22 +824,41 @@ func TestSessionExpiryNotifiesRelink(t *testing.T) {
 	}
 }
 
-// TestKeepWarmSkipsNoSchedule: a linked user with no rules/overrides isn't warmed
-// (their dashboard use would renew it), keeping council traffic proportional to
-// actual schedules.
-func TestKeepWarmSkipsNoSchedule(t *testing.T) {
+// TestKeepWarmSkipsNoPermit: a linked account that manages no permit has nothing for
+// a live session to act on, so it is not warmed (left to lapse) — the account is
+// left intact, not retired.
+func TestKeepWarmSkipsNoPermit(t *testing.T) {
 	st := newStore(t)
-	seedSession(t, st, "idle@example.com") // linked, but no schedule seeded
+	// Bare session, NO permit (seedSession would add one).
+	if err := st.SaveCouncilSession(context.Background(), store.CouncilSession{Owner: "idle@example.com", Cookie: "seed"}); err != nil {
+		t.Fatal(err)
+	}
 	fc := &fakeCouncil{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
 
 	if len(fc.refreshed) != 0 {
-		t.Fatalf("session with no schedule should not be warmed, got %v", fc.refreshed)
+		t.Fatalf("session with no permit should not be warmed, got %v", fc.refreshed)
 	}
 	if _, err := st.GetCouncilSession(context.Background(), "idle@example.com"); err != nil {
 		t.Fatalf("idle session should be left intact: %v", err)
+	}
+}
+
+// TestKeepWarmWarmsPermitWithoutSchedule: a QR-only / not-yet-scheduled household
+// holds a permit but no rule or override — it must be kept warm now (previously the
+// schedule gate skipped it, forcing a login replay on each cold guest activation).
+func TestKeepWarmWarmsPermitWithoutSchedule(t *testing.T) {
+	st := newStore(t)
+	seedSession(t, st, "qr@example.com") // adds a permit, no schedule
+	fc := &fakeCouncil{}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(context.Background())
+
+	if len(fc.refreshed) != 1 {
+		t.Fatalf("permit-holder with no schedule should be warmed, got %v", fc.refreshed)
 	}
 }
 
