@@ -303,8 +303,12 @@ type permitView struct {
 	Expired     bool   // already past the end date
 	Detail      string // council identifier line: "VPP24714 · 1st Visitor Permit"
 	// Copy-schedule affordance (for a renewed/replacement permit).
-	RosterEmpty bool        // no weekly rules yet — a fresh permit
-	CopyFrom    []permitOpt // this owner's OTHER permits, to copy a schedule from
+	RosterEmpty bool // no weekly rules yet — a fresh permit
+	// ShowSetupNudge gates the "nothing scheduled yet" banner: an empty roster with
+	// no one-off bookings AND no history of using the guest/QR path. A QR-only
+	// household is using the permit as intended, so the nudge is suppressed for them.
+	ShowSetupNudge bool
+	CopyFrom       []permitOpt // this owner's OTHER permits, to copy a schedule from
 	// IsPrimary gates the owner-only "stop managing this permit" action. Carried on
 	// the permit view (not just the page) because the card renders as a standalone
 	// htmx fragment, where the dashboard's own IsPrimary is out of scope.

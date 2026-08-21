@@ -43,7 +43,11 @@
   <section class="card" id="permit-{{.Permit.ID}}" style="--hue:var(--sec-schedule)"
            x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="addOpen=true"
            @htmx:after-request="if(!$event.detail.elt.closest('.qrtrigger')) addOpen=false">
-    {{template "permit-body" .}}
+    {{/* #pbody is the swap target for every card re-render (plate poll, roster edits,
+         one-off add/delete). The teleported modals are rendered as a sibling OUTSIDE
+         it, so a re-render can't null a modal the user has open. */}}
+    <div id="pbody-{{.Permit.ID}}">{{template "permit-body" .}}</div>
+    {{template "permit-modals" .}}
   </section>
   {{else}}
   {{if not .ExpiredPermits}}
@@ -136,8 +140,16 @@
     {{if .PollNext}}{{/* Bounded self-refresh: re-fetches the card until the council
          confirms the settled plate or the attempt cap is hit (see armPlatePoll), so a
          just-made change swaps in without a reload while an outage still can't loop.
-         display:none so the helper div is not a flex item nudging the pill's layout. */}}
-    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"></div>
+         display:none so the helper div is not a flex item nudging the pill's layout.
+
+         hx-select=".nowbadge" swaps ONLY this badge, not the whole #pbody. The poll
+         fires on a timer, and re-rendering the whole body re-ran every child's entry
+         animation — most visibly the setup-nudge .banner's rise — so an empty-schedule
+         card flickered on every tick. The badge is all the poll actually updates (the
+         plate + status pill), and the re-armed poll div rides along inside it. Trade-off:
+         today's calendar cell mirrors the pill but is outside the badge, so its
+         applying marker clears on the next full render, not on the poll. */}}
+    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="closest .nowbadge" hx-swap="outerHTML" hx-select=".nowbadge"></div>
     {{end}}
   </div>
 </div>
@@ -157,7 +169,7 @@
   {{else}}
   <button type="button" class="ghost sm" @click="open=!open">{{template "ic-copy"}} Copy schedule from another permit</button>
   {{end}}
-  <form x-show="open" x-cloak class="cs-form" hx-post="/permits/{{.Permit.ID}}/copy-schedule" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
+  <form x-show="open" x-cloak class="cs-form" hx-post="/permits/{{.Permit.ID}}/copy-schedule" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
         {{if not .RosterEmpty}}@submit="if(!confirm('Copy that schedule here? It replaces this permit\'s weekly roster and upcoming bookings.')) $event.preventDefault()"{{end}}>
     <label class="fld">Copy from
       <select name="source" required>
@@ -172,12 +184,13 @@
 
 {{/* An entirely empty schedule used to render as seven "none" chips under a
      green "on permit now ✓" — which reads as SET UP AND WORKING to a newcomer
-     who just linked, when in fact this permit will never change. Say so, once,
-     until the first roster day or booking exists. */}}
-{{if and .RosterEmpty (not .Overrides)}}
-<div class="banner warn" style="margin-top:14px;align-items:flex-start">{{template "ic-alert"}} <span>
-  <strong>Nothing is scheduled yet, so p.stonn will not change this permit.</strong>
-  Pick a car for each day below, or make a one-off booking &mdash; until then the permit stays exactly as it is at the council.
+     who just linked, when in fact this permit will never change. Say so, once —
+     but NOT to a household that hands visitors the QR (a valid way to use the
+     permit); ShowSetupNudge already excludes them (see buildPermitView). */}}
+{{if .ShowSetupNudge}}
+<div class="banner warn" style="margin:14px 0 20px;align-items:flex-start">{{template "ic-alert"}} <span>
+  <strong>This permit isn't on a schedule yet.</strong>
+  Pick a car for each day below or add a one-off booking and p.stonn will keep the permit matching &mdash; or just show a visitor the QR when they arrive. Until then the permit stays exactly as it is at the council.
 </span></div>
 {{end}}
 
@@ -198,10 +211,10 @@
       <p class="tt">{{.Name}}: pick a vehicle</p>
       <div class="vopts">
         <button type="button" class="vopt {{if not $sel}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#permit-{{$pid}}" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">clear day</button>
         {{range $vehicles}}
         <button type="button" class="vopt {{if eq $sel .ID}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#permit-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
         {{end}}
       </div>
     </div>
@@ -246,7 +259,7 @@
          start→end as one unit sets the row's minimum width to both dates combined,
          which is what pushed a long booking past its card. */}}
     <span class="when"><span class="nb">{{localTime .StartsAt $.Loc}}</span> → <span class="nb">{{if .EndsAt}}{{localEnd .EndsAt $.Loc}}{{else}}open-ended{{end}}</span>{{if .CreatedBy}} <span class="by">· by {{.CreatedBy}}</span>{{end}}</span>
-    <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#permit-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
+    <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#pbody-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
       <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking">{{template "ic-x"}}</button>
     </form>
   </div>
@@ -267,7 +280,15 @@
   </form>
 </div>
 {{end}}
+{{end}}{{/* ---- end permit-body ---- */}}
 
+{{/* =================== PERMIT MODALS (NOT swappable) =================== */}}
+{{/* The teleported modals live here, OUTSIDE the #pbody swap target, so re-rendering
+     the card body never destroys a modal the user has open. The visitor QR is fetched
+     into #qrbody-N client-side; if the plate poll's timer swap re-rendered it, the
+     shown code would blank out mid-display. Rendered once per permit as a sibling of
+     #pbody, inside the section, so it keeps the section's qrOpen/addOpen scope. */}}
+{{define "permit-modals"}}
 {{/* Visitor-QR modal, teleported for the same reason as the one-off modal below.
      The card is fetched by htmx into #qrbody-N when the trigger is clicked, so the
      token is only minted when the modal is actually opened. Wake Lock keeps the
@@ -312,7 +333,7 @@
        the AJAX path is deterministic; the method/action make even an un-enhanced
        submit POST to the right endpoint (full reload) rather than silently no-op. */}}
   <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override" data-plate-confirm="plate"
-        hx-post="/permits/{{.Permit.ID}}/override" hx-target="#permit-{{.Permit.ID}}" hx-swap="innerHTML"
+        hx-post="/permits/{{.Permit.ID}}/override" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
         x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
                  endLabel(offset) {

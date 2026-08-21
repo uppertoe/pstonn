@@ -29,7 +29,13 @@ type councilSandbox struct {
 }
 
 func newCouncilSandbox() *councilSandbox {
-	return &councilSandbox{plates: map[string]string{}}
+	// Seed the canned permit with a starting plate, like a real granted permit that
+	// always has SOME vehicle on it. Without a reading, sandboxCurrentVehicle errors
+	// "not read yet", which pins the card's plate poll on — re-rendering the whole
+	// body (including the "nothing scheduled" notice) every few seconds until a
+	// change lands. A real council returns the current plate immediately, so the
+	// poll settles; the seed makes the sandbox match that.
+	return &councilSandbox{plates: map[string]string{"90001": "SBX1AB"}}
 }
 
 func (sb *councilSandbox) current(id string) (string, bool) {

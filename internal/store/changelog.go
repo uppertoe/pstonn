@@ -66,6 +66,23 @@ func (s *Store) RecordChange(ctx context.Context, owner, actor, action, target, 
 	return err
 }
 
+// HasGuestActivity reports whether the account has used the visitor-code path:
+// created, shown, or managed a guest pass or door QR, or decided a printed-QR
+// request. It gates the "nothing scheduled yet" setup nudge — a household that
+// hands visitors a code is using the permit exactly as intended, so telling them
+// nothing will change is wrong. Read from the change log, so the signal survives
+// the short-lived grants themselves (an ad-hoc QR grant is deleted after it
+// lapses); it ages out with the log's 90-day window, which just re-nudges a
+// household that has not touched a code in three months.
+func (s *Store) HasGuestActivity(ctx context.Context, owner string) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS(SELECT 1 FROM account_log
+  WHERE owner = ? AND (action LIKE 'guest.%' OR action LIKE 'doorqr.%' OR action LIKE 'request.%'))`,
+		owner).Scan(&exists)
+	return exists == 1, err
+}
+
 // ListChanges returns an account's most recent changes, newest first.
 func (s *Store) ListChanges(ctx context.Context, owner string, limit int) ([]Change, error) {
 	rows, err := s.db.QueryContext(ctx, `

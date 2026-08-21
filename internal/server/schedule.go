@@ -340,11 +340,20 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// the drift check uses it: the council echoes case/spacing variants.
 	applying := res.Source != model.SourceNone && desiredReg != "" &&
 		!model.SamePlate(desiredReg, p.ActiveRegistration)
+	// The "nothing scheduled yet" nudge is for a NEW household that hasn't set up a
+	// roster and might mistake the empty card for "working". A household that hands
+	// visitors a QR code is using the permit exactly as intended, so once they've
+	// touched the guest/QR path the nudge would just nag — drop it for them.
+	hasGuests, err := s.store.HasGuestActivity(ctx, p.Owner)
+	if err != nil {
+		return permitView{}, err
+	}
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 		ActiveColor:     colorOfPlate(vviews, p.ActiveRegistration),
 		RosterEmpty:     len(rules) == 0,
+		ShowSetupNudge:  len(rules) == 0 && len(ovs) == 0 && !hasGuests,
 		Detail:          permitDetail(p),
 		PlateRefreshing: plateRefreshing,
 		Applying:        applying,

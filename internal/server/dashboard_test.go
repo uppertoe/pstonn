@@ -292,6 +292,15 @@ func TestTemplatesRender(t *testing.T) {
 			p.armPlatePoll(0)
 			return p
 		}, `hx-get="/permits/7/card?n=1"`},
+		// The timer poll swaps ONLY the .nowbadge, not the whole #pbody — otherwise
+		// the empty-schedule nudge (a .banner with an entry animation) re-animates on
+		// every tick. A regression to a full-body swap drops hx-select and fails here.
+		{"poll-narrows-to-nowbadge", func() permitView {
+			p := samplePermitView(loc)
+			p.PlateRefreshing = true
+			p.armPlatePoll(0)
+			return p
+		}, `hx-select=".nowbadge"`},
 		{"applying-follow-up", func() permitView {
 			// A change in flight arms the same bounded poll, even with a fresh cache.
 			p := samplePermitView(loc)
@@ -318,6 +327,12 @@ func TestTemplatesRender(t *testing.T) {
 			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
 			return p
 		}, `usually ABC123`},
+		// The empty-schedule setup nudge shows only when ShowSetupNudge is set.
+		{"setup-nudge-shown", func() permitView {
+			p := samplePermitView(loc)
+			p.ShowSetupNudge = true
+			return p
+		}, `isn't on a schedule yet`},
 	} {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {
@@ -356,6 +371,35 @@ func TestTemplatesRender(t *testing.T) {
 	for _, want := range []string{"Weekly roster", "This week and next", "One-off booking", "ABC123", "→"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("permit-body output missing %q", want)
+		}
+	}
+	// With ShowSetupNudge unset (the sample has a roster), the empty-schedule nudge
+	// must be absent — a QR-only or already-scheduled household never sees it.
+	if strings.Contains(buf.String(), "isn't on a schedule yet") {
+		t.Fatal("setup nudge shown when ShowSetupNudge is false")
+	}
+	// The teleported modals must NOT live in the swap fragment. Every card
+	// re-render (the plate poll's timer swap, roster edits, one-off add/delete)
+	// replaces #pbody with a fresh permit-body — if a modal were inside it, that
+	// swap would destroy a modal the user has open, blanking the visitor QR
+	// mid-display. They belong in permit-modals, rendered once as a sibling.
+	for _, leaked := range []string{`id="qrbody-`, `x-show="qrOpen"`, `x-show="addOpen"`} {
+		if strings.Contains(buf.String(), leaked) {
+			t.Fatalf("permit-body (the swap target) contains %q — a modal moved back inside the swap fragment, so a card re-render will null it while it's open:\n%s", leaked, buf.String())
+		}
+	}
+	// The full schedule page must still render the wrapper and the modals as its sibling.
+	var page bytes.Buffer
+	if err := templates.ExecuteTemplate(&page, "dashboard", dashboardData{
+		User: identity.User{Email: "a@b.com"}, State: "app", Page: "schedule", Loc: loc,
+		Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+		Permits:  []permitView{samplePermitView(loc)},
+	}); err != nil {
+		t.Fatalf("render schedule page: %v", err)
+	}
+	for _, want := range []string{`id="pbody-7"`, `id="qrbody-7"`, `x-show="qrOpen"`, `x-show="addOpen"`} {
+		if !strings.Contains(page.String(), want) {
+			t.Fatalf("schedule page missing %q — the pbody wrapper or the modals aren't rendered", want)
 		}
 	}
 }
