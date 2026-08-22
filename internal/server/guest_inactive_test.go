@@ -243,3 +243,95 @@ func TestRenewalRevivesGuestLinks(t *testing.T) {
 		t.Fatalf("live permit's grant moved to %d (%v); copy between live permits must not move access", gc.Grant.PermitID, err)
 	}
 }
+
+// The pass-management surfaces missed by the first gate pass: re-send rotates a
+// token (killing the link that would revive after a renewal copy), and edit can
+// add recipients (minting by another door). Both must refuse on a dead permit,
+// as must the door QR's printable view page — the artifact the POST gate refuses.
+func TestFrozenPassSurfacesOnDeadPermit(t *testing.T) {
+	s := newAuthzServer(t)
+	ctx := context.Background()
+	const owner, origin = "owner@example.com", "http://app.example.com"
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := s.store.UpsertPermit(ctx, owner, "CP-DEAD", "14", "Old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	passID, err := s.store.CreateGuestGrant(ctx, owner, owner, pid, "Nanny", false,
+		[]int64{vehID}, []store.GuestRecipient{{Email: "nanny@example.com", TokenHash: "hash-frozen"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doorID, err := s.store.CreatePrintedGrant(ctx, owner, owner, pid, "hash-frozen-door", "sealed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelPermit(t, s, owner, "CP-DEAD")
+
+	cases := []struct {
+		method, target string
+		form           url.Values
+	}{
+		{"POST", "/guests/" + itoa64(passID) + "/resend", url.Values{"recipient": {"nanny@example.com"}}},
+		{"POST", "/guests/" + itoa64(passID), url.Values{"label": {"Nanny"}, "vehicle_id": {itoa64(vehID)}, "recipients": {"nanny@example.com"}}},
+		{"GET", "/guests/" + itoa64(passID) + "/edit", nil},
+		{"GET", "/guests/door/" + itoa64(doorID) + "/view", nil},
+	}
+	for _, tc := range cases {
+		w := s.doReq(tc.method, tc.target, owner, origin, tc.form)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "no longer active") {
+			t.Errorf("%s %s on dead permit = %d, want 409 + inactive notice", tc.method, tc.target, w.Code)
+		}
+	}
+	// The re-send must not have rotated the token: the original hash still resolves.
+	if _, err := s.store.GuestContextByTokenHash(ctx, "hash-frozen"); err != nil {
+		t.Fatalf("the recipient's token was rotated by a refused re-send: %v", err)
+	}
+}
+
+// Copying between two DEAD permits must not move the guest surface: the links
+// would land on a target that still 410s while the household is told they work.
+func TestDeadToDeadCopyDoesNotMoveGuests(t *testing.T) {
+	s := newAuthzServer(t)
+	s.sched = scheduler.New(s.store, nil, time.UTC, scheduler.Options{})
+	ctx := context.Background()
+	const owner, origin = "owner@example.com", "http://app.example.com"
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	src, err := s.store.UpsertPermit(ctx, owner, "CP-OLD-A", "14", "Old A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := s.store.UpsertPermit(ctx, owner, "CP-OLD-B", "14", "Old B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetRule(ctx, src, time.Monday, vehID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.CreateGuestGrant(ctx, owner, owner, src, "Nanny", false,
+		[]int64{vehID}, []store.GuestRecipient{{Email: "nanny@example.com", TokenHash: "hash-deadpair"}}); err != nil {
+		t.Fatal(err)
+	}
+	cancelPermit(t, s, owner, "CP-OLD-A")
+	cancelPermit(t, s, owner, "CP-OLD-B")
+
+	if w := s.doReq("POST", "/permits/"+itoa64(dst)+"/copy-schedule", owner, origin,
+		url.Values{"source": {itoa64(src)}}); w.Code != 303 {
+		t.Fatalf("dead-to-dead copy = %d, want 303 (schedule copy itself is allowed)", w.Code)
+	}
+	if gc, err := s.store.GuestContextByTokenHash(ctx, "hash-deadpair"); err != nil || gc.Grant.PermitID != src {
+		t.Fatalf("grant moved to %d (%v); guests must not be re-targeted onto a dead permit", gc.Grant.PermitID, err)
+	}
+}

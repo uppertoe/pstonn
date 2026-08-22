@@ -1212,45 +1212,78 @@ ON CONFLICT(owner) DO UPDATE SET guests_enabled = excluded.guests_enabled`, owne
 // tokens are untouched, and a token IS a link's identity — so a pass saved to a
 // guest's phone home screen and a door poster taped up months ago keep working
 // across a council cancel-and-reissue, with nothing re-sent or re-printed.
-// Both permits must belong to owner. One printed door QR per permit is
-// preserved: if the destination already has its own, the source's is left
-// behind (where the inactive-permit gate keeps it safely refused). Returns how
-// many grants moved.
-func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID int64) (int, error) {
+// Both permits must belong to owner.
+//
+// Three things ride along with the grants, in one transaction:
+//   - Live revert baselines on the moved grants' tokens are CLEARED. A baseline
+//     means "the plate that was on this permit when the link's current run of
+//     activations began" — permit-specific by meaning even though it is stored
+//     on the token — so carrying one across would let a guest's "put the
+//     previous car back" write the OLD permit's plate onto the new permit.
+//   - PENDING printed-QR requests follow their grant, so a visitor waiting at
+//     the door when the renewal lands can still be approved. Decided rows are
+//     history on the old permit and stay put.
+//   - One printed door QR per permit is preserved: if the destination already
+//     has its own, the source's is left behind (where the inactive-permit gate
+//     keeps it safely refused) and strandedPoster reports it, so the caller can
+//     tell the household the old poster is dead instead of claiming it works.
+func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID int64) (moved int, strandedPoster bool, err error) {
 	if srcID == dstID {
-		return 0, errors.New("store: cannot move guest passes onto the same permit")
+		return 0, false, errors.New("store: cannot move guest passes onto the same permit")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer tx.Rollback()
 
 	var owned int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM permit WHERE id IN (?, ?) AND owner = ?`, srcID, dstID, owner).Scan(&owned); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if owned != 2 {
-		return 0, ErrNotFound
+		return 0, false, ErrNotFound
 	}
 	var dstPrinted int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`,
 		owner, dstID).Scan(&dstPrinted); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	q := `UPDATE guest_grant SET permit_id = ? WHERE owner = ? AND permit_id = ?`
+	filter := ``
 	if dstPrinted > 0 {
-		q += ` AND request_only = 0`
+		filter = ` AND request_only = 0`
+		var srcPrinted int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`,
+			owner, srcID).Scan(&srcPrinted); err != nil {
+			return 0, false, err
+		}
+		strandedPoster = srcPrinted > 0
 	}
-	res, err := tx.ExecContext(ctx, q, dstID, owner, srcID)
+	// Baselines and pending requests are updated BEFORE the grants move, while
+	// "the grants being moved" is still expressible as a subquery on the source.
+	movingGrants := `(SELECT id FROM guest_grant WHERE owner = ? AND permit_id = ?` + filter + `)`
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_token SET baseline_plate = '', baseline_until = '' WHERE grant_id IN `+movingGrants,
+		owner, srcID); err != nil {
+		return 0, false, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_request SET permit_id = ? WHERE status = 'pending' AND permit_id = ? AND grant_id IN `+movingGrants,
+		dstID, srcID, owner, srcID); err != nil {
+		return 0, false, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`UPDATE guest_grant SET permit_id = ? WHERE owner = ? AND permit_id = ?`+filter,
+		dstID, owner, srcID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	n, _ := res.RowsAffected()
-	return int(n), nil
+	return int(n), strandedPoster, nil
 }

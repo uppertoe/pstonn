@@ -1185,6 +1185,13 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 // editGuestGrant renders the guests page with the pass form pre-filled for the
 // grant to edit.
 func (s *Server) editGuestGrant(w http.ResponseWriter, r *http.Request) {
+	// Gated before the page shell: the form this renders posts to
+	// updateGuestGrant, which refuses a dead permit — say so up front instead of
+	// letting the edit be filled in for nothing.
+	_, owner, _ := s.resolveAccount(r.Context())
+	if s.refuseDeadGrantPermit(w, r, owner, pathInt(r, "id"), permitInactivePassFrozen) {
+		return
+	}
 	base, ok := s.appShell(w, r, "guests")
 	if !ok {
 		return
@@ -1389,11 +1396,16 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Refuse a dead target before minting anything. Ownership and existence stay
-	// with CreateGuestGrant's atomic check; this only adds the liveness rule the
-	// (filtered) permit selector already implies.
-	if permit, perr := s.store.GetPermit(r.Context(), permitID); perr == nil &&
-		permit.Owner == owner && permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+	// Refuse a dead target before minting anything, and FAIL CLOSED on a store
+	// error — a gate that shrugs on error would mint and email a link for a
+	// permit it couldn't check. Unknown permits fall through: CreateGuestGrant's
+	// atomic ownership check answers those with a clean 403.
+	switch permit, perr := s.store.GetPermit(r.Context(), permitID); {
+	case errors.Is(perr, store.ErrNotFound):
+	case perr != nil:
+		s.serverError(w, perr)
+		return
+	case permit.Owner == owner && permit.Inactive(time.Now(), s.cfg.DisplayLocation):
 		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
 		return
 	}
@@ -1490,8 +1502,15 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "No recipient to re-send to.")
 		return
 	}
-	// Don't rotate the token when we can't deliver the replacement — that would
-	// break the recipient's current link with nothing to replace it.
+	// Don't rotate the token when the permit is dead: the guest's link 410ing is
+	// the very symptom that prompts a re-send, and rotating would trade their
+	// token — which comes back to life after a renewal copy — for a fresh one
+	// that is just as dead.
+	if s.refuseDeadGrantPermit(w, r, owner, pathInt(r, "id"), permitInactivePassFrozen) {
+		return
+	}
+	// Nor when we can't deliver the replacement — that would break the
+	// recipient's current link with nothing to replace it.
 	if !s.notify.EmailAvailable() {
 		s.formError(w, r, "Email isn't set up, so links can't be re-sent.")
 		return
@@ -1541,6 +1560,11 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := pathInt(r, "id")
+	// An edit can add recipients — minting by another door — so it shares the
+	// dead-permit refusal with the create surfaces.
+	if s.refuseDeadGrantPermit(w, r, owner, id, permitInactivePassFrozen) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.formError(w, r, "Could not read the form. Please try again.")
 		return
@@ -2277,9 +2301,14 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
 	// Checked before the idempotent reopen too: reprinting a poster for a dead
-	// permit is as misleading as minting a fresh one.
-	if permit, err := s.store.GetPermit(r.Context(), permitID); err == nil &&
-		permit.Owner == owner && permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+	// permit is as misleading as minting a fresh one. Fails closed on a store
+	// error, for the same reason as createGuestGrant's gate.
+	switch permit, perr := s.store.GetPermit(r.Context(), permitID); {
+	case errors.Is(perr, store.ErrNotFound):
+	case perr != nil:
+		s.serverError(w, perr)
+		return
+	case permit.Owner == owner && permit.Inactive(time.Now(), s.cfg.DisplayLocation):
 		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
 		return
 	}
@@ -2312,6 +2341,17 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.serverError(w, err)
+		return
+	}
+	// The POST mint gate calls reprinting a dead permit's poster "as misleading
+	// as minting a fresh one" — and this view page IS the printable poster, so
+	// it carries the same gate. Fails closed like the mint gates.
+	switch permit, perr := s.store.GetPermit(r.Context(), g.PermitID); {
+	case perr != nil:
+		s.serverError(w, perr)
+		return
+	case permit.Inactive(time.Now(), s.cfg.DisplayLocation):
+		s.message(w, http.StatusConflict, permitInactiveNoPoster)
 		return
 	}
 	raw, _, err := s.box.OpenCtx(secretbox.GuestToken(owner), g.TokenSealed)
@@ -2412,6 +2452,43 @@ const decidePermitInactiveMessage = "This permit is no longer active (cancelled 
 // door QR) for a permit that is cancelled or expired: every link would promise
 // parking cover the permit can no longer give.
 const permitInactiveNoNewLinks = "That permit is no longer active, so guest links and QR codes can't be created for it."
+
+// permitInactivePassFrozen refuses re-sending or editing a pass whose permit has
+// died — a re-send would rotate away the recipient's token (the very thing that
+// starts working again after a renewal copy) and email a born-dead link in its
+// place; an edit can add recipients, which is minting by another door.
+const permitInactivePassFrozen = "That pass's permit is no longer active, so its links can't be re-sent or offered to new people. Renewed the permit? Use “Copy schedule from another permit” — the pass moves across and its links start working again."
+
+// permitInactiveNoPoster refuses showing the printable poster for a dead
+// permit's door QR: the POST mint gate calls reprinting one "as misleading as
+// minting a fresh one", and the view page is the same artifact one click later.
+const permitInactiveNoPoster = "That permit is no longer active, so its printed QR can't be shown or reprinted. Renewed the permit? Use “Copy schedule from another permit” — the door QR moves across and the printed poster keeps working."
+
+// refuseDeadGrantPermit answers the request with msg when the grant's permit is
+// cancelled or expired, reporting whether it wrote a response. An unknown grant
+// returns false so the handler's own ownership path can give its usual answer;
+// a store error fails closed (these gates guard link-minting surfaces).
+func (s *Server) refuseDeadGrantPermit(w http.ResponseWriter, r *http.Request, owner string, grantID int64, msg string) bool {
+	pid, err := s.store.GuestGrantPermit(r.Context(), owner, grantID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return true
+	}
+	switch permit, err := s.store.GetPermit(r.Context(), pid); {
+	case errors.Is(err, store.ErrNotFound):
+		return false
+	case err != nil:
+		s.serverError(w, err)
+		return true
+	case permit.Inactive(time.Now(), s.cfg.DisplayLocation):
+		s.message(w, http.StatusConflict, msg)
+		return true
+	}
+	return false
+}
 
 // decideRequest approves or denies a pending printed-QR request. On approval it
 // puts the plate on the permit (end of day) and applies it best-effort.

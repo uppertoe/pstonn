@@ -237,10 +237,29 @@ func TestMoveGuestGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A live revert baseline on the pass and a pending printed-QR request on the
+	// door grant: both permit-specific states the move must handle.
+	preGC, err := st.GuestContextByTokenHash(ctx, "hash-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(6 * time.Hour)
+	if _, _, err := st.CaptureOrExtendGuestBaseline(ctx, preGC.TokenID, "OLD111", end, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	doorGrant, err := st.PrintedGrantForPermit(ctx, owner, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqID, _, _, err := st.CreateGuestRequest(ctx, doorGrant.GrantID, src, owner, "TRD441", "nonce-move")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Both grants move; the pass's token rows are untouched (same hash resolves).
-	n, err := st.MoveGuestGrants(ctx, owner, src, dst)
-	if err != nil || n != 2 {
-		t.Fatalf("MoveGuestGrants = %d, %v; want 2 grants moved", n, err)
+	n, stranded, err := st.MoveGuestGrants(ctx, owner, src, dst)
+	if err != nil || n != 2 || stranded {
+		t.Fatalf("MoveGuestGrants = %d, stranded=%v, %v; want 2 grants moved, none stranded", n, stranded, err)
 	}
 	gc, err := st.GuestContextByTokenHash(ctx, "hash-pass")
 	if err != nil || gc.Grant.PermitID != dst || gc.Grant.ID != passID {
@@ -248,6 +267,15 @@ func TestMoveGuestGrants(t *testing.T) {
 	}
 	if _, err := st.PrintedGrantForPermit(ctx, owner, dst); err != nil {
 		t.Fatalf("door QR did not follow: %v", err)
+	}
+	// The stale baseline must NOT cross: revert on the new permit would restore
+	// the OLD permit's plate.
+	if gc.BaselinePlate != "" {
+		t.Fatalf("baseline %q survived the move; must be cleared", gc.BaselinePlate)
+	}
+	// The pending request follows its grant so the visitor stays approvable.
+	if req, err := st.GuestRequestByID(ctx, reqID); err != nil || req.PermitID != dst || req.Status != "pending" {
+		t.Fatalf("pending request after move = %+v (%v), want pending on permit %d", req, err, dst)
 	}
 
 	// A destination that already has a door QR keeps it: the source's printed
@@ -263,19 +291,48 @@ func TestMoveGuestGrants(t *testing.T) {
 		[]int64{vehID}, []GuestRecipient{{Email: "pa@example.com", TokenHash: "hash-pass2"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, err = st.MoveGuestGrants(ctx, owner, src2, dst)
-	if err != nil || n != 1 {
-		t.Fatalf("second move = %d, %v; want only the pass (door QR collision)", n, err)
+	n, stranded, err = st.MoveGuestGrants(ctx, owner, src2, dst)
+	if err != nil || n != 1 || !stranded {
+		t.Fatalf("second move = %d, stranded=%v, %v; want only the pass moved and the poster reported stranded", n, stranded, err)
 	}
 	if g, err := st.PrintedGrantForPermit(ctx, owner, src2); err != nil || g.GrantID == 0 {
 		t.Fatalf("source's door QR should stay behind on collision: %+v %v", g, err)
 	}
 
 	// Foreign or unknown permits refuse wholesale.
-	if _, err := st.MoveGuestGrants(ctx, "other@example.com", src, dst); !errors.Is(err, ErrNotFound) {
+	if _, _, err := st.MoveGuestGrants(ctx, "other@example.com", src, dst); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign owner = %v, want ErrNotFound", err)
 	}
-	if _, err := st.MoveGuestGrants(ctx, owner, src, src); err == nil {
+	if _, _, err := st.MoveGuestGrants(ctx, owner, src, src); err == nil {
 		t.Fatal("same-permit move must refuse")
+	}
+}
+
+// TestCopyScheduleEmptySourceIsNoOp: an empty source must not wipe a roster the
+// household already built on the target ("nothing to copy" must mean nothing
+// happened, not wreckage behind a shrug).
+func TestCopyScheduleEmptySourceIsNoOp(t *testing.T) {
+	st := copyStore(t)
+	ctx := context.Background()
+	const owner = "own@example.com"
+	src, dst, vehID := copyFixture(t, st, owner)
+	// Strip the fixture's source schedule so src is empty, and give DST a roster.
+	if _, err := st.db.Exec(`DELETE FROM weekly_rule WHERE permit_id = ?`, src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM override WHERE permit_id = ?`, src); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetRule(ctx, dst, time.Monday, vehID); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := st.CopySchedule(ctx, owner, src, dst, time.Now())
+	if err != nil || n != 0 {
+		t.Fatalf("empty-source copy = %d, %v; want 0, nil", n, err)
+	}
+	rules, err := st.ListRules(ctx, dst)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("dst roster after empty-source copy = %v (%v); want untouched", rules, err)
 	}
 }

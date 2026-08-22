@@ -54,7 +54,8 @@ func (s *Store) ClearRule(ctx context.Context, permitID int64, weekday time.Week
 // permit's schedule" wording in the UI. Overrides that have already ended are not
 // carried (nothing left to apply); the target's past overrides are left as
 // history. Vehicle references are account-scoped, so they stay valid on the
-// target. Returns the number of rules + overrides copied.
+// target. An EMPTY source is a no-op that returns 0 without touching the target.
+// Returns the number of rules + overrides copied.
 func (s *Store) CopySchedule(ctx context.Context, owner string, srcID, dstID int64, now time.Time) (int, error) {
 	if srcID == dstID {
 		return 0, errors.New("store: cannot copy a schedule onto itself")
@@ -74,6 +75,21 @@ func (s *Store) CopySchedule(ctx context.Context, owner string, srcID, dstID int
 	}
 	if owned != 2 {
 		return 0, ErrNotFound
+	}
+
+	// An empty source copies nothing, so it must also REPLACE nothing: clearing
+	// the target first and then finding zero rows to insert silently wiped a
+	// roster the household had already built (and the caller, seeing 0, reported
+	// "nothing to copy" over the wreckage). Nothing-in, nothing-touched.
+	var srcRows int
+	if err := tx.QueryRowContext(ctx, `
+SELECT (SELECT COUNT(*) FROM weekly_rule WHERE permit_id = ?)
+     + (SELECT COUNT(*) FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?))`,
+		srcID, srcID, nowStr).Scan(&srcRows); err != nil {
+		return 0, err
+	}
+	if srcRows == 0 {
+		return 0, nil
 	}
 
 	// Clear the target's current roster + live overrides so this is a clean replace.

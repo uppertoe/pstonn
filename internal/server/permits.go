@@ -464,18 +464,21 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	// door posters keep working with nothing re-sent or re-printed. Never done
 	// between two live permits: there "copy" means duplicate, and silently
 	// re-targeting someone's standing access would be a surprise, not a rescue.
-	moved := 0
-	if sp.Inactive(time.Now(), s.cfg.DisplayLocation) {
-		if moved, err = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); err != nil {
-			// Best-effort: the schedule copy already landed, and unmoved passes stay
-			// safely refused by the inactive-permit gate rather than half-working.
-			log.Printf("copy schedule: move guest passes %d -> %d: %v", src, dst.ID, err)
+	// And never ONTO a dead permit: with two expired permits and one renewal,
+	// dead-to-dead would strand every pass on a target that still 410s while
+	// this handler announces the links work.
+	now := time.Now()
+	moved, stranded := 0, false
+	var moveErr error
+	if sp.Inactive(now, s.cfg.DisplayLocation) && !dst.Inactive(now, s.cfg.DisplayLocation) {
+		if moved, stranded, moveErr = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); moveErr != nil {
+			// The unmoved passes stay safely refused by the inactive-permit gate
+			// rather than half-working — but the failure must reach the user (below),
+			// not just the log: the whole promise of this path is "links keep
+			// working", and a silent miss surfaces only through a confused guest.
+			log.Printf("copy schedule: move guest passes %d -> %d: %v", src, dst.ID, moveErr)
 			moved = 0
 		}
-	}
-	if n == 0 && moved == 0 {
-		s.formError(w, r, "That permit has no schedule to copy.")
-		return
 	}
 	label := permitLabel(dst)
 	if n > 0 {
@@ -484,12 +487,36 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	if moved > 0 {
 		s.logChange(r.Context(), owner, user, store.ActionGuestMove, label, "")
 	}
+	if moveErr != nil {
+		// Partial outcome, said out loud. Re-running the copy is safe (CopySchedule
+		// is idempotent; the move is a plain re-point), so that is the advice.
+		if n > 0 {
+			s.notifyDestructive(r.Context(), owner, user,
+				user+" copied another permit's schedule onto \""+label+"\". That replaced its weekly roster and any upcoming one-off bookings.")
+			s.sched.KickPermit(dst.ID)
+			s.message(w, http.StatusInternalServerError,
+				"The schedule was copied, but the old permit's guest passes couldn't be moved across. Run “Copy schedule from another permit” again to move them.")
+			return
+		}
+		s.message(w, http.StatusInternalServerError,
+			"The old permit's guest passes couldn't be moved across just now. Nothing was changed — please try again.")
+		return
+	}
+	if n == 0 && moved == 0 {
+		s.formError(w, r, "That permit has no schedule to copy.")
+		return
+	}
 	msg := user + " copied another permit's schedule onto \"" + label + "\". That replaced its weekly roster and any upcoming one-off bookings."
 	if moved > 0 {
-		msg += " Guest passes and QR codes moved across with it — links people saved and printed posters keep working."
+		msg += " Guest passes and QR codes moved across with it — links people saved keep working."
 	}
 	if n == 0 {
-		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links people saved and printed posters keep working."
+		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links people saved keep working."
+	}
+	if stranded {
+		msg += " The old permit's printed door QR stayed behind (this permit already has its own) — that poster is dead now, so take it down."
+	} else if moved > 0 {
+		msg += " Printed posters keep working too."
 	}
 	s.notifyDestructive(r.Context(), owner, user, msg)
 	s.sched.KickPermit(dst.ID)
