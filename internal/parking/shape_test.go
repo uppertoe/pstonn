@@ -173,11 +173,12 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		t.Fatalf("a truncated permit grid was not recorded for the operator: %+v; "+
 			"acting on a partial list while reporting nothing is how a paging change stays invisible", st)
 	}
-	// An OMITTED field must be refused, not coerced to "". Absent VehicleRego would read
-	// as "the council holds no plate", so drift would clear the stored plate and issue a
-	// corrective write for every permit on every account at once; absent PermitStatus or
-	// EndDate would be written over good stored metadata.
-	for _, field := range []string{"VehicleRego", "PermitStatus", "EndDate", "PermitType", "PermitNumber",
+	// An OMITTED field must be refused, not coerced to "": absent PermitStatus or
+	// EndDate would be written over good stored metadata. VehicleRego is exempt —
+	// asserted separately below — because the council genuinely sends null for a
+	// permit with no vehicle assigned, and drift corroborates an empty grid rego
+	// against managedVehicle before ever acting on it.
+	for _, field := range []string{"PermitStatus", "EndDate", "PermitType", "PermitNumber",
 		"FKPermitTypeID", "PermitTypeAllowsVehicleChangeByHolder"} {
 		full := row(9, "")
 		var partial map[string]any
@@ -190,6 +191,27 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 		if _, err := c.ListPermits(context.Background(), owner); err == nil {
 			t.Fatalf("a grid row missing %s was accepted; an absent key is indistinguishable "+
 				"from an empty value once decoded, and drift acts on the difference", field)
+		}
+	}
+	// VehicleRego null or omitted is a permit with NO VEHICLE ASSIGNED YET — the
+	// normal state of a freshly granted permit — and must parse as an empty plate,
+	// not be refused as drift. Requiring it locked a real signup out of the picker
+	// (observed live 2026-08-22): their only permit had never had a rego set, so
+	// every load of their account failed as "API shape change".
+	for _, over := range []string{`"VehicleRego":null`, ""} {
+		full := row(9, "")
+		if over != "" {
+			full = strings.Replace(full, `"VehicleRego":"ABC123"`, over, 1)
+		} else {
+			full = strings.Replace(full, `"VehicleRego":"ABC123",`, "", 1)
+		}
+		f.gridBody.Store(`{"TotalItems":1,"PermitGrid":[` + full + `]}`)
+		ps, err := c.ListPermits(context.Background(), owner)
+		if err != nil || len(ps) != 1 {
+			t.Fatalf("a row with VehicleRego %q must be accepted as an unassigned permit: %v / %d", over, err, len(ps))
+		}
+		if ps[0].CurrentRego != "" {
+			t.Fatalf("an unassigned permit must read as an empty plate, got %q", ps[0].CurrentRego)
 		}
 	}
 	// A COMPLETE row still passes, so the guard above rejects absence and not shape.

@@ -1143,12 +1143,19 @@ type gridResp struct {
 
 // gridRow is decoded with POINTERS for every field drift acts on, so an omitted key
 // is distinguishable from a legitimately empty value. With plain values the two are
-// identical after decoding, and that is the dangerous direction: a schema change that
-// drops VehicleRego would read as "the council holds no plate for this permit", so
-// drift would clear the stored plate and issue a corrective write — for every permit
-// on every account at once, against the shared egress IP. Blank PermitStatus/EndDate
-// would likewise be written over good stored metadata. Absence is a shape change and
-// must be reported as one, not silently coerced to "".
+// identical after decoding, and that is the dangerous direction: blank
+// PermitStatus/EndDate would be written over good stored metadata. Absence is a
+// shape change and must be reported as one, not silently coerced to "".
+//
+// VehicleRego is the one deliberate EXEMPTION: the council sends null for a permit
+// that has never had a vehicle assigned (observed live 2026-08-22, a new signup's
+// fresh permit), and a nil pointer cannot tell that from a dropped key — so
+// requiring it locked the exact households most likely to be new out of the picker,
+// with retry advice that burned real council logins. Treating it as "" is safe
+// because the plate-clearing catastrophe the guard feared is prevented downstream:
+// drift NEVER blanks a stored plate on the grid's word alone — an empty grid rego
+// triggers a corroborating managedVehicle read first (see scheduler drift and
+// parking.emptyIsCredible), even if a schema change blanked every row at once.
 type gridRow struct {
 	PKPermitID                            int64   `json:"PKPermitID"`
 	FKPermitTypeID                        *int64  `json:"FKPermitTypeID"`
@@ -1174,7 +1181,8 @@ func (r gridRow) missingGridFields() []string {
 		{"PermitNumber", r.PermitNumber != nil},
 		{"PermitType", r.PermitType != nil},
 		{"PermitStatus", r.PermitStatus != nil},
-		{"VehicleRego", r.VehicleRego != nil},
+		// VehicleRego deliberately absent: null means "no vehicle assigned yet",
+		// not schema drift — see the gridRow comment.
 		{"StartDate", r.StartDate != nil},
 		{"EndDate", r.EndDate != nil},
 		{"PermitTypeAllowsVehicleChangeByHolder", r.PermitTypeAllowsVehicleChangeByHolder != nil},
@@ -1339,7 +1347,7 @@ func (c *Client) permitPage(ctx context.Context, owner string, page int) (_ []Pe
 			PermitNumber:     *r.PermitNumber,
 			PermitType:       *r.PermitType,
 			Status:           *r.PermitStatus,
-			CurrentRego:      *r.VehicleRego,
+			CurrentRego:      strOrEmpty(r.VehicleRego),
 			StartDate:        start,
 			EndDate:          end,
 			CanChangeVehicle: *r.PermitTypeAllowsVehicleChangeByHolder,
@@ -1347,6 +1355,15 @@ func (c *Client) permitPage(ctx context.Context, owner string, page int) (_ []Pe
 		})
 	}
 	return out, total, nil
+}
+
+// strOrEmpty reads an optional grid string: nil (the council's null for a permit
+// with no vehicle assigned) becomes "", which is what it means.
+func strOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // councilDate parses a council date, reporting a malformed one instead of swallowing
