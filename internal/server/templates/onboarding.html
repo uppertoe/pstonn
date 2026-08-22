@@ -61,7 +61,13 @@
       {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, cars and schedule are all still here.
       {{else}}Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.{{end}}
     </p>
-    <form class="stack" method="post" action="/council/link">
+    {{/* One tap = one council login with the user's REAL credentials, so the
+         in-flight guards matter more here than anywhere: hx-sync drops any
+         submit while one is running, and hx-disabled-elt greys the button so
+         the wait reads as progress, not a dead tap (observed live 2026-08-22:
+         one signup fired four logins in 18 seconds re-pressing this button). */}}
+    <form class="stack" method="post" action="/council/link"
+          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
       <label class="fld">Council email (your verified sign-in)
         <input type="email" value="{{.User.Email}}" autocomplete="username" disabled>
       </label>
