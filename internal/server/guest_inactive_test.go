@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -166,5 +167,79 @@ func TestGuestsPageOffersOnlyActivePermits(t *testing.T) {
 	}
 	if len(base.Guests) != 1 || !strings.Contains(base.Guests[0].PermitLabel, "no longer active") {
 		t.Fatalf("existing pass on the dead permit = %+v, want listed with a 'no longer active' label", base.Guests)
+	}
+}
+
+// The renewal flow must carry the guest surface across: copying a schedule FROM
+// a dead permit re-points its grants to the replacement, so the exact link a
+// guest saved to their phone — refused while the permit was dead — works again
+// unchanged. Copying between two live permits must never move anyone's access.
+func TestRenewalRevivesGuestLinks(t *testing.T) {
+	s := newAuthzServer(t)
+	s.sched = scheduler.New(s.store, nil, time.UTC, scheduler.Options{})
+	ctx := context.Background()
+	const owner, origin = "owner@example.com", "http://app.example.com"
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	src, err := s.store.UpsertPermit(ctx, owner, "CP-OLD", "14", "Old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := s.store.UpsertPermit(ctx, owner, "CP-NEW", "14", "New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetRule(ctx, src, time.Monday, vehID); err != nil {
+		t.Fatal(err)
+	}
+	raw := "guestlink" + strings.Repeat("y", 20)
+	if _, err := s.store.CreateGuestGrant(ctx, owner, owner, src, "Nanny", false,
+		[]int64{vehID}, []store.GuestRecipient{{Email: "nanny@example.com", TokenHash: hashGuestToken(raw)}}); err != nil {
+		t.Fatal(err)
+	}
+	cancelPermit(t, s, owner, "CP-OLD")
+
+	if w := s.getGuest("/g/" + raw); w.Code != 410 {
+		t.Fatalf("saved link on the dead permit = %d, want 410 before the renewal copy", w.Code)
+	}
+
+	w := s.doReq("POST", "/permits/"+itoa64(dst)+"/copy-schedule", owner, origin,
+		url.Values{"source": {itoa64(src)}})
+	if w.Code != 303 {
+		t.Fatalf("copy-schedule = %d %q, want 303", w.Code, w.Body.String())
+	}
+
+	after := s.getGuest("/g/" + raw)
+	if after.Code != 200 {
+		t.Fatalf("saved link after the renewal copy = %d, want 200 (same URL, working again)", after.Code)
+	}
+	if gc, err := s.store.GuestContextByTokenHash(ctx, hashGuestToken(raw)); err != nil || gc.Grant.PermitID != dst {
+		t.Fatalf("grant after copy = %+v (%v), want re-pointed at %d", gc.Grant, err, dst)
+	}
+
+	// Two LIVE permits: copy duplicates the schedule but must not move access.
+	src2, err := s.store.UpsertPermit(ctx, owner, "CP-LIVE2", "14", "Second live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetRule(ctx, src2, time.Tuesday, vehID); err != nil {
+		t.Fatal(err)
+	}
+	raw2 := "guestlink" + strings.Repeat("z", 20)
+	if _, err := s.store.CreateGuestGrant(ctx, owner, owner, src2, "Pa", false,
+		[]int64{vehID}, []store.GuestRecipient{{Email: "pa@example.com", TokenHash: hashGuestToken(raw2)}}); err != nil {
+		t.Fatal(err)
+	}
+	if w := s.doReq("POST", "/permits/"+itoa64(dst)+"/copy-schedule", owner, origin,
+		url.Values{"source": {itoa64(src2)}}); w.Code != 303 {
+		t.Fatalf("live-to-live copy = %d, want 303", w.Code)
+	}
+	if gc, err := s.store.GuestContextByTokenHash(ctx, hashGuestToken(raw2)); err != nil || gc.Grant.PermitID != src2 {
+		t.Fatalf("live permit's grant moved to %d (%v); copy between live permits must not move access", gc.Grant.PermitID, err)
 	}
 }

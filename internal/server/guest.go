@@ -1124,7 +1124,7 @@ func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
 // that would be exactly as dead. What they need to hear is that the permit
 // itself is finished — parking on its say-so no longer protects anyone.
 func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request) {
-	const msg = "This permit is no longer active, so this code can't put cars on it. Please check with your host before parking."
+	const msg = "This permit is no longer active, so this code can't put cars on it right now. Please check with your host before parking."
 	if isHX(r) && !isBoosted(r) {
 		// The permit died mid-session: swap the menu for the notice in place.
 		noStore(w)

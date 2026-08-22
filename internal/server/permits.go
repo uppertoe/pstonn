@@ -448,7 +448,8 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	// Confirm the source is also this account's (CopySchedule re-checks, but this
 	// gives a clean 404 rather than a generic error).
-	if sp, err := s.store.GetPermit(r.Context(), src); err != nil || sp.Owner != owner {
+	sp, err := s.store.GetPermit(r.Context(), src)
+	if err != nil || sp.Owner != owner {
 		s.message(w, http.StatusNotFound, "That permit isn't one of yours.")
 		return
 	}
@@ -457,14 +458,40 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	if n == 0 {
+	// Copying FROM a dead permit is the renewal gesture, so the guest surface
+	// moves across with the schedule: re-pointing a grant keeps its tokens, and
+	// a token IS a link's identity — passes saved to guests' phones and printed
+	// door posters keep working with nothing re-sent or re-printed. Never done
+	// between two live permits: there "copy" means duplicate, and silently
+	// re-targeting someone's standing access would be a surprise, not a rescue.
+	moved := 0
+	if sp.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		if moved, err = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); err != nil {
+			// Best-effort: the schedule copy already landed, and unmoved passes stay
+			// safely refused by the inactive-permit gate rather than half-working.
+			log.Printf("copy schedule: move guest passes %d -> %d: %v", src, dst.ID, err)
+			moved = 0
+		}
+	}
+	if n == 0 && moved == 0 {
 		s.formError(w, r, "That permit has no schedule to copy.")
 		return
 	}
 	label := permitLabel(dst)
-	s.logChange(r.Context(), owner, user, store.ActionScheduleCopy, label, "")
-	s.notifyDestructive(r.Context(), owner, user,
-		user+" copied another permit's schedule onto \""+label+"\". That replaced its weekly roster and any upcoming one-off bookings.")
+	if n > 0 {
+		s.logChange(r.Context(), owner, user, store.ActionScheduleCopy, label, "")
+	}
+	if moved > 0 {
+		s.logChange(r.Context(), owner, user, store.ActionGuestMove, label, "")
+	}
+	msg := user + " copied another permit's schedule onto \"" + label + "\". That replaced its weekly roster and any upcoming one-off bookings."
+	if moved > 0 {
+		msg += " Guest passes and QR codes moved across with it — links people saved and printed posters keep working."
+	}
+	if n == 0 {
+		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links people saved and printed posters keep working."
+	}
+	s.notifyDestructive(r.Context(), owner, user, msg)
 	s.sched.KickPermit(dst.ID)
 	s.respondPermit(w, r, owner, dst)
 }

@@ -219,3 +219,63 @@ func TestCopyScheduleRefusesSelfCopy(t *testing.T) {
 		t.Errorf("the source lost rules to a refused self-copy: %d remain, want 2", len(rules))
 	}
 }
+
+// TestMoveGuestGrants: re-pointing grants preserves their tokens (a saved link's
+// identity), refuses foreign permits, and never leaves a permit with two door QRs.
+func TestMoveGuestGrants(t *testing.T) {
+	st := copyStore(t)
+	ctx := context.Background()
+	const owner = "own@example.com"
+	src, dst, vehID := copyFixture(t, st, owner)
+
+	passID, err := st.CreateGuestGrant(ctx, owner, owner, src, "Nanny", false,
+		[]int64{vehID}, []GuestRecipient{{Email: "nanny@example.com", TokenHash: "hash-pass"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreatePrintedGrant(ctx, owner, owner, src, "hash-door", "sealed"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both grants move; the pass's token rows are untouched (same hash resolves).
+	n, err := st.MoveGuestGrants(ctx, owner, src, dst)
+	if err != nil || n != 2 {
+		t.Fatalf("MoveGuestGrants = %d, %v; want 2 grants moved", n, err)
+	}
+	gc, err := st.GuestContextByTokenHash(ctx, "hash-pass")
+	if err != nil || gc.Grant.PermitID != dst || gc.Grant.ID != passID {
+		t.Fatalf("moved pass resolves to %+v (%v), want same grant on permit %d", gc.Grant, err, dst)
+	}
+	if _, err := st.PrintedGrantForPermit(ctx, owner, dst); err != nil {
+		t.Fatalf("door QR did not follow: %v", err)
+	}
+
+	// A destination that already has a door QR keeps it: the source's printed
+	// grant stays behind, everything else still moves.
+	src2, err := st.UpsertPermit(ctx, owner, "src2-permit", "14", "Second old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreatePrintedGrant(ctx, owner, owner, src2, "hash-door2", "sealed2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateGuestGrant(ctx, owner, owner, src2, "Pa", false,
+		[]int64{vehID}, []GuestRecipient{{Email: "pa@example.com", TokenHash: "hash-pass2"}}); err != nil {
+		t.Fatal(err)
+	}
+	n, err = st.MoveGuestGrants(ctx, owner, src2, dst)
+	if err != nil || n != 1 {
+		t.Fatalf("second move = %d, %v; want only the pass (door QR collision)", n, err)
+	}
+	if g, err := st.PrintedGrantForPermit(ctx, owner, src2); err != nil || g.GrantID == 0 {
+		t.Fatalf("source's door QR should stay behind on collision: %+v %v", g, err)
+	}
+
+	// Foreign or unknown permits refuse wholesale.
+	if _, err := st.MoveGuestGrants(ctx, "other@example.com", src, dst); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign owner = %v, want ErrNotFound", err)
+	}
+	if _, err := st.MoveGuestGrants(ctx, owner, src, src); err == nil {
+		t.Fatal("same-permit move must refuse")
+	}
+}

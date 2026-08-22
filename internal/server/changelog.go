@@ -104,6 +104,8 @@ func changeText(c store.Change) string {
 		return "renamed a permit to " + c.Target
 	case store.ActionScheduleCopy:
 		return "copied a schedule onto " + c.Target + ", replacing its roster and one-off bookings"
+	case store.ActionGuestMove:
+		return "moved guest passes and QR codes onto " + c.Target + " (existing links keep working)"
 	case store.ActionRosterSet:
 		return "set " + c.Target + " to " + c.Detail
 	case store.ActionRosterClear:

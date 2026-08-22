@@ -1206,3 +1206,51 @@ ON CONFLICT(owner) DO UPDATE SET guests_enabled = excluded.guests_enabled`, owne
 	}
 	return tx.Commit()
 }
+
+// MoveGuestGrants re-points every guest grant (passes, door QR, even ephemeral
+// on-screen codes) from one of the owner's permits onto another. The grants'
+// tokens are untouched, and a token IS a link's identity — so a pass saved to a
+// guest's phone home screen and a door poster taped up months ago keep working
+// across a council cancel-and-reissue, with nothing re-sent or re-printed.
+// Both permits must belong to owner. One printed door QR per permit is
+// preserved: if the destination already has its own, the source's is left
+// behind (where the inactive-permit gate keeps it safely refused). Returns how
+// many grants moved.
+func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID int64) (int, error) {
+	if srcID == dstID {
+		return 0, errors.New("store: cannot move guest passes onto the same permit")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var owned int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM permit WHERE id IN (?, ?) AND owner = ?`, srcID, dstID, owner).Scan(&owned); err != nil {
+		return 0, err
+	}
+	if owned != 2 {
+		return 0, ErrNotFound
+	}
+	var dstPrinted int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`,
+		owner, dstID).Scan(&dstPrinted); err != nil {
+		return 0, err
+	}
+	q := `UPDATE guest_grant SET permit_id = ? WHERE owner = ? AND permit_id = ?`
+	if dstPrinted > 0 {
+		q += ` AND request_only = 0`
+	}
+	res, err := tx.ExecContext(ctx, q, dstID, owner, srcID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}

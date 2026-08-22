@@ -13,6 +13,7 @@ const (
 	ActionPermitRemove = "permit.remove"
 	ActionPermitRename = "permit.rename"
 	ActionScheduleCopy = "schedule.copy"
+	ActionGuestMove    = "guest.move" // renewal moved guest passes onto the new permit
 	// Weekly roster
 	ActionRosterSet   = "roster.set"
 	ActionRosterClear = "roster.clear"
