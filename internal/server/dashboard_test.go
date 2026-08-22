@@ -556,3 +556,67 @@ func TestEndOfDayUsesStartDay(t *testing.T) {
 		t.Fatal("a future booking must not end before it starts")
 	}
 }
+
+// TestEmptyGarageNudges: with no saved vehicles, the roster popover and the
+// one-off modal must explain their prerequisite at the moment of use instead of
+// dead-ending — the popover's only option was "clear" (a no-op that reads as
+// broken) and the modal opened on an empty vehicle picker beside a plate field.
+// And the page-level "add your plates" banner stays quiet for a household
+// already living on guest QRs, which need no saved cars at all.
+func TestEmptyGarageNudges(t *testing.T) {
+	loc := melbourne(t)
+	empty := samplePermitView(loc)
+	empty.Vehicles = nil
+
+	var body bytes.Buffer
+	if err := templates.ExecuteTemplate(&body, "permit-body", empty); err != nil {
+		t.Fatalf("render permit-body: %v", err)
+	}
+	if !strings.Contains(body.String(), "The weekly roster runs on your saved cars") {
+		t.Fatal("empty-garage roster popover does not explain what the roster needs")
+	}
+	if strings.Contains(body.String(), "clear day") {
+		t.Fatal("empty-garage roster popover still offers the no-op clear button")
+	}
+
+	var modal bytes.Buffer
+	if err := templates.ExecuteTemplate(&modal, "permit-modals", empty); err != nil {
+		t.Fatalf("render permit-modals: %v", err)
+	}
+	if !strings.Contains(modal.String(), "mode:'plate'") {
+		t.Fatal("empty-garage one-off modal does not default to the plate field")
+	}
+	if strings.Contains(modal.String(), "A saved car") {
+		t.Fatal("empty-garage one-off modal still shows the saved-car toggle")
+	}
+	if !strings.Contains(modal.String(), "Save your cars") {
+		t.Fatal("empty-garage one-off modal lost the quiet save-your-cars pointer")
+	}
+
+	// A stocked garage keeps the original behaviour.
+	full := samplePermitView(loc)
+	var modalFull bytes.Buffer
+	if err := templates.ExecuteTemplate(&modalFull, "permit-modals", full); err != nil {
+		t.Fatalf("render permit-modals (full): %v", err)
+	}
+	if !strings.Contains(modalFull.String(), "mode:'car'") || !strings.Contains(modalFull.String(), "A saved car") {
+		t.Fatal("stocked-garage one-off modal lost its saved-car default")
+	}
+
+	// Page banner: shown to a no-vehicle household with no guest activity,
+	// hidden for one already using guest QRs.
+	for _, tc := range []struct {
+		guestActive bool
+		wantBanner  bool
+	}{{false, true}, {true, false}} {
+		var page bytes.Buffer
+		d := dashboardData{Loc: loc, GuestActive: tc.guestActive}
+		if err := templates.ExecuteTemplate(&page, "page-schedule", d); err != nil {
+			t.Fatalf("render page-schedule (guestActive=%v): %v", tc.guestActive, err)
+		}
+		got := strings.Contains(page.String(), "Add your plates")
+		if got != tc.wantBanner {
+			t.Fatalf("guestActive=%v: banner shown=%v, want %v", tc.guestActive, got, tc.wantBanner)
+		}
+	}
+}

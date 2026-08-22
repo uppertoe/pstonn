@@ -36,7 +36,10 @@
   {{/* ---------- SCHEDULE ---------- */}}
   {{if .Vehicles}}
   {{template "legend" .}}
-  {{else}}
+  {{else if not .GuestActive}}
+  {{/* A household already living on guest QRs doesn't need saved cars — the
+       roster and one-off surfaces explain their own prerequisite at the moment
+       of use, so this page-level hint stays quiet for them. */}}
   <div class="banner warn">{{template "ic-cars"}} <span>Add your plates on the <a href="/vehicles">Vehicles</a> page first, then pick which vehicle covers each day of the week.</span></div>
   {{end}}
   {{range .Permits}}
@@ -216,6 +219,7 @@
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
+      {{if $vehicles}}
       <p class="tt">{{.Name}}: pick a vehicle</p>
       <div class="vopts">
         <button type="button" class="vopt {{if not $sel}}sel{{end}}" @click="open=false"
@@ -225,6 +229,13 @@
           hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
         {{end}}
       </div>
+      {{else}}
+      {{/* Empty garage: the only thing this popover could offer is "clear", a
+           no-op that reads as broken. Say what the roster runs on instead. */}}
+      <p class="tt">The weekly roster runs on your saved cars</p>
+      <p class="empty-note" style="margin:2px 0 10px">Add a car once, then set it for any day with one tap.</p>
+      <a class="vopt" href="/vehicles" style="text-decoration:none">{{template "ic-plus"}} <span class="lab">Add your cars</span></a>
+      {{end}}
     </div>
   </div>
   {{end}}
@@ -343,7 +354,7 @@
   <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override" data-plate-confirm="plate"
         hx-post="/permits/{{.Permit.ID}}/override" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
-        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
+        x-data="{mode:'{{if .Vehicles}}car{{else}}plate{{end}}', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
                  endLabel(offset) {
                    const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
                    d.setDate(d.getDate() + offset);
@@ -353,10 +364,13 @@
                    if (same(d, tmw)) return 'Midnight tomorrow night';
                    return 'Midnight ' + d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
                  }}">
+    {{if .Vehicles}}
     <div class="seg">
       <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved car</button>
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">One-off plate</button>
     </div>
+    {{end}}{{/* Empty garage: no toggle — the modal opens straight on the plate
+         field, which needs no saved cars, instead of an empty vehicle picker. */}}
     {{/* Both panes are stacked in one grid cell so the modal keeps a constant
          height (the taller pane's) and doesn't jump when you switch tabs. */}}
     <div class="segpanes">
@@ -382,7 +396,11 @@
         <label class="fld">Number plate
           <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
         </label>
+        {{if .Vehicles}}
         <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
+        {{else}}
+        <p class="empty-note" style="margin-top:6px">Used just for this booking, not saved. Booking your own cars often? <a href="/vehicles">Save your cars</a> for one-tap booking and the weekly roster.</p>
+        {{end}}
       </div>
     </div>
     {{/* Separate date + time inputs rather than datetime-local: Firefox for
@@ -416,7 +434,9 @@
     <p class="empty-note" x-show="ends=='open'" x-cloak>This booking will keep overriding your weekly roster until you cancel it.</p>
     <div class="modal-actions">
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
-      <button type="submit">{{template "ic-plus"}} Book</button>
+      {{/* Can't submit with neither a car nor a plate — the server refuses that
+           anyway, but a button that fires only to bounce reads as broken. */}}
+      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()">{{template "ic-plus"}} Book</button>
     </div>
   </form>
   </div>

@@ -82,6 +82,11 @@ type dashboardData struct {
 	// server-gated here and dismissed per-browser in the template (localStorage),
 	// because seeing it once more on a new device is harmless.
 	ShowShareHint bool
+	// GuestActive gates the page-level "add your plates first" banner: a
+	// household already using guest QRs (which need no saved cars) shouldn't be
+	// told to add plates — the roster and one-off surfaces explain their own
+	// prerequisite at the moment of use instead.
+	GuestActive bool
 	// dashboard state
 	Vehicles []vehicleView
 	// LegendVehicles is the Schedule page's colour key: only the cars whose colour

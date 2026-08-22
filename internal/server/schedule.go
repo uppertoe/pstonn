@@ -65,6 +65,13 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		pvs = append(pvs, pv)
 	}
 	base.Vehicles = vviews
+	// Only consulted when the garage is empty (the banner's only trigger), so
+	// the extra query is skipped for every set-up household.
+	if len(vviews) == 0 {
+		if ga, gerr := s.store.HasGuestActivity(ctx, owner); gerr == nil {
+			base.GuestActive = ga
+		}
+	}
 	if used, lerr := s.legendColors(ctx, owner, vviews, now); lerr == nil {
 		base.LegendVehicles, base.LegendMore = legendVehicles(vviews, used)
 	} else {
