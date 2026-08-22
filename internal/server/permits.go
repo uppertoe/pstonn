@@ -55,14 +55,39 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	}
 	permits, complete, err := s.council.ListPermitsComplete(ctx, owner)
 	if err != nil {
+		if errors.Is(err, parking.ErrSessionExpired) {
+			// A dead session on THIS page is diagnostic, never routine ageing: only a
+			// linked account reaches the picker, and in the ?linked=1 case the session
+			// was established seconds ago. This branch used to be fully silent, which
+			// hid a whole failure mode (observed live 2026-08-22): a signup whose
+			// council password was accepted four times in a row was bounced back to
+			// the link form after each success — under a green "Council account
+			// linked." flash — because the fresh session failed this very read, until
+			// the password throttle stopped them with advice about wrong passwords.
+			freshLink := r.URL.Query().Get("linked") == "1"
+			log.Printf("picker: council permit read for %s failed as session-expired (fresh link: %v)", redact.Email(owner), freshLink)
+			if freshLink {
+				// The one thing this person must NOT be shown is the password form
+				// again: their password already worked, and every resubmit is a real
+				// council login. Say what actually happened and where to look.
+				s.message(w, http.StatusBadGateway,
+					"Your council password was accepted — the sign-in itself worked. But when p.stonn then asked the council for your permit list, "+
+						"the council turned the request away. That usually means the ePermits account isn't fully set up yet — for example it was only just created, "+
+						"or doesn't have a permit on it. Entering your password here again won't change this. "+
+						"Please sign in at the council's own site (parkingpermits.stonnington.vic.gov.au) and check your visitor permit appears there, then come back and link again. "+
+						"If the permit is there and this keeps happening, please get in touch via the contact form.")
+				return
+			}
+			base.State = "onboarding"
+			base.AutoReconnect = s.hasSavedPassword(ctx, owner)
+			base.Relink = true
+			s.render(w, base)
+			return
+		}
 		base.State = "onboarding"
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
-		if errors.Is(err, parking.ErrSessionExpired) {
-			base.Relink = true
-		} else {
-			log.Printf("list council permits for %s: %v", redact.Email(owner), err)
-			base.Warn = "Couldn't reach the council to load your permits. Try re-linking."
-		}
+		log.Printf("list council permits for %s: %v", redact.Email(owner), err)
+		base.Warn = "Couldn't reach the council to load your permits. Try re-linking."
 		s.render(w, base)
 		return
 	}
