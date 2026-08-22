@@ -514,7 +514,7 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links people saved keep working."
 	}
 	if stranded {
-		msg += " The old permit's printed door QR stayed behind (this permit already has its own) — that poster is dead now, so take it down."
+		msg += " The old permit's printed door QR wasn't moved (this permit already has its own) — that old poster no longer works, so take it down."
 	} else if moved > 0 {
 		msg += " Printed posters keep working too."
 	}
