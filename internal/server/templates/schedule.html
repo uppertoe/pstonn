@@ -58,7 +58,7 @@
   {{if .ExpiredPermits}}
   <section class="card expired-permits">
     <h2 class="exp-h2">{{template "ic-clock"}} Expired permits</h2>
-    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore. Renewed one? <a href="/permits/new">Add the new permit</a>, then pick the expired one under &ldquo;Copy schedule from another permit&rdquo;.</p>
+    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and any guest passes or QR codes for these permits have stopped working. Renewed one? <a href="/permits/new">Add the new permit</a>, then pick the expired one under &ldquo;Copy schedule from another permit&rdquo;.</p>
     <ul class="explist">
       {{range .ExpiredPermits}}
       <li class="exprow">

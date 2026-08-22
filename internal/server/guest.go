@@ -341,6 +341,10 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r)
 		return
 	}
+	if permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.renderGuestInactive(w, r)
+		return
+	}
 	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
 }
 
@@ -629,6 +633,10 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r)
 		return
 	}
+	if permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.renderGuestInactive(w, r)
+		return
+	}
 	if gc.Grant.RequestOnly {
 		s.renderGuestGone(w, r)
 		return
@@ -676,6 +684,16 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
 		s.renderGuestGone(w, r)
+		return
+	}
+	// A link outlives its permit: a poster stays on the door after the council
+	// cancels or expires the permit behind it. Without this gate the activation
+	// below would put a real plate on the dead permit and tell the visitor they
+	// are covered — the exact fine this app exists to prevent. (The scheduler
+	// already refuses to reconcile inactive permits, so the override would also
+	// never be corrected.)
+	if permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.renderGuestInactive(w, r)
 		return
 	}
 
@@ -837,6 +855,10 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
 		s.renderGuestGone(w, r)
+		return
+	}
+	if permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.renderGuestInactive(w, r)
 		return
 	}
 	if gc.Grant.RequestOnly {
@@ -1096,6 +1118,25 @@ func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
 	s.render(w, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
 }
 
+// renderGuestInactive is the notice for a link whose token is still valid but
+// whose PERMIT has been cancelled or has expired. Deliberately distinct from
+// renderGuestGone: "ask for a new link" would send this guest chasing a link
+// that would be exactly as dead. What they need to hear is that the permit
+// itself is finished — parking on its say-so no longer protects anyone.
+func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request) {
+	const msg = "This permit is no longer active, so this code can't put cars on it. Please check with your host before parking."
+	if isHX(r) && !isBoosted(r) {
+		// The permit died mid-session: swap the menu for the notice in place.
+		noStore(w)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<div class="banner warn" style="margin-top:14px"><span>%s</span></div>`, msg)
+		return
+	}
+	noStore(w)
+	w.WriteHeader(http.StatusGone)
+	s.render(w, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
+}
+
 func (s *Server) renderGuestResult(w http.ResponseWriter, ownerEmail string, ok bool, msg string) {
 	noStore(w)
 	d := dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation,
@@ -1169,7 +1210,14 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 		return err
 	}
 	labelByPermit := map[int64]string{}
+	now := time.Now()
 	for _, p := range permits {
+		if p.Inactive(now, s.cfg.DisplayLocation) {
+			// Existing passes and request history still name the permit, but say
+			// plainly that it's finished — and never offer it for NEW links.
+			labelByPermit[p.ID] = permitLabel(p) + " — no longer active"
+			continue
+		}
 		labelByPermit[p.ID] = permitLabel(p)
 		base.PermitOpts = append(base.PermitOpts, permitOpt{ID: p.ID, Label: permitLabel(p)})
 	}
@@ -1338,6 +1386,15 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(recipients) > maxGuestRecipients {
 		s.formError(w, r, tooManyRecipients)
+		return
+	}
+
+	// Refuse a dead target before minting anything. Ownership and existence stay
+	// with CreateGuestGrant's atomic check; this only adds the liveness rule the
+	// (filtered) permit selector already implies.
+	if permit, perr := s.store.GetPermit(r.Context(), permitID); perr == nil &&
+		permit.Owner == owner && permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
 		return
 	}
 
@@ -1733,6 +1790,10 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 	permit, err := s.store.GetPermit(r.Context(), atoi64(r.FormValue("permit_id")))
 	if err != nil || permit.Owner != owner {
 		s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
+		return
+	}
+	if permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
 		return
 	}
 	qr, err := s.visitorQR(r.Context(), owner, user, permit)
@@ -2215,6 +2276,13 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
+	// Checked before the idempotent reopen too: reprinting a poster for a dead
+	// permit is as misleading as minting a fresh one.
+	if permit, err := s.store.GetPermit(r.Context(), permitID); err == nil &&
+		permit.Owner == owner && permit.Inactive(time.Now(), s.cfg.DisplayLocation) {
+		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
+		return
+	}
 	if g, err := s.store.PrintedGrantForPermit(r.Context(), owner, permitID); err == nil {
 		http.Redirect(w, r, fmt.Sprintf("/guests/door/%d/view", g.GrantID), http.StatusSeeOther)
 		return
@@ -2323,16 +2391,27 @@ const (
 	decideErr            decideKind = iota // err holds the cause
 	decideAlreadyDecided                   // decline raced: no longer pending
 	decideDeclined
-	decideGone    // approve: request/permit gone, not ours, or raced
-	decideCapFull // permit at its guest-booking sub-cap
-	decideRevoked // door QR revoked between approval and apply
-	decideApplied // approved and the council confirmed the plate
+	decideGone           // approve: request/permit gone, not ours, or raced
+	decideCapFull        // permit at its guest-booking sub-cap
+	decidePermitInactive // approve: the permit itself is cancelled or expired
+	decideRevoked        // door QR revoked between approval and apply
+	decideApplied        // approved and the council confirmed the plate
 	decideApproving
 )
 
 // decideCapFullMessage is shown when an approval hits the guest-booking
 // sub-cap; shared by both front doors so the wording can never drift.
 const decideCapFullMessage = "This permit already has the maximum number of active guest bookings. Remove one before approving another."
+
+// decidePermitInactiveMessage: approving a request against a permit the council
+// has since cancelled (or that has expired) must refuse loudly. Silently
+// "approving" would strand the visitor on a permit that protects nobody.
+const decidePermitInactiveMessage = "This permit is no longer active (cancelled or expired), so nothing can go on it. The visitor has not been approved — let them know."
+
+// permitInactiveNoNewLinks refuses minting any guest surface (pass, visitor QR,
+// door QR) for a permit that is cancelled or expired: every link would promise
+// parking cover the permit can no longer give.
+const permitInactiveNoNewLinks = "That permit is no longer active, so guest links and QR codes can't be created for it."
 
 // decideRequest approves or denies a pending printed-QR request. On approval it
 // puts the plate on the permit (end of day) and applies it best-effort.
@@ -2353,6 +2432,8 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request, approve b
 		http.Redirect(w, r, "/guests", http.StatusSeeOther)
 	case decideCapFull:
 		s.message(w, http.StatusConflict, decideCapFullMessage)
+	case decidePermitInactive:
+		s.message(w, http.StatusConflict, decidePermitInactiveMessage)
 	case decideRevoked:
 		http.Redirect(w, r, "/guests?revoked=1", http.StatusSeeOther)
 	default: // decideApplied / decideApproving
@@ -2397,6 +2478,13 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	permit, perr := s.store.GetPermit(r.Context(), req.PermitID)
 	if perr != nil || permit.Owner != owner {
 		return decideOutcome{kind: decideGone} // not ours / permit removed
+	}
+	// The request may have been made (and the approval email sent) while the
+	// permit was still alive. Approving now would create an override the
+	// scheduler refuses to act on — a visitor told "approved" with nothing
+	// behind it.
+	if permit.Inactive(now, s.cfg.DisplayLocation) {
+		return decideOutcome{kind: decidePermitInactive}
 	}
 	end := dayEndLocal(now, 0)
 	// Tagged with the door QR's own token, so removing the poster (or pausing guest

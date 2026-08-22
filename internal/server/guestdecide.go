@@ -76,6 +76,9 @@ func (s *Server) guestDecideApply(w http.ResponseWriter, r *http.Request) {
 	case decideCapFull:
 		s.message(w, http.StatusConflict, decideCapFullMessage)
 		return
+	case decidePermitInactive:
+		s.message(w, http.StatusConflict, decidePermitInactiveMessage)
+		return
 	case decideAlreadyDecided, decideGone:
 		// Someone else got there first (or it expired mid-tap). Show the settled
 		// state rather than an error: re-render exactly what the GET would.
