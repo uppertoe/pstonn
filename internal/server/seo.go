@@ -71,6 +71,10 @@ var faqItems = []faqItem{
 		"Your login is encrypted, used only to manage your own permit, and you can disconnect or delete everything at any time. It is a council parking account, not a bank login. If you would rather not share it at all, p.stonn is open source and you can run your own copy — the Security & data page has the full detail.",
 	},
 	{
+		"My partner set up the permit — can I manage the schedule too?",
+		"Yes. Whoever set it up can invite up to two other people from Settings → Shared access. You sign in with your own email and manage the same schedule — no council password changes hands.",
+	},
+	{
 		"What does p.stonn cost?",
 		"Nothing. It is free.",
 	},

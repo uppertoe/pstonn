@@ -71,7 +71,9 @@
            council's own lockout-budget attempts. Say it before the password. */}}
       <p class="empty-note" style="margin-top:-4px">
         Your ePermits account must use this same email &mdash; it can&rsquo;t be changed here.
-        If it uses a different address, {{if .LogoutURL}}<a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}}sign out{{end}} and sign back in with that one.
+        If your council account uses a different address, {{if .LogoutURL}}<a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}}sign out{{end}} and sign back in with that one.
+        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
+        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
       </p>
       <label class="fld">Council password
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>

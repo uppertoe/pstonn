@@ -76,6 +76,12 @@ type dashboardData struct {
 	SharedWith string       // for a secondary: the primary account's email
 	Members    []memberView // for a primary: the secondaries with access (and any unanswered invites)
 	Invite     *inviteView  // an invitation awaiting the signed-in person's answer
+	// ShowShareHint puts a quiet shared-access pointer on the Schedule page for a
+	// primary with no members. The feature's only other surface is a card in
+	// Settings, which new households demonstrably never open; the hint is
+	// server-gated here and dismissed per-browser in the template (localStorage),
+	// because seeing it once more on a new device is harmless.
+	ShowShareHint bool
 	// dashboard state
 	Vehicles []vehicleView
 	// LegendVehicles is the Schedule page's colour key: only the cars whose colour

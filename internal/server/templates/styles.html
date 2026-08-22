@@ -629,6 +629,11 @@
   .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
+  .share-hint { color:var(--muted); font-size:13.5px; display:flex; align-items:flex-start; gap:8px; margin:14px 0 0; }
+  .share-hint > svg { flex:none; width:16px; height:16px; margin-top:2px; }
+  .share-hint a { color:inherit; text-decoration:underline; }
+  .share-hint a:hover { color:var(--primary); }
+  .share-hint button { flex:none; margin-left:auto; }
   .link-quiet:hover { color:var(--primary); }
   .link-quiet.active { color:var(--ink); font-weight:650; }
   .link-quiet.active::after { content:""; position:absolute; left:0; right:0; bottom:-6px; height:2px; border-radius:2px; background:var(--primary); }

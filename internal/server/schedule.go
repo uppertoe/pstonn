@@ -72,6 +72,14 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	}
 	base.Permits = pvs
 	base.ExpiredPermits = expired
+	// Shared-access hint: only for a primary far enough along to have a live
+	// permit card on screen, with no members yet. A pending invite counts as a
+	// member here — that household has already found the feature.
+	if base.IsPrimary && len(pvs) > 0 {
+		if n, cerr := s.store.CountMembers(ctx, owner); cerr == nil && n == 0 {
+			base.ShowShareHint = true
+		}
+	}
 	s.render(w, base)
 }
 
