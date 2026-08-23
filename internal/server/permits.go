@@ -115,29 +115,43 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// name-match — systemic (hits every new signup), so the operator must
 		// hear. Once per process: a rename doesn't unhappen between requests.
 		s.renameAlertOnce.Do(func() {
-			// Name the types actually seen: without them the alert cannot distinguish
-			// "the council renamed its types" (systemic) from "this account just holds
-			// no visitor permit" (benign). Type names are council catalog labels shared
-			// by every holder of the type, not personal data — never log permit numbers
-			// or regos here.
+			// Name the types actually seen AND what the picker did with each:
+			// without that the alert cannot distinguish "the council renamed its
+			// types" (systemic) from "this account just holds no visitor permit"
+			// (benign) — and an earlier wording that flatly claimed permits were
+			// being "offered with a caution" sent the operator investigating a
+			// resident-only household whose permit was never offered at all
+			// (2026-08-23). Type names are council catalog labels shared by every
+			// holder of the type, not personal data — never log permit numbers or
+			// regos here.
 			types := make([]string, 0, len(permits))
+			offered := 0
 			for _, p := range permits {
 				t := fmt.Sprintf("%q", p.PermitType)
-				if p.CanChangeVehicle {
-					t += " (changeable)"
+				switch {
+				case !p.CanChangeVehicle:
+					t += " (not changeable — not offered)"
+				case isResidentPermit(p.PermitType):
+					t += " (changeable, resident — excluded, never offered)"
+				default:
+					t += " (changeable — offered with a caution)"
+					offered++
 				}
 				types = append(types, t)
 			}
 			seen := strings.Join(types, ", ")
-			log.Printf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback offering engaged; types seen: %s", redact.Email(owner), seen)
+			log.Printf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback engaged; %s", redact.Email(owner), seen)
+			outcome := "Nothing was offered: every changeable permit here is a resident permit, which the fallback excludes outright (it holds the resident's own car). The household saw their permits greyed out with the reason."
+			if offered > 0 {
+				outcome = "Non-resident changeable permits were offered with a caution; resident permits (if any) stayed excluded."
+			}
 			nctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			_ = s.notify.NotifyAdmin(nctx, "Council may have renamed permit types",
-				"An account holds permits with CanChangeVehicle=true but none whose type name contains \"visitor\". "+
-					"isVisitorPermit's name-match may be stale; the picker is offering changeable permits with a caution meanwhile.\n\n"+
-					"Permit types on the account: "+seen+"\n\n"+
-					"If these are ordinary non-visitor types (e.g. a resident permit), this is one household without a visitor permit and no action is needed. "+
-					"If a visitor-like type has a new name, update isVisitorPermit's match.")
+				"An account holds permits with CanChangeVehicle=true but none whose type name contains \"visitor\" — either the council renamed its permit types (systemic: hits every new signup) or this household simply holds no visitor permit (benign).\n\n"+
+					"What the picker did with each type:\n"+seen+"\n\n"+
+					outcome+"\n\n"+
+					"If these are ordinary non-visitor types, no action is needed. If a visitor-like type has a new name, update isVisitorPermit's match.")
 		})
 	}
 	for _, p := range permits {
