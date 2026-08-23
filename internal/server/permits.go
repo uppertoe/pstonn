@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -521,6 +522,76 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	s.notifyDestructive(r.Context(), owner, user, msg)
 	s.sched.KickPermit(dst.ID)
 	s.respondPermit(w, r, owner, dst)
+}
+
+// clearPermit takes the vehicle OFF a permit, leaving it with no plate — the one
+// way a car comes off, since "nothing scheduled" deliberately leaves the last
+// plate in place. A specific, confirmed action, never a schedulable value: making
+// "nobody" a roster/one-off option would turn every gap into an automatic
+// blanking, inverting the app's core "nothing scheduled = touch nothing" safety.
+//
+// Refused when a schedule covers now: the scheduler would re-apply the scheduled
+// plate on its next tick, so clearing would be a confusing no-op. The UI only
+// offers the button in the lingering-plate state; this is the authoritative gate.
+func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	now := time.Now().In(s.cfg.DisplayLocation)
+
+	// Detached + capped like every other council write on a request path, so a
+	// closed tab can't cancel the write half-done and a slow portal still leaves
+	// room to render inside the server's WriteTimeout.
+	bg := context.WithoutCancel(r.Context())
+	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
+	defer cancel()
+	release, claimed := s.sched.AcquireApply(applyCtx, p.ID)
+	if !claimed {
+		s.formError(w, r, "The permit is busy with another change right now. Please try again in a moment.")
+		return
+	}
+	// Re-check under the claim, immediately before the write: if a schedule now
+	// covers this moment, clearing would be undone on the next reconcile.
+	rules, rerr := s.store.ListRules(applyCtx, p.ID)
+	ovs, oerr := s.store.ListOverrides(applyCtx, p.ID, now)
+	if rerr != nil || oerr != nil {
+		release()
+		s.serverError(w, cmp.Or(rerr, oerr))
+		return
+	}
+	if res := model.Resolve(now, rules, ovs); res.Source != model.SourceNone {
+		release()
+		s.formError(w, r, "This permit has a car scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
+		return
+	}
+	err := s.council.ClearVehicle(applyCtx, owner, p)
+	if err == nil {
+		if e := s.store.SetPermitActive(bg, p.ID, ""); e != nil {
+			log.Printf("clearPermit: council cleared permit %d but local commit failed: %v", p.ID, e)
+		}
+	}
+	release()
+
+	label := permitLabel(p)
+	if err != nil {
+		log.Printf("clearPermit %d for %s: %v", p.ID, redact.Email(owner), err)
+		if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
+			s.formError(w, r, "Couldn't reach the council just now — nothing was changed. Please try again shortly.")
+			return
+		}
+		s.formError(w, r, "The council didn't accept removing the vehicle. The account holder may need to reconnect their council login.")
+		return
+	}
+	_ = s.store.RecordApply(bg, p.ID, "", "manual", "success", "vehicle removed by "+user)
+	s.logChange(bg, owner, user, store.ActionVehicleClear, label, "")
+	s.notifyDestructive(bg, owner, user,
+		user+" removed the car from the permit \""+label+"\". It now has no vehicle — nothing is covered on that permit until a car is set or scheduled.")
+	s.respondPermit(w, r, owner, p)
 }
 
 // cleanLabel trims a user-supplied name and strips control characters (including

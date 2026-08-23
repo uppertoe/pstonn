@@ -688,7 +688,13 @@ type managedVehicleResp struct {
 	// zero: emptyIsCredible must not accept a response that merely dropped the field.
 	PermitVehicleCount *int `json:"permitVehicleCount"`
 	MaxVehicles        int  `json:"maxVehicles"`
-	CanAddVehicle      bool `json:"canAddVehicle"`
+	// POINTER like CanEditOrDeleteVehicle: this now gates ADDING a vehicle to a
+	// credibly-empty permit (the normal state of a freshly granted permit). Absent
+	// decodes to false, which would turn a dropped/renamed field into "the council
+	// won't let you add a vehicle" for EVERY new household at once — a durable
+	// refusal that never self-heals. Absent must be UNEXPECTED (retry + alert), not
+	// a plain false.
+	CanAddVehicle *bool `json:"canAddVehicle"`
 	// POINTER for the same reason as PermitVehicleCount: this one drives a DURABLE
 	// refusal. Absent decodes to false, which would turn a dropped/renamed field into
 	// "the council does not allow changing this permit's vehicle" for EVERY permit at
@@ -1021,14 +1027,26 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 		return err
 	}
 	if len(mv.PermitVehicles) == 0 {
-		// "No vehicle to change" is a durable refusal: the user is told to act and
-		// nothing retries. A response we failed to understand must never become that
-		// verdict, so it is classified as unexpected instead — retried, and raised
-		// with the operator as a possible API change.
+		// A response we failed to understand must never be taken as "empty permit",
+		// so require corroboration first (retried + operator-alerted otherwise).
 		if !mv.emptyIsCredible() {
 			return councilErr(FailUnexpected, op, errVehicleShape(mv))
 		}
-		return councilErr(FailRejected, op, errors.New("the permit has no vehicle to change"))
+		// A credibly-empty permit is the NORMAL state of a freshly granted permit
+		// (confirmed live 2026-08-23: a new signup's only permit has no vehicle until
+		// one is assigned). ADD one rather than refuse — the old "no vehicle to
+		// change" durable refusal locked exactly the newest households out of their
+		// first roster/one-off apply, forever.
+		if mv.CanAddVehicle == nil {
+			// Absent, not false: cannot tell "not permitted" from "field gone".
+			return councilErr(FailUnexpected, op,
+				errors.New("response has no canAddVehicle field: API shape change?"))
+		}
+		if !*mv.CanAddVehicle {
+			return councilErr(FailRejected, op,
+				errors.New("the council does not allow adding a vehicle to this permit"))
+		}
+		return c.addVehicle(ctx, owner, p, registration, key, gen)
 	}
 	if mv.CanEditOrDeleteVehicle == nil {
 		// Absent, not false: we cannot tell "not permitted" from "field gone". Unexpected
@@ -1097,24 +1115,131 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	// so every state we then show or store (the dashboard's "on permit now", a
 	// guest's "your plate is on", the apply log) reflects what the council actually
 	// has — not merely a write we sent, which a 2xx does not guarantee took effect.
-	// A mismatch or an unreadable confirmation is treated as not-yet-applied
-	// (transient): the scheduler retries and the user sees "still applying" rather
-	// than a false "done". The fresh read also refreshes the current-plate cache.
+	return c.confirmWrite(ctx, owner, p, registration, key, gen, op)
+}
+
+// confirmWrite re-reads the council's OWN record after a 2xx write and only
+// reports success once it shows the plate we sent — a 2xx does not guarantee the
+// change took. A mismatch is a durable refusal (act-now notice), an unreadable
+// confirm is transient (retry). Shared by the edit and add paths so both make
+// the same guarantee. registration "" means "expect the permit empty" (the clear
+// path), matched by SamePlate("", "").
+func (c *Client) confirmWrite(ctx context.Context, owner string, p model.Permit, registration string, key regKey, gen uint64, op string) error {
 	confirmed, err := c.CurrentVehicle(ctx, owner, p)
 	if err != nil {
-		// Couldn't reach the council for the confirm — genuinely transient, retry.
 		return councilErr(FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
 	}
 	if !model.SamePlate(confirmed, registration) {
-		// The POST was accepted (2xx) but the council's own record still shows a
-		// different plate: the write did NOT take. This is a durable refusal (a
-		// permission quirk or an API-shape change), not a blip — classify it as
-		// rejected so the user gets an act-now "still shows X" notice rather than a
-		// soothing "we'll keep trying" that never self-heals.
 		return councilErr(FailRejected, op, fmt.Errorf("change was accepted but the council still shows %q", confirmed))
 	}
 	c.storeRegIfCurrent(key, gen, confirmed)
 	return nil
+}
+
+// addVehicle attaches a NEW vehicle to a permit that currently has none — the
+// council's "add" action, distinct from "edit". The request shape was captured
+// live (2026-08-23) against the empty test permit: VehicleActionOption "add",
+// an empty SelectedVehicle, and a Vehicle with no prior detail id / change-set
+// (the council assigns a fresh PKPermitVehicleDetailID). State defaults to VIC,
+// as everywhere else in the app (SetVehicle takes a bare plate, no state).
+func (c *Client) addVehicle(ctx context.Context, owner string, p model.Permit, registration string, key regKey, gen uint64) error {
+	const op = "add a vehicle to your permit"
+	permitID, err := strconv.ParseInt(p.CouncilPermitID, 10, 64)
+	if err != nil {
+		return councilErr(FailRejected, op, fmt.Errorf("invalid council permit id %q", p.CouncilPermitID))
+	}
+	reqBody := manageVehicleReq{
+		PKPermitID:          permitID,
+		SelectedVehicle:     "",
+		VehicleActionOption: "add",
+		Vehicle: manageVehicleV{
+			ChangeSetID:             "",
+			FKPermitID:              permitID,
+			FKVehicleStateID:        "1", // VIC; a bare-plate add carries no prior state
+			PKPermitVehicleDetailID: "",  // new record — the council assigns the id
+			RegisteredAtAddress:     false,
+			RegistrationNumber:      registration,
+		},
+	}
+	buf, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	resp, err := c.apiRequest(ctx, owner, http.MethodPost, "/api/permits/manageVehicle", op, nil, buf)
+	if err != nil {
+		return err
+	}
+	drainClose(resp)
+	return c.confirmWrite(ctx, owner, p, registration, key, gen, op)
+}
+
+// ClearVehicle removes the vehicle from a permit, leaving it with none — the
+// council's "delete" action. Idempotent: an already-empty permit is success. It
+// is deliberately a SEPARATE, explicit operation, never something the scheduler
+// does on its own — "nothing scheduled" leaves the last plate in place, so the
+// only way a plate comes OFF is a person asking for it here.
+func (c *Client) ClearVehicle(ctx context.Context, owner string, p model.Permit) error {
+	const op = "remove the vehicle from your permit"
+	if c.sandbox != nil {
+		return c.sandboxSetVehicle(p, "")
+	}
+	key := regKey{owner, p.CouncilPermitID}
+	gen := c.regGeneration(key)
+	mv, err := c.managedVehicle(ctx, owner, p)
+	if err != nil {
+		return err
+	}
+	if len(mv.PermitVehicles) == 0 {
+		// Already empty. Believe it only when corroborated (see emptyIsCredible),
+		// else it's an unexpected shape, not a done deal.
+		if !mv.emptyIsCredible() {
+			return councilErr(FailUnexpected, op, errVehicleShape(mv))
+		}
+		c.storeRegIfCurrent(key, gen, "")
+		return nil
+	}
+	if len(mv.PermitVehicles) != 1 {
+		return councilErr(FailUnexpected, op,
+			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
+	}
+	cur := mv.PermitVehicles[0]
+	detailID := cur.PKPermitVehicleDetailID.String()
+	if strings.TrimSpace(detailID) == "" {
+		return councilErr(FailUnexpected, op,
+			errors.New("managed vehicle has no PKPermitVehicleDetailID: API shape change?"))
+	}
+	permitID, err := strconv.ParseInt(p.CouncilPermitID, 10, 64)
+	if err != nil {
+		return councilErr(FailRejected, op, fmt.Errorf("invalid council permit id %q", p.CouncilPermitID))
+	}
+	state := cur.FKVehicleStateID
+	if state == "" {
+		state = "1"
+	}
+	reqBody := manageVehicleReq{
+		PKPermitID:          permitID,
+		SelectedVehicle:     detailID,
+		VehicleActionOption: "delete",
+		Vehicle: manageVehicleV{
+			ChangeSetID:             detailID,
+			FKPermitID:              permitID,
+			FKVehicleStateID:        state,
+			PKPermitVehicleDetailID: detailID,
+			RegisteredAtAddress:     false,
+			RegistrationNumber:      cur.RegistrationNumber,
+		},
+	}
+	buf, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	resp, err := c.apiRequest(ctx, owner, http.MethodPost, "/api/permits/manageVehicle", op, nil, buf)
+	if err != nil {
+		return err
+	}
+	drainClose(resp)
+	// Confirm the permit is now empty against the council's own record.
+	return c.confirmWrite(ctx, owner, p, "", key, gen, op)
 }
 
 // PermitInfo summarises one permit on the account, for letting a user pick which

@@ -620,3 +620,38 @@ func TestEmptyGarageNudges(t *testing.T) {
 		}
 	}
 }
+
+// TestClearButtonGating: the "take the car off" action shows only in the
+// lingering-plate state — a plate on the permit with nothing scheduled for now.
+// With a schedule covering now (the sample has a roster), or with no plate, the
+// button must be absent, because a clear would either be re-applied or is moot.
+func TestClearButtonGating(t *testing.T) {
+	loc := melbourne(t)
+
+	// Lingering plate: something on the permit, nothing scheduled now.
+	lingering := samplePermitView(loc)
+	lingering.DesiredSource = ""
+	lingering.CanClear = true
+	lingering.Permit.ActiveRegistration = "OLD999"
+	var b bytes.Buffer
+	if err := templates.ExecuteTemplate(&b, "permit-body", lingering); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(b.String(), "/clear") || !strings.Contains(b.String(), "Take OLD999 off the permit") {
+		t.Fatalf("lingering-plate card missing the take-off action:\n%s", b.String())
+	}
+	if !strings.Contains(b.String(), "loses cover the moment you do this") {
+		t.Fatal("clear confirm does not name the fine risk")
+	}
+
+	// Scheduled now: no button (a clear would be re-applied).
+	scheduled := samplePermitView(loc) // has a roster/desired
+	scheduled.CanClear = false
+	var b2 bytes.Buffer
+	if err := templates.ExecuteTemplate(&b2, "permit-body", scheduled); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if strings.Contains(b2.String(), "/clear") {
+		t.Fatal("clear action shown when a schedule covers now")
+	}
+}

@@ -315,6 +315,11 @@ type permitView struct {
 	Detail      string // council identifier line: "VPP24714 · 1st Visitor Permit"
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool // no weekly rules yet — a fresh permit
+	// CanClear offers the "take the car off" action: the permit shows a plate but
+	// nothing is scheduled for right now, so the plate is lingering (a departed
+	// guest, an ended booking) and the scheduler won't touch it. When a schedule
+	// covers now, clearing would just be re-applied, so the button is hidden.
+	CanClear bool
 	// ShowSetupNudge gates the "nothing scheduled yet" banner: an empty roster with
 	// no one-off bookings AND no history of using the guest/QR path. A QR-only
 	// household is using the permit as intended, so the nudge is suppressed for them.

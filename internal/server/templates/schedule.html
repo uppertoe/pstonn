@@ -165,6 +165,18 @@
   </div>
 </div>
 
+{{/* "Take the car off" — only in the lingering-plate state (a plate is on the
+     permit but nothing is scheduled for now). The confirm names the real risk:
+     the point of the app is not to leave a car uncovered by accident, so removing
+     cover on purpose has to be a deliberate, informed act. */}}
+{{if .CanClear}}
+<form class="clearveh" method="post" action="/permits/{{.Permit.ID}}/clear"
+      hx-post="/permits/{{.Permit.ID}}/clear" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
+      data-confirm="Take {{.Permit.ActiveRegistration}} off this permit? The permit will have no vehicle, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until you set or schedule a car." data-confirm-ok="Take it off">
+  <button type="submit" class="ghost sm">{{template "ic-x"}} Take {{.Permit.ActiveRegistration}} off the permit</button>
+</form>
+{{end}}
+
 {{if .ExpiryLabel}}
 <p class="permit-expiry{{if .Expired}} bad{{else if .ExpiresSoon}} warn{{end}}">
   {{if .Expired}}{{template "ic-alert"}} This permit expired {{.ExpiryIn}} (on {{.ExpiryLabel}}). Renew it with the council, then copy your schedule onto the new permit.

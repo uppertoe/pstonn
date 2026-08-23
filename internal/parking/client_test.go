@@ -33,6 +33,13 @@ type fakeCouncil struct {
 	apiBody  atomic.Value // raw JSON the managedVehicle endpoint returns; "" = the canned record
 	authHTML atomic.Value // when non-empty, /connect/authorize returns 200 HTML with this body instead of a 302
 	gridBody atomic.Value // raw JSON the permit-grid endpoint returns
+
+	// Live-write mode: when set, the managedVehicle READ reflects real writes
+	// posted to manageVehicle (edit/add set the plate, delete clears it), so the
+	// full write→confirm round-trip can be exercised. Default off, so tests that
+	// pin apiBody are unaffected.
+	live  atomic.Bool
+	plate atomic.Value // current plate string; "" = empty permit
 }
 
 func newFakeCouncil(t *testing.T) *fakeCouncil {
@@ -70,6 +77,23 @@ func newFakeCouncil(t *testing.T) *fakeCouncil {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if f.live.Load() {
+			plate, _ := f.plate.Load().(string)
+			if plate == "" {
+				json.NewEncoder(w).Encode(map[string]any{
+					"permitNumber": "VPP1", "permitVehicleCount": 0, "maxVehicles": 1,
+					"canAddVehicle": true, "canEditOrDeleteVehicle": false,
+					"permitVehicles": []map[string]any{},
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"permitNumber": "VPP1", "permitVehicleCount": 1, "maxVehicles": 1,
+				"canAddVehicle": false, "canEditOrDeleteVehicle": true,
+				"permitVehicles": []map[string]any{{"PKPermitVehicleDetailID": 1, "RegistrationNumber": plate, "FKVehicleStateID": "1"}},
+			})
+			return
+		}
 		if raw := f.apiBody.Load().(string); raw != "" {
 			io.WriteString(w, raw)
 			return
@@ -79,6 +103,26 @@ func newFakeCouncil(t *testing.T) *fakeCouncil {
 			"canAddVehicle": false, "canEditOrDeleteVehicle": true,
 			"permitVehicles": []map[string]any{{"PKPermitVehicleDetailID": 1, "RegistrationNumber": "AAA111", "FKVehicleStateID": "1"}},
 		})
+	})
+	// The write endpoint, live-mode only: edit/add set the plate, delete clears it.
+	f.mux.HandleFunc("/ssp-svc/api/permits/manageVehicle", func(w http.ResponseWriter, r *http.Request) {
+		if !f.live.Load() {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			VehicleActionOption string `json:"VehicleActionOption"`
+			Vehicle             struct {
+				RegistrationNumber string `json:"RegistrationNumber"`
+			} `json:"Vehicle"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.VehicleActionOption == "delete" {
+			f.plate.Store("")
+		} else {
+			f.plate.Store(req.Vehicle.RegistrationNumber)
+		}
+		w.WriteHeader(http.StatusOK) // 200, empty body — matches the real council
 	})
 	f.srv = httptest.NewServer(f.mux)
 	t.Cleanup(f.srv.Close)
@@ -584,14 +628,76 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 		t.Fatalf("a shape mismatch became the durable refusal: %v", err)
 	}
 
-	// A corroborated empty permit IS that refusal, and stays one.
+	// A corroborated empty permit that OMITS canAddVehicle is a shape we can't
+	// read: absent must be unexpected (retry + alert), never a plain refusal.
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":0,"permitVehicles":[]}`)
 	err = c.SetVehicle(context.Background(), owner, p, "ABC123")
-	if kind, _ := FailureOf(err); kind != FailRejected {
-		t.Fatalf("kind = %v (%v), want FailRejected", kind, err)
+	if kind, _ := FailureOf(err); kind != FailUnexpected {
+		t.Fatalf("kind = %v (%v), want FailUnexpected for empty-without-canAddVehicle", kind, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "no vehicle to change") {
-		t.Fatalf("err = %v, want the no-vehicle refusal", err)
+
+	// A corroborated empty permit the council says can't take a vehicle IS a
+	// durable refusal (but no longer the misleading "no vehicle to change").
+	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":0,"canAddVehicle":false,"permitVehicles":[]}`)
+	err = c.SetVehicle(context.Background(), owner, p, "ABC123")
+	if kind, _ := FailureOf(err); kind != FailRejected {
+		t.Fatalf("kind = %v (%v), want FailRejected for canAddVehicle:false", kind, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "does not allow adding") {
+		t.Fatalf("err = %v, want the no-adding refusal", err)
+	}
+}
+
+// SetVehicle on a credibly-empty permit that CAN take a vehicle must ADD one (the
+// council's "add" action), not refuse — this is the normal state of a freshly
+// granted permit, and the old durable refusal locked new households out of their
+// first apply. Verified against the live add shape 2026-08-23.
+func TestSetVehicleAddsToEmptyPermit(t *testing.T) {
+	const owner = "add@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	p := model.Permit{CouncilPermitID: "1"}
+
+	f.live.Store(true)
+	f.plate.Store("") // freshly granted: no vehicle yet
+
+	if err := c.SetVehicle(context.Background(), owner, p, "NEW123"); err != nil {
+		t.Fatalf("SetVehicle on empty permit = %v, want nil (add path)", err)
+	}
+	if got, _ := c.CurrentVehicle(context.Background(), owner, p); !model.SamePlate(got, "NEW123") {
+		t.Fatalf("after add, current = %q, want NEW123", got)
+	}
+}
+
+// ClearVehicle removes the plate (delete action) and is idempotent on an already-
+// empty permit. Verified against the live delete shape 2026-08-23.
+func TestClearVehicle(t *testing.T) {
+	const owner = "clear@example.com"
+	f := newFakeCouncil(t)
+	c, st, box := testClient(t, f)
+	linkOwner(t, c, st, box, owner)
+	p := model.Permit{CouncilPermitID: "1"}
+
+	f.live.Store(true)
+	f.plate.Store("OLD999")
+
+	if err := c.ClearVehicle(context.Background(), owner, p); err != nil {
+		t.Fatalf("ClearVehicle = %v, want nil", err)
+	}
+	if got, _ := c.CurrentVehicle(context.Background(), owner, p); got != "" {
+		t.Fatalf("after clear, current = %q, want empty", got)
+	}
+	// Idempotent: clearing an already-empty permit is success, not an error.
+	if err := c.ClearVehicle(context.Background(), owner, p); err != nil {
+		t.Fatalf("ClearVehicle on empty permit = %v, want nil (idempotent)", err)
+	}
+	// And a permit can be re-populated after a clear (add path again).
+	if err := c.SetVehicle(context.Background(), owner, p, "BACK111"); err != nil {
+		t.Fatalf("SetVehicle after clear = %v, want nil", err)
+	}
+	if got, _ := c.CurrentVehicle(context.Background(), owner, p); !model.SamePlate(got, "BACK111") {
+		t.Fatalf("after re-add, current = %q, want BACK111", got)
 	}
 }
 

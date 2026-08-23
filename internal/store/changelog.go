@@ -24,6 +24,7 @@ const (
 	ActionVehicleAdd    = "vehicle.add"
 	ActionVehicleDelete = "vehicle.delete"
 	ActionVehicleEmail  = "vehicle.email"
+	ActionVehicleClear  = "vehicle.clear" // removed the car from a permit (permit left empty)
 	// Guest access
 	ActionGuestCreate  = "guest.create"
 	ActionGuestUpdate  = "guest.update"

@@ -366,8 +366,12 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
-		ActiveColor:     colorOfPlate(vviews, p.ActiveRegistration),
-		RosterEmpty:     len(rules) == 0,
+		ActiveColor: colorOfPlate(vviews, p.ActiveRegistration),
+		RosterEmpty: len(rules) == 0,
+		// Offer "take the car off" only in the lingering-plate state: a plate is on
+		// the permit but nothing is scheduled for now, so the scheduler won't clear
+		// or replace it. With a schedule covering now, a clear would be re-applied.
+		CanClear:        res.Source == model.SourceNone && p.ActiveRegistration != "",
 		ShowSetupNudge:  len(rules) == 0 && len(ovs) == 0 && !hasGuests,
 		Detail:          permitDetail(p),
 		PlateRefreshing: plateRefreshing,
