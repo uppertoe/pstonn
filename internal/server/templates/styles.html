@@ -557,7 +557,12 @@
   table.adm th { text-align:left; font-weight:600; font-size:11.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); padding:10px 12px; border-bottom:1px solid var(--line); background:var(--surface-2); position:sticky; top:0; }
   table.adm td { padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
   table.adm tr:last-child td { border-bottom:0; }
-  .adm-acct { font-weight:600; white-space:normal; max-width:240px; word-break:break-word; }
+  /* The account cell keeps the address on ONE line: the wrapper already
+     scrolls horizontally, so a width cap here only bought mid-word-shattered
+     emails ("r…@thehopk\ninsgroup.com.au") in exchange for nothing. The
+     phone layout below re-enables wrapping — there each row is a full-width
+     card with no scroll, so a long address must break rather than overflow. */
+  .adm-acct { font-weight:600; }
   .adm-sub { font-size:11.5px; color:var(--muted); font-weight:400; }
   .adm-notify .tag, table.adm .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); color:var(--muted); margin-right:3px; }
   table.adm .bad { color:var(--danger); }
@@ -576,7 +581,7 @@
     table.adm tr { border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); padding:10px 14px; margin-bottom:10px; }
     table.adm td { border:0; padding:4px 0; display:flex; gap:8px; align-items:baseline; text-align:right; flex-wrap:wrap; }
     table.adm td::before { content:attr(data-label); margin-right:auto; color:var(--muted); font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; text-align:left; flex:0 0 auto; }
-    table.adm td.adm-acct { display:block; text-align:left; font-size:15px; margin-bottom:4px; max-width:none; }
+    table.adm td.adm-acct { display:block; text-align:left; font-size:15px; margin-bottom:4px; max-width:none; overflow-wrap:break-word; }
     table.adm td.adm-acct::before { content:none; }
     table.adm td.empty-note { display:block; text-align:center; }
     table.adm td.empty-note::before { content:none; }
