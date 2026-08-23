@@ -405,6 +405,11 @@
   .vaddform input { font-size:13.5px; }
   /* Number plate: a distinct badge tinted with each car's colour (--plate). */
   .plate { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:700; font-size:13px; letter-spacing:1px; text-transform:uppercase; padding:4px 9px; border-radius:6px; border:2px solid var(--plate,var(--line)); background:color-mix(in srgb, var(--plate,var(--ink)) 12%, var(--surface)); color:var(--ink); white-space:nowrap; display:inline-block; }
+  /* The empty-permit state occupies the SAME box as a plate (same padding/border/
+     height) so the "on permit now" row keeps identical geometry with or without a
+     car — a plain text label sat at a different height and read as misaligned. A
+     dashed, muted outline signals "no plate here" rather than naming one. */
+  .noplate { font-size:13px; letter-spacing:.2px; padding:4px 9px; border-radius:6px; border:2px dashed var(--line); color:var(--muted); white-space:nowrap; display:inline-block; }
   /* Guest-pass management */
   .grants { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
   .grants .card { margin:0; }
