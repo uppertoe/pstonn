@@ -864,12 +864,16 @@ func (s *Service) SendOnboardNudge(ctx context.Context, to string) error {
 // without an SMTP conversation.
 func onboardNudgeMessage(to, appURL string) (subject, body string) {
 	subject = "One step left to start managing your visitor permit"
+	// Layout note: a SHORT "do this:" line directly above each URL becomes that
+	// button's label in the HTML alternative (see mailer/html.go). Folding the
+	// label into the preceding sentence puts the whole sentence on the button.
 	lines := []string{
 		"You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly plate schedule, guest QR codes and one-off bookings all start from that one connection.",
 		"",
 		"Connecting takes one sign-in with your City of Stonnington ePermits details. Three things trip most people up:",
 		"",
-		"1. The ePermits password. Forgot it — or never set one? Reset it at the council first:",
+		"1. The ePermits password. Forgot it — or never set one?",
+		"Reset it at the council:",
 		CouncilPasswordResetURL,
 		"",
 		"2. An ePermits account under a different email address. p.stonn can only connect to the ePermits account registered under the address you signed up with (" + to + "). If your council account uses a different address, sign in to p.stonn with that one instead.",
@@ -879,7 +883,8 @@ func onboardNudgeMessage(to, appURL string) (subject, body string) {
 	// its public URL keeps the advice without the address.
 	if appURL != "" {
 		lines = append(lines,
-			"3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill. Open p.stonn in Safari or Chrome:",
+			"3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill.",
+			"Open p.stonn in Safari or Chrome:",
 			appURL,
 			"")
 	} else {
@@ -890,7 +895,8 @@ func onboardNudgeMessage(to, appURL string) (subject, body string) {
 	lines = append(lines,
 		"One thing to know: p.stonn manages VISITOR permits only — the permit your guests' cars go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.",
 		"",
-		"No ePermits account or visitor permit yet? Register with the council, apply for a visitor permit there, then come back:",
+		"No ePermits account or visitor permit yet? Apply for a visitor permit on the council's ePermits site first, then come back.",
+		"Register with the council:",
 		CouncilRegisterURL,
 		"",
 		"This is the only reminder p.stonn sends. If you've decided it's not for you, there's nothing to undo — your details go no further than the sign-up you made.",

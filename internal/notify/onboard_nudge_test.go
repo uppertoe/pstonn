@@ -35,6 +35,20 @@ func TestOnboardNudgeMessage(t *testing.T) {
 		}
 	}
 
+	// Each URL must sit under a SHORT "do this:" label line — the mailer's HTML
+	// alternative turns that line into the button text, so a label folded into
+	// its sentence renders the whole sentence on the button (shipped that way
+	// briefly, 2026-08-23).
+	for _, pair := range []string{
+		"Reset it at the council:\n" + CouncilPasswordResetURL,
+		"Open p.stonn in Safari or Chrome:\nhttps://p.stonn.example",
+		"Register with the council:\n" + CouncilRegisterURL,
+	} {
+		if !strings.Contains(body, pair) {
+			t.Errorf("nudge body is missing the label/URL pairing %q", pair)
+		}
+	}
+
 	// A deployment with no public URL keeps the browser advice, minus the address.
 	_, body = onboardNudgeMessage("resident@example.com", "")
 	if strings.Contains(body, "p.stonn.example") {
