@@ -480,6 +480,11 @@ INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 		// point of the bound is to stop serving households that have left, and a
 		// household that visits regularly has plainly not left.
 		`ALTER TABLE council_session ADD COLUMN last_active_at TEXT NOT NULL DEFAULT ''`,
+		// When the once-ever "you signed up but never connected" email went out
+		// (RFC3339; '' = never). A column rather than an outbox dedup key because
+		// delivered outbox rows are purged — the only durable proof this mail was
+		// sent must live somewhere that isn't.
+		`ALTER TABLE account_flags ADD COLUMN onboard_nudge_sent TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

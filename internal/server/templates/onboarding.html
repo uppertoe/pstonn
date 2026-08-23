@@ -5,23 +5,29 @@
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
   {{if .LinkHelp}}
-  {{/* Rejected council login: what happened (one line), the fix (a real button,
-       not a description of a journey — sign-out lands on the auth page, whose
-       notice names the right email), and a fallback check. hx-boost off on both
-       links: a logout must be a real navigation, and the council site is
-       another origin. */}}
+  {{/* Rejected council login: what happened (one line), then the remedies in
+       likelihood order. The reset link leads now — the council can't tell us a
+       wrong password from an account that never had a working one (permits set
+       up by phone or paper predate the portal), and the 2026-08 access logs
+       showed most rejected signups give up without ever being offered it. The
+       sign-out fix stays a real button, not a description of a journey — it
+       lands on the auth page, whose notice names the right email. hx-boost off
+       on all of these: a logout must be a real navigation, and the council
+       site is another origin. */}}
   <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
     <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
     Either the password is wrong, or your ePermits account isn&rsquo;t under <strong>{{.User.Email}}</strong>.
+    <span style="display:block;margin-top:12px">&bull; <strong>Forgot your council password &mdash; or never set one?</strong> <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">Reset it at the council</a>, then come back and link. This is the most common fix.</span>
     {{if .LogoutURL}}
-    <span style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
+    <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+      <span>&bull; <strong>Council account under a different email?</strong></span>
       <a href="{{.LogoutURL}}" hx-boost="false"><button type="button" class="sm">Sign out</button></a>
-      <span>then sign back in with your ePermits email &mdash; the usual fix.</span>
+      <span>then sign back in here with that address.</span>
     </span>
     {{else}}
-    <span style="display:block;margin-top:10px">The usual fix: sign out, then sign back in with your ePermits email.</span>
+    <span style="display:block;margin-top:10px">&bull; <strong>Council account under a different email?</strong> Sign out, then sign back in here with that address.</span>
     {{end}}
-    <span style="display:block;margin-top:10px;font-size:13px">Unsure of your details? Try them at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a> first.</span>
+    <span style="display:block;margin-top:10px;font-size:13px">Unsure which it is? Try your details at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a> first.</span>
   </span></div>
   {{end}}
   {{if .LinkThrottled}}
@@ -34,7 +40,7 @@
     <strong>Paused after several sign-in tries &mdash; please wait about 15 minutes.</strong><br>
     Too many attempts in a row could lock your real council account, so p.stonn stops first.
     <span style="display:block;margin-top:10px">While you wait, two things worth checking:</span>
-    <span style="display:block;margin-top:6px">&bull; Your password &mdash; try it at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a>. If it fails there too, use their password reset.</span>
+    <span style="display:block;margin-top:6px">&bull; Your password &mdash; try it at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a>. If it fails there too, <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">reset it at the council</a>.</span>
     <span style="display:block;margin-top:6px">&bull; Your email &mdash; your ePermits account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
     {{- if .LogoutURL}} <a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}} sign out{{end}} and sign back in here with that one.</span>
   </span></div>
@@ -61,6 +67,18 @@
       {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, cars and schedule are all still here.
       {{else}}Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.{{end}}
     </p>
+    {{if .InAppBrowser}}
+    {{/* The visitor is inside Facebook's (or Instagram's) built-in browser,
+         where password managers don't auto-fill — and the council password is
+         exactly the credential nobody types from memory. Say so BEFORE the
+         field defeats them: the 2026-08 stalled-signup cohort arrived almost
+         entirely through this webview, and a third never attempted the form.
+         Plain text URL, not a link: a tap would open it in the SAME webview. */}}
+    <p class="empty-note" style="margin-top:2px">
+      <strong>In the Facebook or Instagram app right now?</strong> Its built-in browser can&rsquo;t auto-fill saved passwords.
+      If yours lives in a password manager, open <strong>p.stonn.org</strong> in Safari or Chrome and link from there &mdash; everything here will be waiting.
+    </p>
+    {{end}}
     {{/* One tap = one council login with the user's REAL credentials, so the
          in-flight guards matter more here than anywhere: hx-sync drops any
          submit while one is running, and hx-disabled-elt greys the button so
@@ -84,6 +102,12 @@
       <label class="fld">Council password
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>
+      {{/* The reset offer belongs NEXT TO the ask, not only on the failure
+           banner: a resident whose permit was set up by phone or paper has an
+           ePermits account but has never held a working portal password, and
+           for them this field is unanswerable — every guess burns one of the
+           council's own lockout-budget attempts first. */}}
+      <p class="empty-note" style="margin-top:-4px">Forgot it &mdash; or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">Reset it at the council</a>, then link here.</p>
       <label class="optin">
         {{/* Ticked by default, deliberately. Without a saved password the schedule
              stops the first time the council ends the session — which happens

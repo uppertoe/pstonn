@@ -19,6 +19,14 @@
     </form>
     <p class="empty-note" style="text-align:center;margin-top:12px">Terms version {{.Terms.Version}}.</p>
     {{else}}
+    {{if .IsPrimary}}
+    {{/* First acceptance only (a re-accept goes back to a working app, and a
+         secondary never links anything): name the NEXT step's prerequisite
+         while there is still time to fix it — the council password ask on the
+         following page is where signups stall, and by then they are one page
+         deeper and mid-form. */}}
+    <p class="empty-note" style="text-align:center;margin-top:16px">Next you&rsquo;ll connect your council account, which takes your <strong>ePermits password</strong>. Not sure you have one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener">Reset it at the council</a> while you&rsquo;re here.</p>
+    {{end}}
     <p class="empty-note" style="text-align:center;margin-top:16px">Terms version {{.Terms.Version}}.{{if .LogoutURL}} Prefer not to? <a href="{{.LogoutURL}}">Sign out</a>.{{end}}</p>
     {{end}}
   </section>

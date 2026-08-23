@@ -120,9 +120,34 @@ func TestTemplatesRender(t *testing.T) {
 		{"capacity-full", dashboardData{User: user, State: "onboarding", IsPrimary: true, CapacityFull: true, Loc: loc}, "p.stonn is full at the moment"},
 		{"link-rejected offers sign-out", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true,
 			LogoutURL: "https://auth.example.com/logout", Loc: loc},
-			"then sign back in with your ePermits email"},
+			"then sign back in here with that address"},
 		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
-			"The usual fix: sign out, then sign back in with your ePermits email."},
+			"Sign out, then sign back in here with that address."},
+		// The reset deep link LEADS the rejected banner: the council can't tell a
+		// wrong password from an account that never had a working one, and the
+		// 2026-08 access logs showed rejected signups giving up without ever
+		// being offered the reset.
+		{"link-rejected leads with the council reset link", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
+			"idm/account/ForgotPassword"},
+		{"link-rejected names the never-set-one case", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
+			"or never set one?"},
+		// The reset offer also sits NEXT TO the password ask itself, before the
+		// first failed attempt burns council lockout budget.
+		{"link-form offers reset beside the password field", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc},
+			"idm/account/ForgotPassword"},
+		{"link-throttled deep-links the reset too", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
+			"idm/account/ForgotPassword"},
+		// Inside a social in-app webview the password manager can't auto-fill;
+		// the advice must appear BEFORE the field defeats them, and only there —
+		// in a real browser it would be wrong and worrying.
+		{"onboarding warns inside the Facebook webview", dashboardData{User: user, State: "onboarding", IsPrimary: true, InAppBrowser: true, Loc: loc},
+			"In the Facebook or Instagram app right now?"},
+		// The terms page names the NEXT step's prerequisite (the ePermits
+		// password) while there is still time to fix it — first acceptance only:
+		// a re-accept returns to a working app, and a secondary links nothing.
+		{"terms heads-up names the ePermits password", dashboardData{User: user, State: "terms", IsPrimary: true, Loc: loc,
+			Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}},
+			"ePermits password"},
 		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true,
 			LogoutURL: "https://auth.example.com/logout", Loc: loc},
 			"please wait about 15 minutes"},

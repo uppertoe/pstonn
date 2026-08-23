@@ -240,6 +240,8 @@ type fakeNotifier struct {
 	displaced     []string // guest emails told their car came off the permit
 	expiries      []string // "owner:permitLabel" per expiry warning sent
 	expiryDeliver int      // channels to report delivered (0 => 1)
+	nudged        []string // stalled signups sent the onboarding recovery email
+	nudgeErr      error    // when set, SendOnboardNudge records the attempt but returns this
 }
 
 func (f *fakeNotifier) Enabled() bool { return f.on }
@@ -316,6 +318,19 @@ func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permi
 	defer f.mu.Unlock()
 	f.displaced = append(f.displaced, to)
 	return nil
+}
+
+func (f *fakeNotifier) SendOnboardNudge(_ context.Context, to string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nudged = append(f.nudged, to)
+	return f.nudgeErr
+}
+
+func (f *fakeNotifier) nudgedSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.nudged...)
 }
 
 // snapshot accessors: copy the slices under lock so tests read them safely while

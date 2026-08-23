@@ -177,6 +177,16 @@ const (
 	reasonInvite   = "someone gave this address shared access to their p.stonn account"
 	reasonDisplace = "this address is the contact for a car that was on a visitor permit"
 	reasonTest     = "you asked p.stonn to send a test notification"
+	reasonOnboard  = "you signed up for p.stonn with it but haven't connected a council account yet"
+)
+
+// The council's own account pages, deep-linked wherever p.stonn tells someone
+// their remedy lives at the council. Bare paths on purpose: the portal decorates
+// these with one-time OIDC state (nonce, PKCE challenge) that would be stale in
+// a stored link, and both pages work without it.
+const (
+	CouncilPasswordResetURL = "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword"
+	CouncilRegisterURL      = "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register"
 )
 
 // ErrSuppressed reports that an address is on the suppression list, so nothing
@@ -825,6 +835,67 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 		"",
 		"If you were not expecting this, you can ignore this email. You can also remove your access from Settings after signing in.")
 	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonInvite)
+}
+
+// SendOnboardNudge emails a stalled signup — someone who accepted the terms but
+// never connected a council account — the once-ever recovery note. Email is the
+// only channel that can reach them: they never got far enough to configure
+// anything else, and (observed live, 2026-08) most arrived inside the Facebook
+// in-app browser, where closing the webview severs every other path back.
+//
+// The body walks the three things the access logs showed actually stop people:
+// not having the ePermits password to hand (with the council's reset deep link,
+// which also serves the resident whose account predates the portal and has
+// never had a working password), a p.stonn email that doesn't match the
+// ePermits one, and the in-app browser holding their password manager hostage.
+//
+// The caller decides what "sent" means for its once-ever bookkeeping; this
+// method just reports the send outcome (including ErrSuppressed).
+func (s *Service) SendOnboardNudge(ctx context.Context, to string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject, body := onboardNudgeMessage(to, s.appURL)
+	return s.sendEmail(ctx, to, subject, body, reasonOnboard)
+}
+
+// onboardNudgeMessage composes the recovery email. Split from the send so its
+// content — each line answers a distinct observed drop-off cause — is testable
+// without an SMTP conversation.
+func onboardNudgeMessage(to, appURL string) (subject, body string) {
+	subject = "One step left to start managing your visitor permit"
+	lines := []string{
+		"You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly plate schedule, guest QR codes and one-off bookings all start from that one connection.",
+		"",
+		"Connecting takes one sign-in with your City of Stonnington ePermits details. Three things trip most people up:",
+		"",
+		"1. The ePermits password. Forgot it — or never set one? Reset it at the council first:",
+		CouncilPasswordResetURL,
+		"",
+		"2. An ePermits account under a different email address. p.stonn can only connect to the ePermits account registered under the address you signed up with (" + to + "). If your council account uses a different address, sign in to p.stonn with that one instead.",
+		"",
+	}
+	// The webview escape needs somewhere to point; a deployment that never set
+	// its public URL keeps the advice without the address.
+	if appURL != "" {
+		lines = append(lines,
+			"3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill. Open p.stonn in Safari or Chrome:",
+			appURL,
+			"")
+	} else {
+		lines = append(lines,
+			"3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill. Open p.stonn in Safari or Chrome instead.",
+			"")
+	}
+	lines = append(lines,
+		"One thing to know: p.stonn manages VISITOR permits only — the permit your guests' cars go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.",
+		"",
+		"No ePermits account or visitor permit yet? Register with the council, apply for a visitor permit there, then come back:",
+		CouncilRegisterURL,
+		"",
+		"This is the only reminder p.stonn sends. If you've decided it's not for you, there's nothing to undo — your details go no further than the sign-up you made.",
+	)
+	return subject, strings.Join(lines, "\n")
 }
 
 // SendGuestLink emails a recipient their personal guest-pass link (email only,

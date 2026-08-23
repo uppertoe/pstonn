@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/identity"
@@ -67,9 +68,15 @@ type dashboardData struct {
 	// but it should arrive WITH the likely fix (wrong password vs wrong ePermits
 	// email) so the pause becomes checking time, not giving-up time.
 	LinkThrottled bool
-	Flash         string // success (green)
-	Warn          string // problem / caution (amber)
-	Loc           *time.Location
+	// InAppBrowser marks a visitor inside a social app's built-in webview
+	// (Facebook, Messenger, Instagram), where password managers don't auto-fill.
+	// The onboarding page uses it to suggest opening the real browser BEFORE the
+	// council password ask becomes a dead end: nearly every stalled signup in the
+	// 2026-08 cohort arrived exactly this way (fbclid + FBAN/FBAV user agents).
+	InAppBrowser bool
+	Flash        string // success (green)
+	Warn         string // problem / caution (amber)
+	Loc          *time.Location
 	// shared access
 	Owner      string       // effective account owner (email) that scopes the data
 	IsPrimary  bool         // whether the signed-in user owns this account
@@ -542,6 +549,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// The council account belongs to the primary; a secondary can only wait
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
+		base.InAppBrowser = inAppBrowser(r.UserAgent())
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
 		// The landing after a REJECTED council login (see councilLink): name both
 		// causes and offer the remedy as a button. Takes precedence over the
@@ -586,4 +594,20 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 	}
 	base.State = "app"
 	return base, true
+}
+
+// inAppBrowser reports whether the user agent is a social app's built-in
+// webview. Deliberately narrow: only the Meta family, which is where the
+// observed signups actually come from and whose markers are documented and
+// stable (FBAN/FBAV for Facebook and Messenger on iOS, FB_IAB for Android,
+// "Instagram" for Instagram's). A generic Android ("; wv)") match would also
+// catch benign embedded views where the advice is noise. False negatives are
+// fine — the person just sees the normal page — while a false positive tells
+// someone in a real browser their password manager won't work, which is both
+// wrong and worrying.
+func inAppBrowser(ua string) bool {
+	return strings.Contains(ua, "FBAN/") ||
+		strings.Contains(ua, "FBAV/") ||
+		strings.Contains(ua, "FB_IAB") ||
+		strings.Contains(ua, "Instagram")
 }

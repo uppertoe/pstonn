@@ -77,6 +77,10 @@ type Notifier interface {
 	// (a guest or a saved vehicle's attached email — no account) that their car
 	// has been taken off the permit.
 	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
+	// SendOnboardNudge emails a stalled signup (terms accepted, council never
+	// connected) the once-ever recovery note. Email-only, like the renewal
+	// reminder: this person configured no other channel.
+	SendOnboardNudge(ctx context.Context, to string) error
 	// EmailAvailable reports whether an SMTP sender is configured. The renewal
 	// reminder is email-only, so Enabled() (any channel) is the wrong gate for it.
 	EmailAvailable() bool
@@ -129,14 +133,19 @@ type Scheduler struct {
 	loc              *time.Location
 	interval         time.Duration
 
-	sessionMaxAge    time.Duration
-	warmInterval     time.Duration
-	reminderLead     time.Duration
-	expiryLead       time.Duration
-	publicBaseURL    string
-	notifier         Notifier
-	opDrain          time.Duration // rollover-sizing unit (see Options.OpDrain); NOT a sleep
-	jitterFrac       float64
+	sessionMaxAge time.Duration
+	warmInterval  time.Duration
+	reminderLead  time.Duration
+	expiryLead    time.Duration
+	publicBaseURL string
+	notifier      Notifier
+	opDrain       time.Duration // rollover-sizing unit (see Options.OpDrain); NOT a sleep
+	jitterFrac    float64
+	// Onboarding-nudge audience window, initialised from the onboardNudge*
+	// constants. Fields rather than the constants directly so a test can narrow
+	// the window without waiting a day for a just-recorded consent to qualify.
+	nudgeAfter       time.Duration
+	nudgeLookback    time.Duration
 	spreadWindow     time.Duration
 	driftInterval    time.Duration
 	idleWindow       time.Duration // estimated council idle expiry; anchors the warm safety clamp (0 disables it)
@@ -394,6 +403,8 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		applying:         make(map[int64]chan struct{}),
 		unscheduled:      make(map[int64]string),
 		snapshotPath:     opts.SnapshotPath,
+		nudgeAfter:       onboardNudgeAfter,
+		nudgeLookback:    onboardNudgeLookback,
 	}
 	// commitActive persists a confirmed plate change. Held as a field, not a direct
 	// store call, purely so a test can inject a commit failure and exercise the
@@ -858,7 +869,56 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
 		log.Printf("scheduler: prune change log: %v", err)
 	}
+	s.sweepOnboardNudges(ctx)
 	s.maybeSnapshot(ctx)
+}
+
+// Bounds of the onboarding-nudge audience window (see store.OnboardNudgeCandidates):
+// a signup gets a day to finish on their own before being emailed, and the first
+// deploy of the feature reaches back two weeks — far enough to recover the current
+// stalled cohort, not far enough to mail people who plainly moved on months ago.
+const (
+	onboardNudgeAfter    = 24 * time.Hour
+	onboardNudgeLookback = 14 * 24 * time.Hour
+)
+
+// sweepOnboardNudges emails each stalled signup (terms accepted 1–14 days ago,
+// council never connected) the once-ever recovery note, on the housekeeping
+// cadence. The mark is written only after the send is settled, so a transient
+// SMTP failure retries on a later sweep rather than burning the one shot —
+// while a SUPPRESSED address (bounced, complained, unsubscribed) marks as done:
+// that outcome never improves by retrying, and each retry is another log line
+// about mailing an address that asked to be left alone.
+func (s *Scheduler) sweepOnboardNudges(ctx context.Context) {
+	// Email-only mail plus a nil-notifier deployment: same gate as the renewal
+	// reminder. Without SMTP, candidates simply keep accruing until it exists.
+	if s.notifier == nil || !s.notifier.EmailAvailable() {
+		return
+	}
+	now := time.Now()
+	owners, err := s.store.OnboardNudgeCandidates(ctx, now.Add(-s.nudgeLookback), now.Add(-s.nudgeAfter))
+	if err != nil {
+		log.Printf("scheduler: onboarding nudge candidates: %v", err)
+		return
+	}
+	for _, owner := range owners {
+		err := s.notifier.SendOnboardNudge(ctx, owner)
+		if err != nil && !errors.Is(err, notify.ErrSuppressed) {
+			log.Printf("scheduler: onboarding nudge to %s: %v (will retry next sweep)", redact.Email(owner), err)
+			continue
+		}
+		if merr := s.store.MarkOnboardNudgeSent(ctx, owner); merr != nil {
+			// The send went out but the mark didn't stick; say so rather than let a
+			// later sweep silently contradict "this is the only reminder p.stonn sends".
+			log.Printf("scheduler: onboarding nudge to %s sent but not recorded: %v", redact.Email(owner), merr)
+			continue
+		}
+		if err != nil {
+			log.Printf("scheduler: onboarding nudge to %s skipped (suppressed address); marked done", redact.Email(owner))
+		} else {
+			log.Printf("scheduler: onboarding nudge emailed to %s", redact.Email(owner))
+		}
+	}
 }
 
 // maybeSnapshot writes the daily backup snapshot, at most once a day. The snapshot
