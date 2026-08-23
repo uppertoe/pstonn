@@ -160,6 +160,14 @@ func TestTemplatesRender(t *testing.T) {
 		{"activity", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: time.Now()}},
 		}, "Activity"},
+		// Source codes render as words, not raw internal tags.
+		{"activity-source-label", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
+			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: time.Now()}},
+		}, "weekly roster"},
+		// A removal has no plate: it reads "plate removed", not "manual" with an empty pill.
+		{"activity-removal", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
+			Log: []store.ApplyRecord{{PermitID: 7, Registration: "", Source: "manual", Status: "success", Detail: "vehicle removed by a@b.com", At: time.Now()}},
+		}, "plate removed"},
 		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, RelinkBy: "15 Oct 2026"}, "Council connection"},
 		{"settings-quiet-hours", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
 			Notify: notifyView{EmailAvailable: true, EmailEnabled: true, QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}, "hold overnight notices"},

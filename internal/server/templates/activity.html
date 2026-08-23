@@ -8,7 +8,8 @@
       {{range .Log}}
         <tr>
           <td class="muted" style="white-space:nowrap">{{localTime .At $.Loc}}</td>
-          <td><span class="reg">{{.Registration}}</span> <span class="muted">{{.Source}}</span></td>
+          {{/* A removal has no plate: show a dash, not an empty pill. */}}
+          <td>{{if .Registration}}<span class="reg">{{.Registration}}</span>{{else}}<span class="muted">&mdash;</span>{{end}} <span class="muted">{{sourceLabel .Source}}</span></td>
           {{/* The plate is the headline; the outcome is a footnote to it — except
                when it isn't, so error and changed carry colour and weight while a
                success stays quiet. Rendering all three identically made a failed

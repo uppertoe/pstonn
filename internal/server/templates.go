@@ -63,6 +63,24 @@ var weekdaysDisplay = []time.Weekday{
 var templateFuncs = template.FuncMap{
 	"asset":       asset,
 	"weekdayName": func(w time.Weekday) string { return w.String() },
+	// sourceLabel turns an apply-log source code into words for the Activity page.
+	// The stored codes are internal; the page is read by householders.
+	"sourceLabel": func(src string) string {
+		switch src {
+		case "roster":
+			return "weekly roster"
+		case "override":
+			return "one-off booking"
+		case "guest":
+			return "guest link"
+		case "doorqr":
+			return "printed QR"
+		case "manual":
+			return "plate removed"
+		default:
+			return src
+		}
+	},
 	"localTime": func(t time.Time, loc *time.Location) string {
 		if t.IsZero() {
 			return ""

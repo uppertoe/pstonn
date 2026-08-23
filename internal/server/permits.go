@@ -574,6 +574,12 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 		if e := s.store.SetPermitActive(bg, p.ID, ""); e != nil {
 			log.Printf("clearPermit: council cleared permit %d but local commit failed: %v", p.ID, e)
 		}
+		// Reflect the cleared plate on the struct we re-render from. Without this the
+		// card shows the OLD plate: respondPermit renders from this p, and the
+		// council-cache adopt inside buildPermitView is a compare-and-swap against the
+		// STORED plate, which the line above already moved to "" — so the CAS no-ops
+		// and the stale struct value would win.
+		p.ActiveRegistration = ""
 	}
 	release()
 

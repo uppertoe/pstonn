@@ -151,7 +151,7 @@
          job is "which car is on the permit right now". An empty ActiveColor leaves
          the neutral .plate default, which is how a visitor's one-off plate reads as
          "not one of your cars". */}}
-    {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">unknown</span>{{end}}
+    {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="muted">no car</span>{{end}}
     {{/* Fixed-size status slot: an "applying" spinner while a change is landing, a
          "checking" spinner while a background council read runs, a tick once the
          shown plate IS the council's confirmed state — same footprint throughout, so
