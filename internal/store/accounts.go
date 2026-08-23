@@ -407,17 +407,30 @@ ORDER BY o.owner`)
 type RosterEntry struct {
 	Email string `json:"email"`
 	Ntfy  string `json:"ntfy,omitempty"` // topic, only when ntfy is enabled
+	// NextChangeAt is when this account's schedule next requires a council write
+	// (RFC3339 UTC), or "" when nothing is due inside the reporting horizon. The
+	// watchdog uses it to warn, during an outage, only the households whose
+	// change has actually been missed — filled by the /status handler (it needs
+	// model logic), not by NotifyRoster.
+	NextChangeAt string `json:"next_change_at,omitempty"`
 }
 
 // NotifyRoster returns the contact list an outage watchdog would use: every
-// consented account, with its ntfy topic when enabled. Email is the baseline
-// channel, so it is always the account email.
+// consented account THAT MANAGES A PERMIT, with its ntfy topic when enabled.
+// Email is the baseline channel, so it is always the account email.
+//
+// The permit test is the coarse SQL cut — anyone with no permit row at all
+// (signed up, never linked; a secondary, whose permits live under the primary)
+// has nothing an outage can break, and every address in this list is PII that
+// travels to and sits with the watchdog. The /status handler applies the finer
+// model-level cut (permit liveness) on top.
 func (s *Store) NotifyRoster(ctx context.Context) ([]RosterEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT c.owner,
   CASE WHEN COALESCE(np.ntfy_enabled,0)=1 THEN COALESCE(np.ntfy_topic,'') ELSE '' END
 FROM (SELECT DISTINCT owner FROM consent) c
 LEFT JOIN notify_pref np ON np.owner = c.owner
+WHERE EXISTS (SELECT 1 FROM permit p WHERE p.owner = c.owner)
 ORDER BY c.owner`)
 	if err != nil {
 		return nil, err

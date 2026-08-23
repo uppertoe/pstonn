@@ -113,8 +113,8 @@ type Config struct {
 	// RosterKey seals the user roster in the /status payload (32 bytes, 64 hex, via
 	// ROSTER_KEY). The outage watchdog holds the same key and decrypts it.
 	//
-	// Without this the roster — every consented account's email plus their push
-	// topic — travels and sits in the response in the clear, so one leaked
+	// Without this the roster — every permit-managing account's email plus their
+	// push topic — travels and sits in the response in the clear, so one leaked
 	// STATUS_TOKEN yields the entire user list and a live read capability on
 	// everyone's notifications. With it, a leaked token yields ciphertext.
 	//

@@ -477,6 +477,11 @@ func TestStatusRosterSealed(t *testing.T) {
 	if err := s.store.RecordConsent(ctx, "roster@example.com", "v1", "h1"); err != nil {
 		t.Fatal(err)
 	}
+	// The roster covers only accounts that manage a permit, so give this one a
+	// permit — a bare consent row (a signup who never linked) stays out.
+	if _, err := s.store.UpsertPermit(ctx, "roster@example.com", "P-1", "14", "VPP1"); err != nil {
+		t.Fatal(err)
+	}
 
 	get := func(target string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("GET", target, nil)

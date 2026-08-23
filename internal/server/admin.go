@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -11,7 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -388,10 +391,11 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	// The roster — every consented account's email plus their push topic — is the
-	// sensitive half of this endpoint. The watchdog needs it only to reach users
-	// during an outage, and needs it rarely, so it is served ONLY when asked for,
-	// and only sealed. The frequent health poll then carries nothing worth stealing.
+	// The roster — every permit-managing account's email, push topic and next due
+	// write — is the sensitive half of this endpoint. The watchdog needs it only to
+	// reach users during an outage, and needs it rarely, so it is served ONLY when
+	// asked for, and only sealed. The frequent health poll then carries nothing
+	// worth stealing.
 	//
 	// Asking is the whole condition. This used to also serve the roster whenever no
 	// ROSTER_KEY was configured, which inverted the intent: the deployment with no
@@ -407,6 +411,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, rerr)
 			return
 		}
+		roster = s.enrichRoster(r.Context(), roster)
 	}
 	sessions, err := s.store.ListCouncilSessions(r.Context())
 	if err != nil {
@@ -522,6 +527,71 @@ func secretEqual(presented, want string) bool {
 	a := sha256.Sum256([]byte(presented))
 	b := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
+}
+
+// rosterChangeHorizon is how far ahead each roster entry's NextChangeAt looks.
+// It bounds what the watchdog can target during an outage: past this, its
+// long-outage backstop (which emails every managed household) has taken over
+// anyway, so a wider horizon would add schedule detail to the sealed payload
+// that nothing reads.
+const rosterChangeHorizon = 48 * time.Hour
+
+// enrichRoster applies the model-level half of the roster policy: drop owners
+// whose permits are ALL dead (a cancelled permit is nothing an outage can
+// break), and stamp each survivor with when their schedule next requires a
+// council write, so the watchdog can warn exactly the households whose change
+// an outage has actually cost.
+//
+// Read errors fail OPEN on membership — an entry we cannot evaluate stays in,
+// un-stamped, because this list exists for a moment when things are already
+// going wrong, and a database blip must not quietly shrink who gets warned.
+func (s *Server) enrichRoster(ctx context.Context, roster []store.RosterEntry) []store.RosterEntry {
+	loc := s.cfg.DisplayLocation
+	now := time.Now().In(loc)
+	out := make([]store.RosterEntry, 0, len(roster))
+	for _, e := range roster {
+		permits, err := s.store.ListPermitsFor(ctx, e.Email)
+		if err != nil {
+			log.Printf("roster: permits for %s: %v (kept, unstamped)", redact.Email(e.Email), err)
+			out = append(out, e)
+			continue
+		}
+		var next *time.Time
+		alive := false
+		for _, p := range permits {
+			if p.Inactive(now, loc) {
+				continue
+			}
+			alive = true
+			rules, rerr := s.store.ListRules(ctx, p.ID)
+			if rerr != nil {
+				log.Printf("roster: rules for permit %d: %v", p.ID, rerr)
+				continue
+			}
+			overrides, oerr := s.store.ListOverrides(ctx, p.ID, now)
+			if oerr != nil {
+				log.Printf("roster: overrides for permit %d: %v", p.ID, oerr)
+				continue
+			}
+			if c := model.NextChange(now, rosterChangeHorizon, rules, overrides); c != nil && (next == nil || c.Before(*next)) {
+				next = c
+			}
+		}
+		if !alive && err == nil && len(permits) > 0 {
+			continue // permits exist but every one is dead; nothing to protect
+		}
+		if !alive {
+			// No permit rows at all shouldn't reach here (NotifyRoster's SQL cut),
+			// but keep the entry if it somehow does — fail open, as above.
+			out = append(out, e)
+			continue
+		}
+		if next != nil {
+			e.NextChangeAt = next.UTC().Format(time.RFC3339)
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // sealRoster encrypts the roster for transport to the outage watchdog, using the

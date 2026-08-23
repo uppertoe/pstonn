@@ -1419,7 +1419,10 @@ func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
 	ctx := context.Background()
 	const alice, bob = "alice@example.com", "bob@example.com"
 
-	// Two consented accounts; bob also has an ntfy topic.
+	// Two consented accounts; bob also has an ntfy topic. Both hold a permit,
+	// because the roster now covers only accounts that MANAGE one — an outage
+	// can't break anything for a signup who never linked, and each address here
+	// is PII that travels to the watchdog.
 	if err := s.RecordConsent(ctx, alice, "v1", "h"); err != nil {
 		t.Fatal(err)
 	}
@@ -1427,6 +1430,13 @@ func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.SetNotifyPref(ctx, NotifyPref{Owner: bob, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "bob-topic"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertPermit(ctx, bob, "P-bob", "14", "Bob permit"); err != nil {
+		t.Fatal(err)
+	}
+	// A consented account with NO permit stays out of the roster entirely.
+	if err := s.RecordConsent(ctx, "unlinked@example.com", "v1", "h"); err != nil {
 		t.Fatal(err)
 	}
 	// Give alice something to cascade so deletion touches more than consent.
@@ -1453,6 +1463,9 @@ func TestNotifyRosterExcludesDeletedAccount(t *testing.T) {
 	}
 	if _, ok := inRoster(alice); !ok {
 		t.Fatal("alice should be in the roster before deletion")
+	}
+	if _, ok := inRoster("unlinked@example.com"); ok {
+		t.Fatal("a consented account with no permit must not be in the outage roster")
 	}
 
 	// Deleting alice's account must drop her from the outage-notify roster.

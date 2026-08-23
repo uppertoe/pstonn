@@ -3,6 +3,7 @@
 package model
 
 import (
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -250,6 +251,66 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 		return Resolution{VehicleID: bestRule.VehicleID, Source: SourceRoster, Since: midnight, Scheduled: true}
 	}
 	return Resolution{Source: SourceNone}
+}
+
+// NextChange reports the first instant within (now, now+horizon] at which the
+// schedule requires a council WRITE — the resolved allocation switching to a
+// different car than the one already in place — or nil when the horizon holds
+// none. It exists for the outage watchdog: an outage only hurts a household
+// whose schedule was due to act during it, and this is "due to act", computed
+// while the app is still healthy to ship in the /status roster.
+//
+// The write test mirrors what the scheduler actually does, not raw resolution
+// changes:
+//   - a transition INTO a gap (SourceNone) is not a write — the scheduler
+//     leaves the last plate in place;
+//   - a transition OUT of a gap back to the same car is not a write either,
+//     because that car's plate is the one lingering;
+//   - an override handing back to a roster day with the same vehicle is no
+//     write, whatever the sources say.
+//
+// When nothing is allocated at now, the lingering plate is unknowable here
+// (it lives on the permit row, not in the schedule), so the first future
+// allocation counts as a change. That can over-report by exactly one write —
+// the harmless direction for an outage warning.
+//
+// now must already be in the roster timezone (see Resolve). Candidate change
+// instants are the local midnights and the override boundaries in the horizon;
+// Resolve is piecewise-constant between those, so nothing can change elsewhere.
+func NextChange(now time.Time, horizon time.Duration, rules []WeeklyRule, overrides []Override) *time.Time {
+	end := now.Add(horizon)
+	var cands []time.Time
+	for d := startOfDay(now).AddDate(0, 0, 1); !d.After(end); d = d.AddDate(0, 0, 1) {
+		cands = append(cands, d)
+	}
+	for _, o := range overrides {
+		if o.StartsAt.After(now) && !o.StartsAt.After(end) {
+			cands = append(cands, o.StartsAt)
+		}
+		if o.EndsAt != nil && o.EndsAt.After(now) && !o.EndsAt.After(end) {
+			cands = append(cands, *o.EndsAt)
+		}
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].Before(cands[j]) })
+
+	last := Resolve(now, rules, overrides)
+	haveLast := last.Source != SourceNone
+	for _, t := range cands {
+		r := Resolve(t, rules, overrides)
+		if r.Source == SourceNone {
+			continue // entering a gap writes nothing; the last plate lingers
+		}
+		if !haveLast || r.VehicleID != last.VehicleID || !SamePlate(r.Registration, last.Registration) {
+			c := t
+			return &c
+		}
+		last, haveLast = r, true
+	}
+	return nil
+}
+
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // VehicleInfo is what displaced-driver resolution needs to know about a saved
