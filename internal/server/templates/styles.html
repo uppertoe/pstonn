@@ -737,8 +737,13 @@
      flipping the ink passed the contrast maths but read as muddy brown-on-orange
      in daylight — legible by the numbers, hard to actually read. .fab uses the
      same two tokens so the pair stays a family. */
+  /* The QR button and the outlined "Remove <plate>" action share a row below the
+     permit title. margin-bottom keeps the buttons off whatever follows (the expiry
+     line or the roster) — without it the outlined button crowded the content below. */
+  .permit-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0 6px; }
+  .permit-actions form { margin:0; }
   .qrtrigger {
-    margin-top:8px; align-self:flex-start;
+    align-self:flex-start;
     background:linear-gradient(135deg, var(--accent-fill), color-mix(in srgb, var(--accent-fill) 84%, #000));
     color:var(--on-accent); border:0; font-weight:600; box-shadow:var(--shadow);
   }

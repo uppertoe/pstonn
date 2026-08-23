@@ -119,15 +119,29 @@
          multi-permit account never has to pick one, which is exactly where the old
          path was slowest), and it sits beside the "on permit now" badge, so you can
          see what you are about to displace before you show the code. */}}
-    <button type="button" class="qrtrigger sm"
-            hx-post="/guests/qr" hx-vals='{"permit_id": "{{.Permit.ID}}"}'
-            {{/* transition:false — the app enables htmx globalViewTransitions, and
-                 running one over a modal Alpine has teleported into <body> aborts
-                 with "Transition was aborted because of invalid state", leaving the
-                 modal empty. This swap is inside an overlay that is animating in
-                 already, so it has nothing to gain from a view transition. */}}
-            hx-target="#qrbody-{{.Permit.ID}}" hx-swap="innerHTML transition:false"
-            @click="qrOpen=true">{{template "ic-qr"}} Show visitor QR</button>
+    <div class="permit-actions">
+      <button type="button" class="qrtrigger sm"
+              hx-post="/guests/qr" hx-vals='{"permit_id": "{{.Permit.ID}}"}'
+              {{/* transition:false — the app enables htmx globalViewTransitions, and
+                   running one over a modal Alpine has teleported into <body> aborts
+                   with "Transition was aborted because of invalid state", leaving the
+                   modal empty. This swap is inside an overlay that is animating in
+                   already, so it has nothing to gain from a view transition. */}}
+              hx-target="#qrbody-{{.Permit.ID}}" hx-swap="innerHTML transition:false"
+              @click="qrOpen=true">{{template "ic-qr"}} Show visitor QR</button>
+      {{/* "Take the car off" sits beside the QR button — paired, but outlined
+           rather than filled so it reads as the secondary, occasional action. Shown
+           only in the lingering-plate state (a plate on the permit, nothing
+           scheduled now); the confirm names the fine risk, since removing cover on
+           purpose must be a deliberate, informed act. */}}
+      {{if .CanClear}}
+      <form method="post" action="/permits/{{.Permit.ID}}/clear"
+            hx-post="/permits/{{.Permit.ID}}/clear" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
+            data-confirm="Take {{.Permit.ActiveRegistration}} off this permit? The permit will have no vehicle, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until you set or schedule a car." data-confirm-ok="Take it off">
+        <button type="submit" class="ghost sm">{{template "ic-x"}} Remove {{.Permit.ActiveRegistration}}</button>
+      </form>
+      {{end}}
+    </div>
   </div>
   <div class="nowbadge">
     <span class="muted" style="font-size:12.5px">on permit now</span>
@@ -164,18 +178,6 @@
     {{end}}
   </div>
 </div>
-
-{{/* "Take the car off" — only in the lingering-plate state (a plate is on the
-     permit but nothing is scheduled for now). The confirm names the real risk:
-     the point of the app is not to leave a car uncovered by accident, so removing
-     cover on purpose has to be a deliberate, informed act. */}}
-{{if .CanClear}}
-<form class="clearveh" method="post" action="/permits/{{.Permit.ID}}/clear"
-      hx-post="/permits/{{.Permit.ID}}/clear" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
-      data-confirm="Take {{.Permit.ActiveRegistration}} off this permit? The permit will have no vehicle, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until you set or schedule a car." data-confirm-ok="Take it off">
-  <button type="submit" class="ghost sm">{{template "ic-x"}} Take {{.Permit.ActiveRegistration}} off the permit</button>
-</form>
-{{end}}
 
 {{if .ExpiryLabel}}
 <p class="permit-expiry{{if .Expired}} bad{{else if .ExpiresSoon}} warn{{end}}">

@@ -637,8 +637,11 @@ func TestClearButtonGating(t *testing.T) {
 	if err := templates.ExecuteTemplate(&b, "permit-body", lingering); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(b.String(), "/clear") || !strings.Contains(b.String(), "Take OLD999 off the permit") {
+	if !strings.Contains(b.String(), "/clear") || !strings.Contains(b.String(), "Remove OLD999") {
 		t.Fatalf("lingering-plate card missing the take-off action:\n%s", b.String())
+	}
+	if !strings.Contains(b.String(), "permit-actions") {
+		t.Fatal("clear button not in the shared action row beside the QR button")
 	}
 	if !strings.Contains(b.String(), "loses cover the moment you do this") {
 		t.Fatal("clear confirm does not name the fine risk")
