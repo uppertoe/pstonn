@@ -359,6 +359,16 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 	if s.council != nil { // a council hiccup (or, in tests, no client at all) must not fail the page
 		if actual, _, _, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
 			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
+			// This read just showed the council holding a different plate than our
+			// stored belief — the one state where the scheduler could wrongly skip a
+			// due change as "already correct". Don't wait out the ~6h drift cadence
+			// with a guest at the kerb: ask for the owner's drift read on the next
+			// warm pass (≤3 min), which verifies and adopts through the normal
+			// external-change path. Divergence-gated, so an open guest page polling
+			// a healthy permit requests nothing.
+			if !model.SamePlate(actual, permit.ActiveRegistration) && s.sched != nil {
+				s.sched.RequestDriftSoon(permit.Owner)
+			}
 			current = actual
 		}
 	}
@@ -994,6 +1004,13 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	if err != nil || permit.Owner != gc.Grant.Owner {
 		return guestCtx{}, model.Permit{}, false
 	}
+	// A guest presenting a valid token IS household activity: someone the owner
+	// gave access to is using the service right now, which is exactly the
+	// evidence the 90-day idle bound wants. Resolving is the one funnel every
+	// guest surface (menu, poll, activate, revert, printed-QR request) passes
+	// through, so the touch lives here rather than in each handler. Hourly
+	// throttled inside.
+	s.touchGuestActivity(r.Context(), permit.Owner)
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
 }
 

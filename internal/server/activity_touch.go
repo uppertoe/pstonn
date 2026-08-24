@@ -55,3 +55,40 @@ func (s *Server) touchActivity(ctx context.Context, user string) {
 		log.Printf("touch activity for %s: %v", redact.Email(owner), err)
 	}
 }
+
+// touchGuestActivity resets the idle clock for GUEST-driven use of an account:
+// a visitor opening the household's pass link, activating a car, or a printed-QR
+// request being made or decided. The 90-day retirement bound exists to stop
+// serving households that have LEFT — and a stranger scanning the QR on their
+// door, or a nanny opening the link saved to her phone, is direct evidence they
+// haven't. Without this, the happiest usage pattern the data shows (set up once,
+// let guests self-serve, never sign in again) walks straight into idle
+// retirement at day 90 while the household is actively relying on the service.
+//
+// Same hourly throttle as touchActivity, keyed separately from signed-in users
+// (an owner email can never collide with the prefixed key). Owner is taken from
+// the resolved grant/permit — guest requests carry no signed-in identity.
+func (s *Server) touchGuestActivity(ctx context.Context, owner string) {
+	if owner == "" || s.store == nil {
+		return
+	}
+	key := "guest\x00" + owner
+	now := time.Now()
+	s.touchMu.Lock()
+	if s.lastTouch == nil {
+		s.lastTouch = make(map[string]time.Time)
+	}
+	if last, ok := s.lastTouch[key]; ok && now.Sub(last) < activityTouchEvery {
+		s.touchMu.Unlock()
+		return
+	}
+	s.lastTouch[key] = now
+	if len(s.lastTouch) > maxLimiterKeys {
+		s.lastTouch = map[string]time.Time{key: now}
+	}
+	s.touchMu.Unlock()
+
+	if err := s.store.TouchAccountActive(ctx, owner); err != nil {
+		log.Printf("touch guest activity for %s: %v", redact.Email(owner), err)
+	}
+}

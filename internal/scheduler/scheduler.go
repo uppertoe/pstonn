@@ -252,7 +252,11 @@ type Scheduler struct {
 	driftMu      sync.Mutex
 	driftRetryAt map[string]time.Time
 	driftFails   map[string]int
-	driftShape   []churnEvent
+	// driftAsap holds owners whose next drift read should run on the next warm
+	// pass rather than the 6h cadence (see RequestDriftSoon). Lazily initialised:
+	// tests construct Schedulers literally.
+	driftAsap  map[string]struct{}
+	driftShape []churnEvent
 
 	// reminderWarnMu guards the rate limit on the "no SMTP sender" operator warning.
 	reminderWarnMu sync.Mutex
@@ -1092,11 +1096,49 @@ func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
 	if s.driftBackedOff(cs.Owner, now) {
 		return false // a failing read is retried on its own backoff, not every warm tick
 	}
+	if s.driftRequested(cs.Owner) {
+		return true // someone observed evidence of drift; verify on the next pass, not in 6h
+	}
 	baseline := cs.DriftCheckedAt
 	if baseline.IsZero() {
 		baseline = cs.UpdatedAt
 	}
 	return now.Sub(baseline) >= s.driftThresholdFor(cs.Owner)
+}
+
+// RequestDriftSoon asks for this owner's next drift read to run on the next
+// warm pass (≤3 min) instead of waiting out the ~6h cadence. Callers use it
+// when they have SEEN evidence the local plate belief diverged from the
+// council — e.g. the guest page's cached council read disagreeing with the
+// stored active_registration — so the belief heals while the moment still
+// matters (a guest is at the kerb), through the normal drift path with all its
+// care (CAS adopt, external-change audit row, backoff, credibility checks).
+//
+// In-memory on purpose: a request lost to a restart just means that owner
+// falls back to the regular cadence, and the observation that prompted it will
+// recur if it still holds. Idempotent; cleared only once a drift round
+// completes durably for the owner, so a failed read keeps the intent (the
+// backoff still paces retries meanwhile).
+func (s *Scheduler) RequestDriftSoon(owner string) {
+	s.driftMu.Lock()
+	if s.driftAsap == nil {
+		s.driftAsap = make(map[string]struct{})
+	}
+	s.driftAsap[owner] = struct{}{}
+	s.driftMu.Unlock()
+}
+
+func (s *Scheduler) driftRequested(owner string) bool {
+	s.driftMu.Lock()
+	defer s.driftMu.Unlock()
+	_, ok := s.driftAsap[owner]
+	return ok
+}
+
+func (s *Scheduler) clearDriftRequest(owner string) {
+	s.driftMu.Lock()
+	delete(s.driftAsap, owner)
+	s.driftMu.Unlock()
 }
 
 // keepWarm silent-renews idle-but-valid sessions so their council cookie does not
@@ -1249,7 +1291,8 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", redact.Email(cs.Owner), err)
 				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
 			} else {
-				s.noteDriftSuccess(cs.Owner) // clear any backoff from earlier failures
+				s.noteDriftSuccess(cs.Owner)  // clear any backoff from earlier failures
+				s.clearDriftRequest(cs.Owner) // any RequestDriftSoon intent is now satisfied
 			}
 		}
 	}

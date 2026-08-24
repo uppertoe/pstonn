@@ -68,6 +68,10 @@ func (s *Server) guestDecideApply(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusBadRequest, "Missing decision.")
 		return
 	}
+	// A member deciding via the emailed one-tap link is household activity every
+	// bit as much as a signed-in visit — but this route carries no session, so
+	// the middleware's touch never sees it. Reset the idle clock here.
+	s.touchGuestActivity(r.Context(), req.Owner)
 	out := s.runDecideRequest(r, req.Owner, addr, req.ID, approve)
 	switch out.kind {
 	case decideErr:

@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS council_session (
     confirm_token        TEXT NOT NULL DEFAULT '',   -- single-use token for the email confirm link
     password_sealed      TEXT NOT NULL DEFAULT '',   -- opt-in sealed council password for auto-reconnect (empty = not saved)
     reconnected_at       TEXT NOT NULL DEFAULT '',   -- last saved-password auto-reconnect; shown to the user in Settings
-    last_active_at       TEXT NOT NULL DEFAULT '',    -- last authenticated visit by ANY member; the idle clock (see decideWarm)
+    last_active_at       TEXT NOT NULL DEFAULT '',    -- last use of the account by ANY member OR their guests (visits, guest-link use, emailed decisions); the idle clock (see decideWarm)
     drift_checked_at     TEXT NOT NULL DEFAULT '',    -- last owner-grid drift/expiry read; its own cadence, decoupled from keep-warm
     session_generation   INTEGER NOT NULL DEFAULT 1   -- monotonic version of the session material; the async reconnect queue's compare-and-swap token
 );

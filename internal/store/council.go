@@ -62,10 +62,14 @@ type CouncilSession struct {
 	// (zero = never). Surfaced in Settings so credential use is visible to the
 	// user, not just the operator's server log.
 	ReconnectedAt time.Time
-	// LastActive is the last authenticated visit by ANY member of the account —
-	// the idle clock the re-authorise bound is measured against. The bound exists
-	// to stop serving households that have left; a household that opens the app
-	// has plainly not left, so their visit resets it. Zero falls back to LinkedAt.
+	// LastActive is the last USE of the account — an authenticated visit by any
+	// member, a guest opening/using the household's pass link, or a member
+	// deciding a request via the emailed one-tap link. It is the idle clock the
+	// re-authorise bound is measured against. The bound exists to stop serving
+	// households that have LEFT; a guest scanning the QR on their door is as
+	// much proof they haven't as a sign-in (and the happiest usage pattern —
+	// set up once, let guests self-serve — produces no sign-ins at all).
+	// Zero falls back to LinkedAt.
 	LastActive time.Time
 	// DriftCheckedAt is when the owner-grid drift/expiry read last ran. It has its
 	// own cadence (hours), decoupled from keep-warm (which slides UpdatedAt every
