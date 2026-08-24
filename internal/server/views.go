@@ -322,6 +322,11 @@ type permitView struct {
 	Detail      string // council identifier line: "VPP24714 · 1st Visitor Permit"
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool // no weekly rules yet — a fresh permit
+	// CopyPitch leads with the "renewed this permit?" copy card (open form, note).
+	// False renders the quiet copy button instead. Only meaningful when CopyFrom
+	// is non-empty; shown once per added permit until dismissed, copied, or a
+	// roster day is set (Permit.CopyOfferDone).
+	CopyPitch bool
 	// CanClear offers the "take the car off" action: the permit shows a plate but
 	// nothing is scheduled for right now, so the plate is lingering (a departed
 	// guest, an ended booking) and the scheduler won't touch it. When a schedule

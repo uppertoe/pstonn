@@ -25,15 +25,16 @@ func (s *Store) ListPermitsFor(ctx context.Context, owner string) ([]model.Permi
 }
 
 // permitCols is the column list backing scanPermit; keep the two in lockstep.
-const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak`
+const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak, copy_offer_done`
 
 // scanPermit reads one permit row (permitCols order), parsing the stored strings.
 func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 	var p model.Permit
 	var endDate, reminded string
+	var copyDone int
 	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
 		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType,
-		&p.FailStreak)
+		&p.FailStreak, &copyDone)
 	if err != nil {
 		return p, err
 	}
@@ -41,6 +42,7 @@ func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 		p.EndDate, _ = time.Parse(time.RFC3339, endDate)
 	}
 	p.ExpiryReminded = reminded == "1"
+	p.CopyOfferDone = copyDone == 1
 	return p, nil
 }
 
@@ -136,6 +138,15 @@ WHERE council_permit_id = ? AND owner = ?`,
 // MarkPermitExpiryReminded records that an approaching-expiry reminder has gone
 // out for the permit's current end date, so it isn't sent again until the date
 // changes (see UpdatePermitMeta, which clears the flag on renewal).
+// MarkCopyOfferDone retires the "renewed this permit?" copy pitch for one
+// permit. One-way by design: the pitch shows once per added permit and never
+// returns after a dismissal, a copy, or a first roster day.
+func (s *Store) MarkCopyOfferDone(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET copy_offer_done = 1 WHERE id = ?`, id)
+	return err
+}
+
 func (s *Store) MarkPermitExpiryReminded(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE permit SET expiry_reminded = '1' WHERE id = ?`, id)

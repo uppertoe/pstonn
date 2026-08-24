@@ -363,16 +363,40 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	if err != nil {
 		return permitView{}, err
 	}
+	// Siblings serve two features below: the copy-from options, and deciding which
+	// card carries the account's single setup nudge. Errors are tolerated the way
+	// CopyFrom always tolerated them — both features quietly degrade.
+	siblings, _ := s.store.ListPermitsFor(ctx, p.Owner)
+	// The nudge teaches a concept, not a permit, so it appears ONCE per account:
+	// only while NOTHING on the account is scheduled (a household that has set up
+	// any permit knows the mechanics), and then only on the first live card — a
+	// two-permit signup used to read the same banner twice in a row. Computed here
+	// rather than at page level because htmx card re-renders rebuild one view in
+	// isolation and must reach the same answer.
+	nudge := len(rules) == 0 && len(ovs) == 0 && !hasGuests
+	if nudge {
+		if scheduled, err := s.store.OwnerHasSchedule(ctx, p.Owner, now); err == nil && scheduled {
+			nudge = false
+		}
+		for _, sp := range siblings {
+			if sp.Inactive(now, loc) {
+				continue
+			}
+			nudge = sp.ID == p.ID
+			break
+		}
+	}
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 		ActiveColor: colorOfPlate(vviews, p.ActiveRegistration),
 		RosterEmpty: len(rules) == 0,
+		CopyPitch:   len(rules) == 0 && !p.CopyOfferDone,
 		// Offer "take the car off" only in the lingering-plate state: a plate is on
 		// the permit but nothing is scheduled for now, so the scheduler won't clear
 		// or replace it. With a schedule covering now, a clear would be re-applied.
 		CanClear:        res.Source == model.SourceNone && p.ActiveRegistration != "",
-		ShowSetupNudge:  len(rules) == 0 && len(ovs) == 0 && !hasGuests,
+		ShowSetupNudge:  nudge,
 		Detail:          permitDetail(p),
 		PlateRefreshing: plateRefreshing,
 		Applying:        applying,
@@ -396,18 +420,16 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	fillExpiry(&pv, now)
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
 	// renewal creates a fresh permit under a new council id).
-	if siblings, err := s.store.ListPermitsFor(ctx, p.Owner); err == nil {
-		for _, sp := range siblings {
-			if sp.ID != p.ID {
-				label := sp.Label
-				if label == "" {
-					label = "Permit " + sp.CouncilPermitID
-				}
-				if sp.Inactive(now, loc) {
-					label += " (expired)"
-				}
-				pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label})
+	for _, sp := range siblings {
+		if sp.ID != p.ID {
+			label := sp.Label
+			if label == "" {
+				label = "Permit " + sp.CouncilPermitID
 			}
+			if sp.Inactive(now, loc) {
+				label += " (expired)"
+			}
+			pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label})
 		}
 	}
 	return pv, nil
@@ -488,6 +510,14 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.serverError(w, err)
 		return
+	}
+	// A first roster day answers the "renewed this permit?" copy pitch: they are
+	// building a schedule by hand, so the pitch must not lead again. p is a local
+	// copy, so mirror the flag for the respondPermit render below.
+	if vehicleID != 0 && !p.CopyOfferDone {
+		if err := s.store.MarkCopyOfferDone(r.Context(), p.ID); err == nil {
+			p.CopyOfferDone = true
+		}
 	}
 	// Roster edits are the change most likely to matter and least likely to be
 	// noticed: clearing a day produces no apply at all, so the scheduler does

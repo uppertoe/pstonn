@@ -447,6 +447,26 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 // copySchedule clones the weekly roster and active/upcoming one-offs from another
 // of the account's permits onto this one — the "I renewed my permit, put my
 // schedule back" flow. Any account member may do it (it's schedule management).
+// dismissCopyOffer retires the "renewed this permit?" copy pitch for one permit
+// without copying anything. One-way: the pitch never leads again; the quiet
+// "Copy schedule from another permit" button remains.
+func (s *Server) dismissCopyOffer(w http.ResponseWriter, r *http.Request) {
+	_, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	if err := s.store.MarkCopyOfferDone(r.Context(), p.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	p.CopyOfferDone = true
+	s.respondPermit(w, r, owner, p)
+}
+
 func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	user, owner, _, ok := s.accountForWrite(w, r)
 	if !ok {
@@ -535,6 +555,15 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	s.notifyDestructive(r.Context(), owner, user, msg)
 	s.sched.KickPermit(dst.ID)
+	// Running a copy answers the "renewed this permit?" pitch for good — matters
+	// even in the moved-passes-only case (n == 0), where the roster stays empty
+	// and nothing else would retire it. dst is a local copy; mirror the flag for
+	// the render below.
+	if !dst.CopyOfferDone {
+		if err := s.store.MarkCopyOfferDone(r.Context(), dst.ID); err == nil {
+			dst.CopyOfferDone = true
+		}
+	}
 	s.respondPermit(w, r, owner, dst)
 }
 

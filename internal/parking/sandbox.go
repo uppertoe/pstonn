@@ -35,7 +35,7 @@ func newCouncilSandbox() *councilSandbox {
 	// body (including the "nothing scheduled" notice) every few seconds until a
 	// change lands. A real council returns the current plate immediately, so the
 	// poll settles; the seed makes the sandbox match that.
-	return &councilSandbox{plates: map[string]string{"90001": "SBX1AB"}}
+	return &councilSandbox{plates: map[string]string{"90001": "SBX1AB", "90002": "SBX2CD"}}
 }
 
 func (sb *councilSandbox) current(id string) (string, bool) {
@@ -85,15 +85,29 @@ func (c *Client) sandboxSetVehicle(p model.Permit, registration string) error {
 }
 
 func (c *Client) sandboxListPermits() []PermitInfo {
+	// Two permits, matching real Stonnington households that hold a 1st and a 2nd
+	// visitor permit — the account shape the multi-permit UI (one-off chooser,
+	// per-card QR) needs a sandbox for.
 	now := time.Now()
-	reg, _ := c.sandbox.current("90001")
+	reg1, _ := c.sandbox.current("90001")
+	reg2, _ := c.sandbox.current("90002")
 	return []PermitInfo{{
 		CouncilPermitID:  "90001",
 		PermitTypeID:     "14",
 		PermitNumber:     "VPP-SANDBOX",
 		PermitType:       "(A) 1st Visitor Permit",
 		Status:           "Granted",
-		CurrentRego:      reg,
+		CurrentRego:      reg1,
+		StartDate:        now.AddDate(0, -1, 0),
+		EndDate:          now.AddDate(0, 6, 0),
+		CanChangeVehicle: true,
+	}, {
+		CouncilPermitID:  "90002",
+		PermitTypeID:     "15",
+		PermitNumber:     "VPP-SANDBOX-2",
+		PermitType:       "(A) 2nd Visitor Permit",
+		Status:           "Granted",
+		CurrentRego:      reg2,
 		StartDate:        now.AddDate(0, -1, 0),
 		EndDate:          now.AddDate(0, 6, 0),
 		CanChangeVehicle: true,

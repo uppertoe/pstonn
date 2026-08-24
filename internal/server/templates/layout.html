@@ -259,7 +259,10 @@ window.popClamp = window.popClamp || function (el) {
     if (!el) return;
     if (el.hasAttribute('data-print')) window.print();
     var name = el.getAttribute('data-dispatch');
-    if (name) window.dispatchEvent(new CustomEvent(name));
+    {{/* detail.permit scopes the event to one permit card: without it, every
+         card on a multi-permit account answered "open-oneoff" at once and the
+         booking landed on whichever modal happened to be stacked on top. */}}
+    if (name) window.dispatchEvent(new CustomEvent(name, {detail:{permit: el.getAttribute('data-dispatch-permit') || ''}}));
   });
   {{/* Typed-plate read-back. The council stores any well-formed string, real
        car or not, so a typo that stays alphanumeric (O vs 0, I vs 1) sails

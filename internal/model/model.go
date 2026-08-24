@@ -32,6 +32,10 @@ type Permit struct {
 	PermitNumber       string    // council permit number, e.g. "VPP24714" (empty = unknown)
 	PermitType         string    // council permit type, e.g. "(A) 1st Visitor Permit"
 	FailStreak         int       // consecutive failed/blocked reconcile attempts; 0 = healthy
+	// CopyOfferDone: the "renewed this permit? copy your schedule" pitch has been
+	// answered — dismissed, a copy ran, or a roster day was set — and must never
+	// lead again on this permit. The quiet copy button stays available regardless.
+	CopyOfferDone bool
 }
 
 // deadStatuses are the council PermitStatus WORDS that mean a permit is no longer

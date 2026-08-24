@@ -196,6 +196,26 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	}
 }
 
+// TestMarkCopyOfferDone: the "renewed this permit?" pitch flag defaults off for
+// a fresh permit and sticks once set.
+func TestMarkCopyOfferDone(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	id, err := s.UpsertPermit(ctx, "alice@example.com", "14576", "14", "Alice permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.GetPermit(ctx, id); p.CopyOfferDone {
+		t.Fatal("fresh permit should not have the copy pitch answered")
+	}
+	if err := s.MarkCopyOfferDone(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.GetPermit(ctx, id); !p.CopyOfferDone {
+		t.Fatal("MarkCopyOfferDone did not persist")
+	}
+}
+
 // TestAccountMembers covers shared access: resolution, the one-membership rule,
 // listing/counting, primary detection, and removal (by owner and by self).
 func TestAccountMembers(t *testing.T) {

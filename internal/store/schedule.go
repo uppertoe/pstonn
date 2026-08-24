@@ -46,6 +46,23 @@ func (s *Store) ClearRule(ctx context.Context, permitID int64, weekday time.Week
 	return err
 }
 
+// OwnerHasSchedule reports whether ANY of the owner's permits carries a weekly
+// rule or a live (running or future) one-off booking. It scopes the "nothing
+// scheduled yet" nudge to households that have never scheduled anything: once
+// one permit is set up the mechanics are learnt, and repeating the banner on
+// every other empty card would just nag.
+func (s *Store) OwnerHasSchedule(ctx context.Context, owner string, now time.Time) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM weekly_rule w JOIN permit p ON p.id = w.permit_id WHERE p.owner = ?
+    UNION ALL
+    SELECT 1 FROM override o JOIN permit p ON p.id = o.permit_id
+    WHERE p.owner = ? AND (o.ends_at IS NULL OR o.ends_at > ?)
+)`, owner, owner, now.UTC().Format(time.RFC3339)).Scan(&n)
+	return n == 1, err
+}
+
 // CopySchedule REPLACES a permit's weekly roster and active/upcoming overrides
 // with a copy of another permit's — the "I renewed my permit and re-added it, put
 // my schedule back" flow. Both permits must belong to owner. It clears the

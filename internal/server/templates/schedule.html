@@ -44,7 +44,7 @@
   {{end}}
   {{range .Permits}}
   <section class="card" id="permit-{{.Permit.ID}}" style="--hue:var(--sec-schedule)"
-           x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="addOpen=true"
+           x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '{{.Permit.ID}}') addOpen=true"
            @htmx:after-request="if(!$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     {{/* #pbody is the swap target for every card re-render (plate poll, roster edits,
          one-off add/delete). The teleported modals are rendered as a sibling OUTSIDE
@@ -90,8 +90,41 @@
   </p>
   {{end}}
   {{if .Permits}}
+  {{if gt (len .Permits) 1}}
+  {{/* More than one permit: the FAB can't know which one the booking is for, so
+       it opens a chooser first. Each row shows the car on that permit right now —
+       the plate is how a household actually tells its permits apart, and it shows
+       what the booking is about to displace. Picking a row dispatches the same
+       scoped open-oneoff event the single-permit FAB sends. */}}
+  <div x-data="{pickOpen:false}" @open-oneoff.window="pickOpen=false">
+    <button class="fab" type="button"
+            @click="pickOpen=true">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
+    <template x-teleport="body">
+    <div class="modal-wrap" x-show="pickOpen" x-cloak @keydown.escape.window="pickOpen=false">
+      <div class="scrim" x-show="pickOpen" x-transition.opacity @click="pickOpen=false"></div>
+      <div class="modal" x-show="pickOpen" x-transition>
+        <div class="modal-head"><strong>Add a one-off booking</strong>
+          <button type="button" class="icon-btn" @click="pickOpen=false" aria-label="Close">{{template "ic-x"}}</button>
+        </div>
+        <p class="empty-note" style="margin:-6px 0 12px">You manage more than one permit &mdash; which one is the booking for? Next to each is the car on it right now.</p>
+        <div class="pick">
+          {{range .Permits}}
+          <button type="button" class="pick-item" data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">
+            <span class="pick-name">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</span>
+            {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no car</span>{{end}}
+          </button>
+          {{end}}
+        </div>
+      </div>
+    </div>
+    </template>
+  </div>
+  {{else}}
+  {{range .Permits}}
   <button class="fab" type="button"
-          data-dispatch="open-oneoff">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
+          data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
+  {{end}}
+  {{end}}
   {{end}}
 
 {{end}}
@@ -188,9 +221,16 @@
 {{end}}
 
 {{if .CopyFrom}}
-<div class="copysched{{if .RosterEmpty}} lead{{end}}" x-data="{open:{{if .RosterEmpty}}true{{else}}false{{end}}}">
-  {{if .RosterEmpty}}
-  <p class="cs-note">{{template "ic-copy"}} Renewed this permit? Copy your weekly roster and upcoming bookings across from an existing permit.</p>
+{{/* CopyPitch leads with the open "renewed this permit?" card exactly once per
+     added permit; dismissing it, running a copy, or setting a roster day retires
+     it for good (permit.copy_offer_done) and leaves the quiet button. */}}
+<div class="copysched{{if .CopyPitch}} lead{{end}}" x-data="{open:{{if .CopyPitch}}true{{else}}false{{end}}}">
+  {{if .CopyPitch}}
+  <div class="cs-head">
+    <p class="cs-note">{{template "ic-copy"}} Renewed this permit? Copy your weekly roster and upcoming bookings across from an existing permit.</p>
+    <button type="button" class="ghost icon sm" title="Dismiss" aria-label="Dismiss"
+            hx-post="/permits/{{.Permit.ID}}/copy-offer/dismiss" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML">{{template "ic-x"}}</button>
+  </div>
   {{else}}
   <button type="button" class="ghost sm" @click="open=!open">{{template "ic-copy"}} Copy schedule from another permit</button>
   {{end}}
@@ -209,9 +249,11 @@
 
 {{/* An entirely empty schedule used to render as seven "none" chips under a
      green "on permit now ✓" — which reads as SET UP AND WORKING to a newcomer
-     who just linked, when in fact this permit will never change. Say so, once —
-     but NOT to a household that hands visitors the QR (a valid way to use the
-     permit); ShowSetupNudge already excludes them (see buildPermitView). */}}
+     who just linked, when in fact this permit will never change. Say so, once
+     per ACCOUNT (the first live card only, and never once anything on the
+     account is scheduled) — and NOT to a household that hands visitors the QR
+     (a valid way to use the permit); ShowSetupNudge encodes all of this (see
+     buildPermitView). */}}
 {{if .ShowSetupNudge}}
 <div class="banner warn" style="margin:14px 0 20px;align-items:flex-start">{{template "ic-alert"}} <span>
   <strong>This permit isn't on a schedule yet.</strong>
@@ -359,6 +401,10 @@
   <div class="modal-head"><strong>Add a one-off booking</strong>
     <button type="button" class="icon-btn" @click="addOpen=false" aria-label="Close">{{template "ic-x"}}</button>
   </div>
+  {{/* The modal covers the card that gave it context, so it names its permit
+       itself — on a multi-permit account this is the only line saying where the
+       booking will land. */}}
+  <p class="empty-note" style="margin:-10px 0 12px">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}} &middot; on permit now: {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}no car{{end}}</p>
   {{/* method/action are a native fallback: this form is teleported into <body> by
        Alpine, and htmx's async MutationObserver sometimes hasn't processed it by
        the time it's submitted — in which case the browser would do a useless GET

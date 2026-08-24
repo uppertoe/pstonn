@@ -331,6 +331,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /permits/{id}/name", s.withConsent(s.renamePermit))
 	mux.HandleFunc("POST /permits/{id}/rules", s.withConsent(s.setRule))
 	mux.HandleFunc("POST /permits/{id}/copy-schedule", s.withConsent(s.copySchedule))
+	mux.HandleFunc("POST /permits/{id}/copy-offer/dismiss", s.withConsent(s.dismissCopyOffer))
 	mux.HandleFunc("POST /permits/{id}/clear", s.withConsent(s.clearPermit))
 	mux.HandleFunc("POST /permits/{id}/override", s.withConsent(s.addOverride))
 	mux.HandleFunc("POST /permits/{id}/overrides/{oid}/delete", s.withConsent(s.deleteOverride))

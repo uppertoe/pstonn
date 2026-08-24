@@ -310,9 +310,19 @@ func TestTemplatesRender(t *testing.T) {
 		{"copy-from-empty", func() permitView {
 			p := samplePermitView(loc)
 			p.RosterEmpty = true
+			p.CopyPitch = true
 			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
 			return p
 		}, "Renewed this permit?"},
+		{"copy-pitch-dismissed", func() permitView {
+			// Pitch answered (dismissed/copied/roster set): the quiet button
+			// remains even while the roster is still empty.
+			p := samplePermitView(loc)
+			p.RosterEmpty = true
+			p.CopyPitch = false
+			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
+			return p
+		}, "Copy schedule from another permit"},
 		{"copy-from-option", func() permitView {
 			p := samplePermitView(loc)
 			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}

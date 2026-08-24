@@ -485,6 +485,11 @@ INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 		// delivered outbox rows are purged — the only durable proof this mail was
 		// sent must live somewhere that isn't.
 		`ALTER TABLE account_flags ADD COLUMN onboard_nudge_sent TEXT NOT NULL DEFAULT ''`,
+		// Whether the "renewed this permit? copy your schedule" pitch has been
+		// answered (dismissed, copied, or a roster day set). DEFAULT 0 re-offers it
+		// on existing permits, which is safe: any permit with a roster already
+		// renders the quiet button, not the pitch.
+		`ALTER TABLE permit ADD COLUMN copy_offer_done INTEGER NOT NULL DEFAULT 0`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
