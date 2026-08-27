@@ -52,6 +52,23 @@
     document.addEventListener('click', function (e) {
       if (e.target.closest && e.target.closest('[data-theme-toggle]')) toggle();
     });
+    // Guest-page referral share button. Delegated for the same two reasons as the
+    // theme toggle: the CSP nonce can't reach on* attributes, and the button
+    // arrives inside #gbody htmx swaps after this head script has already run.
+    // Falls back to a clipboard copy where the share sheet isn't available.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('[data-share-pstonn]');
+      if (!btn) return;
+      var url = location.origin + '/';
+      var msg = 'Free scheduler for City of Stonnington visitor parking permits';
+      if (navigator.share) {
+        navigator.share({ title: 'p.stonn', text: msg, url: url }).catch(function () {});
+      } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(msg + ': ' + url).then(function () {
+          btn.textContent = 'Link copied';
+        }).catch(function () {});
+      }
+    });
   })();
 </script>
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>

@@ -46,6 +46,7 @@
     {{if .Flash}}
     <div class="gring ok">{{template "ic-check"}}</div>
     <p class="gresult">{{.Flash}}</p>
+    {{template "guest-referral"}}
     {{else}}
     <div class="gring warn">{{template "ic-alert"}}</div>
     <p class="gresult">{{.Warn}}</p>
@@ -54,6 +55,24 @@
   </section>
 </main>
 
+{{end}}
+
+{{define "guest-referral"}}
+{{/* The referral moment: shown ONLY on a success state — the visitor has just
+     parked in seconds, and a good share of visitors to a permit zone hold a
+     visitor permit of their own (or clean/nanny for several households that
+     do). Deliberately NOT a server-side "send referral email" endpoint: this
+     page is anonymous, and an endpoint that emails arbitrary addresses is an
+     open relay that would burn the sending domain. The share sheet and a
+     prefilled mailto use the visitor's OWN accounts instead — and a referral
+     from a friend's address carries more trust than one from a service. */}}
+<div class="gref">
+  <p class="empty-note">Does your own household juggle a visitor permit? p.stonn is free for City of Stonnington residents.</p>
+  <div class="grefrow">
+    <button type="button" class="ghost sm" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
+    <a class="ghost sm btnlike" href="mailto:?subject=p.stonn%20%E2%80%94%20visitor%20permit%20scheduler&body=Free%20scheduler%20for%20City%20of%20Stonnington%20visitor%20parking%20permits%3A%20https%3A%2F%2Fp.stonn.org" hx-boost="false">Email yourself the link</a>
+  </div>
+</div>
 {{end}}
 
 {{define "guest-body"}}
@@ -123,6 +142,7 @@
 {{end}}
 {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your plate to put your car on the permit until the end of the day.{{else}}Tap your car. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>{{end}}
 {{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>{{end}}
+{{if .Flash}}{{template "guest-referral"}}{{end}}
 {{end}}
 
 {{/* Printed-QR request status (htmx-polled). Pending re-polls; a decision stops. */}}
@@ -132,6 +152,7 @@
 <div id="reqstatus">
   <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
   <p class="gresult"><span class="plate">{{.Plate}}</span> is on the permit until {{.Until}}.</p>
+  {{template "guest-referral"}}
 </div>
 {{else if eq .Status "denied"}}
 <div id="reqstatus">
