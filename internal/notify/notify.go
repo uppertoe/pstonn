@@ -506,6 +506,18 @@ type ApplyOutcome struct {
 // with the high-priority push suppressed.
 func (o ApplyOutcome) actionNeeded() bool { return !o.OK && (!o.Transient || o.Urgent) }
 
+// emailWanted decides whether this member's verified address gets the outcome.
+// Email-off means "no routine confirmations", never "no safety alerts": an
+// action-needed failure ("change the plate yourself now or someone gets a fine")
+// always goes to the verified address, the same rule broadcastAccount applies to
+// the re-link and reconnect-stalled notices. A push channel has no delivery
+// receipt — an uninstalled app, a silenced phone or a wrong topic fails without
+// a trace — and this is the one message that must not depend on it. The only
+// live push-only household (2026-08) was exactly that exposure.
+func (s *Service) emailWanted(pref store.NotifyPref, o ApplyOutcome) bool {
+	return (pref.EmailEnabled || o.actionNeeded()) && s.mail.Enabled()
+}
+
 // deferUntil returns the quiet-hours delivery time for this outcome, or the zero
 // time (send now) when the outcome is a hard action-needed failure.
 func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, o ApplyOutcome) time.Time {
@@ -652,7 +664,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 			NotBefore: s.deferUntil(d.pref, now, o),
 			Reason:    reasonAccount,
 		}
-		if d.pref.EmailEnabled && s.mail.Enabled() {
+		if s.emailWanted(d.pref, o) {
 			m.Recipients = []string{d.email}
 		}
 		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
@@ -691,7 +703,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		if o.OK && d.pref.FailuresOnly {
 			continue
 		}
-		wantEmail := d.pref.EmailEnabled && s.mail.Enabled()
+		wantEmail := s.emailWanted(d.pref, o)
 		wantNtfy := d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != ""
 		if !wantEmail && !wantNtfy {
 			continue // no reachable channel for this member

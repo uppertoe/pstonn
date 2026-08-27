@@ -262,3 +262,43 @@ func TestGuestRequestLinkEmailOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestActionNeededFailureAlwaysEmails pins the safety rule: a member who turned
+// email off (push-only, or nothing at all) is still emailed when an apply fails in
+// a way that needs their hands — the fine-risk message must not ride a channel
+// with no delivery receipt. Routine successes keep honouring the opt-out.
+func TestActionNeededFailureAlwaysEmails(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const owner = "push-only@example.com"
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: false, NtfyEnabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+
+	// A success respects the opt-out: nothing is queued.
+	if err := svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "VPP1", Reg: "ABC123", OK: true}); err != nil {
+		t.Fatal(err)
+	}
+	if due, _ := st.DueOutbox(ctx, time.Now().UTC(), 10); len(due) != 0 {
+		t.Fatalf("success with email off queued %d messages, want 0", len(due))
+	}
+
+	// A hard failure does not: the verified address is emailed anyway.
+	if err := svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "VPP1", Reg: "ABC123", OK: false, Reason: "The council rejected the plate.", Action: "Set the vehicle yourself at the council."}); err != nil {
+		t.Fatal(err)
+	}
+	due, err := st.DueOutbox(ctx, time.Now().UTC(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || len(due[0].Recipients) != 1 || due[0].Recipients[0] != owner {
+		t.Fatalf("action-needed failure with email off: outbox = %+v, want one message to %s", due, owner)
+	}
+}
