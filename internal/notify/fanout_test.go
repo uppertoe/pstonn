@@ -302,3 +302,37 @@ func TestActionNeededFailureAlwaysEmails(t *testing.T) {
 		t.Fatalf("action-needed failure with email off: outbox = %+v, want one message to %s", due, owner)
 	}
 }
+
+// TestPermitExpiryAlwaysEmails: the expiry warning is safety-tier — a member with
+// email off is still emailed. Quiet hours cover "now" so the notice takes the
+// outbox path and the recipient list can be inspected.
+func TestPermitExpiryAlwaysEmails(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const owner = "push-only@example.com"
+	nowHour := time.Now().UTC().Hour()
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{
+		Owner: owner, EmailEnabled: false, NtfyEnabled: false,
+		QuietFrom: nowHour, QuietUntil: (nowHour + 2) % 24,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+
+	if n := svc.NotifyPermitExpiry(ctx, owner, "VPP1", time.Now().Add(14*24*time.Hour)); n != 1 {
+		t.Fatalf("delivered = %d, want 1 (queued email)", n)
+	}
+	rows, err := st.DueOutbox(ctx, time.Now().UTC().Add(3*time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || len(rows[0].Recipients) != 1 || rows[0].Recipients[0] != owner {
+		t.Fatalf("expiry with email off: outbox = %+v, want one email to %s", rows, owner)
+	}
+}

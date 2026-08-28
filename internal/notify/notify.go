@@ -370,12 +370,15 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 	delivered := 0
 	now := time.Now()
 	for _, d := range dels {
-		wantEmail := d.pref.EmailEnabled && s.mail.Enabled()
+		// Safety tier: sent once, weeks ahead, and a lapsed permit fines every
+		// visitor — so the verified address is emailed whatever the channel choice
+		// (push is added when enabled). Quiet hours are still honoured below.
+		wantEmail := s.mail.Enabled()
 		wantNtfy := d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != ""
 		if !wantEmail && !wantNtfy {
 			continue
 		}
-		// This is a routine reminder (its own wording says so), not an emergency:
+		// Not an emergency, so it need not wake anyone:
 		// honour the member's quiet hours by holding it in the outbox — the
 		// expiry-sync runs on the keep-warm cadence at arbitrary times, and a
 		// 14-days-ahead warning must not ping anyone at 3am. Queuing counts as
@@ -404,7 +407,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 		}
 		reached := false
 		if wantEmail {
-			if e := s.sendEmail(ctx, d.email, subject, body, reasonAccount); e != nil {
+			if e := s.sendEmailCritical(ctx, d.email, subject, body, reasonAccount); e != nil {
 				log.Printf("notify permit-expiry email %s: %v", RedactEmail(d.email), e)
 			} else {
 				reached = true

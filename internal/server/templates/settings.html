@@ -194,6 +194,12 @@
   <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}" x-ref="status" role="status" aria-live="polite">
     {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
   </p>
+  {{if .EmailAvailable}}
+  {{/* The tier the toggles above cannot switch off. Stated, not argued: the
+       page says what happens, and the list is the actual set of forced-email
+       notices (emailWanted / broadcastAccount / NotifyPermitExpiry / watchdog). */}}
+  <p class="empty-note">Whatever you choose here, safety alerts always come by email: a change p.stonn couldn&rsquo;t make, a council connection that needs re-linking, a permit about to expire, and outage notices.</p>
+  {{end}}
   <label class="toggle"><input type="checkbox" name="failures_only" {{if .FailuresOnly}}checked{{end}}> <span>Only tell me when something needs attention &mdash; skip the &ldquo;plate changed as scheduled&rdquo; confirmations</span></label>
   <div class="quiet" x-data="{quiet: {{if .QuietEnabled}}true{{else}}false{{end}}}">
     <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
@@ -208,7 +214,7 @@
       </select>
       <span>&mdash; then they're delivered.</span>
     </div>
-    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. A failure is held too, but arrives early enough to act on.</p>
+    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. Anything that needs your action is sent straight away.</p>
   </div>
 </form>
 {{end}}
