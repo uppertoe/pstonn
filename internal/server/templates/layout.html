@@ -59,12 +59,14 @@
     document.addEventListener('click', function (e) {
       var btn = e.target.closest && e.target.closest('[data-share-pstonn]');
       if (!btn) return;
-      var url = location.origin + '/';
-      var msg = 'Free scheduler for City of Stonnington visitor parking permits';
+      // The bare origin, no trailing slash: wherever it is pasted the link preview
+      // (OG tags) supplies the blurb, and a sentence glued to a URL is not pasteable.
+      var url = location.origin;
+      var msg = 'Schedule your Stonnington visitor parking permit';
       if (navigator.share) {
         navigator.share({ title: 'p.stonn', text: msg, url: url }).catch(function () {});
       } else if (navigator.clipboard) {
-        navigator.clipboard.writeText(msg + ': ' + url).then(function () {
+        navigator.clipboard.writeText(url).then(function () {
           btn.textContent = 'Link copied';
         }).catch(function () {});
       }
