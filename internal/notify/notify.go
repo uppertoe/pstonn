@@ -841,7 +841,7 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	lines := []string{
 		ownerEmail + " has given you shared access to their p.stonn account, which schedules a City of Stonnington visitor parking permit.",
 		"",
-		"Sign in with this email address to help manage the schedule. You will get a one-time code to confirm it is you.",
+		"Sign in with this email address, then tap Accept on the page you land on. You will get a one-time code to confirm it is you.",
 	}
 	if s.appURL != "" {
 		lines = append(lines, "", s.appURL)
