@@ -3518,3 +3518,50 @@ func TestVehicleCreateRefusedForAcceptedSecondary(t *testing.T) {
 		t.Fatalf("CreateVehicle = %v, want ErrSecondaryAccount", err)
 	}
 }
+
+// TestAdminAccountsDistinguishesPendingInvite: an unanswered invitation is not
+// membership. The admin page showed "shares X" for a person who had only been
+// invited (and counted them under the owner's Shared column), which read as the
+// invite flow having worked when it had not.
+func TestAdminAccountsDistinguishesPendingInvite(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner, invitee = "owner@example.com", "invitee@example.com"
+	if err := s.RecordConsent(ctx, owner, "1", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordConsent(ctx, invitee, "1", "h"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMemberCapped(ctx, owner, invitee, 2); err != nil {
+		t.Fatal(err)
+	}
+	find := func(email string) AdminAccount {
+		accts, err := s.AdminAccounts(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range accts {
+			if a.Owner == email {
+				return a
+			}
+		}
+		t.Fatalf("%s not in admin accounts", email)
+		return AdminAccount{}
+	}
+	if a := find(invitee); a.MemberOf != "" || a.InvitedBy != owner {
+		t.Fatalf("pending invite: MemberOf=%q InvitedBy=%q, want \"\" / %s", a.MemberOf, a.InvitedBy, owner)
+	}
+	if a := find(owner); a.MemberCount != 0 {
+		t.Fatalf("pending invite counted as a member: MemberCount=%d", a.MemberCount)
+	}
+	if err := s.AcceptInvite(ctx, invitee, owner); err != nil {
+		t.Fatal(err)
+	}
+	if a := find(invitee); a.MemberOf != owner || a.InvitedBy != "" {
+		t.Fatalf("after accept: MemberOf=%q InvitedBy=%q, want %s / \"\"", a.MemberOf, a.InvitedBy, owner)
+	}
+	if a := find(owner); a.MemberCount != 1 {
+		t.Fatalf("after accept: MemberCount=%d, want 1", a.MemberCount)
+	}
+}

@@ -321,7 +321,8 @@ type AdminAccount struct {
 	NtfyTopic       string
 	ConsentVersion  string
 	PermitCount     int
-	MemberCount     int
+	MemberCount     int      // accepted secondaries only; a pending invite is not access
+	InvitedBy       string   // owner of an unanswered invitation to this person ("" = none)
 	Plates          []string // active plate on each managed permit
 	LastApplyAt     time.Time
 	LastApplyStatus string // status of the most recent apply_log row for the account
@@ -335,12 +336,13 @@ type AdminAccount struct {
 func (s *Store) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT o.owner,
-  COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner LIMIT 1), ''),
+  COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner AND invite_pending = 0 LIMIT 1), ''),
+  COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner AND invite_pending = 1 LIMIT 1), ''),
   COALESCE(cs.cookie_sealed, ''), COALESCE(cs.linked_at, ''), COALESCE(cs.last_active_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
   COALESCE(np.email_enabled, 1), COALESCE(np.ntfy_enabled, 0), COALESCE(np.ntfy_topic, ''),
   COALESCE((SELECT version FROM consent c WHERE c.owner = o.owner ORDER BY id DESC LIMIT 1), ''),
   (SELECT COUNT(*) FROM permit p WHERE p.owner = o.owner),
-  (SELECT COUNT(*) FROM account_member m WHERE m.owner = o.owner),
+  (SELECT COUNT(*) FROM account_member m WHERE m.owner = o.owner AND m.invite_pending = 0),
   COALESCE((SELECT al.status FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), ''),
   COALESCE((SELECT al.at     FROM apply_log al JOIN permit p ON p.id = al.permit_id WHERE p.owner = o.owner ORDER BY al.id DESC LIMIT 1), ''),
   (SELECT COALESCE(MAX(fail_streak), 0) FROM permit p WHERE p.owner = o.owner)
@@ -365,7 +367,7 @@ ORDER BY o.owner`)
 		var a AdminAccount
 		var cookie, linked, active, warmed, expiry, lastAt string
 		var emailEn, ntfyEn int
-		if err := rows.Scan(&a.Owner, &a.MemberOf, &cookie, &linked, &active, &warmed, &expiry,
+		if err := rows.Scan(&a.Owner, &a.MemberOf, &a.InvitedBy, &cookie, &linked, &active, &warmed, &expiry,
 			&emailEn, &ntfyEn, &a.NtfyTopic, &a.ConsentVersion, &a.PermitCount, &a.MemberCount,
 			&a.LastApplyStatus, &lastAt, &a.MaxFailStreak); err != nil {
 			return nil, err

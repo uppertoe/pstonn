@@ -95,7 +95,8 @@ type suppressionRow struct {
 
 type adminRow struct {
 	Email        string
-	MemberOf     string // shares another account
+	MemberOf     string // shares another account (accepted)
+	InvitedBy    string // has an unanswered invitation to another account
 	Status       string // ok | stale | relink | unlinked
 	StatusLabel  string
 	Warmed       string // relative time of last keep-warm
@@ -156,7 +157,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 
 	for _, a := range accounts {
 		row := adminRow{
-			Email: a.Owner, MemberOf: a.MemberOf, EmailOn: a.EmailEnabled,
+			Email: a.Owner, MemberOf: a.MemberOf, InvitedBy: a.InvitedBy, EmailOn: a.EmailEnabled,
 			Consent: a.ConsentVersion, Permits: a.PermitCount, Members: a.MemberCount,
 			Plates: strings.Join(a.Plates, ", "),
 		}

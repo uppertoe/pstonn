@@ -22,7 +22,7 @@
       <tbody>
       {{range .Admin.Rows}}
       <tr>
-        <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{end}}</td>
+        <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{else if .InvitedBy}}<div class="adm-sub">invited by {{.InvitedBy}} &mdash; not yet accepted</div>{{end}}</td>
         <td data-label="Council"><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
         <td data-label="Last warm">{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
         <td data-label="Re-link by">{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
