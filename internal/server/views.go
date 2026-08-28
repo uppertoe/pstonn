@@ -117,7 +117,8 @@ type dashboardData struct {
 	Notify        notifyView // settings: notification channels
 	Terms         termsView  // terms state + settings display
 	// picker state
-	Pick []pickView
+	HasManaged bool // the account already manages a permit: the picker is "manage another", so it can offer a way back
+	Pick       []pickView
 	// HasPermits distinguishes the two empty-picker cases: the council account
 	// holds permits but none is schedulable (so explain why), versus it holds no
 	// permits at all (so explain that one must be applied for with the council).

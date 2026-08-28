@@ -163,6 +163,11 @@
 <main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+  {{/* Reached from "Manage another permit": the appbar has no nav on this page,
+       so without this the only way back to the schedule was the browser. Not
+       shown to a first-timer with nothing managed — /schedule renders this very
+       page for them, and the link would be a loop. */}}
+  {{if .HasManaged}}<a class="link-quiet" href="/schedule" style="margin-bottom:10px;display:inline-flex">&larr; Back to schedule</a>{{end}}
   <section class="card">
     <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to manage</div>
     <p class="subtitle">Pick the permit whose plate you want to schedule. This is usually your visitor permit.</p>

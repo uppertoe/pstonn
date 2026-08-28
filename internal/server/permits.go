@@ -106,6 +106,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		base.PermitsUnknown = true
 	}
 	base.HasPermits = len(permits) > 0
+	base.HasManaged = len(managed) > 0
 	already := map[string]bool{}
 	for _, p := range managed {
 		already[p.CouncilPermitID] = true
