@@ -322,6 +322,12 @@ type permitView struct {
 	Detail      string // council identifier line: "VPP24714 · 1st Visitor Permit"
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool // no weekly rules yet — a fresh permit
+	// Notice is the outcome of an action the viewer just took on this permit
+	// (a schedule copy), rendered at the top of the card fragment. The household
+	// change notice deliberately skips the actor, so without this the person who
+	// ran the copy was the only one never told what moved — or that their old
+	// door poster had just stopped working.
+	Notice string
 	// CopyPitch leads with the "renewed this permit?" copy card (open form, note).
 	// False renders the quiet copy button instead. Only meaningful when CopyFrom
 	// is non-empty; shown once per added permit until dismissed, copied, or a

@@ -166,6 +166,7 @@ type guestRecipientView struct {
 type permitOpt struct {
 	ID    int64
 	Label string
+	Dead  bool // no longer active at the council; copying FROM it moves its guest passes
 }
 
 // guestLinkView is a freshly-minted link shown once, right after grant creation

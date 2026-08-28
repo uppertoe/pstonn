@@ -31,7 +31,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Permit added. Pick a car for each day of the week below, or make a one-off booking."
 	case "expired":
 		base.Warn = "That permit was added, but it is no longer active at the council, so nothing will be applied to it. " +
-			"It's under “Expired permits” below — renew it on the council's ePermits site, then copy its schedule onto the new permit when it appears here."
+			"It's under “Permits no longer active” below — renew it on the council's ePermits site, then copy its schedule onto the new permit when it appears here."
 	}
 	ctx := r.Context()
 	owner := base.Owner
@@ -426,10 +426,11 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			if label == "" {
 				label = "Permit " + sp.CouncilPermitID
 			}
-			if sp.Inactive(now, loc) {
-				label += " (expired)"
+			dead := sp.Inactive(now, loc)
+			if dead {
+				label += " (no longer active)"
 			}
-			pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label})
+			pv.CopyFrom = append(pv.CopyFrom, permitOpt{ID: sp.ID, Label: label, Dead: dead})
 		}
 	}
 	return pv, nil
@@ -821,6 +822,12 @@ func (pv *permitView) armPlatePoll(attempt int) {
 }
 
 func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner string, p model.Permit) {
+	s.respondPermitNotice(w, r, owner, p, "")
+}
+
+// respondPermitNotice is respondPermit with an outcome line at the top of the
+// card, for the person whose action just changed this permit.
+func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice string) {
 	if r.Header.Get("HX-Request") == "" {
 		redirectHome(w, r)
 		return
@@ -843,6 +850,7 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 	// while still preventing a council outage from looping forever.
 	attempt, _ := strconv.Atoi(r.URL.Query().Get("n"))
 	pv.armPlatePoll(attempt)
+	pv.Notice = notice
 	_, _, pv.IsPrimary = s.resolveAccount(ctx)
 	// The colour key lives ABOVE the permit cards, outside this fragment's target,
 	// so a roster change would otherwise leave it stale until the next full load —

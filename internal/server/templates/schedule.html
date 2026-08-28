@@ -60,15 +60,15 @@
 
   {{if .ExpiredPermits}}
   <section class="card expired-permits">
-    <h2 class="exp-h2">{{template "ic-clock"}} Expired permits</h2>
-    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and their guest passes and QR codes are paused. Renewed one? <a href="/permits/new">Add the new permit</a>, then pick the expired one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links people saved keep working.</p>
+    <h2 class="exp-h2">{{template "ic-clock"}} Permits no longer active</h2>
+    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and their guest passes and QR codes are paused. Renewed one? <a href="/permits/new">Add the new permit</a>, then pick the old one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links that people have saved keep working.</p>
     <ul class="explist">
       {{range .ExpiredPermits}}
       <li class="exprow">
         <div class="expmain"><span class="expname">{{.Label}}</span><span class="expstatus">{{.StatusText}}{{if .Detail}} · {{.Detail}}{{end}}</span></div>
         {{if $.IsPrimary}}
         <form method="post" action="/permits/{{.ID}}/delete"
-              data-confirm="Remove this expired permit and its saved schedule? Copy it onto your new permit first if you still need it." data-confirm-ok="Remove">
+              data-confirm="Remove this permit, its saved schedule and its guest passes? Copy it onto your new permit first if you still need them." data-confirm-ok="Remove">
           <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
         </form>
         {{end}}
@@ -131,6 +131,7 @@
 
 {{/* =================== PERMIT BODY (swappable) =================== */}}
 {{define "permit-body"}}
+{{if .Notice}}<div class="banner ok" style="margin-bottom:12px">{{template "ic-check"}} <span>{{.Notice}}</span></div>{{end}}
 <div class="permit-head">
   <div class="pname" x-data="{rename:false}">
     {{/* Only the TITLE line swaps between the name and the rename form; the
@@ -227,19 +228,22 @@
 <div class="copysched{{if .CopyPitch}} lead{{end}}" x-data="{open:{{if .CopyPitch}}true{{else}}false{{end}}}">
   {{if .CopyPitch}}
   <div class="cs-head">
-    <p class="cs-note">{{template "ic-copy"}} Renewed this permit? Copy your weekly roster and upcoming bookings across from an existing permit.</p>
+    <p class="cs-note">{{template "ic-copy"}} Renewed this permit? Copy the roster, upcoming bookings, guest passes and printed QR across from the old one &mdash; links that people have saved keep working.</p>
     <button type="button" class="ghost icon sm" title="Dismiss" aria-label="Dismiss"
             hx-post="/permits/{{.Permit.ID}}/copy-offer/dismiss" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML">{{template "ic-x"}}</button>
   </div>
   {{else}}
   <button type="button" class="ghost sm" @click="open=!open">{{template "ic-copy"}} Copy schedule from another permit</button>
   {{end}}
+  {{/* Always confirmed, and the message says what THIS copy does: from a permit
+       that is no longer active the guest passes and QR codes move across too
+       (the option carries data-dead), so the person is told before, not after. */}}
   <form x-show="open" x-cloak class="cs-form" hx-post="/permits/{{.Permit.ID}}/copy-schedule" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
-        {{if not .RosterEmpty}}@submit="if(!confirm('Copy that schedule here? It replaces this permit\'s weekly roster and upcoming bookings.')) $event.preventDefault()"{{end}}>
+        @submit="var o = $event.target.source.selectedOptions[0]; var m = 'Copy from ' + o.text + '? This replaces this permit\'s weekly roster and upcoming bookings.'; if (o.dataset.dead) m += ' Guest passes and QR codes move across; links that people have saved keep working.'; if(!confirm(m)) $event.preventDefault()">
     <label class="fld">Copy from
       <select name="source" required>
         <option value="" disabled selected>Choose a permit…</option>
-        {{range .CopyFrom}}<option value="{{.ID}}">{{.Label}}</option>{{end}}
+        {{range .CopyFrom}}<option value="{{.ID}}"{{if .Dead}} data-dead="1"{{end}}>{{.Label}}</option>{{end}}
       </select>
     </label>
     <button type="submit" class="sm">{{template "ic-copy"}} Copy schedule</button>

@@ -180,6 +180,15 @@ func TestTemplatesRender(t *testing.T) {
 		{"picker with only dead permits says so", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
 			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Cancelled"},
 		}}, "All your permits are managed or no longer active."},
+		// The copy outcome is shown to the person who ran it, on the card itself.
+		{"permit card shows a copy outcome", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits: []permitView{func() permitView {
+				pv := samplePermitView(loc)
+				pv.Notice = "Schedule copied. Guest passes and QR codes moved across with it — links that people have saved keep working."
+				return pv
+			}()},
+		}, "links that people have saved keep working"},
 		{"app-contact-link", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, Contact: true,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:  []permitView{samplePermitView(loc)},

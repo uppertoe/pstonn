@@ -562,10 +562,10 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := user + " copied another permit's schedule onto \"" + label + "\". That replaced its weekly roster and any upcoming one-off bookings."
 	if moved > 0 {
-		msg += " Guest passes and QR codes moved across with it — links people saved keep working."
+		msg += " Guest passes and QR codes moved across with it — links that people have saved keep working."
 	}
 	if n == 0 {
-		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links people saved keep working."
+		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links that people have saved keep working."
 	}
 	if stranded {
 		msg += " The old permit's printed door QR wasn't moved (this permit already has its own) — that old poster no longer works, so take it down."
@@ -573,6 +573,19 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 		msg += " Printed posters keep working too."
 	}
 	s.notifyDestructive(r.Context(), owner, user, msg)
+	// The same facts for the person who did it, in their own frame: the change
+	// notice above goes to everyone else on the account.
+	notice := "Schedule copied. This permit's weekly roster and upcoming bookings were replaced."
+	if n == 0 {
+		notice = "Guest passes and QR codes moved onto this permit — links that people have saved keep working."
+	} else if moved > 0 {
+		notice += " Guest passes and QR codes moved across with it — links that people have saved keep working."
+	}
+	if stranded {
+		notice += " The old permit's printed door QR wasn't moved (this permit already has its own) — that old poster no longer works, so take it down."
+	} else if moved > 0 {
+		notice += " Printed posters keep working too."
+	}
 	s.sched.KickPermit(dst.ID)
 	// Running a copy answers the "renewed this permit?" pitch for good — matters
 	// even in the moved-passes-only case (n == 0), where the roster stays empty
@@ -583,7 +596,7 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 			dst.CopyOfferDone = true
 		}
 	}
-	s.respondPermit(w, r, owner, dst)
+	s.respondPermitNotice(w, r, owner, dst, notice)
 }
 
 // clearPermit takes the vehicle OFF a permit, leaving it with no plate — the one
