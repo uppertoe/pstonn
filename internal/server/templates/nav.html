@@ -33,6 +33,10 @@
       <div class="menu" x-show="open" x-cloak>
         <div class="menu-email">{{.User.Email}}</div>
         {{if .Contact}}<a href="/contact" class="menu-item">{{template "ic-mail"}} Contact</a>{{end}}
+        {{/* Same delegated handler as the guest page's share button (layout head
+             script): the share sheet with a blurb and the LANDING URL, so what
+             gets passed on is the front door rather than a copied /schedule. */}}
+        <button type="button" class="menu-item" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
         {{if .User.IsAdmin}}<a href="/admin" class="menu-item">{{template "ic-gear"}} Admin</a>{{end}}
         {{if .LogoutURL}}<a href="{{.LogoutURL}}" class="menu-item">{{template "ic-logout"}} Sign out</a>
         {{else}}<span class="menu-note">Session handled by your login provider</span>{{end}}
