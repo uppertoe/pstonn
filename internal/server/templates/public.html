@@ -296,6 +296,25 @@
     </div>
     {{end}}
     <p class="faq-more">More detail on what is stored and how it is protected is on the <a href="/security" hx-boost="false">Security &amp; data</a> page.</p>
+    <h2 class="about-h2" style="margin-top:28px">Guides</h2>
+    <ul class="guide-list">
+      <li><a href="/guide/change-car-on-visitor-permit" hx-boost="false">How do I change the car on my Stonnington visitor permit?</a></li>
+      <li><a href="/guide/visitor-parking-cleaner-nanny-carer" hx-boost="false">Visitor parking for a cleaner, nanny or carer in Stonnington</a></li>
+      <li><a href="/guide/paper-visitor-permits" hx-boost="false">Do visitors need a paper permit in Stonnington?</a></li>
+    </ul>
+  </section>
+</main>
+{{end}}
+
+{{define "page-guide"}}
+{{/* ================= PUBLIC GUIDE: one question, answered ================= */}}
+{{template "publicheader" .}}
+<main id="main" tabindex="-1" class="landing about">
+  <section class="paper">
+    <h1 class="about-h1">{{.Guide.H1}}</h1>
+    {{range .Guide.Paras}}<p>{{.}}</p>{{end}}
+    <p style="margin-top:22px"><a href="/schedule" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
+    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. See <a href="/how" hx-boost="false">how it works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
   </section>
 </main>
 {{end}}

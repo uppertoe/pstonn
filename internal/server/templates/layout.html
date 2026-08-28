@@ -351,6 +351,7 @@ window.popClamp = window.popClamp || function (el) {
 {{- else if eq .State "doorqr"}}{{template "page-doorqr" .}}
 {{- else if eq .State "share"}}{{template "page-share" .}}
 {{- else if eq .State "share-card"}}{{template "page-share-card" .}}
+{{- else if eq .State "guide"}}{{template "page-guide" .}}
 {{- else if eq .State "admin"}}{{template "page-admin" .}}
 {{- else}}{{template "page-app" .}}
 {{- end}}

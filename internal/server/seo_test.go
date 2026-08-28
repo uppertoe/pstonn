@@ -105,3 +105,24 @@ func TestRobotsAndSitemap(t *testing.T) {
 		t.Errorf("sitemap Content-Type = %q, want application/xml", ct)
 	}
 }
+
+// Every guide has a slug, a question title, and body text; its structured data is
+// a one-question FAQPage naming that question.
+func TestGuides(t *testing.T) {
+	seen := map[string]bool{}
+	for _, g := range guides {
+		if g.Slug == "" || g.Title == "" || g.H1 == "" || len(g.Paras) == 0 || seen[g.Slug] {
+			t.Fatalf("guide %+v incomplete or duplicate slug", g.Slug)
+		}
+		seen[g.Slug] = true
+		if ld := string(guideJSONLD(&g)); !strings.Contains(ld, `"@type":"FAQPage"`) || !strings.Contains(ld, g.H1) {
+			t.Fatalf("guide %s JSON-LD wrong: %s", g.Slug, ld)
+		}
+		if guideBySlug(g.Slug) == nil {
+			t.Fatalf("guide %s not found by slug", g.Slug)
+		}
+	}
+	if guideBySlug("nope") != nil {
+		t.Fatal("unknown slug should be nil")
+	}
+}

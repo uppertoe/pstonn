@@ -189,6 +189,7 @@ func TestTemplatesRender(t *testing.T) {
 				return pv
 			}()},
 		}, "links that people have saved keep working"},
+		{"guide page", dashboardData{State: "guide", Guide: &guides[0], Loc: loc}, "How do I change the car on my Stonnington visitor permit?"},
 		{"share page", dashboardData{User: user, State: "share", Loc: loc, ShareEmailAvailable: true}, `action="/share/invite"`},
 		{"share page without mail hides the form", dashboardData{User: user, State: "share", Loc: loc}, "Open the printable card"},
 		{"share card", dashboardData{User: user, State: "share-card", Loc: loc, ShareQR: "data:image/png;base64,AAAA", ShareURL: "p.stonn.org"}, `alt="QR code to p.stonn.org"`},

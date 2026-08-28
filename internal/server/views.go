@@ -45,6 +45,7 @@ type dashboardData struct {
 	CanonicalPath string
 	JSONLD        template.JS // JSON-LD structured data for this page, or ""
 	FAQ           []faqItem   // only the FAQ page fills this
+	Guide         *guidePage  // a /guide/<slug> page: its own title, description, canonical and FAQ structured data
 	LogoutURL     string      // sign-out link (app OIDC or forward-auth provider); "" hides it
 	SignedIn      bool        // landing: whether the visitor already has an identity
 	Contact       bool        // whether the public contact link/form is available
@@ -543,6 +544,10 @@ func (s *Server) renderBuf(w http.ResponseWriter, data dashboardData) (*bytes.Bu
 	data.BaseURL = s.cfg.PublicBaseURL
 	data.Title, data.Description, data.CanonicalPath = seoFor(data.State)
 	data.JSONLD = jsonLDFor(data.State, data.BaseURL)
+	if data.Guide != nil {
+		data.Title, data.Description, data.CanonicalPath = data.Guide.Title, data.Guide.Desc, "/guide/"+data.Guide.Slug
+		data.JSONLD = guideJSONLD(data.Guide)
+	}
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, "dashboard", data); err != nil {
 		return nil, err

@@ -198,8 +198,89 @@ func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
 	for _, p := range []string{"/", "/how", "/security", "/contact", "/faq"} {
 		fmt.Fprintf(&b, "  <url><loc>%s%s</loc></url>\n", base, p)
 	}
+	for _, g := range guides {
+		fmt.Fprintf(&b, "  <url><loc>%s/guide/%s</loc></url>\n", base, g.Slug)
+	}
 	b.WriteString("</urlset>\n")
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// guidePage is one question-shaped public page: the title is the question a
+// resident types into a search box, the body answers it plainly, and the tool
+// comes last. Plain-text paragraphs feed both the page and its structured data.
+type guidePage struct {
+	Slug  string // /guide/<slug>
+	Title string // <title> and og:title
+	Desc  string // meta description
+	H1    string // the question, as the page heading
+	Paras []string
+}
+
+var guides = []guidePage{
+	{
+		Slug:  "change-car-on-visitor-permit",
+		Title: "How do I change the car on my Stonnington visitor permit? — p.stonn",
+		Desc:  "Changing the vehicle on a City of Stonnington visitor parking permit: how it works on the council's ePermits site, and how to stop doing it by hand.",
+		H1:    "How do I change the car on my Stonnington visitor permit?",
+		Paras: []string{
+			"On the council's ePermits site: sign in, open the visitor permit, edit the vehicle, save. Every visitor means doing that again, and it has to be done before they park.",
+			"If the same people visit on the same days — a cleaner, a nanny, grandparents — p.stonn does it for you: set a weekly roster once and the plate changes itself; for one-offs, book it in a few taps; or give regular visitors a link so they put their own car on when they arrive. Free for Stonnington residents.",
+		},
+	},
+	{
+		Slug:  "visitor-parking-cleaner-nanny-carer",
+		Title: "Visitor parking for a cleaner, nanny or carer in Stonnington — p.stonn",
+		Desc:  "A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.",
+		H1:    "Visitor parking for a cleaner, nanny or carer in Stonnington",
+		Paras: []string{
+			"A visitor permit covers one car at a time, and the council site needs the plate changed by hand for each visit. For someone who comes every week that's the same job every week.",
+			"p.stonn lets you set their day on a roster — the permit switches to their car that morning and back afterwards — or send them a link so they put their car on themselves when they pull up. Nothing to print, nothing for them to sign up to.",
+		},
+	},
+	{
+		Slug:  "paper-visitor-permits",
+		Title: "Do visitors need a paper permit in Stonnington? — p.stonn",
+		Desc:  "City of Stonnington visitor parking permits are digital: nothing to display, but the number plate has to be entered before each visitor parks. What that means in practice.",
+		H1:    "Do visitors need a paper permit in Stonnington?",
+		Paras: []string{
+			"No — since the move to ePermits there's nothing to display. The permit is tied to the number plate you enter on the council site, which means the plate has to be changed before each visitor parks.",
+			"p.stonn takes over that step: a weekly roster for regulars, one-off bookings for everyone else, and a link or QR your visitors can use themselves.",
+		},
+	},
+}
+
+func guideBySlug(slug string) *guidePage {
+	for i := range guides {
+		if guides[i].Slug == slug {
+			return &guides[i]
+		}
+	}
+	return nil
+}
+
+// guide serves one public question page.
+func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
+	g := guideBySlug(r.PathValue("slug"))
+	if g == nil {
+		http.NotFound(w, r)
+		return
+	}
+	_, signedIn := identity.FromContext(r.Context())
+	s.render(w, dashboardData{State: "guide", Guide: g, SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+}
+
+// guideJSONLD is a one-question FAQPage: the page IS the answer to its title.
+func guideJSONLD(g *guidePage) template.JS {
+	v := map[string]any{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": []map[string]any{{
+		"@type":          "Question",
+		"name":           g.H1,
+		"acceptedAnswer": map[string]any{"@type": "Answer", "text": strings.Join(g.Paras, " ")},
+	}}}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return template.JS(b)
 }

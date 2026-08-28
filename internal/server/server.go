@@ -295,6 +295,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /security", s.security)             // public
 	mux.HandleFunc("GET /how", s.how)                       // public
 	mux.HandleFunc("GET /faq", s.faq)                       // public
+	mux.HandleFunc("GET /guide/{slug}", s.guide)            // public question pages
 	mux.HandleFunc("GET /robots.txt", s.robotsTxt)          // public (SEO)
 	mux.HandleFunc("GET /sitemap.xml", s.sitemapXML)        // public (SEO)
 	mux.HandleFunc("GET /favicon.ico", s.faviconICO)        // public
