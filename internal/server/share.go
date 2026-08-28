@@ -1,6 +1,7 @@
 package server
 
 import (
+	"html/template"
 	"log"
 	"net/http"
 	"strings"
@@ -50,7 +51,7 @@ func (s *Server) shareCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := dashboardData{User: u, State: "share-card", OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation}
-	base.ShareQR = img
+	base.ShareQR = template.URL(img)
 	base.ShareURL = strings.TrimPrefix(url, "https://")
 	s.render(w, base)
 }

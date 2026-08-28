@@ -42,12 +42,15 @@
       <button type="button" data-print>{{template "ic-qr"}} Print</button>
     </div>
   </div>
-  <div class="poster">
-    <div class="poster-brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+  <article class="poster">
+    <div class="poster-band">
+      <span class="poster-brand"><span class="poster-mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></span>
+      <span class="poster-kicker">Visitor parking</span>
+    </div>
     <p class="poster-lead">Your Stonnington visitor parking permit, on a schedule.</p>
     <img class="poster-qr" src="{{.ShareQR}}" alt="QR code to {{.ShareURL}}" width="240" height="240">
     <p class="poster-url">{{.ShareURL}}</p>
     <p class="poster-note">A weekly roster for regulars, one-off bookings for everyone else, and a link or QR code your visitors can use themselves. Free for City of Stonnington residents.</p>
-  </div>
+  </article>
 </main>
 {{end}}
