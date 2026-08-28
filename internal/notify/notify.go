@@ -530,6 +530,20 @@ func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, o ApplyOutcom
 	return s.quietDefer(pref, now)
 }
 
+// firstApplyLine is the once-ever referral ask, appended to the confirmation of
+// the household's FIRST successful council write: the moment the product has just
+// proven itself. RecordApply runs before notification, so a count of exactly one
+// means this outcome is that first success. Any store error means no line.
+func (s *Service) firstApplyLine(ctx context.Context, o ApplyOutcome) string {
+	if !o.OK || s.store == nil {
+		return ""
+	}
+	if n, err := s.store.CountSuccessfulApplies(ctx, o.Owner); err != nil || n != 1 {
+		return ""
+	}
+	return "\n\nKnow another Stonnington household with a visitor permit? Send them p.stonn.org."
+}
+
 // composeApply builds the subject/body/priority/tags for an apply notification,
 // shared by the inline NotifyApply (scheduler) and the durable EnqueueApply.
 func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
@@ -655,6 +669,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
+	body += s.firstApplyLine(ctx, o)
 	now := time.Now()
 	for _, d := range dels {
 		if o.OK && d.pref.FailuresOnly {
@@ -699,6 +714,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if s.appURL != "" {
 		emailBody += "\n\n" + s.appURL
 	}
+	emailBody += s.firstApplyLine(ctx, o)
 	var errs []string
 	due := 0 // members with at least one channel that should have received this
 	now := time.Now()
@@ -842,6 +858,8 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 		ownerEmail + " has given you shared access to their p.stonn account, which schedules a City of Stonnington visitor parking permit.",
 		"",
 		"Sign in with this email address — you will get a one-time code to confirm it is you — then tap Accept on the page you land on.",
+		"",
+		"Already using p.stonn with your own permits? The invitation is under Settings. You can't join another account while you keep your own.",
 	}
 	if s.appURL != "" {
 		lines = append(lines, "", s.appURL)
@@ -942,6 +960,8 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 		"Tip: bookmark this link or add it to your phone's home screen — then next time you can open it in one tap, without hunting for this email. The same link works every time.",
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
+		"",
+		"Got a visitor permit of your own? p.stonn is free for City of Stonnington residents — p.stonn.org",
 	}
 	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonGuest)
 }

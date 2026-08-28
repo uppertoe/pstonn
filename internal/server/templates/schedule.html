@@ -89,6 +89,19 @@
             @click="hide=true; localStorage.setItem('pstonn-share-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
+  {{if .ShowInstallHint}}
+  {{/* Hidden when already running from the home screen (display-mode: standalone,
+       or iOS's navigator.standalone), and dismissed per browser like the share
+       hint. The wording follows the platform's own menu names. */}}
+  <p class="share-hint" x-data="{hide: localStorage.getItem('pstonn-install-hint')==='1' || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+                                  ios: /iPhone|iPad|iPod/.test(navigator.userAgent)}" x-show="!hide" x-cloak>
+    {{template "ic-ticket"}}
+    <span x-show="ios">Tip: add p.stonn to your home screen for one-tap access &mdash; <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>
+    <span x-show="!ios">Tip: add p.stonn to your home screen for one-tap access &mdash; the browser menu, then <strong>Add to Home screen</strong> (or <strong>Install app</strong>).</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-install-hint','1')">{{template "ic-x"}}</button>
+  </p>
+  {{end}}
   {{if .Permits}}
   {{if gt (len .Permits) 1}}
   {{/* More than one permit: the FAB can't know which one the booking is for, so

@@ -773,3 +773,14 @@ func (s *Store) HasOwnData(ctx context.Context, email string) (bool, error) {
 		email, email, email).Scan(&has)
 	return has == 1, err
 }
+
+// CountSuccessfulApplies is how many council writes p.stonn has completed for
+// this owner's permits, ever. 1 means the one that just happened was the first —
+// the moment the referral line and the home-screen tip are keyed to.
+func (s *Store) CountSuccessfulApplies(ctx context.Context, owner string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM apply_log a JOIN permit p ON p.id = a.permit_id
+WHERE p.owner = ? AND a.status = 'success'`, owner).Scan(&n)
+	return n, err
+}

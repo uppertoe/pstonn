@@ -148,7 +148,7 @@ func TestTemplatesRender(t *testing.T) {
 		// the advice must appear BEFORE the field defeats them, and only there —
 		// in a real browser it would be wrong and worrying.
 		{"onboarding warns inside the Facebook webview", dashboardData{User: user, State: "onboarding", IsPrimary: true, InAppBrowser: true, Loc: loc},
-			"In the Facebook or Instagram app right now?"},
+			"In the Facebook, Instagram or Google app right now?"},
 		// The terms page names the NEXT step's prerequisite (the ePermits
 		// password) while there is still time to fix it — first acceptance only:
 		// a re-accept returns to a working app, and a secondary links nothing.
@@ -237,6 +237,15 @@ func TestTemplatesRender(t *testing.T) {
 		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
 			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}}, "nanny@example.com"},
 		{"settings-secondary", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Leave this account"},
+		// An invitee who already runs their own permits gets the blocked variant: the
+		// rule stated, Decline offered, and NO Accept form that could only fail.
+		{"settings-invite-blocked-own", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com", Blocked: "own"}}, "can&rsquo;t also join another account"},
+		{"settings-invite-blocked-shared", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com", Blocked: "shared"}}, "Remove them first, or decline the invitation"},
+		{"schedule install hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, ShowInstallHint: true,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitView(loc)}}, "Add to Home Screen"},
 		{"guests-page", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
 			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
 			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},

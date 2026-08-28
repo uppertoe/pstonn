@@ -83,7 +83,7 @@
          entirely through this webview, and a third never attempted the form.
          Plain text URL, not a link: a tap would open it in the SAME webview. */}}
     <p class="empty-note" style="margin-top:2px">
-      <strong>In the Facebook or Instagram app right now?</strong> Its built-in browser can&rsquo;t auto-fill saved passwords.
+      <strong>In the Facebook, Instagram or Google app right now?</strong> Its built-in browser can&rsquo;t auto-fill saved passwords.
       If yours lives in a password manager, open <strong>p.stonn.org</strong> in Safari or Chrome and link from there &mdash; everything here will be waiting.
     </p>
     {{end}}
@@ -254,13 +254,21 @@
      checks it), so a stale page cannot enrol someone somewhere they never saw. */}}
 <section class="card" style="--hue:var(--sec-settings)">
   <h2><span class="ic">{{template "ic-user"}}</span> An invitation for you</h2>
+  {{if eq .Invite.Blocked "own"}}
+  <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. You already manage your own permits here, so you can&rsquo;t also join another account. Decline the invitation, or remove your own account first if you would rather share theirs.</p>
+  {{else if eq .Invite.Blocked "shared"}}
+  <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. You share your own account with someone else, so you can&rsquo;t also join another. Remove them first, or decline the invitation.</p>
+  {{else}}
   <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. Nothing is shared until you accept, and you can decline without anything happening.</p>
   <p class="empty-note" style="margin-top:12px">If you accept, you will see and manage their permits, vehicles and schedule instead of your own, and they will see what you change. You will not be able to connect your own council account while you share theirs. You can leave at any time.</p>
+  {{end}}
   <div class="row" style="margin-top:14px;gap:8px">
+    {{if not .Invite.Blocked}}
     <form method="post" action="/account/invite/accept" data-confirm="Share {{.Invite.Owner}}'s account? You'll manage their permits instead of your own." data-confirm-ok="Accept">
       <input type="hidden" name="owner" value="{{.Invite.Owner}}">
       <button type="submit">{{template "ic-check"}} Accept</button>
     </form>
+    {{end}}
     <form method="post" action="/account/invite/decline">
       <button type="submit" class="ghost">{{template "ic-x"}} Decline</button>
     </form>

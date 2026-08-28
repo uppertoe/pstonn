@@ -89,6 +89,11 @@ type dashboardData struct {
 	// server-gated here and dismissed per-browser in the template (localStorage),
 	// because seeing it once more on a new device is harmless.
 	ShowShareHint bool
+	// ShowInstallHint offers the add-to-home-screen tip on the Schedule page once
+	// the household has had a successful apply (the morning glance is the dominant
+	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
+	// template; hidden by the template when already running standalone.
+	ShowInstallHint bool
 	// GuestActive gates the page-level "add your plates first" banner: a
 	// household already using guest QRs (which need no saved cars) shouldn't be
 	// told to add plates — the roster and one-off surfaces explain their own
@@ -298,6 +303,10 @@ type memberView struct {
 // the viewer is the subject of the row rather than its owner.
 type inviteView struct {
 	Owner string // the account inviting them
+	// Blocked names why this person cannot accept right now: "own" (they manage
+	// their own permits) or "shared" (they share their own account with someone).
+	// The card then offers only Decline, instead of an Accept that can only fail.
+	Blocked string
 }
 
 type permitView struct {
@@ -633,5 +642,6 @@ func inAppBrowser(ua string) bool {
 	return strings.Contains(ua, "FBAN/") ||
 		strings.Contains(ua, "FBAV/") ||
 		strings.Contains(ua, "FB_IAB") ||
-		strings.Contains(ua, "Instagram")
+		strings.Contains(ua, "Instagram") ||
+		strings.Contains(ua, "GSA/") // the Google app's webview (a rejected signup arrived this way, 2026-08-24)
 }

@@ -30,7 +30,7 @@
 <link rel="apple-touch-icon" href="{{asset "icon-180.png"}}">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-{{if eq .State "guest"}}{{/* Make a bookmarked/installed guest link feel like an app on the home screen (PNG icons + per-recipient manifest so it opens straight to their menu). */}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/{{.Guest.Token}}">{{else}}<link rel="manifest" href="/site.webmanifest">{{end}}
+{{if eq .State "guest"}}{{/* Make a bookmarked/installed guest link feel like an app on the home screen (PNG icons + per-recipient manifest so it opens straight to their menu). */}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/{{.Guest.Token}}">{{else}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">{{end}}
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>
   // Apply the saved theme before first paint (no flash), and wire the toggle.
   (function () {

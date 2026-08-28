@@ -112,7 +112,14 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		// to a primary: they cannot accept while they run their own account, but they are
 		// entitled to know it exists and to decline it.
 		if from, ok, err := s.store.PendingInvite(ctx, base.User.Email); err == nil && ok {
-			base.Invite = &inviteView{Owner: from}
+			inv := &inviteView{Owner: from}
+			// Mirror acceptInvite's refusals so the card says so up front.
+			if n, cerr := s.store.CountMembers(ctx, base.User.Email); cerr == nil && n > 0 {
+				inv.Blocked = "shared"
+			} else if has, herr := s.store.HasOwnData(ctx, base.User.Email); herr == nil && has {
+				inv.Blocked = "own"
+			}
+			base.Invite = inv
 		}
 	} else if from, ok, err := s.store.PendingInvite(ctx, base.User.Email); err == nil && ok {
 		base.Invite = &inviteView{Owner: from}

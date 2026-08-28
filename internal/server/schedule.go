@@ -87,6 +87,13 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			base.ShowShareHint = true
 		}
 	}
+	// The home-screen tip waits for the first successful apply: the household has
+	// something worth glancing at, and the tip lands as a reward rather than a chore.
+	if len(pvs) > 0 {
+		if n, cerr := s.store.CountSuccessfulApplies(ctx, owner); cerr == nil && n > 0 {
+			base.ShowInstallHint = true
+		}
+	}
 	s.render(w, base)
 }
 

@@ -359,6 +359,7 @@
 
   .empty-note { color:var(--muted); font-size:13.5px; }
   .toggle { display:flex; align-items:center; gap:11px; font-size:14px; cursor:pointer; }
+  .toggle input[type=checkbox] { width:22px; height:22px; flex:0 0 auto; accent-color:var(--primary); }
   /* Refused-toggle feedback (e.g. unticking the last notification channel). */
   @keyframes shake { 20%,60% { translate:-4px 0; } 40%,80% { translate:4px 0; } }
   .toggle.shake { animation:shake .35s ease; }
