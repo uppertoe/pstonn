@@ -490,6 +490,14 @@
   .share-opts { display:grid; grid-template-columns:1fr; gap:12px; }
   @media (min-width:760px) { .share-opts { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
   .share-opts .qropt-txt .empty-note { font-size:13px; }
+  /* the action sits at the foot of every card, whatever sits above it */
+  .share-opts .qropt > :last-child { margin-top:auto; }
+  .share-opts .qropt > a { display:block; }
+  .share-opts .qropt form.stack { margin-top:auto; }
+  /* the action sits at the foot of every card, whatever sits above it */
+  .share-opts .qropt > :last-child { margin-top:auto; }
+  .share-opts .qropt form.stack { margin-top:auto; }
+  .share-opts .qropt > a { display:block; }
   .share-ic { width:38px; height:38px; border-radius:11px; display:grid; place-items:center; background:color-mix(in srgb, var(--hue) 14%, transparent); color:var(--hue); }
   .share-ic svg { width:20px; height:20px; }
   .share-preview { display:flex; align-items:center; gap:12px; padding:10px; background:var(--surface); border:1px solid var(--line); border-radius:10px; font-weight:650; }
@@ -527,7 +535,12 @@
   .poster-brand .dot { color:#fff; }
   .guide-list { padding-left:18px; margin:8px 0 0; display:grid; gap:8px; }
   .poster-qr { display:block; width:240px; height:240px; margin:16px auto 8px; background:#fff; border-radius:12px; padding:10px; box-sizing:content-box; }
-  .poster-url { text-align:center; font-weight:700; font-size:22px; letter-spacing:.01em; margin:4px 0 12px; color:var(--pp-ink); }
+  .poster-url { text-align:center; font-weight:700; font-size:22px; letter-spacing:.01em; margin:4px 0 14px; color:var(--pp-ink); }
+  /* the share card: one lead line, the code, the address, a short note — spaced as a card, not a poster */
+  .poster.share-poster { padding-bottom:26px; }
+  .poster.share-poster .poster-lead { margin:20px 22px 6px; }
+  .poster.share-poster .poster-qr { width:200px; height:200px; margin:10px auto 6px; }
+  .poster.share-poster .poster-note { max-width:360px; margin:0 auto; text-align:center; }
   .poster-mark { width:26px; height:26px; border-radius:7px; background:rgba(255,255,255,.28); display:grid; place-items:center; }
   .poster-mark svg { width:16px; height:16px; stroke:currentColor; }
   .poster-kicker { font-size:11px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; opacity:.85; }
