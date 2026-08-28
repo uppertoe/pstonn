@@ -61,7 +61,7 @@
   {{if .ExpiredPermits}}
   <section class="card expired-permits">
     <h2 class="exp-h2">{{template "ic-clock"}} Permits no longer active</h2>
-    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and their guest passes and QR codes are paused. Renewed one? <a href="/permits/new">Add the new permit</a>, then pick the old one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links that people have saved keep working.</p>
+    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and their guest passes and QR codes are paused. Got a new permit instead? <a href="/permits/new">Add it</a>, then pick the old one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links that people have saved keep working.</p>
     <ul class="explist">
       {{range .ExpiredPermits}}
       <li class="exprow">
@@ -241,7 +241,7 @@
 <div class="copysched{{if .CopyPitch}} lead{{end}}" x-data="{open:{{if .CopyPitch}}true{{else}}false{{end}}}">
   {{if .CopyPitch}}
   <div class="cs-head">
-    <p class="cs-note">{{template "ic-copy"}} Renewed this permit? Copy the roster, upcoming bookings, guest passes and printed QR across from the old one &mdash; links that people have saved keep working.</p>
+    <p class="cs-note">{{template "ic-copy"}} Is this a new permit replacing an old one? Copy the roster, upcoming bookings, guest passes and printed QR across from the old one &mdash; links that people have saved keep working.</p>
     <button type="button" class="ghost icon sm" title="Dismiss" aria-label="Dismiss"
             hx-post="/permits/{{.Permit.ID}}/copy-offer/dismiss" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML">{{template "ic-x"}}</button>
   </div>

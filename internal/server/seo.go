@@ -55,10 +55,6 @@ type faqItem struct{ Q, A string }
 
 var faqItems = []faqItem{
 	{
-		"How do I change the car on my Stonnington visitor parking permit?",
-		"Connect your ePermits login to p.stonn once, then set a weekly schedule of which car should be on the permit on which days. p.stonn changes the vehicle on your permit automatically as the schedule rolls over, and you can make a one-off change at any time.",
-	},
-	{
 		"Can I set up recurring visitor parking for a carer or family member?",
 		"Yes. Set a weekly roster — say a carer's car every Tuesday and Thursday — or share a permanent guest link so a trusted person can put their own car on the permit when they arrive, with no account needed on their end.",
 	},

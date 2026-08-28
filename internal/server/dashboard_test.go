@@ -209,7 +209,7 @@ func TestTemplatesRender(t *testing.T) {
 		{"schedule-only-expired", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Cancelled"}},
-		}, "Add the new permit"},
+		}, "Got a new permit instead?"},
 		{"schedule-share-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, ShowShareHint: true,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:  []permitView{samplePermitView(loc)},
@@ -362,7 +362,7 @@ func TestTemplatesRender(t *testing.T) {
 			p.CopyPitch = true
 			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
 			return p
-		}, "Renewed this permit?"},
+		}, "Is this a new permit replacing an old one?"},
 		{"copy-pitch-dismissed", func() permitView {
 			// Pitch answered (dismissed/copied/roster set): the quiet button
 			// remains even while the roster is still empty.

@@ -164,6 +164,9 @@
   {{end}}
 
   {{if .Guests}}
+  {{/* The list of passes had no heading: a card titled "Cleaner" with cars and
+       people under it did not say what it was. */}}
+  <div class="sectitle" style="--hue:var(--sec-settings);margin-top:6px"><span class="ic">{{template "ic-link"}}</span> Passes you&rsquo;ve sent</div>
   <div class="grants">
     {{range .Guests}}
     <section class="card">
