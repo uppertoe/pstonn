@@ -692,10 +692,11 @@
   .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
-  /* A tip is a contained strip, so its dismiss belongs to it: icon on the first
-     line, text, and the × centred on the strip rather than floating at the edge. */
-  .share-hint { color:var(--muted); font-size:13.5px; display:flex; align-items:center; gap:10px; margin:12px 0 0; padding:9px 8px 9px 12px; background:var(--surface-2); border:1px solid var(--line); border-radius:11px; }
-  .share-hint > svg { flex:none; width:16px; height:16px; align-self:flex-start; margin-top:3px; }
+  /* A tip is a contained strip, so its dismiss belongs to it: icon, text and ×
+     all centred on the strip. No margin of its own — the page grid's gap spaces
+     the link above and the strips evenly. */
+  .share-hint { color:var(--muted); font-size:13.5px; display:flex; align-items:center; gap:10px; margin:0; padding:9px 8px 9px 12px; background:var(--surface-2); border:1px solid var(--line); border-radius:11px; }
+  .share-hint > svg { flex:none; width:16px; height:16px; align-self:center; }
   .share-hint > span { flex:1 1 auto; }
   .share-hint a { color:inherit; text-decoration:underline; }
   .share-hint a:hover { color:var(--primary); }
