@@ -83,6 +83,9 @@ type Notifier interface {
 	SendOnboardNudge(ctx context.Context, to string) error
 	// EmailAvailable reports whether an SMTP sender is configured. The renewal
 	// reminder is email-only, so Enabled() (any channel) is the wrong gate for it.
+	// SendFortnightNudge is the once-ever tell-a-neighbour note, a fortnight after
+	// the household's first successful council write.
+	SendFortnightNudge(ctx context.Context, to string) error
 	EmailAvailable() bool
 }
 
@@ -874,6 +877,7 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 		log.Printf("scheduler: prune change log: %v", err)
 	}
 	s.sweepOnboardNudges(ctx)
+	s.sweepFortnightNudges(ctx)
 	s.maybeSnapshot(ctx)
 }
 
@@ -2953,5 +2957,38 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
 		log.Printf("scheduler: permit %s apply error: %v", p.CouncilPermitID, err)
 		return true
+	}
+}
+
+// fortnightNudgeAfter is how long after a household's first successful council
+// write the tell-a-neighbour note goes out.
+const fortnightNudgeAfter = 14 * 24 * time.Hour
+
+// sweepFortnightNudges sends the once-ever note to each household whose first
+// success is old enough. Same send-then-mark discipline as the onboarding nudge.
+func (s *Scheduler) sweepFortnightNudges(ctx context.Context) {
+	if s.notifier == nil || !s.notifier.EmailAvailable() {
+		return
+	}
+	owners, err := s.store.FortnightNudgeCandidates(ctx, time.Now().Add(-fortnightNudgeAfter))
+	if err != nil {
+		log.Printf("scheduler: fortnight nudge candidates: %v", err)
+		return
+	}
+	for _, owner := range owners {
+		err := s.notifier.SendFortnightNudge(ctx, owner)
+		if err != nil && !errors.Is(err, notify.ErrSuppressed) {
+			log.Printf("scheduler: fortnight nudge to %s: %v (will retry next sweep)", redact.Email(owner), err)
+			continue
+		}
+		if merr := s.store.MarkFortnightNudgeSent(ctx, owner); merr != nil {
+			log.Printf("scheduler: fortnight nudge to %s sent but not recorded: %v", redact.Email(owner), merr)
+			continue
+		}
+		if err != nil {
+			log.Printf("scheduler: fortnight nudge to %s skipped (suppressed address); marked done", redact.Email(owner))
+		} else {
+			log.Printf("scheduler: fortnight nudge emailed to %s", redact.Email(owner))
+		}
 	}
 }

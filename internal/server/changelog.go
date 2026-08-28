@@ -133,6 +133,8 @@ func changeText(c store.Change) string {
 		return "deleted " + named + " (any roster days and bookings using it went too)"
 	case store.ActionVehicleEmail:
 		return "changed the driver email for " + c.Target
+	case store.ActionReferralSend:
+		return "sent a p.stonn invitation to " + c.Target
 	case store.ActionVehicleClear:
 		return "removed the car from " + c.Target + ", leaving it with no vehicle"
 	case store.ActionGuestCreate:

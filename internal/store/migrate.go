@@ -416,6 +416,17 @@ CREATE TABLE IF NOT EXISTS breaker_state (
     last_pushback TEXT NOT NULL DEFAULT '',            -- RFC3339 UTC of the most recent pushback
     updated_at    TEXT NOT NULL DEFAULT ''
 );
+-- One row per referral invitation a signed-in account asked p.stonn to send:
+-- the per-account daily cap reads this, so a compromised or over-keen account
+-- cannot turn the invite form into a mailer.
+CREATE TABLE IF NOT EXISTS referral_invite (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner     TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    sent_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at);
+
 INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 `
 	if _, err := s.db.Exec(schema); err != nil {
@@ -485,6 +496,7 @@ INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 		// delivered outbox rows are purged — the only durable proof this mail was
 		// sent must live somewhere that isn't.
 		`ALTER TABLE account_flags ADD COLUMN onboard_nudge_sent TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE account_flags ADD COLUMN fortnight_nudge_sent TEXT NOT NULL DEFAULT ''`,
 		// Whether the "renewed this permit? copy your schedule" pitch has been
 		// answered (dismissed, copied, or a roster day set). DEFAULT 0 re-offers it
 		// on existing permits, which is safe: any permit with a roster already

@@ -320,6 +320,8 @@ func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permi
 	return nil
 }
 
+func (f *fakeNotifier) SendFortnightNudge(_ context.Context, to string) error { return nil }
+
 func (f *fakeNotifier) SendOnboardNudge(_ context.Context, to string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

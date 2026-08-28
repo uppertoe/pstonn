@@ -94,6 +94,10 @@ type dashboardData struct {
 	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
 	// template; hidden by the template when already running standalone.
 	ShowInstallHint bool
+	// Share page (State "share" / "share-card").
+	ShareEmailAvailable bool   // the invite form only makes sense with SMTP configured
+	ShareQR             string // data URI of the QR to the landing page, for the printable card
+	ShareURL            string // the human-readable address printed under the QR
 	// GuestActive gates the page-level "add your plates first" banner: a
 	// household already using guest QRs (which need no saved cars) shouldn't be
 	// told to add plates — the roster and one-off surfaces explain their own

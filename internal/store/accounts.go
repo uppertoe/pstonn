@@ -784,3 +784,19 @@ SELECT COUNT(*) FROM apply_log a JOIN permit p ON p.id = a.permit_id
 WHERE p.owner = ? AND a.status = 'success'`, owner).Scan(&n)
 	return n, err
 }
+
+// RecordReferralInvite notes that owner asked p.stonn to send an invitation to
+// recipient; CountReferralInvitesSince is the per-account daily cap's input.
+func (s *Store) RecordReferralInvite(ctx context.Context, owner, recipient string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO referral_invite (owner, recipient, sent_at) VALUES (?, ?, ?)`, owner, recipient, nowUTC())
+	return err
+}
+
+func (s *Store) CountReferralInvitesSince(ctx context.Context, owner string, since time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM referral_invite WHERE owner = ? AND sent_at >= ?`,
+		owner, since.UTC().Format(time.RFC3339)).Scan(&n)
+	return n, err
+}

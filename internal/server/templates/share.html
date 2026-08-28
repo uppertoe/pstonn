@@ -1,0 +1,53 @@
+{{define "page-share"}}
+{{/* ================= SHARE p.stonn (signed in) ================= */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1">
+  {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
+  {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
+  <section class="card" style="max-width:560px;margin:0 auto">
+    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-link"}}</span> Share p.stonn</div>
+    <p class="subtitle">Know someone else in Stonnington with a visitor permit? Three ways to pass it on.</p>
+
+    <p class="sub" style="margin-top:18px">Send the link</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button type="button" class="ghost sm" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
+    </div>
+    <p class="empty-note" style="margin-top:6px">Opens your phone&rsquo;s share sheet (or copies the link) so you can send it in a message.</p>
+
+    {{if .ShareEmailAvailable}}
+    <p class="sub" style="margin-top:20px">Send an invite by email</p>
+    <form method="post" action="/share/invite" class="stack" x-data="{sent:false}" @submit="if (sent) { $event.preventDefault(); return } sent = true">
+      <label class="fld">Their email
+        <input type="email" name="email" required autocomplete="off" placeholder="name@example.com">
+      </label>
+      <button type="submit" :disabled="sent">{{template "ic-mail"}} Send invitation</button>
+    </form>
+    <p class="empty-note" style="margin-top:6px">They get a short note from p.stonn saying you use it and what it does, with your email address so they know who it&rsquo;s from. Nothing else is sent to them.</p>
+    {{end}}
+
+    <p class="sub" style="margin-top:20px" id="card">Print a card</p>
+    <p class="empty-note" style="margin-top:0">A card with a QR code to p.stonn.org &mdash; handy for handing over the fence.</p>
+    <a href="/share/card" hx-boost="false" style="display:inline-block;margin-top:8px"><button type="button" class="ghost sm">{{template "ic-qr"}} Open the printable card</button></a>
+  </section>
+</main>
+{{end}}
+
+{{define "page-share-card"}}
+{{/* ============ PRINTABLE p.stonn CARD (QR to the landing page) ============ */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1" class="posterwrap">
+  <div class="posteractions noprint">
+    <a href="/share" hx-boost="false"><button type="button" class="ghost sm">&larr; Share</button></a>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button type="button" data-print>{{template "ic-qr"}} Print</button>
+    </div>
+  </div>
+  <div class="poster">
+    <div class="poster-brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    <p class="poster-lead">Your Stonnington visitor parking permit, on a schedule.</p>
+    <img class="poster-qr" src="{{.ShareQR}}" alt="QR code to {{.ShareURL}}" width="240" height="240">
+    <p class="poster-url">{{.ShareURL}}</p>
+    <p class="poster-note">A weekly roster for regulars, one-off bookings for everyone else, and a link or QR code your visitors can use themselves. Free for City of Stonnington residents.</p>
+  </div>
+</main>
+{{end}}

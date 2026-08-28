@@ -3565,3 +3565,45 @@ func TestAdminAccountsDistinguishesPendingInvite(t *testing.T) {
 		t.Fatalf("after accept: MemberCount=%d, want 1", a.MemberCount)
 	}
 }
+
+// TestFortnightNudgeCandidates: keyed to the FIRST successful apply being old
+// enough, sent once, and skipped for households with no success yet.
+func TestFortnightNudgeCandidates(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const old, fresh = "old@example.com", "fresh@example.com"
+	for _, o := range []string{old, fresh} {
+		if err := s.RecordConsent(ctx, o, "1", "h"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldP, err := s.UpsertPermit(ctx, old, "1", "14", "Old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshP, err := s.UpsertPermit(ctx, fresh, "2", "14", "Fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Backdate the old household's first success by 20 days; the fresh one is today.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO apply_log (permit_id, registration, source, status, at) VALUES (?, 'ABC123', 'roster', 'success', ?)`,
+		oldP, time.Now().Add(-20*24*time.Hour).UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordApply(ctx, freshP, "XYZ789", "roster", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FortnightNudgeCandidates(ctx, time.Now().Add(-14*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != old {
+		t.Fatalf("candidates = %v, want [%s]", got, old)
+	}
+	if err := s.MarkFortnightNudgeSent(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.FortnightNudgeCandidates(ctx, time.Now().Add(-14*24*time.Hour)); len(got) != 0 {
+		t.Fatalf("after mark: candidates = %v, want none", got)
+	}
+}

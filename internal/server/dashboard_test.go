@@ -189,6 +189,9 @@ func TestTemplatesRender(t *testing.T) {
 				return pv
 			}()},
 		}, "links that people have saved keep working"},
+		{"share page", dashboardData{User: user, State: "share", Loc: loc, ShareEmailAvailable: true}, `action="/share/invite"`},
+		{"share page without mail hides the form", dashboardData{User: user, State: "share", Loc: loc}, "Open the printable card"},
+		{"share card", dashboardData{User: user, State: "share-card", Loc: loc, ShareQR: "data:image/png;base64,AAAA", ShareURL: "p.stonn.org"}, `alt="QR code to p.stonn.org"`},
 		{"app-contact-link", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, Contact: true,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:  []permitView{samplePermitView(loc)},

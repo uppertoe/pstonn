@@ -104,3 +104,41 @@ ON CONFLICT(owner) DO UPDATE SET onboard_nudge_sent = excluded.onboard_nudge_sen
 		owner, nowUTC())
 	return err
 }
+
+// FortnightNudgeCandidates lists owners whose FIRST successful council write is
+// at least `after` old and who have not had the once-ever "tell a neighbour"
+// note. Keyed to the first success, not signup: the note only makes sense once
+// the product has actually done something for them.
+func (s *Store) FortnightNudgeCandidates(ctx context.Context, before time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT p.owner, MIN(a.at) AS first_ok
+FROM apply_log a JOIN permit p ON p.id = a.permit_id
+WHERE a.status = 'success'
+  AND EXISTS (SELECT 1 FROM consent c WHERE c.owner = p.owner)
+  AND COALESCE((SELECT f.fortnight_nudge_sent FROM account_flags f WHERE f.owner = p.owner), '') = ''
+GROUP BY p.owner
+HAVING first_ok <= ?
+ORDER BY first_ok`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var owners []string
+	for rows.Next() {
+		var owner, at string
+		if err := rows.Scan(&owner, &at); err != nil {
+			return nil, err
+		}
+		owners = append(owners, owner)
+	}
+	return owners, rows.Err()
+}
+
+// MarkFortnightNudgeSent records the once-ever note as done for owner.
+func (s *Store) MarkFortnightNudgeSent(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO account_flags (owner, fortnight_nudge_sent) VALUES (?, ?)
+ON CONFLICT(owner) DO UPDATE SET fortnight_nudge_sent = excluded.fortnight_nudge_sent`,
+		owner, nowUTC())
+	return err
+}

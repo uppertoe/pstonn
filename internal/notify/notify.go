@@ -178,6 +178,7 @@ const (
 	reasonDisplace = "this address is the contact for a car that was on a visitor permit"
 	reasonTest     = "you asked p.stonn to send a test notification"
 	reasonOnboard  = "you signed up for p.stonn with it but haven't connected a council account yet"
+	reasonReferral = "someone who uses p.stonn asked us to tell you about it"
 )
 
 // The council's own account pages, deep-linked wherever p.stonn tells someone
@@ -1539,4 +1540,46 @@ func outboxBackoff(attempts int) time.Duration {
 		}
 	}
 	return d
+}
+
+// SendFortnightNudge is the once-ever "tell a neighbour" note, sent a fortnight
+// after the household's first successful council write (see the scheduler sweep).
+func (s *Service) SendFortnightNudge(ctx context.Context, to string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	base := strings.TrimRight(s.appURL, "/")
+	if base == "" {
+		base = "https://p.stonn.org"
+	}
+	subject := "p.stonn — a quick one"
+	body := strings.Join([]string{
+		"Hi — you've had p.stonn looking after your visitor permit for a couple of weeks now.",
+		"",
+		"If it's been handy, you might know someone else in Stonnington with a visitor permit who'd get some use out of it too.",
+		"",
+		"Send them an invite: " + base + "/share",
+		"Or print a card with a QR code they can scan to get started: " + base + "/share#card",
+	}, "\n")
+	return s.sendEmail(ctx, to, subject, body, reasonAccount)
+}
+
+// SendReferralInvite is the introduction a signed-in person asked p.stonn to send
+// to someone they chose. The sender's address is shown: a recommendation from a
+// stranger is worth nothing, and they picked the recipient.
+func (s *Service) SendReferralInvite(ctx context.Context, to, sender string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := sender + " thought you might like p.stonn"
+	body := strings.Join([]string{
+		sender + " uses p.stonn to look after their City of Stonnington visitor parking permit, and thought it might be useful for you too.",
+		"",
+		"p.stonn changes the car on your visitor permit for you — a weekly roster for regulars, one-off bookings for everyone else, and a link or QR code your visitors can use themselves. It's free for Stonnington residents.",
+		"",
+		"Have a look: https://p.stonn.org",
+		"",
+		"If you weren't expecting this, you can ignore it — nothing else will be sent.",
+	}, "\n")
+	return s.sendEmail(ctx, to, subject, body, reasonReferral)
 }

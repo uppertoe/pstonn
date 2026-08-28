@@ -305,6 +305,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /vehicles", s.withUser(s.vehiclesPage))
 	mux.HandleFunc("GET /activity", s.withUser(s.activityPage))
 	mux.HandleFunc("GET /settings", s.withUser(s.settingsPage))
+	mux.HandleFunc("GET /share", s.withConsent(s.sharePage))
+	mux.HandleFunc("GET /share/card", s.withConsent(s.shareCard))
+	mux.HandleFunc("POST /share/invite", s.withConsent(s.sendReferral))
 	mux.HandleFunc("GET /admin", s.requireAdmin(s.adminPage))
 	mux.HandleFunc("GET /status", s.statusJSON) // machine watchdog; bearer-token gated
 	mux.HandleFunc("GET /permits/new", s.withUser(s.pickerPage))
