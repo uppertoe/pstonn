@@ -42,22 +42,7 @@
     <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
     {{end}}
   </section>
-  {{if .Invite}}
-  <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic">{{template "ic-user"}}</span> An invitation for you</h2>
-    <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. Nothing is shared until you accept, and you can decline without anything happening.</p>
-    <p class="empty-note" style="margin-top:12px">If you accept, you will see and manage their permits, vehicles and schedule instead of your own, and they will see what you change. You will not be able to connect your own council account while you share theirs. You can leave at any time.</p>
-    <div class="row" style="margin-top:14px;gap:8px">
-      <form method="post" action="/account/invite/accept" data-confirm="Share {{.Invite.Owner}}'s account? You'll manage their permits instead of your own." data-confirm-ok="Accept">
-        <input type="hidden" name="owner" value="{{.Invite.Owner}}">
-        <button type="submit">{{template "ic-check"}} Accept</button>
-      </form>
-      <form method="post" action="/account/invite/decline">
-        <button type="submit" class="ghost">{{template "ic-x"}} Decline</button>
-      </form>
-    </div>
-  </section>
-  {{end}}
+  {{if .Invite}}{{template "invite-card" .}}{{end}}
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-user"}}</span> Shared access</h2>
     {{if .IsPrimary}}

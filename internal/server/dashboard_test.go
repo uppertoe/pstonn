@@ -102,6 +102,13 @@ func TestTemplatesRender(t *testing.T) {
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
+		// An invitee with no council link of their own can reach no page but this one,
+		// so the invitation must be answerable here — with the owner it was rendered
+		// for carried in the form (acceptInvite checks it).
+		{"onboarding answers a pending invite", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com"}}, `action="/account/invite/accept"`},
+		{"onboarding invite names the owner", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com"}}, `name="owner" value="rd@example.com"`},
 		// A partial permit read holding ZERO rows must not be reported as an empty
 		// account. Saying "your council account doesn't have any permits on it yet" to
 		// someone who holds several is a flat falsehood they cannot act on.

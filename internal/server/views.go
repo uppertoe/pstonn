@@ -556,6 +556,11 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		base.State = "onboarding"
 		base.InAppBrowser = inAppBrowser(r.UserAgent())
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
+		// An unanswered invitation is the most likely reason a person with no
+		// council link is here at all; this page is the only one they can reach.
+		if from, ok, err := s.store.PendingInvite(ctx, user); err == nil && ok {
+			base.Invite = &inviteView{Owner: from}
+		}
 		// The landing after a REJECTED council login (see councilLink): name both
 		// causes and offer the remedy as a button. Takes precedence over the
 		// relink/capacity banners — this person is mid-attempt, and the next step
