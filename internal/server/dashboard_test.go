@@ -165,6 +165,21 @@ func TestTemplatesRender(t *testing.T) {
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},
 			{CouncilPermitID: "9001", PermitTypeID: "3", PermitNumber: "RPP5", PermitType: "(B) Resident Permit", Addable: false, Reason: "Only visitor permits can be scheduled."},
 		}}, "Only visitor permits can be scheduled."},
+		// A dead permit is grouped under its own heading with a status pill and a
+		// button that says what adding it is for — never the live card's "Manage".
+		{"picker groups dead permits", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "1", PermitNumber: "VPP1", PermitType: "(A) 1st Visitor Permit", CurrentRego: "LIVE01", Addable: true},
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", CurrentRego: "OLD999", Addable: true, Dead: true, Status: "Cancelled"},
+		}}, "Older permits"},
+		{"picker dead permit shows its status", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", CurrentRego: "OLD999", Addable: true, Dead: true, Status: "Cancelled"},
+		}}, `<span class="pick-status">Cancelled</span>`},
+		{"picker dead permit has the copy button", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Rejected"},
+		}}, "Add to copy its old schedule"},
+		{"picker with only dead permits says so", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Cancelled"},
+		}}, "All your permits are managed or no longer active."},
 		{"app-contact-link", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, Contact: true,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:  []permitView{samplePermitView(loc)},

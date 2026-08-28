@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -179,9 +180,15 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		if addable && fallback {
 			warn = fallbackWarn
 		}
+		dead, status := false, ""
 		if addable {
 			meta := model.Permit{Status: p.Status, EndDate: p.EndDate}
 			if meta.Inactive(time.Now(), s.cfg.DisplayLocation) {
+				dead = true
+				status = p.Status
+				if status == "" || status == "Granted" {
+					status = "Expired"
+				}
 				warn = "This permit is no longer active, so nothing will be applied to it."
 				if !p.EndDate.IsZero() {
 					warn = "This permit expired on " + p.EndDate.In(s.cfg.DisplayLocation).Format("2 Jan 2006") + ", so nothing will be applied to it."
@@ -191,9 +198,21 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		base.Pick = append(base.Pick, pickView{
 			CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID,
 			PermitNumber: p.PermitNumber, PermitType: p.PermitType, CurrentRego: p.CurrentRego,
-			Addable: addable, Reason: reason, Warn: warn,
+			Addable: addable, Reason: reason, Warn: warn, Dead: dead, Status: status,
 		})
 	}
+	// Live permits first, dead ones last; the council's own order within each
+	// group. The template renders the dead group under its own heading.
+	slices.SortStableFunc(base.Pick, func(a, b pickView) int {
+		switch {
+		case a.Dead == b.Dead:
+			return 0
+		case a.Dead:
+			return 1
+		default:
+			return -1
+		}
+	})
 	base.State = "picker"
 	s.render(w, base)
 }

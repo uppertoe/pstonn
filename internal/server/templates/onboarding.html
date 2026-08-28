@@ -167,8 +167,18 @@
     <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to manage</div>
     <p class="subtitle">Pick the permit whose plate you want to schedule. This is usually your visitor permit.</p>
     {{if .Pick}}
+    {{/* Two groups: live permits (the ones a resident is here for), then dead
+         ones under their own heading. A dead permit is still addable — its old
+         schedule can be copied onto a renewal — but it must not look like the
+         working permit: status pill, no "currently <plate>" (a cancelled permit
+         still carries its last plate and read as live), and a quieter button
+         that says what adding it is for. */}}
+    {{$live := 0}}{{range .Pick}}{{if not .Dead}}{{$live = 1}}{{end}}{{end}}
+    {{if not $live}}
+    <p class="empty-note" style="margin-bottom:12px">All your permits are managed or no longer active.</p>
+    {{end}}
     <div class="pick">
-      {{range .Pick}}
+      {{range .Pick}}{{if not .Dead}}
       <div class="pick-item {{if not .Addable}}disabled{{end}}">
         <div>
           <div style="font-weight:650">{{.PermitNumber}}</div>
@@ -187,8 +197,29 @@
         {{end}}
         {{if .Warn}}<span class="pick-reason">{{.Warn}}</span>{{end}}
       </div>
-      {{end}}
+      {{end}}{{end}}
     </div>
+    {{$dead := 0}}{{range .Pick}}{{if .Dead}}{{$dead = 1}}{{end}}{{end}}
+    {{if $dead}}
+    <h3 class="pick-older">Older permits</h3>
+    <div class="pick">
+      {{range .Pick}}{{if .Dead}}
+      <div class="pick-item dead">
+        <div>
+          <div style="font-weight:650">{{.PermitNumber}} <span class="pick-status">{{.Status}}</span></div>
+          <div class="muted" style="font-size:13px;margin-top:2px">{{.PermitType}}</div>
+        </div>
+        <form method="post" action="/permits">
+          <input type="hidden" name="council_permit_id" value="{{.CouncilPermitID}}">
+          <input type="hidden" name="permit_type_id" value="{{.PermitTypeID}}">
+          <input type="hidden" name="label" value="{{.PermitNumber}}">
+          <input type="hidden" name="current_rego" value="{{.CurrentRego}}">
+          <button type="submit" class="ghost sm">{{template "ic-plus"}} Add to copy its old schedule</button>
+        </form>
+      </div>
+      {{end}}{{end}}
+    </div>
+    {{end}}
     {{else}}
     {{/* Two different situations reach this empty state, and the difference is
          what the person needs to hear. HasPermits means the council account holds

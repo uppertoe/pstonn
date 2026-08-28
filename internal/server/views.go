@@ -467,6 +467,13 @@ type pickView struct {
 	// picker doesn't silently invite someone to schedule a permit that will never
 	// be reconciled. Text explains which.
 	Warn string
+	// Dead: the council says this permit is over (cancelled, expired, rejected).
+	// Listed after the live ones, under their own heading, with Status as a pill
+	// and a different button — a dead permit is addable only to copy its old
+	// schedule, and residents shown an identical "Manage" card added dead permits
+	// believing they were the working one (2026-08, three households).
+	Dead   bool
+	Status string // council status label for the pill, e.g. "Cancelled"
 }
 
 // vehicleViews builds the per-user vehicle view models plus id→colour and
