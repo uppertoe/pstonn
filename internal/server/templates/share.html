@@ -1,33 +1,41 @@
 {{define "page-share"}}
 {{/* ================= SHARE p.stonn (signed in) ================= */}}
+{{/* The one page in the app that sells the app — to the people its users know.
+     A hero that says what it is in one line, then one card per way to pass it
+     on. The email card renders only when SMTP exists, so no heading counts. */}}
 {{template "appbar" .}}
 <main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
-  <section class="card" style="max-width:560px;margin:0 auto">
-    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-link"}}</span> Share p.stonn</div>
-    <p class="subtitle">Know someone else in Stonnington with a visitor permit? Three ways to pass it on.</p>
-
-    <p class="sub" style="margin-top:18px">Send the link</p>
-    <div class="row" style="gap:8px;flex-wrap:wrap">
-      <button type="button" class="ghost sm" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
+  <section class="card hero share-hero">
+    <div class="ring">{{template "ic-link"}}</div>
+    <h2>Pass p.stonn on</h2>
+    <p>Free for any Stonnington household with a visitor parking permit. If someone you know is still changing the plate by hand, here&rsquo;s how to send it their way.</p>
+  </section>
+  <section class="card share-card">
+    <div class="share-opts">
+      <div class="qropt">
+        <div class="share-ic" style="--hue:var(--sec-schedule)">{{template "ic-link"}}</div>
+        <div class="qropt-txt"><strong>Send the link</strong><span class="empty-note">In a text, WhatsApp or Messenger &mdash; your phone&rsquo;s share sheet opens with the link ready. On a computer it copies the link instead.</span></div>
+        <button type="button" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
+      </div>
+      {{if .ShareEmailAvailable}}
+      <div class="qropt">
+        <div class="share-ic" style="--hue:var(--sec-vehicles)">{{template "ic-mail"}}</div>
+        <div class="qropt-txt"><strong>Email an invite</strong><span class="empty-note">p.stonn sends them a short note saying you use it and what it does, from your name. Nothing else follows.</span></div>
+        <form method="post" action="/share/invite" class="stack" style="max-width:none;gap:8px" x-data="{sent:false}" @submit="if (sent) { $event.preventDefault(); return } sent = true">
+          <input type="email" name="email" required autocomplete="off" placeholder="their@email.com" aria-label="Their email">
+          <button type="submit" :disabled="sent">{{template "ic-mail"}} Send invitation</button>
+        </form>
+      </div>
+      {{end}}
+      <div class="qropt" id="card">
+        <div class="share-ic" style="--hue:var(--sec-activity)">{{template "ic-qr"}}</div>
+        <div class="qropt-txt"><strong>Print a card</strong><span class="empty-note">A card with a QR code straight to p.stonn.org &mdash; for handing over the fence or leaving with a neighbour.</span></div>
+        {{if .ShareQR}}<div class="share-preview"><img src="{{.ShareQR}}" alt="" width="72" height="72"><span>p.stonn.org</span></div>{{end}}
+        <a href="/share/card" hx-boost="false"><button type="button" class="ghost" style="width:100%;justify-content:center">{{template "ic-qr"}} Open the printable card</button></a>
+      </div>
     </div>
-    <p class="empty-note" style="margin-top:6px">Opens your phone&rsquo;s share sheet (or copies the link) so you can send it in a message.</p>
-
-    {{if .ShareEmailAvailable}}
-    <p class="sub" style="margin-top:20px">Send an invite by email</p>
-    <form method="post" action="/share/invite" class="stack" x-data="{sent:false}" @submit="if (sent) { $event.preventDefault(); return } sent = true">
-      <label class="fld">Their email
-        <input type="email" name="email" required autocomplete="off" placeholder="name@example.com">
-      </label>
-      <button type="submit" :disabled="sent">{{template "ic-mail"}} Send invitation</button>
-    </form>
-    <p class="empty-note" style="margin-top:6px">They get a short note from p.stonn saying you use it and what it does, with your email address so they know who it&rsquo;s from. Nothing else is sent to them.</p>
-    {{end}}
-
-    <p class="sub" style="margin-top:20px" id="card">Print a card</p>
-    <p class="empty-note" style="margin-top:0">A card with a QR code to p.stonn.org &mdash; handy for handing over the fence.</p>
-    <a href="/share/card" hx-boost="false" style="display:inline-block;margin-top:8px"><button type="button" class="ghost sm">{{template "ic-qr"}} Open the printable card</button></a>
   </section>
 </main>
 {{end}}

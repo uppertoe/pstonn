@@ -32,6 +32,12 @@ func (s *Server) sharePage(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Invitation sent."
 	}
 	base.ShareEmailAvailable = s.notify != nil && s.notify.EmailAvailable()
+	// The card preview: same QR the printable page renders.
+	if url := strings.TrimRight(s.cfg.PublicBaseURL, "/"); url != "" {
+		if img, err := qrDataURI(url); err == nil {
+			base.ShareQR = template.URL(img)
+		}
+	}
 	s.render(w, base)
 }
 
