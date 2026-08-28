@@ -214,7 +214,12 @@
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
     <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
-    <form method="post" action="/guests" class="stack" x-data="{recips:''}">
+    {{/* Plain (non-htmx) POST, so the guard is Alpine: the first submit marks the
+         form sent and later ones are dropped, and the button greys so the wait
+         reads as progress. One household created two identical passes seven
+         seconds apart (2026-08-22) — both emails went out to both people. */}}
+    <form method="post" action="/guests" class="stack" x-data="{recips:'', sent:false}"
+          @submit="if (sent) { $event.preventDefault(); return } sent = true">
       <label class="fld"><span>Permit</span>
         <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
       </label>
@@ -237,7 +242,7 @@
         <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
         <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
       </label>
-      <button type="submit">{{template "ic-link"}} Create pass and send links</button>
+      <button type="submit" :disabled="sent">{{template "ic-link"}} Create pass and send links</button>
     </form>
   </section>
   {{else}}
