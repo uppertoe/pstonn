@@ -177,6 +177,12 @@
         </div>
       </div>
       <p class="empty-note" style="margin-top:0">{{.PermitLabel}}{{if .AllowOvernight}} &middot; overnight allowed{{end}}</p>
+      {{if .PermitDead}}
+      {{/* The pass is on a permit the council says is over: every link it issued
+           now turns visitors away. Say so on the card, and name the one action
+           that revives it — the copy moves the pass, tokens unchanged. */}}
+      <div class="banner warn" style="margin:6px 0 12px">{{template "ic-alert"}} <span><strong>Permit no longer active.</strong> Copy the schedule to your new permit and this pass moves with it.</span></div>
+      {{end}}
       <p class="sub">Cars</p>
       <div class="legend" style="gap:8px">{{range .Cars}}<span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>{{end}}</div>
       <p class="sub" style="margin-top:16px">People</p>

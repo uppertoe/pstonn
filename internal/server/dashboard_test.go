@@ -234,6 +234,11 @@ func TestTemplatesRender(t *testing.T) {
 			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
 				Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
 				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Guest passes"},
+		// A pass on a dead permit says so on its card and names the way out.
+		{"guests-page flags a pass on a dead permit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 2, Label: "New permit"}},
+			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "VPP25619 — no longer active", PermitDead: true,
+				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Copy the schedule to your new permit and this pass moves with it."},
 		{"guests-trust-warning", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
 			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
 			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "send it to people you trust"},

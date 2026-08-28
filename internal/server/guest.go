@@ -135,6 +135,7 @@ type guestGrantView struct {
 	ID             int64
 	Label          string
 	PermitLabel    string
+	PermitDead     bool // the permit is over: the pass's links refuse visitors until it is copied onto a live permit
 	AllowOvernight bool
 	Cars           []vehicleView
 	Recipients     []guestRecipientView
@@ -1234,12 +1235,17 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 		return err
 	}
 	labelByPermit := map[int64]string{}
+	deadPermit := map[int64]bool{}
 	now := time.Now()
 	for _, p := range permits {
 		if p.Inactive(now, s.cfg.DisplayLocation) {
 			// Existing passes and request history still name the permit, but say
-			// plainly that it's finished — and never offer it for NEW links.
+			// plainly that it's finished — and never offer it for NEW links. The
+			// pass card itself carries a pill and the way out (see PermitDead): a
+			// suffix on a bare permit number was not read as "your guests' links
+			// are dead" by the one household this happened to (2026-08-22).
 			labelByPermit[p.ID] = permitLabel(p) + " — no longer active"
+			deadPermit[p.ID] = true
 			continue
 		}
 		labelByPermit[p.ID] = permitLabel(p)
@@ -1280,6 +1286,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 		}
 		base.Guests = append(base.Guests, guestGrantView{
 			ID: d.Grant.ID, Label: d.Grant.Label, PermitLabel: labelByPermit[d.Grant.PermitID],
+			PermitDead:     deadPermit[d.Grant.PermitID],
 			AllowOvernight: d.Grant.AllowOvernight, Cars: cars, Recipients: recips,
 		})
 		if editID > 0 && d.Grant.ID == editID {
