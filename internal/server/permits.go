@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"log"
 	"net/http"
 	"slices"
@@ -239,7 +238,7 @@ func (s *Server) say(ctx context.Context, owner, key string) string {
 		log.Printf("i18n: %v", err)
 		return key
 	}
-	return html.UnescapeString(out)
+	return out
 }
 
 // councilFor returns the descriptor of the owner's council. Nil-safe for tests

@@ -93,3 +93,13 @@ func TestSlotsEscape(t *testing.T) {
 		t.Fatalf("href not escaped: %q", l)
 	}
 }
+
+// The catalog is prose: no markup, no entities. Links and emphasis are slots the
+// templates own; typographic characters are typed as themselves.
+func TestCatalogIsProse(t *testing.T) {
+	for _, loc := range MustLoad().Locales() {
+		if bad := MustLoad().For(loc).Lint(); len(bad) > 0 {
+			t.Errorf("%s: messages carry markup or entities: %v", loc, bad)
+		}
+	}
+}
