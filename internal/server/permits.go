@@ -184,7 +184,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		dead, status := false, ""
 		if addable {
 			meta := model.Permit{Status: p.Status, EndDate: p.EndDate}
-			if meta.Inactive(time.Now(), s.cfg.DisplayLocation) {
+			if meta.Inactive(time.Now(), s.locFor(ctx, owner)) {
 				dead = true
 				status = p.Status
 				if status == "" || status == "Granted" {
@@ -192,7 +192,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				}
 				warn = "This permit is no longer active, so nothing will be applied to it."
 				if !p.EndDate.IsZero() {
-					warn = "This permit expired on " + p.EndDate.In(s.cfg.DisplayLocation).Format("2 Jan 2006") + ", so nothing will be applied to it."
+					warn = "This permit expired on " + p.EndDate.In(s.locFor(ctx, owner)).Format("2 Jan 2006") + ", so nothing will be applied to it."
 				}
 			}
 		}
@@ -247,6 +247,18 @@ func (s *Server) councilFor(ctx context.Context, owner string) *council.Council 
 		}
 	}
 	return s.councils.Default
+}
+
+// locFor is the timezone the owner's permit days are reckoned in: their council's
+// when the registry knows it, else the process default. Public pages with no
+// owner keep the default.
+func (s *Server) locFor(ctx context.Context, owner string) *time.Location {
+	if s.councils != nil && owner != "" {
+		if c := s.councilFor(ctx, owner); c != nil {
+			return c.Location()
+		}
+	}
+	return s.cfg.DisplayLocation
 }
 
 // policyFor returns the permit policy of the owner's council.
@@ -387,7 +399,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// used to land on a page where the just-added permit was nowhere visible and
 	// nothing acknowledged it. The active case gets a first-steps nudge instead.
 	meta := model.Permit{Status: match.Status, EndDate: match.EndDate}
-	if meta.Inactive(time.Now(), s.cfg.DisplayLocation) {
+	if meta.Inactive(time.Now(), s.locFor(ctx, owner)) {
 		http.Redirect(w, r, "/schedule?added=expired", http.StatusSeeOther)
 		return
 	}
@@ -506,7 +518,7 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	moved, stranded := 0, false
 	var moveErr error
-	if sp.Inactive(now, s.cfg.DisplayLocation) && !dst.Inactive(now, s.cfg.DisplayLocation) {
+	if sp.Inactive(now, s.locFor(r.Context(), owner)) && !dst.Inactive(now, s.locFor(r.Context(), owner)) {
 		if moved, stranded, moveErr = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); moveErr != nil {
 			// The unmoved passes stay safely refused by the inactive-permit gate
 			// rather than half-working — but the failure must reach the user (below),
@@ -599,7 +611,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	now := time.Now().In(s.cfg.DisplayLocation)
+	now := time.Now().In(s.locFor(r.Context(), owner))
 
 	// Detached + capped like every other council write on a request path, so a
 	// closed tab can't cancel the write half-done and a slow portal still leaves

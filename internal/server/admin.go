@@ -226,6 +226,9 @@ type statusResponse struct {
 	// developing edge block: the real request rate, pushback count/diagnostics, the
 	// fleet circuit state, and whether restart-protection persistence is intact.
 	Council councilStatus `json:"council"`
+	// Councils is the same health per council, and how many linked sessions each
+	// holds, for a process serving more than one (an edge block is per portal).
+	Councils map[string]councilBreakdown `json:"councils,omitempty"`
 	// Client reports what the app believes about the caller of this very request.
 	// It is here so the watchdog's ordinary poll doubles as an assertion about the
 	// deployment's shape: the throttles that protect every public route key on this
@@ -439,7 +442,8 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 			IP:        clientIP(r),
 			EdgeProxy: noteEdgeProxy(r),
 		},
-		Council: s.councilSnapshot(),
+		Council:  s.councilSnapshot(),
+		Councils: s.councilBreakdowns(sessions),
 	}
 	if wantRoster {
 		// A missing or malformed ROSTER_KEY makes this fail, which is the correct
@@ -461,6 +465,38 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// councilBreakdown is one council's slice of the status page.
+type councilBreakdown struct {
+	Linked int           `json:"linked"`
+	Health councilStatus `json:"health"`
+}
+
+// perCouncil is what a multi-council client exposes for the breakdown.
+type perCouncil interface {
+	IDs() []string
+	Client(id string) (*parking.Client, bool)
+}
+
+// councilBreakdowns builds the per-council section when the client is a mux.
+func (s *Server) councilBreakdowns(sessions []store.CouncilSession) map[string]councilBreakdown {
+	pc, ok := s.council.(perCouncil)
+	if !ok {
+		return nil
+	}
+	out := map[string]councilBreakdown{}
+	for _, id := range pc.IDs() {
+		c, _ := pc.Client(id)
+		b := councilBreakdown{Health: councilStatusFrom(c.Stats())}
+		for _, cs := range sessions {
+			if cs.CouncilID == id && cs.Cookie != "" {
+				b.Linked++
+			}
+		}
+		out[id] = b
+	}
+	return out
 }
 
 // councilSnapshot returns the council-health section, nil-safe for tests that

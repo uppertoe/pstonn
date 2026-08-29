@@ -135,8 +135,10 @@ func run() error {
 	}
 	st.DefaultCouncil = registry.Default.ID
 	clients := map[string]*parking.Client{}
+	// One concurrency cap across every council: they all leave through one address.
+	shared := parking.NewConcurrencyLimit(cfg.Council.GovConcurrency)
 	for _, tenant := range registry.Enabled() {
-		transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council))
+		transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council)).Share(shared)
 		var prov provider.Provider
 		if tenant.Connector == fake.ID {
 			prov = fake.New()
@@ -174,6 +176,17 @@ func run() error {
 			"Hard SMTP rejections are still learned at send time, but provider-reported bounces are not. See deploy/aws-ses-hook-setup.py")
 	}
 	sched := scheduler.New(st, council, cfg.DisplayLocation, scheduler.Options{
+		// Each account's permit days are reckoned in ITS council's timezone.
+		LocationFor: func(owner string) *time.Location {
+			id, err := st.CouncilIDFor(context.Background(), owner)
+			if err != nil {
+				return nil
+			}
+			if c, ok := registry.ByID(id); ok {
+				return c.Location()
+			}
+			return nil
+		},
 		SessionMaxAge:    cfg.Council.SessionMaxAge,
 		WarmInterval:     cfg.Council.WarmInterval,
 		ReminderLead:     cfg.Council.ReminderLead,

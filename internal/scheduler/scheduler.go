@@ -101,10 +101,13 @@ type Options struct {
 	ReminderLead  time.Duration // how far before the bound to email the confirm link (0 = no reminder)
 	ExpiryLead    time.Duration // how far before a permit's expiry to warn the account (0 = no reminder)
 	PublicBaseURL string        // absolute base for the email confirm link
-	Notifier      Notifier      // nil/disabled = no emails
-	OpDrain       time.Duration // modelled time one council operation occupies the governor at its sustained rate; used ONLY to size the rollover spread (no per-call sleep — the governor paces)
-	JitterFrac    float64       // ± fraction to randomise thresholds/delays (default 0.2)
-	SnapshotPath  string        // where to write the daily consistent DB backup snapshot ("" disables)
+	// LocationFor returns the timezone an owner's permit days are reckoned in
+	// (their council's); nil, or a nil result, falls back to the scheduler's loc.
+	LocationFor  func(owner string) *time.Location
+	Notifier     Notifier      // nil/disabled = no emails
+	OpDrain      time.Duration // modelled time one council operation occupies the governor at its sustained rate; used ONLY to size the rollover spread (no per-call sleep — the governor paces)
+	JitterFrac   float64       // ± fraction to randomise thresholds/delays (default 0.2)
+	SnapshotPath string        // where to write the daily consistent DB backup snapshot ("" disables)
 	// SpreadWindow staggers SCHEDULED plate changes across a window opening at the
 	// schedule boundary, so a midnight roster rollover shared by every household
 	// does not become one back-to-back burst of council writes. 0 disables it and
@@ -139,6 +142,7 @@ type Scheduler struct {
 	markDriftChecked func(ctx context.Context, owner string) error
 	council          Council
 	loc              *time.Location
+	locFor           func(owner string) *time.Location // per-owner timezone (Options.LocationFor)
 	interval         time.Duration
 
 	sessionMaxAge time.Duration
@@ -390,6 +394,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		markDriftChecked: st.MarkDriftChecked,
 		council:          council,
 		loc:              loc,
+		locFor:           opts.LocationFor,
 		interval:         time.Minute,
 		sessionMaxAge:    opts.SessionMaxAge,
 		warmInterval:     warm,
@@ -1998,7 +2003,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 	now := time.Now()
 	for i := range permits {
 		p := permits[i]
-		if p.Inactive(now, s.loc) {
+		if p.Inactive(now, s.locOf(p.Owner)) {
 			continue // don't act on permits we no longer manage
 		}
 		pi, ok := byCouncilID[p.CouncilPermitID]
@@ -2118,7 +2123,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		// the warning window at ~10-11am local on the permit's final valid day. A
 		// notifier that was down through the lead window would then never warn at all,
 		// which is the outage this reminder exists to survive.
-		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.loc)) {
+		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.locOf(owner))) {
 			continue
 		}
 		if s.notifier == nil || !s.notifier.Enabled() {
@@ -2128,7 +2133,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		if label == "" {
 			label = "visitor permit"
 		}
-		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.loc)) > 0 {
+		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.locOf(owner))) > 0 {
 			if e := s.store.MarkPermitExpiryReminded(ctx, p.ID); e != nil {
 				log.Printf("scheduler: mark permit %d expiry-reminded: %v", p.ID, e)
 			}
@@ -2245,7 +2250,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		log.Printf("scheduler: mark reminder for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
-	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.loc), url); err != nil {
+	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.locOf(cs.Owner)), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the
@@ -2265,7 +2270,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
 		return
 	}
-	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.loc).Format("2006-01-02"))
+	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner)).Format("2006-01-02"))
 }
 
 // spreadElapsed reports whether a permit may act on a SCHEDULED change yet.
@@ -2541,7 +2546,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 		// An expired or cancelled permit can't be changed; skip it so we don't
 		// hammer the council with doomed writes or alarm the user with failures.
 		// It stays in the store as a copy-schedule source until removed.
-		if p.Inactive(now, s.loc) {
+		if p.Inactive(now, s.locOf(p.Owner)) {
 			continue
 		}
 		active++
@@ -2748,7 +2753,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// override whose StartsAt falls inside that window must be seen as started for
 	// the permit being processed now — otherwise the previous plate is (re)applied
 	// and only corrected next pass, leaving the wrong car on a live permit meanwhile.
-	now := time.Now().In(s.loc)
+	now := time.Now().In(s.locOf(p.Owner))
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -2828,7 +2833,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		log.Printf("scheduler: skipping permit %d: could not re-read it under the claim: %v", p.ID, ferr)
 		return false
 	}
-	if fresh.Inactive(now, s.loc) {
+	if fresh.Inactive(now, s.locOf(p.Owner)) {
 		// checkDrift may have written a council-reported expiry earlier in THIS pass.
 		// Writing anyway earns a council refusal that alarms the household with "the
 		// council would not let p.stonn update your permit" for a permit that expired.
@@ -3048,7 +3053,7 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	if prev == "" {
 		return
 	}
-	now := time.Now().In(s.loc)
+	now := time.Now().In(s.locOf(p.Owner))
 	overrides, err := s.store.ListOverrides(ctx, p.ID, now)
 	if err != nil {
 		return
@@ -3072,4 +3077,15 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	if d.Contact != "" {
 		s.warnDisplacedHow(ctx, p, d, prev, "it was changed at the council")
 	}
+}
+
+// locOf is the timezone an owner's permit days are reckoned in: their council's
+// when known, else the scheduler's default.
+func (s *Scheduler) locOf(owner string) *time.Location {
+	if s.locFor != nil {
+		if loc := s.locFor(owner); loc != nil {
+			return loc
+		}
+	}
+	return s.loc
 }

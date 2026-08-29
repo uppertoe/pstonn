@@ -19,6 +19,26 @@ type Transport struct {
 	base    http.RoundTripper
 	gov     *governor
 	traffic *trafficCounters
+	shared  *ConcurrencyLimit // optional cap across every council (one egress IP)
+}
+
+// ConcurrencyLimit bounds simultaneous requests across SEVERAL transports: every
+// council shares one egress address, so per-council governors alone would let N
+// councils put N times the intended concurrency on it.
+type ConcurrencyLimit struct{ slots chan struct{} }
+
+// NewConcurrencyLimit builds a limit of n simultaneous requests (n < 1 → default).
+func NewConcurrencyLimit(n int) *ConcurrencyLimit {
+	if n < 1 {
+		n = defaultGovConcurrency
+	}
+	return &ConcurrencyLimit{slots: make(chan struct{}, n)}
+}
+
+// Share makes the transport honour a fleet-wide concurrency limit.
+func (t *Transport) Share(l *ConcurrencyLimit) *Transport {
+	t.shared = l
+	return t
 }
 
 // Limits are the transport's ceilings. Zero values take the built-in defaults.
@@ -58,6 +78,14 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	defer release()
+	if t.shared != nil {
+		select {
+		case t.shared.slots <- struct{}{}:
+			defer func() { <-t.shared.slots }()
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
 	t.traffic.count(surface)
 	return t.base.RoundTrip(req)
 }

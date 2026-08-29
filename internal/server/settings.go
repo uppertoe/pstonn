@@ -31,10 +31,10 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			idleSince = cs.LinkedAt
 		}
 		if !idleSince.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
-			base.RelinkBy = idleSince.Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 Jan 2006")
+			base.RelinkBy = idleSince.Add(s.cfg.Council.SessionMaxAge).In(s.locFor(ctx, owner)).Format("2 Jan 2006")
 		}
 		if base.AutoReconnect && !cs.ReconnectedAt.IsZero() {
-			base.LastReconnect = cs.ReconnectedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006, 3:04pm")
+			base.LastReconnect = cs.ReconnectedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006, 3:04pm")
 		}
 	}
 	if r.URL.Query().Get("tested") == "1" {
@@ -94,7 +94,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	base.Notify = s.notifyViewOf(ctx, user, pref)
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
-		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"))
+		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006"))
 	}
 	base.Terms.Clauses = s.terms.Clauses
 	// Shared access: the owner sees who has access; a secondary sees whose account.
@@ -103,7 +103,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			for _, m := range ms {
 				base.Members = append(base.Members, memberView{
 					Email:   m.Email,
-					Added:   m.AddedAt.In(s.cfg.DisplayLocation).Format("2 Jan 2006"),
+					Added:   m.AddedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006"),
 					Pending: m.Pending,
 				})
 			}

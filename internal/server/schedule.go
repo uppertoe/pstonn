@@ -35,7 +35,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	owner := base.Owner
-	now := time.Now().In(s.cfg.DisplayLocation)
+	now := time.Now().In(s.locFor(ctx, owner))
 	vehicles, err := s.store.ListVehiclesFor(ctx, owner)
 	if err != nil {
 		s.serverError(w, err)
@@ -52,8 +52,8 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	for _, p := range managed {
 		// Expired/cancelled permits collapse into a compact section — no full card,
 		// no council call — but stay available as a copy-schedule source.
-		if p.Inactive(now, s.cfg.DisplayLocation) {
-			expired = append(expired, buildExpiredView(p, now, s.cfg.DisplayLocation))
+		if p.Inactive(now, s.locFor(ctx, owner)) {
+			expired = append(expired, buildExpiredView(p, now, s.locFor(ctx, owner)))
 			continue
 		}
 		pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, now)
@@ -107,7 +107,7 @@ func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vviews, _, _, _ := vehicleViews(vehicles)
-	used, err := s.legendColors(r.Context(), owner, vviews, time.Now().In(s.cfg.DisplayLocation))
+	used, err := s.legendColors(r.Context(), owner, vviews, time.Now().In(s.locFor(r.Context(), owner)))
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -165,7 +165,7 @@ func (s *Server) legendColors(ctx context.Context, owner string, vviews []vehicl
 	}
 	for _, p := range permits {
 		// Expired permits collapse into their own section and render no colours.
-		if p.Inactive(now, s.cfg.DisplayLocation) {
+		if p.Inactive(now, s.locFor(ctx, owner)) {
 			continue
 		}
 		mark(colorByReg[normPlate(p.ActiveRegistration)])
@@ -291,7 +291,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		})
 	}
 
-	loc := s.cfg.DisplayLocation
+	loc := s.locFor(ctx, p.Owner)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	// Align the fortnight grid to weekday columns (Sunday first) so the same
 	// weekday sits in the same column as the roster above. The grid starts on the
@@ -571,7 +571,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// "until", so choosing only a day still makes a sensible booking.
 	startsAt := time.Now()
 	if raw := combineDateTime(r.FormValue("from_date"), r.FormValue("from_time"), "00:00"); raw != "" {
-		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
+		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locFor(r.Context(), owner))
 		if err != nil {
 			s.formError(w, r, "Couldn't read the start time.")
 			return
@@ -600,7 +600,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 			s.formError(w, r, "Pick the date this booking should end, or choose one of the other options.")
 			return
 		}
-		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.cfg.DisplayLocation)
+		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locFor(r.Context(), owner))
 		if err != nil {
 			s.formError(w, r, "Couldn't read the end time.")
 			return
@@ -609,14 +609,14 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		// day boundary. It used to default to 23:59, which left the last minute of the
 		// day to the weekly roster for exactly the reason endOfDay explains.
 		if strings.TrimSpace(r.FormValue("until_time")) == "" {
-			t = endOfDay(t, s.cfg.DisplayLocation)
+			t = endOfDay(t, s.locFor(r.Context(), owner))
 		}
 		endsAt = &t
 	case "nextday":
-		t := endOfDay(startsAt.AddDate(0, 0, 1), s.cfg.DisplayLocation)
+		t := endOfDay(startsAt.AddDate(0, 0, 1), s.locFor(r.Context(), owner))
 		endsAt = &t
 	default: // "day", and anything unexpected
-		t := endOfDay(startsAt, s.cfg.DisplayLocation)
+		t := endOfDay(startsAt, s.locFor(r.Context(), owner))
 		endsAt = &t
 	}
 	if endsAt != nil && !endsAt.After(startsAt) {
@@ -670,11 +670,11 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if reg == "" {
 		reg = s.plateOf(r.Context(), owner, vehicleID)
 	}
-	window := "from " + startsAt.In(s.cfg.DisplayLocation).Format("2 Jan 3:04pm")
+	window := "from " + startsAt.In(s.locFor(r.Context(), owner)).Format("2 Jan 3:04pm")
 	if endsAt == nil {
 		window += ", open-ended"
 	} else {
-		window += " until " + windowEndText(*endsAt, s.cfg.DisplayLocation)
+		window += " until " + windowEndText(*endsAt, s.locFor(r.Context(), owner))
 	}
 	s.logChange(r.Context(), owner, user, store.ActionOverrideAdd, reg, window)
 	s.sched.KickPermit(p.ID)
@@ -846,7 +846,7 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 		return
 	}
 	vviews, colorByID, regByID, labelByID := vehicleViews(vehicles)
-	pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, time.Now().In(s.cfg.DisplayLocation))
+	pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, time.Now().In(s.locFor(r.Context(), owner)))
 	if err != nil {
 		s.serverError(w, err)
 		return

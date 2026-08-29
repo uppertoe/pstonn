@@ -254,7 +254,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.st.SetRule(r.ctx, pid, time.Now().UTC().Weekday(), vid); err != nil {
+		if err := r.st.SetRule(r.ctx, pid, time.Now().In(council.Stonnington().Location()).Weekday(), vid); err != nil {
 			t.Fatal(err)
 		}
 		rr := r.post(path, rigUser, nil)
