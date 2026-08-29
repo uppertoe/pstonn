@@ -38,6 +38,13 @@ type Provider struct {
 	// RejectPassword, when non-empty, is the one password that is refused — so a
 	// wrong-password path can be exercised. Every other password signs in.
 	RejectPassword string
+	// Scripting hooks for tests: LoginErr fails every login with the given error;
+	// ListErr fails ListPermits; Extra permits are appended to the canned two;
+	// Partial makes ListPermits claim one more permit than it returns.
+	LoginErr error
+	ListErr  error
+	Extra    []provider.Permit
+	Partial  bool
 }
 
 // New builds a fake portal seeded with a plate on each canned permit, like a real
@@ -58,6 +65,9 @@ type session struct {
 }
 
 func (f *Provider) Login(ctx context.Context, creds provider.Credentials) (provider.Session, error) {
+	if f.LoginErr != nil {
+		return nil, f.LoginErr
+	}
 	if f.RejectPassword != "" && creds.Password == f.RejectPassword {
 		return nil, provider.ErrLoginRejected
 	}
@@ -91,6 +101,9 @@ func (f *Provider) applyLater(id, reg string) {
 }
 
 func (f *Provider) ListPermits(ctx context.Context, s *provider.Session) ([]provider.Permit, int, error) {
+	if f.ListErr != nil {
+		return nil, 0, f.ListErr
+	}
 	// Two permits, matching households that hold a 1st and a 2nd visitor permit —
 	// the account shape the multi-permit UI needs a sandbox for.
 	now := time.Now()
@@ -103,7 +116,12 @@ func (f *Provider) ListPermits(ctx context.Context, s *provider.Session) ([]prov
 		CouncilPermitID: "90002", PermitTypeID: "15", PermitNumber: "VPP-SANDBOX-2", PermitType: "(A) 2nd Visitor Permit",
 		Status: "Granted", CurrentRego: reg2, StartDate: now.AddDate(0, -1, 0), EndDate: now.AddDate(0, 6, 0), CanChangeVehicle: true,
 	}}
-	return ps, len(ps), nil
+	ps = append(ps, f.Extra...)
+	total := len(ps)
+	if f.Partial {
+		total++
+	}
+	return ps, total, nil
 }
 
 func (f *Provider) CurrentVehicle(ctx context.Context, s *provider.Session, p provider.PermitRef) (provider.Vehicle, error) {
