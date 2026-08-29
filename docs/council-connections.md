@@ -125,24 +125,37 @@ login-flow serialiser and traffic counters are **per council**. They already liv
 cap** is added across councils because the egress IP is shared. `breaker_state` gains
 a `council_id` key.
 
-### Schema
+### Naming
 
-- `account.council_id` — chosen at sign-up, before any link exists.
-- `council_session.council_id` — PK stays `owner`: **one council per account**.
-  A household is in one council; switching means disconnect and re-onboard.
+An entry in the registry is a **tenant** (the technical word: an ePermits tenant
+is exactly what it is; a council, a university, a precinct). The user-facing
+generic word is a catalog term — **"area"** by default ("Switch to…", "Connect
+another area") — so it changes per deployment or locale without code. Internal
+identifiers stay `council`/`council_id`.
+
+### Schema (as built)
+
+- `account_flags.council_id` — the account's **current tenant**: the sign-up
+  choice, later the menu's switcher. A selection, not a binding.
+- `council_session` keyed by **`(owner, council_id)`**: one session per tenant an
+  account is linked to. An account may hold several (a second home); each has
+  its own cookie, saved password, re-authorise clock and reconnect state.
 - `permit.council_id`, `UNIQUE(council_id, council_permit_id)`; `PermitByCouncilID`,
   `UpsertPermit` and `ForgetPermit` take the council.
 - `breaker_state` keyed by `council_id`.
 - Additive `ALTER` + backfill of every existing row to `'stonnington'`, in the style
   of the `linked_at` migration.
 
-### Sign-up
+### Sign-up and switching
 
-Onboarding gains a step 0: a council picker (cards; enabled councils only; capacity
-shown per council; "not listed? tell us" → the contact form, which doubles as demand
-signal). Everything downstream reads `.Council` from the account. The rule that the
-council username is pinned to the verified email stays — it is per tenant and still
-correct.
+With one enabled tenant nothing is asked. With several, the link form asks which
+(the sign-up choice), the user menu shows the current area and offers "Switch
+to…" (linked) or "Connect…" (not yet) for the others, Settings shows a card per
+connection, and permit cards carry a tenant label once an account's permits span
+tenants. Link, pick-a-permit and add-a-permit act in the current tenant; every
+permit-level operation follows the permit's own tenant, and a client never acts on
+another tenant's session or permit. The rule that the council username is pinned
+to the verified email stays — it is per tenant and still correct.
 
 ### Permit policy
 
@@ -201,8 +214,8 @@ copy that mentions fines).
 | Generic client | `internal/parking`: sealed opaque session blob (legacy rows import once), per-owner serialisation, plate cache, backoff, per-council breaker, governed surface-counted transport, a fleet-wide `ConcurrencyLimit`, expiry tagging; `NewClientFor(councilID, …)` |
 | Registry | `internal/council`: embedded `councils.json` (single source of truth; `COUNCILS_PATH` override; `COUNCIL_*` still overrides Stonnington; `COUNCIL_SANDBOX` narrows to one fake); validated on load; per-council permit policy, links, copy, terms, timezone |
 | Routing | `council.Mux` implements `server.Council` and `scheduler.Council`: choice → linked session → process default |
-| Schema | `council_id` on `council_session`, `permit` (`UNIQUE(council_id, council_permit_id)` via a column-aware rebuild) and `account_flags` (the sign-up choice); `breaker_state` per council; backfill to `stonnington`; tested from the pre-change schema |
-| Product | sign-up council choice (form asks only when >1 enabled; a linked account cannot be re-pointed); per-council timezone in the scheduler and every owner-scoped page; `/status` per-council breakdown |
+| Schema | `council_session` keyed by `(owner, council_id)`; `council_id` on `permit` (`UNIQUE(council_id, council_permit_id)`) and `account_flags` (the current tenant); `breaker_state` per council; all via column-aware rebuilds, backfilled to `stonnington`, tested from the pre-change schema |
+| Product | one account, several tenants: sessions per (account, tenant), a switcher in the user menu, per-tenant Settings cards and unlink/forget-password, tenant labels on permit cards; timezone follows the permit; `/status` per-council breakdown |
 | Copy | `internal/i18n` catalogs (en-AU) + council terminology; messages are **prose with named slots** (`{{slot "reset"}}Reset it at the council{{endslot}}`) and the call site supplies the markup (`(slots "reset" (link .Council.Links.ResetPassword …))`) — templates own every anchor, attribute and emphasis, a lint keeps markup and entities out of the catalog; templates, SEO, FAQ, guides, manifest and mail speak through `.Council`; guard tests keep council literals out of code and keys in sync |
 | Tests | provider contract; generic client over a scripted stub and the fake; Orikan protocol; HTTP tests of link/picker/add/clear on the real client + fake provider, incl. a two-council run; migration; registry; mux; shared limit; goldens |
 
@@ -268,8 +281,9 @@ Every council needs a live capture before it is enabled:
 
 1. **Brand.** "p.stonn" = *parking Stonnington*. Keep it and position as "started in
    Stonnington" until a second council is real.
-2. **One council per account** (chosen). Many-per-account complicates every
-   owner-keyed table for a case that barely exists.
+2. **Several tenants per account** (chosen 2026-08-29, superseding one-per-account):
+   a resident with homes in two councils cannot use two accounts, since each
+   sign-in is an email address. Sessions are per (account, tenant).
 3. Egress reputation is the scale ceiling and it is per host, so a second council
    roughly doubles headroom rather than sharing it.
 4. Phase 3 step 13 is the go/no-go: if the second tenant is not config-only, the
