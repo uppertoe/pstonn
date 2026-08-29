@@ -16,8 +16,8 @@
        site is another origin. */}}
   <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
     <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
-    {{T "onboarding.rejected_lead" .}}
-    <span style="display:block;margin-top:12px">{{T "onboarding.rejected_reset" .}}</span>
+    {{T "onboarding.rejected_lead" . (slots "b" (strong))}}
+    <span style="display:block;margin-top:12px">{{T "onboarding.rejected_reset" . (slots "reset" (link .Council.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`) "b" (strong))}}</span>
     {{if .LogoutURL}}
     <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
       <span>&bull; <strong>Council account under a different email?</strong></span>
@@ -27,7 +27,7 @@
     {{else}}
     <span style="display:block;margin-top:10px">&bull; <strong>Council account under a different email?</strong> Sign out, then sign back in here with that address.</span>
     {{end}}
-    <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" .}}</span>
+    <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" . (slots "portal" (link .Council.Links.Portal `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</span>
   </span></div>
   {{end}}
   {{if .LinkThrottled}}
@@ -40,7 +40,7 @@
     <strong>Paused after several sign-in tries &mdash; please wait about 15 minutes.</strong><br>
     Too many attempts in a row could lock your real council account, so p.stonn stops first.
     <span style="display:block;margin-top:10px">While you wait, two things worth checking:</span>
-    <span style="display:block;margin-top:6px">{{T "onboarding.throttled_password" .}}</span>
+    <span style="display:block;margin-top:6px">{{T "onboarding.throttled_password" . (slots "portal" (link .Council.Links.Portal `hx-boost="false"` `target="_blank"` `rel="noopener"`) "reset" (link .Council.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</span>
     <span style="display:block;margin-top:6px">&bull; Your email &mdash; your {{.Council.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
     {{- if .LogoutURL}} <a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}} sign out{{end}} and sign back in here with that one.</span>
   </span></div>
@@ -122,7 +122,7 @@
            ePermits account but has never held a working portal password, and
            for them this field is unanswerable — every guess burns one of the
            council's own lockout-budget attempts first. */}}
-      <p class="empty-note" style="margin-top:-4px">{{T "onboarding.reset_beside" .}}</p>
+      <p class="empty-note" style="margin-top:-4px">{{T "onboarding.reset_beside" . (slots "reset" (link .Council.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</p>
       <label class="optin">
         {{/* Ticked by default, deliberately. Without a saved password the schedule
              stops the first time the council ends the session — which happens

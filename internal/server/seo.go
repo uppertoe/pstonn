@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/uppertoe/pstonn/internal/i18n"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -224,7 +225,11 @@ type guidePage struct {
 // limits with online connection and capability).
 func councilSignInSteps(c councilView) []template.HTML {
 	return []template.HTML{
-		tr(c, "guide.signin_step", nil),
+		tr(c, "guide.signin_step", nil, i18n.Slots{
+			"portal":   i18n.Link(c.Links.Portal, `target="_blank"`, `rel="noopener"`),
+			"register": i18n.Link(c.Links.Register, `target="_blank"`, `rel="noopener"`),
+			"reset":    i18n.Link(c.Links.ResetPassword, `target="_blank"`, `rel="noopener"`),
+		}),
 		template.HTML(`In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.`),
 		template.HTML(`Enter the new registration and the state it&rsquo;s registered in, and save.`),
 	}
@@ -244,7 +249,7 @@ func guidesFor(c councilView) []guidePage {
 			CouncilHeading: "At the council",
 			Steps: append(append([]template.HTML{}, steps...),
 				template.HTML(`Repeat for each new visitor, before they park.`)),
-			CouncilNote: tr(c, "guide.change_note", nil),
+			CouncilNote: tr(c, "guide.change_note", nil, nil),
 			Pstonn:      "Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.",
 			Demo:        "roster",
 		},
@@ -258,7 +263,7 @@ func guidesFor(c councilView) []guidePage {
 			},
 			CouncilHeading: "At the council, each visit",
 			Steps:          steps,
-			CouncilNote:    tr(c, "guide.carer_note", nil),
+			CouncilNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
 			Pstonn:         "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
 			Demo:           "guest",
 		},
@@ -276,7 +281,7 @@ func guidesFor(c councilView) []guidePage {
 				template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
 				template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
 			},
-			CouncilNote: tr(c, "guide.paper_note", nil),
+			CouncilNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
 			Pstonn:      "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
 			Demo:        "oneoff",
 		},

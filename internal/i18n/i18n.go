@@ -20,6 +20,7 @@ import (
 	"fmt"
 	htmltemplate "html/template"
 	"io/fs"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +38,45 @@ type catalogFile struct {
 	Terms    map[string]string `json:"terms"`
 	Messages map[string]string `json:"messages"`
 }
+
+// Slot is markup a template lends to a message: the message says WHERE a link
+// or emphasis goes and what words it carries; the template says what it IS.
+// A Slot receives the translator's words (already escaped) and returns the
+// wrapped fragment.
+type Slot func(inner htmltemplate.HTML) htmltemplate.HTML
+
+// Slots is the set of slots a call site provides, by name.
+type Slots map[string]Slot
+
+// Link is an anchor slot. attrs are literal attribute strings the template
+// chooses (`hx-boost="false"`); href is escaped.
+func Link(href string, attrs ...string) Slot {
+	open := `<a href="` + htmltemplate.HTMLEscapeString(href) + `"`
+	for _, a := range attrs {
+		open += " " + a
+	}
+	return func(inner htmltemplate.HTML) htmltemplate.HTML {
+		return htmltemplate.HTML(open + ">" + string(inner) + "</a>")
+	}
+}
+
+// Strong is an emphasis slot.
+func Strong() Slot {
+	return func(inner htmltemplate.HTML) htmltemplate.HTML { return "<strong>" + inner + "</strong>" }
+}
+
+// Markers: a message's {{slot "name"}}words{{endslot}} renders to private
+// markers around the words (which are ordinary message text, so they may carry
+// interpolations) that the catalog resolves against the call site's Slots AFTER
+// template execution — slots need no place in the message's data, and a nested
+// {{T}} passes them through to the top level.
+const (
+	slotOpen  = "\x00slot\x00"
+	slotSep   = "\x00"
+	slotClose = "\x00/slot\x00"
+)
+
+var slotRe = regexp.MustCompile(regexp.QuoteMeta(slotOpen) + `([^\x00]*)` + regexp.QuoteMeta(slotSep) + `((?:[^\x00])*?)` + regexp.QuoteMeta(slotClose))
 
 // Catalog is one locale's messages and default terminology.
 type Catalog struct {
@@ -110,9 +150,18 @@ func parse(raw []byte) (*Catalog, error) {
 	if c.terms == nil {
 		c.terms = map[string]string{}
 	}
-	// Messages may include one another with {{T "key" .}}.
-	htmlFuncs := htmltemplate.FuncMap{"T": func(key string, data any) (htmltemplate.HTML, error) { return c.HTML(key, data) }}
-	textFuncs := texttemplate.FuncMap{"T": func(key string, data any) (string, error) { return c.Text(key, data) }}
+	// Messages may include one another with {{T "key" .}} (slots resolve at the
+	// top level), and mark a slot with {{slot "name"}}words{{endslot}}.
+	htmlFuncs := htmltemplate.FuncMap{
+		"T":       func(key string, data any) (htmltemplate.HTML, error) { return c.renderHTML(key, data) },
+		"slot":    func(name string) htmltemplate.HTML { return htmltemplate.HTML(slotOpen + name + slotSep) },
+		"endslot": func() htmltemplate.HTML { return slotClose },
+	}
+	textFuncs := texttemplate.FuncMap{
+		"T":       func(key string, data any) (string, error) { return c.Text(key, data) },
+		"slot":    func(name string) string { return "" }, // prose keeps its words, loses the markup
+		"endslot": func() string { return "" },
+	}
 	for k, v := range f.Messages {
 		ht, err := htmltemplate.New(k).Funcs(htmlFuncs).Parse(v)
 		if err != nil {
@@ -146,8 +195,33 @@ func (b *Bundles) Locales() []string {
 	return out
 }
 
-// HTML renders a message for an HTML page.
-func (c *Catalog) HTML(key string, data any) (htmltemplate.HTML, error) {
+// HTML renders a message for an HTML page, filling its slots from the call
+// site. A slot the message names but the caller did not supply is an error: the
+// page must not quietly lose a link.
+func (c *Catalog) HTML(key string, data any, slots Slots) (htmltemplate.HTML, error) {
+	out, err := c.renderHTML(key, data)
+	if err != nil {
+		return "", err
+	}
+	var missing []string
+	resolved := slotRe.ReplaceAllStringFunc(string(out), func(m string) string {
+		sub := slotRe.FindStringSubmatch(m)
+		name, inner := sub[1], htmltemplate.HTML(sub[2])
+		slot, ok := slots[name]
+		if !ok {
+			missing = append(missing, name)
+			return string(inner)
+		}
+		return string(slot(inner))
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("i18n: %s: no slot %v supplied by the call site", key, missing)
+	}
+	return htmltemplate.HTML(resolved), nil
+}
+
+// renderHTML executes a message, leaving slot markers for HTML to resolve.
+func (c *Catalog) renderHTML(key string, data any) (htmltemplate.HTML, error) {
 	t, ok := c.html[key]
 	if !ok {
 		return "", fmt.Errorf("i18n: no message %q in %s", key, c.Locale)
@@ -158,6 +232,21 @@ func (c *Catalog) HTML(key string, data any) (htmltemplate.HTML, error) {
 	}
 	return htmltemplate.HTML(buf.String()), nil
 }
+
+// Lint reports messages that carry markup or entities: those belong to the
+// templates and to slots, so a translator only ever sees prose.
+func (c *Catalog) Lint() []string {
+	var out []string
+	for _, k := range c.Keys() {
+		v := c.raw[k]
+		if strings.Contains(v, "<") || entityRe.MatchString(v) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+var entityRe = regexp.MustCompile(`&[a-zA-Z]+;|&#`)
 
 // Text renders a message as plain text (email bodies, notifications).
 func (c *Catalog) Text(key string, data any) (string, error) {

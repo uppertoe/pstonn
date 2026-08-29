@@ -44,12 +44,12 @@ type councilView struct {
 // tr renders a catalog message with a council and extra fields, for Go-composed
 // page text (SEO titles, FAQ entries, guides). HTML markup in the message is
 // trusted; interpolated fields are escaped.
-func tr(c councilView, key string, extra map[string]any) template.HTML {
+func tr(c councilView, key string, extra map[string]any, slots i18n.Slots) template.HTML {
 	data := map[string]any{"Council": c}
 	for k, v := range extra {
 		data[k] = v
 	}
-	out, err := catalog.For(i18n.DefaultLocale).HTML(key, data)
+	out, err := catalog.For(i18n.DefaultLocale).HTML(key, data, slots)
 	if err != nil {
 		log.Printf("i18n: %v", err)
 		return template.HTML(template.HTMLEscapeString(key))

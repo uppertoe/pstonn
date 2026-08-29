@@ -69,13 +69,35 @@ var templateFuncs = template.FuncMap{
 	"guidesFor": guidesFor, // the council's guide pages, for the landing list
 	// T renders a catalog message for the page's locale and council: the page's
 	// data (which carries Council) is the message's data.
-	"T": func(key string, data any) (template.HTML, error) {
+	"T": func(key string, data any, slots ...i18n.Slots) (template.HTML, error) {
 		locale := i18n.DefaultLocale
 		if l, ok := data.(interface{ LocaleTag() string }); ok && l.LocaleTag() != "" {
 			locale = l.LocaleTag()
 		}
-		return catalog.For(locale).HTML(key, data)
+		return catalog.For(locale).HTML(key, data, mergeSlots(slots))
 	},
+	// slots pairs names with the markup a message may wrap words in:
+	// (slots "reset" (link .Council.Links.ResetPassword `target="_blank"`)).
+	"slots": func(kv ...any) (i18n.Slots, error) {
+		if len(kv)%2 != 0 {
+			return nil, fmt.Errorf("slots: want name/slot pairs, got %d values", len(kv))
+		}
+		out := i18n.Slots{}
+		for i := 0; i < len(kv); i += 2 {
+			name, ok := kv[i].(string)
+			if !ok {
+				return nil, fmt.Errorf("slots: name %v is not a string", kv[i])
+			}
+			slot, ok := kv[i+1].(i18n.Slot)
+			if !ok {
+				return nil, fmt.Errorf("slots: %q is not a slot", name)
+			}
+			out[name] = slot
+		}
+		return out, nil
+	},
+	"link":        i18n.Link,
+	"strong":      i18n.Strong,
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	// sourceLabel turns an apply-log source code into words for the Activity page.
 	// The stored codes are internal; the page is read by householders.
@@ -148,3 +170,17 @@ var templateFuncs = template.FuncMap{
 }
 
 var templates = template.Must(template.New("").Funcs(templateFuncs).ParseFS(templateFS, "templates/*.html"))
+
+// mergeSlots folds the optional slot sets a template passes to T.
+func mergeSlots(sets []i18n.Slots) i18n.Slots {
+	if len(sets) == 1 {
+		return sets[0]
+	}
+	out := i18n.Slots{}
+	for _, s := range sets {
+		for k, v := range s {
+			out[k] = v
+		}
+	}
+	return out
+}
