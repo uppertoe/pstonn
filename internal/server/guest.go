@@ -1500,6 +1500,7 @@ func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprint(w, `{
+  "id": `+startURL+`,
   "name": "p.stonn parking permit",
   "short_name": "p.stonn",
   "start_url": `+startURL+`,

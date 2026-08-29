@@ -170,6 +170,7 @@ func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	fmt.Fprint(w, `{
+  "id": "/",
   "name": "p.stonn — Stonnington visitor parking permits",
   "short_name": "p.stonn",
   "start_url": "/",
