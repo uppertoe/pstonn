@@ -1,0 +1,46 @@
+
+
+
+
+<form hx-post="/notifications" hx-target="#notify-body" hx-swap="none" hx-trigger="change"
+      class="stack notify-form"
+      x-data="{ntfy: false,
+               guard(e) {
+                 if (e.target.checked || [...e.target.form.querySelectorAll('.chan')].some(c => c.checked)) return;
+                 e.target.checked = true;
+                 if (e.target.name === 'ntfy_enabled') this.ntfy = true;
+                 e.stopPropagation();
+                 const row = e.target.closest('.toggle');
+                 row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake');
+                 this.$refs.status.textContent = '⚠ Keep at least one method on.';
+                 this.$refs.status.className = 'notify-status err';
+               }}"
+      @htmx:after-request="if ($event.target === $root && $event.detail.successful) { $refs.status.textContent = '✓ Saved'; $refs.status.className = 'notify-status ok'; }">
+  
+  <label class="toggle"><input type="checkbox" class="chan" name="email_enabled" checked @change="guard($event)"> <span>Email me at <strong></strong></span></label>
+  
+  
+  <p class="notify-status" x-ref="status" role="status" aria-live="polite">
+    At least one method must stay on.
+  </p>
+  
+  
+  <p class="empty-note">Whatever you choose here, safety alerts always come by email: a change p.stonn couldn&rsquo;t make, a council connection that needs re-linking, a permit about to expire, and outage notices.</p>
+  
+  <label class="toggle"><input type="checkbox" name="failures_only" > <span>Only tell me when something needs attention &mdash; skip the &ldquo;plate changed as scheduled&rdquo; confirmations</span></label>
+  <div class="quiet" x-data="{quiet: false}">
+    <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" > <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
+    <div class="quiet-times" x-show="quiet" x-cloak>
+      <span>Hold notices from</span>
+      <select name="quiet_from" aria-label="Start holding notices at">
+        <option value="0" selected>12:00 am</option><option value="1" >1:00 am</option><option value="2" >2:00 am</option><option value="3" >3:00 am</option><option value="4" >4:00 am</option><option value="5" >5:00 am</option><option value="6" >6:00 am</option><option value="7" >7:00 am</option><option value="8" >8:00 am</option><option value="9" >9:00 am</option><option value="10" >10:00 am</option><option value="11" >11:00 am</option><option value="12" >12:00 pm</option><option value="13" >1:00 pm</option><option value="14" >2:00 pm</option><option value="15" >3:00 pm</option><option value="16" >4:00 pm</option><option value="17" >5:00 pm</option><option value="18" >6:00 pm</option><option value="19" >7:00 pm</option><option value="20" >8:00 pm</option><option value="21" >9:00 pm</option><option value="22" >10:00 pm</option><option value="23" >11:00 pm</option>
+      </select>
+      <span>until</span>
+      <select name="quiet_until" aria-label="Deliver held notices at">
+        <option value="0" selected>12:00 am</option><option value="1" >1:00 am</option><option value="2" >2:00 am</option><option value="3" >3:00 am</option><option value="4" >4:00 am</option><option value="5" >5:00 am</option><option value="6" >6:00 am</option><option value="7" >7:00 am</option><option value="8" >8:00 am</option><option value="9" >9:00 am</option><option value="10" >10:00 am</option><option value="11" >11:00 am</option><option value="12" >12:00 pm</option><option value="13" >1:00 pm</option><option value="14" >2:00 pm</option><option value="15" >3:00 pm</option><option value="16" >4:00 pm</option><option value="17" >5:00 pm</option><option value="18" >6:00 pm</option><option value="19" >7:00 pm</option><option value="20" >8:00 pm</option><option value="21" >9:00 pm</option><option value="22" >10:00 pm</option><option value="23" >11:00 pm</option>
+      </select>
+      <span>&mdash; then they're delivered.</span>
+    </div>
+    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. Anything that needs your action is sent straight away.</p>
+  </div>
+</form>

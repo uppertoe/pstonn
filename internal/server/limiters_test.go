@@ -20,7 +20,7 @@ import (
 // spot the next time a limiter is added — reflection is what makes this hold for
 // limiters that do not exist yet.
 func TestNewInitialisesEveryRateLimiter(t *testing.T) {
-	s := New(&config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil)
+	s := New(&config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	v := reflect.ValueOf(s).Elem()
 	limiterType := reflect.TypeOf((*rateLimiter)(nil))

@@ -1,0 +1,19 @@
+=== EMAIL to lily@example.com
+Subject: Keep your Stonnington parking scheduler running
+Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Hi,
+
+Your visitor-permit scheduler is still running and updating your permit automatically.
+
+We haven't seen you in p.stonn for a while, so this is a check that you still want it running. If you do nothing, it will stop on Monday 17 August 2026 and you'll need to link your council account again.
+
+(Opening p.stonn and signing in does the same thing as clicking below — either way the clock resets.)
+
+Confirm and keep it running (one click):
+https://p.stonn.org/council/confirm?token=abc
+
+If you no longer want the service, just ignore this email and it will stop on its own.
+
+-- p.stonn
+

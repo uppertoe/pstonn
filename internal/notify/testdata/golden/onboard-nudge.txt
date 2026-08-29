@@ -1,0 +1,26 @@
+=== EMAIL to guest@example.com
+Subject: One step left to start managing your visitor permit
+Provenance: You received this at guest@example.com because you signed up for p.stonn with it but haven't connected a council account yet. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly plate schedule, guest QR codes and one-off bookings all start from that one connection.
+
+Connecting takes one sign-in with your City of Stonnington ePermits details. Three things trip most people up:
+
+1. The ePermits password. Forgot it — or never set one?
+Reset it at the council:
+https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword
+
+2. An ePermits account under a different email address. p.stonn can only connect to the ePermits account registered under the address you signed up with (guest@example.com). If your council account uses a different address, sign in to p.stonn with that one instead.
+
+3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill.
+Open p.stonn in Safari or Chrome:
+https://p.stonn.org
+
+One thing to know: p.stonn manages VISITOR permits only — the permit your guests' cars go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.
+
+No ePermits account or visitor permit yet? Apply for a visitor permit on the council's ePermits site first, then come back.
+Register with the council:
+https://parkingpermits.stonnington.vic.gov.au/idm/account/Register
+
+This is the only reminder p.stonn sends. If you've decided it's not for you, there's nothing to undo — your details go no further than the sign-up you made.
+

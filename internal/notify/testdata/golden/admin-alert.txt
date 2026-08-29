@@ -1,0 +1,14 @@
+=== EMAIL to admin@stonn.org
+Subject: [p.stonn admin] Council may have renamed permit types
+
+Body line one.
+Body line two.
+
+=== NTFY pstonn-admin
+Title: [p.stonn admin] Council may have renamed permit types
+Priority: high
+Tags: rotating_light
+
+Body line one.
+Body line two.
+

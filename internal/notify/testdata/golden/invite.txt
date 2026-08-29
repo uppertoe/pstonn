@@ -1,0 +1,14 @@
+=== EMAIL to guest@example.com
+Subject: You have been given access to a p.stonn account
+Provenance: You received this at guest@example.com because someone gave this address shared access to their p.stonn account. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+lily@example.com has given you shared access to their p.stonn account, which schedules a City of Stonnington visitor parking permit.
+
+Sign in with this email address — you will get a one-time code to confirm it is you — then tap Accept on the page you land on.
+
+Already using p.stonn with your own permits? The invitation is under Settings. You can't join another account while you keep your own.
+
+https://p.stonn.org
+
+If you were not expecting this, you can ignore this email. You can also remove your access from Settings after signing in.
+

@@ -5,13 +5,16 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/mailer"
+	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/scheduler"
@@ -21,19 +24,48 @@ import (
 	"github.com/uppertoe/pstonn/internal/webauth"
 )
 
+// Council is everything the handlers need from a council connection. It is the
+// server-side counterpart of scheduler.Council: the handlers never name the
+// concrete client, so a per-council driver (or a multiplexer over several) can be
+// substituted without touching them. *parking.Client satisfies it.
+// See docs/council-connections.md.
+type Council interface {
+	// Link performs the credential login for owner and stores the session.
+	Link(ctx context.Context, owner, username, password string, savePassword, interactive bool, expectedGen int64) error
+	// Linked reports whether owner holds a stored council session.
+	Linked(ctx context.Context, owner string) bool
+	// ListPermitsComplete reads owner's permits and reports whether the list was whole.
+	ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error)
+	// CurrentVehicleCached is the bounded-read plate lookup the pages use.
+	CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, age time.Duration, fresh bool, err error)
+	// RefreshFailingFor reports how long background plate refreshes have been failing.
+	RefreshFailingFor(owner string, p model.Permit) time.Duration
+	// ForgetPermit drops cached state for a permit the owner stopped managing.
+	ForgetPermit(owner, councilPermitID string)
+	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
+	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
+	// Stats is the traffic / breaker snapshot shown on /status.
+	Stats() parking.Stats
+}
+
+// The real client satisfies the interface; a mismatch is a compile error here, not
+// a wiring failure in main.
+var _ Council = (*parking.Client)(nil)
+
 // Server holds the dependencies shared by the handlers.
 type Server struct {
-	cfg      *config.Config
-	store    *store.Store
-	sessions *session.Manager
-	auth     *webauth.Authenticator // nil when OIDC login is disabled
-	council  *parking.Client
-	sched    *scheduler.Scheduler
-	notify   *notify.Service
-	mail     *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
-	box      *secretbox.Box // at-rest cipher; seals the reprintable door-QR token
-	terms    Terms
-	contact  *rateLimiter // per-IP throttle on the public contact form
+	cfg         *config.Config
+	store       *store.Store
+	sessions    *session.Manager
+	auth        *webauth.Authenticator // nil when OIDC login is disabled
+	council     Council                // nil only in tests that never touch the council
+	councilInfo *council.Council       // the tenant the process is wired to (names, links, permit policy)
+	sched       *scheduler.Scheduler
+	notify      *notify.Service
+	mail        *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
+	box         *secretbox.Box // at-rest cipher; seals the reprintable door-QR token
+	terms       Terms
+	contact     *rateLimiter // per-IP throttle on the public contact form
 	// invite-email throttles so a primary can't email-bomb an address or mass-send
 	// via SMTP: fanout caps per-owner sends, target dedups per recipient.
 	inviteFanout *rateLimiter
@@ -112,9 +144,9 @@ type Server struct {
 const maxConcurrentGuest = 24
 
 // New constructs a Server.
-func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council *parking.Client, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
+func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council Council, info *council.Council, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
 	return &Server{
-		cfg: cfg, store: st, sessions: sessions, auth: auth, council: council,
+		cfg: cfg, store: st, sessions: sessions, auth: auth, council: council, councilInfo: info,
 		sched: sched, notify: notifier, mail: mail, box: box, terms: loadTerms(cfg.TermsPath),
 		contact:      newRateLimiter(3, 10*time.Minute),  // 3 messages / 10 min per IP
 		inviteFanout: newRateLimiter(6, time.Hour),       // <=6 invite emails / hour per owner

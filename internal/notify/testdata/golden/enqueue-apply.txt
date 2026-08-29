@@ -1,0 +1,30 @@
+=== OUTBOX account= recipients=lily@example.com ntfy=/default/white_check_mark reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: apply|lily@example.com|lily@example.com|Visitor|ABC123|true|email|lily@example.com
+Subject: Permit updated: Visitor now shows ABC123
+
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+
+=== OUTBOX account= recipients= ntfy=pstonn-lily/default/white_check_mark reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: apply|lily@example.com|lily@example.com|Visitor|ABC123|true|ntfy
+Subject: Permit updated: Visitor now shows ABC123
+
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+
+=== OUTBOX account= recipients=sam@example.com ntfy=/default/white_check_mark reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: apply|sam@example.com|lily@example.com|Visitor|ABC123|true|email|sam@example.com
+Subject: Permit updated: Visitor now shows ABC123
+
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+

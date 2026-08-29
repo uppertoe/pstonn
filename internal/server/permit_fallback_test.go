@@ -3,8 +3,12 @@ package server
 import (
 	"testing"
 
+	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/parking"
 )
+
+// pol is the Stonnington permit policy these cases were written against.
+var pol = council.Stonnington().Policy
 
 // TestVisitorNameFallback: the council owns the permit-type display text, and a
 // rename used to make every permit unaddable overnight, with the picker flatly
@@ -39,7 +43,7 @@ func TestVisitorNameFallback(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := visitorNameFallback(c.permits); got != c.want {
+			if got := pol.NameFallback(c.permits); got != c.want {
 				t.Fatalf("visitorNameFallback = %v, want %v", got, c.want)
 			}
 		})
@@ -57,7 +61,7 @@ func TestIsResidentPermit(t *testing.T) {
 		"Prescribed Accommodation Permit": false,
 	}
 	for name, want := range cases {
-		if got := isResidentPermit(name); got != want {
+		if got := pol.IsResident(name); got != want {
 			t.Errorf("isResidentPermit(%q) = %v, want %v", name, got, want)
 		}
 	}
@@ -91,7 +95,7 @@ func TestVisitorSchedulable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := visitorSchedulable(c.p, c.fallback); got != c.want {
+			if got := pol.Schedulable(c.p, c.fallback); got != c.want {
 				t.Fatalf("visitorSchedulable(%q, fallback=%v) = %v, want %v", c.p.PermitType, c.fallback, got, c.want)
 			}
 		})

@@ -26,6 +26,7 @@ import (
 	"flag"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
@@ -121,7 +122,12 @@ func run() error {
 		log.Print("APP_OIDC_ISSUER not set: OIDC login disabled; relying on forward_auth headers or DEV_IDENTITY_EMAIL")
 	}
 
+	// The council this process serves. Phase 0 of docs/council-connections.md: one
+	// descriptor (Stonnington), endpoints from COUNCIL_* config; the driver is built
+	// from it so the app never names the council directly.
+	tenant := council.FromConfig(cfg.Council)
 	council := parking.New(cfg, st, box)
+	council.DefaultVehicleState = tenant.Policy.DefaultVehicleState
 	if cfg.Council.Sandbox {
 		log.Print("WARNING: COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
 	}
@@ -186,7 +192,7 @@ func run() error {
 		}
 	}
 
-	srv := server.New(cfg, st, sessions, auth, council, sched, notifier, mail, box)
+	srv := server.New(cfg, st, sessions, auth, council, tenant, sched, notifier, mail, box)
 
 	// Track the worker loops so shutdown can join them: st.Close() runs on
 	// return from this function, and closing the store under a loop that is

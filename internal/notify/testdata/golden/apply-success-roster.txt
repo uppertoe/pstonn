@@ -1,0 +1,29 @@
+=== EMAIL to lily@example.com
+Subject: Permit updated: Visitor now shows ABC123
+Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+
+=== NTFY pstonn-lily
+Title: Permit updated: Visitor now shows ABC123
+Priority: default
+Tags: white_check_mark
+
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+
+Nothing to do — this is just your confirmation it went through.
+
+=== EMAIL to sam@example.com
+Subject: Permit updated: Visitor now shows ABC123
+Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+

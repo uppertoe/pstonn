@@ -1,0 +1,34 @@
+=== EMAIL to lily@example.com
+Subject: Action needed: reconnect your p.stonn council account
+Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your council connection has expired, so p.stonn has stopped updating your visitor permit.
+
+Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
+
+Re-link: https://p.stonn.org
+Council portal: https://parkingpermits.stonnington.vic.gov.au/
+
+=== NTFY pstonn-lily
+Title: Action needed: reconnect your p.stonn council account
+Priority: high
+Tags: warning
+
+Your council connection has expired, so p.stonn has stopped updating your visitor permit.
+
+Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
+
+Re-link: https://p.stonn.org
+Council portal: https://parkingpermits.stonnington.vic.gov.au/
+
+=== EMAIL to sam@example.com
+Subject: Action needed: reconnect your p.stonn council account
+Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your council connection has expired, so p.stonn has stopped updating your visitor permit.
+
+Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
+
+Re-link: https://p.stonn.org
+Council portal: https://parkingpermits.stonnington.vic.gov.au/
+

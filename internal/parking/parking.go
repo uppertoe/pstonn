@@ -202,6 +202,20 @@ type Client struct {
 	persistAt time.Time
 
 	sandbox *councilSandbox // non-nil in COUNCIL_SANDBOX mode: fake the council in memory
+
+	// DefaultVehicleState is the portal's vehicle-state id written when a plate is
+	// added without a prior state to copy (the council's own state: VIC=1). Set from
+	// the council descriptor by main; empty falls back to VIC for the tests that
+	// build a bare Client.
+	DefaultVehicleState string
+}
+
+// vehicleState returns the state id to write when the permit carries none.
+func (c *Client) vehicleState() string {
+	if c.DefaultVehicleState == "" {
+		return "1" // VIC
+	}
+	return c.DefaultVehicleState
 }
 
 type cachedReg struct {
@@ -1086,7 +1100,7 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 	detailID := cur.PKPermitVehicleDetailID.String()
 	state := cur.FKVehicleStateID
 	if state == "" {
-		state = "1" // VIC, if the current state is somehow absent
+		state = c.vehicleState() // if the current state is somehow absent
 	}
 	reqBody := manageVehicleReq{
 		PKPermitID:          permitID,
@@ -1155,8 +1169,8 @@ func (c *Client) addVehicle(ctx context.Context, owner string, p model.Permit, r
 		Vehicle: manageVehicleV{
 			ChangeSetID:             "",
 			FKPermitID:              permitID,
-			FKVehicleStateID:        "1", // VIC; a bare-plate add carries no prior state
-			PKPermitVehicleDetailID: "",  // new record — the council assigns the id
+			FKVehicleStateID:        c.vehicleState(), // a bare-plate add carries no prior state
+			PKPermitVehicleDetailID: "",               // new record — the council assigns the id
 			RegisteredAtAddress:     false,
 			RegistrationNumber:      registration,
 		},
@@ -1214,7 +1228,7 @@ func (c *Client) ClearVehicle(ctx context.Context, owner string, p model.Permit)
 	}
 	state := cur.FKVehicleStateID
 	if state == "" {
-		state = "1"
+		state = c.vehicleState()
 	}
 	reqBody := manageVehicleReq{
 		PKPermitID:          permitID,

@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/redact"
@@ -111,7 +111,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	for _, p := range managed {
 		already[p.CouncilPermitID] = true
 	}
-	fallback := visitorNameFallback(permits)
+	fallback := s.visitorNameFallback(permits)
 	if fallback && complete {
 		// The council appears to have renamed its permit types out from under the
 		// name-match — systemic (hits every new signup), so the operator must
@@ -133,7 +133,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				switch {
 				case !p.CanChangeVehicle:
 					t += " (not changeable — not offered)"
-				case isResidentPermit(p.PermitType):
+				case s.isResidentPermit(p.PermitType):
 					t += " (changeable, resident — excluded, never offered)"
 				default:
 					t += " (changeable — offered with a caution)"
@@ -153,7 +153,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				"An account holds permits with CanChangeVehicle=true but none whose type name contains \"visitor\" — either the council renamed its permit types (systemic: hits every new signup) or this household simply holds no visitor permit (benign).\n\n"+
 					"What the picker did with each type:\n"+seen+"\n\n"+
 					outcome+"\n\n"+
-					"If these are ordinary non-visitor types, no action is needed. If a visitor-like type has a new name, update isVisitorPermit's match.")
+					"If these are ordinary non-visitor types, no action is needed. If a visitor-like type has a new name, update the council policy's VisitorWord.")
 		})
 	}
 	for _, p := range permits {
@@ -164,7 +164,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// holder can change the vehicle can actually be scheduled. The rest are
 		// listed greyed-out with the reason, so the user sees them and isn't left
 		// wondering where a permit went.
-		visitor := visitorSchedulable(p, fallback)
+		visitor := s.visitorSchedulable(p, fallback)
 		addable := visitor && p.CanChangeVehicle
 		reason := ""
 		switch {
@@ -227,70 +227,32 @@ const claimedByAnotherAccount = "That permit is already being scheduled through 
 	"Only one account can manage a permit, so ask them to open p.stonn and choose \"Stop managing\" on it (or to share access with you from their Settings), and then you can add it here. " +
 	"If you think nobody else should have it, get in touch and we'll sort it out."
 
-// isVisitorPermit reports whether a council permit type is a visitor permit, the
-// only kind p.stonn schedules. The council names them like "(A) 1st Visitor
-// Permit", so a case-insensitive "visitor" match is the reliable signal.
-func isVisitorPermit(permitType string) bool {
-	return strings.Contains(strings.ToLower(permitType), "visitor")
-}
+// Which permit types may be scheduled is the COUNCIL's policy, not the server's:
+// see council.PermitPolicy (the visitor-name match, the resident exclusion, and the
+// rename fallback, with the reasoning for each). The helpers below are the server's
+// view of the policy for the council this account belongs to.
 
-// isResidentPermit reports whether a council permit type is a resident permit,
-// named like "(A) 1st Resident Permit". Confirmed 2026-08-21: Stonnington resident
-// permits report CanChangeVehicle=true, so without this the visitorNameFallback —
-// which offers ANY changeable permit when none is named "visitor" — would hand a
-// resident with no visitor permit their own resident permit to schedule, and
-// p.stonn would overwrite their everyday car's plate with visitor plates. A
-// resident permit holds the holder's OWN nominated vehicle, so it must never be
-// scheduled, even under the fallback.
-//
-// Matches "resident" as a whole word, so "Residential Tradesperson Permit" — a
-// DIFFERENT type — is deliberately NOT caught here. (It, too, holds a specific own
-// vehicle; if it ever warrants excluding from the fallback, do that as its own
-// explicit, named decision rather than leaning on a substring accident.)
-func isResidentPermit(permitType string) bool {
-	return residentPermitRe.MatchString(permitType)
-}
-
-var residentPermitRe = regexp.MustCompile(`(?i)\bresident\b`)
-
-// visitorNameFallback reports whether the name-match should be bypassed for
-// this account: the council owns the display text, and a rename ("visitor" →
-// anything else) would otherwise make every permit unaddable overnight, with
-// the picker flatly asserting nothing on the account can be scheduled. When NO
-// permit matches the name but the council says at least one permit's vehicle
-// can be changed — its own authorization signal for exactly the operation
-// p.stonn performs — those permits are offered with a caution instead of a
-// dead end. Scoped to the no-match case on purpose: while the name works, it
-// stays the primary filter (other permit types can be CanChangeVehicle too).
-func visitorNameFallback(permits []parking.PermitInfo) bool {
-	anyChangeable := false
-	for _, p := range permits {
-		if isVisitorPermit(p.PermitType) {
-			return false
-		}
-		if p.CanChangeVehicle {
-			anyChangeable = true
-		}
+// policy returns the permit policy of the council the process is wired to.
+// Nil-safe for tests that build a Server without a descriptor.
+func (s *Server) policy() council.PermitPolicy {
+	if s.councilInfo == nil {
+		return council.Stonnington().Policy
 	}
-	return anyChangeable
+	return s.councilInfo.Policy
 }
 
-// fallbackWarn is the caution shown on a permit offered via visitorNameFallback.
+func (s *Server) isVisitorPermit(permitType string) bool  { return s.policy().IsVisitor(permitType) }
+func (s *Server) isResidentPermit(permitType string) bool { return s.policy().IsResident(permitType) }
+func (s *Server) visitorNameFallback(permits []parking.PermitInfo) bool {
+	return s.policy().NameFallback(permits)
+}
+func (s *Server) visitorSchedulable(p parking.PermitInfo, fallback bool) bool {
+	return s.policy().Schedulable(p, fallback)
+}
+
+// fallbackWarn is the caution shown on a permit offered via the name fallback.
 const fallbackWarn = "This permit isn't named as a visitor permit, but the council allows its vehicle to be changed. " +
 	"Only add it if it's the permit your visitors park on."
-
-// visitorSchedulable reports whether a permit's TYPE may be scheduled by p.stonn:
-// a visitor-named permit, or — only when the account has no visitor-named permit
-// at all (fallback, a possible council rename) — a changeable permit that is not a
-// resident permit. The picker's greyed-out hint and addPermit's authoritative gate
-// both call this so they can never drift; the expression was once duplicated, and
-// a mismatch would let the picker offer a permit the gate then refuses. Resident
-// permits are excluded even under fallback: they hold the holder's own everyday
-// vehicle and are themselves changeable, so offering one would let p.stonn
-// overwrite the resident's own plate. Caller passes fallback = visitorNameFallback.
-func visitorSchedulable(p parking.PermitInfo, fallback bool) bool {
-	return isVisitorPermit(p.PermitType) || (fallback && p.CanChangeVehicle && !isResidentPermit(p.PermitType))
-}
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	user, owner, _, ok := s.accountForWrite(w, r)
@@ -352,7 +314,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// gate (the greyed-out picker button is only a UI hint) — it shares
 	// visitorSchedulable with the picker so the two can't drift and offer a
 	// permit this gate then refuses.
-	if !visitorSchedulable(*match, visitorNameFallback(permits)) {
+	if !s.visitorSchedulable(*match, s.visitorNameFallback(permits)) {
 		s.message(w, http.StatusForbidden, "p.stonn only manages visitor permits.")
 		return
 	}

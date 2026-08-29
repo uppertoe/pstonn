@@ -27,6 +27,9 @@ type Mailer struct {
 	addr string
 	auth smtp.Auth
 	from string
+
+	// SendHook replaces SMTP delivery when set (tests only; see SetSendHook).
+	SendHook func(to, subject, body string, o Options) error
 }
 
 // New returns a Mailer, or nil when email is not configured. A nil *Mailer is
@@ -74,7 +77,7 @@ func (m *Mailer) SendRenewalReminder(to string, deadline time.Time, confirmURL s
 		"",
 		"-- p.stonn",
 	}, "\r\n")
-	return m.send(to, subject, body, o)
+	return m.SendOpts(to, subject, body, o)
 }
 
 // Options carries the per-message extras. Zero value = a plain notice.
@@ -109,7 +112,19 @@ func (m *Mailer) SendOpts(to, subject, body string, o Options) error {
 	if m == nil {
 		return nil
 	}
+	if m.SendHook != nil {
+		return m.SendHook(to, subject, body, o)
+	}
 	return m.send(to, subject, body, o)
+}
+
+// SendHook, when set, receives every message in place of SMTP delivery. It exists
+// for the golden email tests (internal/notify), which lock the composed subject,
+// body and footer options of every notice the app sends; production never sets it.
+func (m *Mailer) SetSendHook(fn func(to, subject, body string, o Options) error) {
+	if m != nil {
+		m.SendHook = fn
+	}
 }
 
 // emailBoundary separates the two MIME parts. A fixed, unlikely token is fine for

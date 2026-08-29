@@ -1,0 +1,22 @@
+=== OUTBOX account= recipients=lily@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: acctchange|lily@example.com|lily@example.com|added the car ABC123 (Van)|email|lily@example.com
+Subject: A change was made to your p.stonn setup
+
+added the car ABC123 (Van)
+
+If that was expected, nothing to do.
+If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+
+https://p.stonn.org/activity
+
+=== OUTBOX account= recipients= ntfy=pstonn-lily// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: acctchange|lily@example.com|lily@example.com|added the car ABC123 (Van)|ntfy
+Subject: A change was made to your p.stonn setup
+
+added the car ABC123 (Van)
+
+If that was expected, nothing to do.
+If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+
+https://p.stonn.org/activity
+

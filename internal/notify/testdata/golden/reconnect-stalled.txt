@@ -1,0 +1,40 @@
+=== EMAIL to lily@example.com
+Subject: p.stonn can't reach the council — your permit schedule is paused
+Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
+
+That means any change your schedule should make will not happen: if a different car needs to be on the permit, change the vehicle yourself on the council website now, or that car is not covered and can be fined.
+
+p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
+
+Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Open p.stonn: https://p.stonn.org
+
+=== NTFY pstonn-lily
+Title: p.stonn can't reach the council — your permit schedule is paused
+Priority: high
+Tags: warning
+
+p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
+
+That means any change your schedule should make will not happen: if a different car needs to be on the permit, change the vehicle yourself on the council website now, or that car is not covered and can be fined.
+
+p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
+
+Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Open p.stonn: https://p.stonn.org
+
+=== EMAIL to sam@example.com
+Subject: p.stonn can't reach the council — your permit schedule is paused
+Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
+
+That means any change your schedule should make will not happen: if a different car needs to be on the permit, change the vehicle yourself on the council website now, or that car is not covered and can be fined.
+
+p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
+
+Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Open p.stonn: https://p.stonn.org
+

@@ -1,0 +1,34 @@
+=== EMAIL to lily@example.com
+Subject: Your Visitor expires on 24 Aug 2026
+Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your Visitor is due to expire on 24 Aug 2026.
+
+p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
+
+Open p.stonn: https://p.stonn.org
+Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
+
+=== NTFY pstonn-lily
+Title: Your Visitor expires on 24 Aug 2026
+Priority: default
+Tags: calendar
+
+Your Visitor is due to expire on 24 Aug 2026.
+
+p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
+
+Open p.stonn: https://p.stonn.org
+Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
+
+=== EMAIL to sam@example.com
+Subject: Your Visitor expires on 24 Aug 2026
+Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your Visitor is due to expire on 24 Aug 2026.
+
+p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
+
+Open p.stonn: https://p.stonn.org
+Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
+

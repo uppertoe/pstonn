@@ -19,8 +19,12 @@ func melbourne(t *testing.T) *time.Location {
 	return loc
 }
 
-func samplePermitView(loc *time.Location) permitView {
-	now := time.Now().In(loc)
+// samplePermitView is the schedule-page fixture at the current time (substring
+// assertions only). samplePermitViewAt pins the clock for the golden renders.
+func samplePermitView(loc *time.Location) permitView { return samplePermitViewAt(loc, time.Now()) }
+
+func samplePermitViewAt(loc *time.Location, at time.Time) permitView {
+	now := at.In(loc)
 	end := now.Add(4 * time.Hour)
 	vv := []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}}
 	var days []dayView
@@ -86,238 +90,7 @@ func TestTemplatesRender(t *testing.T) {
 	user := identity.User{Email: "a@b.com"}
 	tm := loadTerms("")
 
-	cases := []struct {
-		name string
-		data dashboardData
-		want string
-	}{
-		{"landing", dashboardData{State: "landing", Loc: loc}, "Schedule your City of Stonnington"},
-		{"landing-signedin", dashboardData{State: "landing", SignedIn: true, Loc: loc}, "Open the app"},
-		{"security", dashboardData{State: "security", Loc: loc}, "The short version"},
-		{"security-encryption", dashboardData{State: "security", Loc: loc}, "AES-256-GCM"},
-		{"how", dashboardData{State: "how", Loc: loc}, "get a Stonnington ePermit"},
-		{"how-demos", dashboardData{State: "how", Loc: loc}, "data-demo=\"roster\""},
-		{"contact", dashboardData{State: "contact", Contact: true, Loc: loc}, "Send message"},
-		{"contact-sent", dashboardData{State: "contact", Contact: true, Flash: "Thanks. Your message has been sent.", Loc: loc}, "has been sent"},
-		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
-		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
-		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
-		// An invitee with no council link of their own can reach no page but this one,
-		// so the invitation must be answerable here — with the owner it was rendered
-		// for carried in the form (acceptInvite checks it).
-		{"onboarding answers a pending invite", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
-			Invite: &inviteView{Owner: "rd@example.com"}}, `action="/account/invite/accept"`},
-		{"onboarding invite names the owner", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
-			Invite: &inviteView{Owner: "rd@example.com"}}, `name="owner" value="rd@example.com"`},
-		// A partial permit read holding ZERO rows must not be reported as an empty
-		// account. Saying "your council account doesn't have any permits on it yet" to
-		// someone who holds several is a flat falsehood they cannot act on.
-		{"picker-partial-empty", dashboardData{User: user, State: "picker", Loc: loc, PermitsUnknown: true}, "couldn't load your permit list"},
-		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
-		// On a FIRST link the box is TICKED. Without a saved password the schedule
-		// stops the first time the council ends the session — which happens whenever
-		// the resident signs in to ePermits themselves — and it stops silently, which
-		// is how a car ends up on the wrong permit. The stored value is a
-		// parking-permit login, sealed at rest and recoverable by the council's own
-		// forgot-password email.
-		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
-		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
-		{"relink-savepw-respects-opton", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: true, Loc: loc}, `name="save_password" value="1" checked>`},
-		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Reconnect your council account"},
-		{"capacity-full", dashboardData{User: user, State: "onboarding", IsPrimary: true, CapacityFull: true, Loc: loc}, "p.stonn is full at the moment"},
-		{"link-rejected offers sign-out", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true,
-			LogoutURL: "https://auth.example.com/logout", Loc: loc},
-			"then sign back in here with that address"},
-		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
-			"Sign out, then sign back in here with that address."},
-		// The reset deep link LEADS the rejected banner: the council can't tell a
-		// wrong password from an account that never had a working one, and the
-		// 2026-08 access logs showed rejected signups giving up without ever
-		// being offered the reset.
-		{"link-rejected leads with the council reset link", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
-			"idm/account/ForgotPassword"},
-		{"link-rejected names the never-set-one case", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
-			"or never set one?"},
-		// The reset offer also sits NEXT TO the password ask itself, before the
-		// first failed attempt burns council lockout budget.
-		{"link-form offers reset beside the password field", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc},
-			"idm/account/ForgotPassword"},
-		{"link-throttled deep-links the reset too", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
-			"idm/account/ForgotPassword"},
-		// Inside a social in-app webview the password manager can't auto-fill;
-		// the advice must appear BEFORE the field defeats them, and only there —
-		// in a real browser it would be wrong and worrying.
-		{"onboarding warns inside the Facebook webview", dashboardData{User: user, State: "onboarding", IsPrimary: true, InAppBrowser: true, Loc: loc},
-			"In the Facebook, Instagram or Google app right now?"},
-		// The terms page names the NEXT step's prerequisite (the ePermits
-		// password) while there is still time to fix it — first acceptance only:
-		// a re-accept returns to a working app, and a secondary links nothing.
-		{"terms heads-up names the ePermits password", dashboardData{User: user, State: "terms", IsPrimary: true, Loc: loc,
-			Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}},
-			"ePermits password"},
-		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true,
-			LogoutURL: "https://auth.example.com/logout", Loc: loc},
-			"please wait about 15 minutes"},
-		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
-			"your ePermits account must be under"},
-		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
-		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
-			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},
-			{CouncilPermitID: "9001", PermitTypeID: "3", PermitNumber: "RPP5", PermitType: "(B) Resident Permit", Addable: false, Reason: "Only visitor permits can be scheduled."},
-		}}, "Only visitor permits can be scheduled."},
-		// A dead permit is grouped under its own heading with a status pill and a
-		// button that says what adding it is for — never the live card's "Manage".
-		{"picker groups dead permits", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
-			{CouncilPermitID: "1", PermitNumber: "VPP1", PermitType: "(A) 1st Visitor Permit", CurrentRego: "LIVE01", Addable: true},
-			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", CurrentRego: "OLD999", Addable: true, Dead: true, Status: "Cancelled"},
-		}}, "Older permits"},
-		{"picker dead permit shows its status", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
-			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", CurrentRego: "OLD999", Addable: true, Dead: true, Status: "Cancelled"},
-		}}, `<span class="pick-status">Cancelled</span>`},
-		{"picker dead permit has the copy button", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
-			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Rejected"},
-		}}, "Add to copy its old schedule"},
-		{"picker with only dead permits says so", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
-			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Cancelled"},
-		}}, "All your permits are managed or no longer active."},
-		// The copy outcome is shown to the person who ran it, on the card itself.
-		{"permit card shows a copy outcome", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits: []permitView{func() permitView {
-				pv := samplePermitView(loc)
-				pv.Notice = "Schedule copied. Guest passes and QR codes moved across with it — links that people have saved keep working."
-				return pv
-			}()},
-		}, "links that people have saved keep working"},
-		{"guide page", dashboardData{State: "guide", Guide: &guides[0], Loc: loc}, "How do I change the car on my Stonnington visitor permit?"},
-		{"share page", dashboardData{User: user, State: "share", Loc: loc, ShareEmailAvailable: true}, `action="/share/invite"`},
-		{"share page without mail hides the form", dashboardData{User: user, State: "share", Loc: loc}, "Open the printable card"},
-		{"share card", dashboardData{User: user, State: "share-card", Loc: loc, ShareQR: "data:image/png;base64,AAAA", ShareURL: "p.stonn.org"}, `alt="QR code to p.stonn.org"`},
-		{"app-contact-link", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, Contact: true,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits:  []permitView{samplePermitView(loc)},
-		}, "/contact"},
-		{"schedule", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits:  []permitView{samplePermitView(loc)},
-		}, "Weekly roster"},
-		{"schedule-expired-section", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
-			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits:        []permitView{samplePermitView(loc)},
-			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", Detail: "VPP24714 · 1st Visitor Permit", StatusText: "Expired 1 Jul 2026"}},
-		}, "VPP24714 · 1st Visitor Permit"},
-		{"schedule-only-expired", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
-			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Cancelled"}},
-		}, "Got a new permit instead?"},
-		{"schedule-share-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, ShowShareHint: true,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits:  []permitView{samplePermitView(loc)},
-		}, "Shared access"},
-		{"vehicles", dashboardData{User: user, State: "app", Page: "vehicles", Loc: loc,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-		}, "ABC123"},
-		{"activity", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
-			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: time.Now()}},
-		}, "Activity"},
-		// Source codes render as words, not raw internal tags.
-		{"activity-source-label", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
-			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: time.Now()}},
-		}, "weekly roster"},
-		// A removal has no plate: it reads "plate removed", not "manual" with an empty pill.
-		{"activity-removal", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
-			Log: []store.ApplyRecord{{PermitID: 7, Registration: "", Source: "manual", Status: "success", Detail: "vehicle removed by a@b.com", At: time.Now()}},
-		}, "plate removed"},
-		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, RelinkBy: "15 Oct 2026"}, "Council connection"},
-		{"settings-quiet-hours", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
-			Notify: notifyView{EmailAvailable: true, EmailEnabled: true, QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}, "hold overnight notices"},
-		{"settings-autoreconnect-on", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "Turn off"},
-		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: false}, "Your password isn't saved"},
-		{"settings-last-reconnect", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true, LastReconnect: "14 Jul 2026, 3:04pm"}, "14 Jul 2026, 3:04pm"},
-		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "hasn't been needed yet"},
-		{"security-data-promise", dashboardData{State: "security", Loc: loc}, "never sold"},
-		{"security-council-note", dashboardData{State: "security", Contact: true, Loc: loc}, "For the City of Stonnington"},
-		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc}, "Add person"},
-		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
-			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}}, "nanny@example.com"},
-		{"settings-secondary", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Leave this account"},
-		// An invitee who already runs their own permits gets the blocked variant: the
-		// rule stated, Decline offered, and NO Accept form that could only fail.
-		{"settings-invite-blocked-own", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
-			Invite: &inviteView{Owner: "rd@example.com", Blocked: "own"}}, "can&rsquo;t also join another account"},
-		{"settings-invite-blocked-shared", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
-			Invite: &inviteView{Owner: "rd@example.com", Blocked: "shared"}}, "Remove them first, or decline the invitation"},
-		{"schedule install hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, ShowInstallHint: true,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits:  []permitView{samplePermitView(loc)}}, "Add to Home Screen"},
-		{"guests-page", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
-				Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Guest passes"},
-		// A pass on a dead permit says so on its card and names the way out.
-		{"guests-page flags a pass on a dead permit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 2, Label: "New permit"}},
-			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "VPP25619 — no longer active", PermitDead: true,
-				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Copy the schedule to your new permit and this pass moves with it."},
-		{"guests-trust-warning", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "send it to people you trust"},
-		{"guests-qr-contrast", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "don't give lasting access"},
-		{"guests-resend", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
-				Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Re-send"},
-		{"guests-secondary-can-manage", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "Create a new guest pass"},
-		{"guests-edit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
-			Edit: &editGrantView{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit", AllowOvernight: true,
-				Selected: map[int64]bool{1: true}, Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}, "Editing pass"},
-		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", OwnerEmail: "held@example.com", PermitLabel: "Visitor Permit", CurrentReg: "ABC123",
-			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "Managed by"},
-		{"guest-bookmark-tip", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", PermitLabel: "Visitor Permit",
-			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "add it to your home screen"},
-		{"guest-manifest-link", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "toktok", PermitLabel: "Visitor Permit",
-			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok"},
-		{"guest-rescan-applied", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
-			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "applied", Until: "the end of today"}}},
-			"is on the permit until the end of today"},
-		{"guest-rescan-superseded", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
-			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "superseded"}}},
-			"it has since been changed"},
-		{"guest-rescan-ended", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
-			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "ended"}}},
-			"has ended"},
-		{"guest-rescan-pending-polls", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
-			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}}},
-			"/g/req/4?n=nn"},
-		{"guests-recent-activity", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
-			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
-			RecentRequests: []guestDecidedView{
-				{Plate: "GUEST1", PermitLabel: "Visitor Permit", Outcome: "Approved", DecidedBy: "mum@example.com", Ago: "2 hr ago",
-					Live: "No longer on the permit — since replaced by OWNER9.", Warn: true},
-				{Plate: "GUEST2", PermitLabel: "Visitor Permit", Outcome: "Not answered", Ago: "3 hr ago"}}},
-			"since replaced by OWNER9"},
-		{"guest-result-ok", dashboardData{State: "guest-result", Loc: loc,
-			Flash: "AAA111 is now on the permit until the end of today.", Guest: guestActView{OwnerEmail: "held@example.com"}}, "on the permit"},
-		{"guest-gone", dashboardData{State: "guest-result", Loc: loc,
-			Warn: "This link is no longer active. Ask the account holder for a new one."}, "no longer active"},
-	}
+	cases := templateRenderCases(loc, user, tm, time.Now())
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var buf bytes.Buffer
@@ -331,105 +104,7 @@ func TestTemplatesRender(t *testing.T) {
 	}
 
 	// The permit-body fragment surfaces expiry when the permit view carries it.
-	for _, ec := range []struct {
-		name string
-		pv   func() permitView
-		want string
-	}{
-		{"soon", func() permitView {
-			p := samplePermitView(loc)
-			p.ExpiryLabel = "3 Aug 2026"
-			p.ExpiryIn = "in 12 days"
-			p.ExpiresSoon = true
-			return p
-		}, "renew it with the council"},
-		{"expired", func() permitView {
-			p := samplePermitView(loc)
-			p.ExpiryLabel = "1 Jul 2026"
-			p.ExpiryIn = "5 days ago"
-			p.Expired = true
-			return p
-		}, "copy your schedule onto the new permit"},
-		{"valid", func() permitView {
-			p := samplePermitView(loc)
-			p.ExpiryLabel = "1 Jan 2027"
-			p.ExpiryIn = "in 168 days"
-			return p
-		}, "Valid until 1 Jan 2027"},
-		{"copy-from-empty", func() permitView {
-			p := samplePermitView(loc)
-			p.RosterEmpty = true
-			p.CopyPitch = true
-			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
-			return p
-		}, "Is this a new permit replacing an old one?"},
-		{"copy-pitch-dismissed", func() permitView {
-			// Pitch answered (dismissed/copied/roster set): the quiet button
-			// remains even while the roster is still empty.
-			p := samplePermitView(loc)
-			p.RosterEmpty = true
-			p.CopyPitch = false
-			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
-			return p
-		}, "Copy schedule from another permit"},
-		{"copy-from-option", func() permitView {
-			p := samplePermitView(loc)
-			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
-			return p
-		}, "Copy schedule from another permit"},
-		{"permit-detail", func() permitView {
-			p := samplePermitView(loc)
-			p.Detail = "VPP24714 · (A) 1st Visitor Permit"
-			return p
-		}, "VPP24714 · (A) 1st Visitor Permit"},
-		{"plate-refreshing-follow-up", func() permitView {
-			p := samplePermitView(loc)
-			p.PlateRefreshing = true
-			p.armPlatePoll(0)
-			return p
-		}, `hx-get="/permits/7/card?n=1"`},
-		// The timer poll swaps ONLY the .nowbadge, not the whole #pbody — otherwise
-		// the empty-schedule nudge (a .banner with an entry animation) re-animates on
-		// every tick. A regression to a full-body swap drops hx-select and fails here.
-		{"poll-narrows-to-nowbadge", func() permitView {
-			p := samplePermitView(loc)
-			p.PlateRefreshing = true
-			p.armPlatePoll(0)
-			return p
-		}, `hx-select=".nowbadge"`},
-		{"applying-follow-up", func() permitView {
-			// A change in flight arms the same bounded poll, even with a fresh cache.
-			p := samplePermitView(loc)
-			p.Applying = true
-			p.armPlatePoll(0)
-			return p
-		}, `hx-get="/permits/7/card?n=1"`},
-		{"applying-spinner", func() permitView {
-			p := samplePermitView(loc)
-			p.Applying = true
-			return p
-		}, `Applying your change`},
-		// A typed-plate override day gets the striped bar. Without it the day fell
-		// back to the neutral bar and a covered day read as "nothing scheduled".
-		{"adhoc-override-bar", func() permitView {
-			p := samplePermitView(loc)
-			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
-			return p
-		}, `class="bar adhoc"`},
-		// An override day names the roster plate it displaced, so "usually A,
-		// currently B" is readable from the calendar popover.
-		{"override-usual-plate", func() permitView {
-			p := samplePermitView(loc)
-			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
-			return p
-		}, `usually ABC123`},
-		// The empty-schedule setup nudge shows only when ShowSetupNudge is set.
-		{"setup-nudge-shown", func() permitView {
-			p := samplePermitView(loc)
-			p.ShowSetupNudge = true
-			return p
-		}, `isn't on a schedule yet`},
-	} {
+	for _, ec := range permitBodyCases(loc, time.Now()) {
 		var b bytes.Buffer
 		if err := templates.ExecuteTemplate(&b, "permit-body", ec.pv()); err != nil {
 			t.Fatalf("render permit-body/%s: %v", ec.name, err)
@@ -748,5 +423,350 @@ func TestClearButtonGating(t *testing.T) {
 	}
 	if strings.Contains(b2.String(), "/clear") {
 		t.Fatal("clear action shown when a schedule covers now")
+	}
+}
+
+// renderCase is one full-page render: a view model and a substring the page must
+// contain. The list is shared with the golden harness (golden_test.go), which
+// renders every case at a pinned clock and compares the whole page.
+type renderCase struct {
+	name string
+	data dashboardData
+	want string
+}
+
+func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now time.Time) []renderCase {
+	return []renderCase{
+		{"landing", dashboardData{State: "landing", Loc: loc}, "Schedule your City of Stonnington"},
+		{"landing-signedin", dashboardData{State: "landing", SignedIn: true, Loc: loc}, "Open the app"},
+		{"security", dashboardData{State: "security", Loc: loc}, "The short version"},
+		{"security-encryption", dashboardData{State: "security", Loc: loc}, "AES-256-GCM"},
+		{"how", dashboardData{State: "how", Loc: loc}, "get a Stonnington ePermit"},
+		{"how-demos", dashboardData{State: "how", Loc: loc}, "data-demo=\"roster\""},
+		{"contact", dashboardData{State: "contact", Contact: true, Loc: loc}, "Send message"},
+		{"contact-sent", dashboardData{State: "contact", Contact: true, Flash: "Thanks. Your message has been sent.", Loc: loc}, "has been sent"},
+		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
+		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
+		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
+		// An invitee with no council link of their own can reach no page but this one,
+		// so the invitation must be answerable here — with the owner it was rendered
+		// for carried in the form (acceptInvite checks it).
+		{"onboarding answers a pending invite", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com"}}, `action="/account/invite/accept"`},
+		{"onboarding invite names the owner", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com"}}, `name="owner" value="rd@example.com"`},
+		// A partial permit read holding ZERO rows must not be reported as an empty
+		// account. Saying "your council account doesn't have any permits on it yet" to
+		// someone who holds several is a flat falsehood they cannot act on.
+		{"picker-partial-empty", dashboardData{User: user, State: "picker", Loc: loc, PermitsUnknown: true}, "couldn't load your permit list"},
+		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
+		// On a FIRST link the box is TICKED. Without a saved password the schedule
+		// stops the first time the council ends the session — which happens whenever
+		// the resident signs in to ePermits themselves — and it stops silently, which
+		// is how a car ends up on the wrong permit. The stored value is a
+		// parking-permit login, sealed at rest and recoverable by the council's own
+		// forgot-password email.
+		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
+		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
+		{"relink-savepw-respects-opton", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: true, Loc: loc}, `name="save_password" value="1" checked>`},
+		{"relink", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, Loc: loc}, "Reconnect your council account"},
+		{"capacity-full", dashboardData{User: user, State: "onboarding", IsPrimary: true, CapacityFull: true, Loc: loc}, "p.stonn is full at the moment"},
+		{"link-rejected offers sign-out", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true,
+			LogoutURL: "https://auth.example.com/logout", Loc: loc},
+			"then sign back in here with that address"},
+		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
+			"Sign out, then sign back in here with that address."},
+		// The reset deep link LEADS the rejected banner: the council can't tell a
+		// wrong password from an account that never had a working one, and the
+		// 2026-08 access logs showed rejected signups giving up without ever
+		// being offered the reset.
+		{"link-rejected leads with the council reset link", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
+			"idm/account/ForgotPassword"},
+		{"link-rejected names the never-set-one case", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
+			"or never set one?"},
+		// The reset offer also sits NEXT TO the password ask itself, before the
+		// first failed attempt burns council lockout budget.
+		{"link-form offers reset beside the password field", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc},
+			"idm/account/ForgotPassword"},
+		{"link-throttled deep-links the reset too", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
+			"idm/account/ForgotPassword"},
+		// Inside a social in-app webview the password manager can't auto-fill;
+		// the advice must appear BEFORE the field defeats them, and only there —
+		// in a real browser it would be wrong and worrying.
+		{"onboarding warns inside the Facebook webview", dashboardData{User: user, State: "onboarding", IsPrimary: true, InAppBrowser: true, Loc: loc},
+			"In the Facebook, Instagram or Google app right now?"},
+		// The terms page names the NEXT step's prerequisite (the ePermits
+		// password) while there is still time to fix it — first acceptance only:
+		// a re-accept returns to a working app, and a secondary links nothing.
+		{"terms heads-up names the ePermits password", dashboardData{User: user, State: "terms", IsPrimary: true, Loc: loc,
+			Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}},
+			"ePermits password"},
+		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true,
+			LogoutURL: "https://auth.example.com/logout", Loc: loc},
+			"please wait about 15 minutes"},
+		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
+			"your ePermits account must be under"},
+		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
+		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},
+			{CouncilPermitID: "9001", PermitTypeID: "3", PermitNumber: "RPP5", PermitType: "(B) Resident Permit", Addable: false, Reason: "Only visitor permits can be scheduled."},
+		}}, "Only visitor permits can be scheduled."},
+		// A dead permit is grouped under its own heading with a status pill and a
+		// button that says what adding it is for — never the live card's "Manage".
+		{"picker groups dead permits", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "1", PermitNumber: "VPP1", PermitType: "(A) 1st Visitor Permit", CurrentRego: "LIVE01", Addable: true},
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", CurrentRego: "OLD999", Addable: true, Dead: true, Status: "Cancelled"},
+		}}, "Older permits"},
+		{"picker dead permit shows its status", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", CurrentRego: "OLD999", Addable: true, Dead: true, Status: "Cancelled"},
+		}}, `<span class="pick-status">Cancelled</span>`},
+		{"picker dead permit has the copy button", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Rejected"},
+		}}, "Add to copy its old schedule"},
+		{"picker with only dead permits says so", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Cancelled"},
+		}}, "All your permits are managed or no longer active."},
+		// The copy outcome is shown to the person who ran it, on the card itself.
+		{"permit card shows a copy outcome", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits: []permitView{func() permitView {
+				pv := samplePermitViewAt(loc, now)
+				pv.Notice = "Schedule copied. Guest passes and QR codes moved across with it — links that people have saved keep working."
+				return pv
+			}()},
+		}, "links that people have saved keep working"},
+		{"guide page", dashboardData{State: "guide", Guide: &guides[0], Loc: loc}, "How do I change the car on my Stonnington visitor permit?"},
+		{"share page", dashboardData{User: user, State: "share", Loc: loc, ShareEmailAvailable: true}, `action="/share/invite"`},
+		{"share page without mail hides the form", dashboardData{User: user, State: "share", Loc: loc}, "Open the printable card"},
+		{"share card", dashboardData{User: user, State: "share-card", Loc: loc, ShareQR: "data:image/png;base64,AAAA", ShareURL: "p.stonn.org"}, `alt="QR code to p.stonn.org"`},
+		{"app-contact-link", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, Contact: true,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitViewAt(loc, now)},
+		}, "/contact"},
+		{"schedule", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitViewAt(loc, now)},
+		}, "Weekly roster"},
+		{"schedule-expired-section", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:        []permitView{samplePermitViewAt(loc, now)},
+			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", Detail: "VPP24714 · 1st Visitor Permit", StatusText: "Expired 1 Jul 2026"}},
+		}, "VPP24714 · 1st Visitor Permit"},
+		{"schedule-only-expired", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Cancelled"}},
+		}, "Got a new permit instead?"},
+		{"schedule-share-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, ShowShareHint: true,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitViewAt(loc, now)},
+		}, "Shared access"},
+		{"vehicles", dashboardData{User: user, State: "app", Page: "vehicles", Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+		}, "ABC123"},
+		{"activity", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
+			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now}},
+		}, "Activity"},
+		// Source codes render as words, not raw internal tags.
+		{"activity-source-label", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
+			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now}},
+		}, "weekly roster"},
+		// A removal has no plate: it reads "plate removed", not "manual" with an empty pill.
+		{"activity-removal", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
+			Log: []store.ApplyRecord{{PermitID: 7, Registration: "", Source: "manual", Status: "success", Detail: "vehicle removed by a@b.com", At: now}},
+		}, "plate removed"},
+		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, RelinkBy: "15 Oct 2026"}, "Council connection"},
+		{"settings-quiet-hours", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Notify: notifyView{EmailAvailable: true, EmailEnabled: true, QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}, "hold overnight notices"},
+		{"settings-autoreconnect-on", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "Turn off"},
+		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: false}, "Your password isn't saved"},
+		{"settings-last-reconnect", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true, LastReconnect: "14 Jul 2026, 3:04pm"}, "14 Jul 2026, 3:04pm"},
+		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "hasn't been needed yet"},
+		{"security-data-promise", dashboardData{State: "security", Loc: loc}, "never sold"},
+		{"security-council-note", dashboardData{State: "security", Contact: true, Loc: loc}, "For the City of Stonnington"},
+		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc}, "Add person"},
+		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}}, "nanny@example.com"},
+		{"settings-secondary", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Leave this account"},
+		// An invitee who already runs their own permits gets the blocked variant: the
+		// rule stated, Decline offered, and NO Accept form that could only fail.
+		{"settings-invite-blocked-own", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com", Blocked: "own"}}, "can&rsquo;t also join another account"},
+		{"settings-invite-blocked-shared", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
+			Invite: &inviteView{Owner: "rd@example.com", Blocked: "shared"}}, "Remove them first, or decline the invitation"},
+		{"schedule install hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, ShowInstallHint: true,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitViewAt(loc, now)}}, "Add to Home Screen"},
+		{"guests-page", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
+			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
+				Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
+				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Guest passes"},
+		// A pass on a dead permit says so on its card and names the way out.
+		{"guests-page flags a pass on a dead permit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 2, Label: "New permit"}},
+			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "VPP25619 — no longer active", PermitDead: true,
+				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Copy the schedule to your new permit and this pass moves with it."},
+		{"guests-trust-warning", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "send it to people you trust"},
+		{"guests-qr-contrast", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "don't give lasting access"},
+		{"guests-resend", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
+			Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
+				Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
+				Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}, "Re-send"},
+		{"guests-secondary-can-manage", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}, "Create a new guest pass"},
+		{"guests-edit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			Vehicles:   []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
+			Edit: &editGrantView{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit", AllowOvernight: true,
+				Selected: map[int64]bool{1: true}, Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}, "Editing pass"},
+		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", OwnerEmail: "held@example.com", PermitLabel: "Visitor Permit", CurrentReg: "ABC123",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "Managed by"},
+		{"guest-bookmark-tip", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "add it to your home screen"},
+		{"guest-manifest-link", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok"},
+		{"guest-rescan-applied", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "applied", Until: "the end of today"}}},
+			"is on the permit until the end of today"},
+		{"guest-rescan-superseded", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "superseded"}}},
+			"it has since been changed"},
+		{"guest-rescan-ended", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "ended"}}},
+			"has ended"},
+		{"guest-rescan-pending-polls", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
+			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}}},
+			"/g/req/4?n=nn"},
+		{"guests-recent-activity", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc, GuestsEnabled: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+			RecentRequests: []guestDecidedView{
+				{Plate: "GUEST1", PermitLabel: "Visitor Permit", Outcome: "Approved", DecidedBy: "mum@example.com", Ago: "2 hr ago",
+					Live: "No longer on the permit — since replaced by OWNER9.", Warn: true},
+				{Plate: "GUEST2", PermitLabel: "Visitor Permit", Outcome: "Not answered", Ago: "3 hr ago"}}},
+			"since replaced by OWNER9"},
+		{"guest-result-ok", dashboardData{State: "guest-result", Loc: loc,
+			Flash: "AAA111 is now on the permit until the end of today.", Guest: guestActView{OwnerEmail: "held@example.com"}}, "on the permit"},
+		{"guest-gone", dashboardData{State: "guest-result", Loc: loc,
+			Warn: "This link is no longer active. Ask the account holder for a new one."}, "no longer active"},
+	}
+}
+
+// fragmentCase is one permit-body fragment render; shared with the golden harness.
+type fragmentCase struct {
+	name string
+	pv   func() permitView
+	want string
+}
+
+func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
+	return []fragmentCase{
+		{"soon", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.ExpiryLabel = "3 Aug 2026"
+			p.ExpiryIn = "in 12 days"
+			p.ExpiresSoon = true
+			return p
+		}, "renew it with the council"},
+		{"expired", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.ExpiryLabel = "1 Jul 2026"
+			p.ExpiryIn = "5 days ago"
+			p.Expired = true
+			return p
+		}, "copy your schedule onto the new permit"},
+		{"valid", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.ExpiryLabel = "1 Jan 2027"
+			p.ExpiryIn = "in 168 days"
+			return p
+		}, "Valid until 1 Jan 2027"},
+		{"copy-from-empty", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.RosterEmpty = true
+			p.CopyPitch = true
+			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
+			return p
+		}, "Is this a new permit replacing an old one?"},
+		{"copy-pitch-dismissed", func() permitView {
+			// Pitch answered (dismissed/copied/roster set): the quiet button
+			// remains even while the roster is still empty.
+			p := samplePermitViewAt(loc, now)
+			p.RosterEmpty = true
+			p.CopyPitch = false
+			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
+			return p
+		}, "Copy schedule from another permit"},
+		{"copy-from-option", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
+			return p
+		}, "Copy schedule from another permit"},
+		{"permit-detail", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.Detail = "VPP24714 · (A) 1st Visitor Permit"
+			return p
+		}, "VPP24714 · (A) 1st Visitor Permit"},
+		{"plate-refreshing-follow-up", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.PlateRefreshing = true
+			p.armPlatePoll(0)
+			return p
+		}, `hx-get="/permits/7/card?n=1"`},
+		// The timer poll swaps ONLY the .nowbadge, not the whole #pbody — otherwise
+		// the empty-schedule nudge (a .banner with an entry animation) re-animates on
+		// every tick. A regression to a full-body swap drops hx-select and fails here.
+		{"poll-narrows-to-nowbadge", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.PlateRefreshing = true
+			p.armPlatePoll(0)
+			return p
+		}, `hx-select=".nowbadge"`},
+		{"applying-follow-up", func() permitView {
+			// A change in flight arms the same bounded poll, even with a fresh cache.
+			p := samplePermitViewAt(loc, now)
+			p.Applying = true
+			p.armPlatePoll(0)
+			return p
+		}, `hx-get="/permits/7/card?n=1"`},
+		{"applying-spinner", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.Applying = true
+			return p
+		}, `Applying your change`},
+		// A typed-plate override day gets the striped bar. Without it the day fell
+		// back to the neutral bar and a covered day read as "nothing scheduled".
+		{"adhoc-override-bar", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
+			return p
+		}, `class="bar adhoc"`},
+		// An override day names the roster plate it displaced, so "usually A,
+		// currently B" is readable from the calendar popover.
+		{"override-usual-plate", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
+			return p
+		}, `usually ABC123`},
+		// The empty-schedule setup nudge shows only when ShowSetupNudge is set.
+		{"setup-nudge-shown", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.ShowSetupNudge = true
+			return p
+		}, `isn't on a schedule yet`},
 	}
 }

@@ -1,0 +1,30 @@
+=== OUTBOX account= recipients=lily@example.com ntfy=/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: guestreq|lily@example.com|lily@example.com|Visitor|GUEST1|email|lily@example.com
+Subject: Approve GUEST1 on your Visitor?
+
+Someone scanned your printed QR code and is asking to put GUEST1 on your Visitor.
+
+Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.
+
+https://p.stonn.org/g/req/4
+
+=== OUTBOX account= recipients= ntfy=pstonn-lily/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: guestreq|lily@example.com|lily@example.com|Visitor|GUEST1|ntfy
+Subject: Approve GUEST1 on your Visitor?
+
+Someone scanned your printed QR code and is asking to put GUEST1 on your Visitor.
+
+Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.
+
+https://p.stonn.org/g/req/4
+
+=== OUTBOX account= recipients=sam@example.com ntfy=/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: guestreq|sam@example.com|lily@example.com|Visitor|GUEST1|email|sam@example.com
+Subject: Approve GUEST1 on your Visitor?
+
+Someone scanned your printed QR code and is asking to put GUEST1 on your Visitor.
+
+Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.
+
+https://p.stonn.org/g/req/4
+

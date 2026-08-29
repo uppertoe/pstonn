@@ -1,0 +1,45 @@
+
+
+
+
+<div class="gstat">
+  
+  <p class="gnow">On the permit now: <span class="plate">ABC123</span></p>
+  <p class="gsub"></p>
+</div>
+
+
+
+
+
+<form method="post" action="/g/tok" class="stack" style="margin-top:14px" data-plate-confirm="plate" hx-post="/g/tok" hx-target="#gbody" hx-swap="innerHTML">
+  
+  <p class="sub">Tap your car to put it on the permit</p>
+  <div class="gcars">
+    
+    <button class="gcar" style="--plate:#111" type="submit" name="vehicle_id" value="1">
+      <span class="dot" style="background:#111"></span>
+      <span class="glabel">Mum</span>
+      <span class="plate" style="--plate:#111">AAA111</span>
+      
+    </button>
+    
+  </div>
+  
+  
+  
+  <label class="fld"><span>Your number plate</span>
+    <input type="text" id="g-plate" name="plate" placeholder="e.g. ABC123" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" required style="text-transform:uppercase;font-size:17px;letter-spacing:1px;text-align:center">
+  </label>
+  
+  
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps the car on until the end of tomorrow instead of the end of today.</span></span></label>
+  
+  
+  <button type="submit" style="justify-content:center;margin-top:4px"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Put my car on the permit</button>
+  
+</form>
+
+<p class="empty-note" style="margin-top:16px">Enter your plate to put your car on the permit until the end of the day. The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>
+
+

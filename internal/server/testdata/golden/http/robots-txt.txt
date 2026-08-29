@@ -1,0 +1,27 @@
+GET /robots.txt
+Status: 200
+Cache-Control: public, max-age=86400
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-NONCE' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+Content-Type: text/plain; charset=utf-8
+Permissions-Policy: screen-wake-lock=(self), camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()
+Referrer-Policy: same-origin
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+
+User-agent: *
+Disallow: /schedule
+Disallow: /account
+Disallow: /vehicles
+Disallow: /permits
+Disallow: /guests
+Disallow: /settings
+Disallow: /notifications
+Disallow: /admin
+Disallow: /auth/
+Disallow: /council/
+Disallow: /g/
+Disallow: /u/
+Disallow: /r/
+Disallow: /status
+
+Sitemap: https://p.stonn.org/sitemap.xml

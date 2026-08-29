@@ -1,0 +1,11 @@
+=== EMAIL to lily@example.com
+Subject: p.stonn — a quick one
+Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Hi — you've had p.stonn looking after your visitor permit for a couple of weeks now.
+
+If it's been handy, you might know someone else in Stonnington with a visitor permit who'd get some use out of it too.
+
+Send them an invite: https://p.stonn.org/share
+Or print a card with a QR code they can scan to get started: https://p.stonn.org/share#card
+

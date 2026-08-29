@@ -1,0 +1,8 @@
+=== OUTBOX account= recipients=guest@example.com ntfy=// reason=this address is the contact for a car that was on a visitor permit
+Dedup: displaced|guest@example.com|Visitor|AAA111
+Subject: Heads up: AAA111 is no longer covered on the visitor permit
+
+Your car AAA111 came off the visitor parking permit for Visitor at 2:30pm — a one-off booking started.
+
+If your car is still parked there it's no longer covered. Move it, or put it back on with your link, or check with the permit holder.
+

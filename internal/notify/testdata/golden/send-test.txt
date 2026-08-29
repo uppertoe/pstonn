@@ -1,0 +1,13 @@
+=== EMAIL to lily@example.com
+Subject: p.stonn test notification
+Provenance: You received this at lily@example.com because you asked p.stonn to send a test notification. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+This is a test. Your permit-change notifications are set up correctly.
+
+=== NTFY pstonn-lily
+Title: p.stonn test notification
+Priority: default
+Tags: bell
+
+This is a test. Your permit-change notifications are set up correctly.
+

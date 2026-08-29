@@ -751,3 +751,17 @@ func TestCouncilErrorMessage(t *testing.T) {
 		t.Errorf("newlines survived into an error message: %q", got)
 	}
 }
+
+// The vehicle-state id written on an add or a state-less edit comes from the
+// council descriptor; a bare Client (tests, or an unset descriptor) falls back to
+// VIC so today's single-council behaviour is unchanged.
+func TestVehicleStateDefault(t *testing.T) {
+	c := &Client{}
+	if got := c.vehicleState(); got != "1" {
+		t.Fatalf("bare client vehicleState = %q, want VIC (1)", got)
+	}
+	c.DefaultVehicleState = "3"
+	if got := c.vehicleState(); got != "3" {
+		t.Fatalf("configured vehicleState = %q, want 3", got)
+	}
+}

@@ -1,0 +1,16 @@
+=== EMAIL to guest@example.com
+Subject: Your link to set a car on lily@example.com's parking permit
+Provenance: You received this at guest@example.com because someone shared their visitor parking permit with you by email. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+lily@example.com has given you a link to put a car on their City of Stonnington visitor parking permit (Visitor).
+
+When you arrive, open the link and choose your car. It stays on the permit until the end of the day.
+
+https://p.stonn.org/g/tok
+
+Tip: bookmark this link or add it to your phone's home screen — then next time you can open it in one tap, without hunting for this email. The same link works every time.
+
+Keep this link to yourself. If you were not expecting it, you can ignore this email.
+
+Got a visitor permit of your own? p.stonn is free for City of Stonnington residents — p.stonn.org
+

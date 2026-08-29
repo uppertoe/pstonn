@@ -51,6 +51,8 @@ type Council interface {
 	Blocked() bool
 }
 
+var _ Council = (*parking.Client)(nil)
+
 // Notifier sends user-facing notifications (the re-authorise reminder, each
 // applied plate change / failure, and a re-link prompt) plus operator alerts for
 // systemic failures. A nil or disabled Notifier means user notices are not sent.
