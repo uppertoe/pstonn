@@ -2,7 +2,6 @@ package council
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -13,7 +12,7 @@ import (
 
 // ErrCouncilUnavailable: the account belongs to a council this process is not
 // serving (disabled, or removed from the registry). Treated like "not linked".
-var ErrCouncilUnavailable = errors.New("council: the account's council is not available")
+var ErrCouncilUnavailable = fmt.Errorf("%w: the account's council is not available", parking.ErrNotLinked)
 
 // Mux routes each per-owner council call to the client for the owner's council.
 // The scheduler and the server keep calling one thing keyed by owner, exactly as

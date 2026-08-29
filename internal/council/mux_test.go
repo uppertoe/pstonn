@@ -94,3 +94,46 @@ func TestMuxSingleCouncilNeedsNoChoice(t *testing.T) {
 		t.Fatalf("aggregate stats: %+v", s)
 	}
 }
+
+// Unlink, then try to sign up with another council: the permits kept for a
+// re-link bind the account to its original council, and a permit filed under
+// one council is never acted on by another council's client.
+func TestMuxRefusesSwitchingCouncilWhilePermitsRemain(t *testing.T) {
+	ctx := context.Background()
+	m, st, fakes := muxRig(t, "stonnington", "othertown")
+	const o = "mover@example.com"
+	if err := st.SetAccountCouncil(ctx, o, "stonnington"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Link(ctx, o, o, "pw", false, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := st.UpsertPermit(ctx, o, "90001", "14", "V")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteCouncilSession(ctx, o); err != nil { // unlink keeps the permit
+		t.Fatal(err)
+	}
+	if err := st.SetAccountCouncil(ctx, o, "othertown"); !errors.Is(err, store.ErrCouncilMismatch) {
+		t.Fatalf("switching council with permits kept = %v, want ErrCouncilMismatch", err)
+	}
+	// Belt and braces: even if the account were re-pointed, the other council's
+	// client refuses a permit that is not its own.
+	perm, _ := st.GetPermit(ctx, pid)
+	other, _ := m.Client("othertown")
+	_ = st.DeleteAllForOwner(ctx, o)
+	_ = st.SetAccountCouncil(ctx, o, "othertown")
+	_ = m.Link(ctx, o, o, "pw", false, true, 0)
+	if err := other.SetVehicle(ctx, o, perm, "AAA111"); !errors.Is(err, parking.ErrNotLinked) {
+		t.Fatalf("other council acted on a foreign permit: %v", err)
+	}
+	if got, _ := fakes["othertown"].Current("90001"); got == "AAA111" {
+		t.Fatal("the write reached the wrong portal")
+	}
+	// A disabled/unknown council reads as not linked, so the scheduler stays quiet.
+	_ = st.SetAccountCouncil(ctx, "ghost@example.com", "gone")
+	if err := m.Refresh(ctx, "ghost@example.com"); !errors.Is(err, parking.ErrNotLinked) {
+		t.Fatalf("unavailable council = %v, want ErrNotLinked", err)
+	}
+}

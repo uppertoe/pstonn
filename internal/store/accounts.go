@@ -13,6 +13,7 @@ import (
 // the self-service "delete my data" action. Runs in one transaction so a partial
 // failure leaves nothing half-deleted.
 func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
+	defer s.forgetCouncil(owner)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

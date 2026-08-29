@@ -310,6 +310,12 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 	if err != nil || cs.Cookie == "" {
 		return ErrNotLinked
 	}
+	// This client speaks to ONE council. Session material stamped for another
+	// must never be handed to this provider (a cookie or saved password replayed
+	// at the wrong portal), however the routing above resolved the owner.
+	if cs.CouncilID != "" && c.CouncilID != "" && cs.CouncilID != c.CouncilID {
+		return ErrNotLinked
+	}
 	if d, blocked := c.cooldownFor(owner); blocked {
 		return fmt.Errorf("%w (retry in %s)", ErrCouncilBusy, d.Round(time.Second))
 	}
@@ -324,32 +330,33 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 	before := string(sess)
 	opErr := fn(&sess)
 	c.classify(owner, permit, opErr)
-	if opErr != nil && !errors.Is(opErr, ErrCouncilBusy) && string(sess) == before && !persist {
-		// Nothing to write back. An expiry is tagged with the generation of the
-		// session that actually failed, so the recovery queue binds to THIS session
-		// and not to whatever the row holds by the time it enqueues.
+	if opErr != nil {
+		// Never persist on a failure, even if the provider rotated material on the
+		// way to it: a write bumps session_generation, and an expiry tagged with the
+		// generation the operation STARTED from would then no longer match the row —
+		// the scheduler's generation-checked retire/reconnect would read that as
+		// "the user re-linked meanwhile" and leave a dead session in place. The old
+		// client had the same rule (error paths wrote nothing). The tag binds the
+		// recovery queue to THIS session, not to whatever the row holds later.
 		return withSessionGen(opErr, cs.Generation)
 	}
 	if string(sess) != before || persist {
-		sealed, serr := c.sealSession(owner, sess)
-		if serr != nil {
-			if opErr != nil {
-				return withSessionGen(opErr, cs.Generation)
-			}
-			return serr
+		sealed, err := c.sealSession(owner, sess)
+		if err != nil {
+			return err
 		}
 		// Conditioned on the generation the operation started from: a re-link that
 		// landed meanwhile holds a DIFFERENT, valid session, and writing the older
 		// material over it would silently undo the user's re-link.
-		if perr := c.store.UpdateCouncilCookie(ctx, owner, sealed, cs.Generation); perr != nil {
-			if errors.Is(perr, store.ErrSessionSuperseded) {
+		if err := c.store.UpdateCouncilCookie(ctx, owner, sealed, cs.Generation); err != nil {
+			if errors.Is(err, store.ErrSessionSuperseded) {
 				log.Printf("parking: session for %s was re-linked during an operation; keeping the newer one", redact.Email(owner))
-			} else if opErr == nil {
-				return perr
+				return nil
 			}
+			return err
 		}
 	}
-	return withSessionGen(opErr, cs.Generation)
+	return nil
 }
 
 // classify applies the outcome of a provider call to the owner's backoff and the
@@ -438,6 +445,9 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	if cs.Password == "" {
 		return ErrNoSavedPassword
 	}
+	if cs.CouncilID != "" && c.CouncilID != "" && cs.CouncilID != c.CouncilID {
+		return ErrNotLinked // never replay a saved password at another council's portal
+	}
 	password, legacy, err := c.box.OpenCtx(secretbox.CouncilPassword(owner), cs.Password)
 	if legacy {
 		log.Printf("parking: saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", redact.Email(owner))
@@ -474,6 +484,15 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 
 func ref(p model.Permit) provider.PermitRef { return provider.PermitRef{ID: p.CouncilPermitID} }
 
+// permitMine refuses a permit filed under another council: the ids overlap
+// between portals, so acting on it here would address a stranger's permit.
+func (c *Client) permitMine(p model.Permit) error {
+	if p.CouncilID != "" && c.CouncilID != "" && p.CouncilID != c.CouncilID {
+		return fmt.Errorf("%w: permit belongs to council %q, this client serves %q", ErrNotLinked, p.CouncilID, c.CouncilID)
+	}
+	return nil
+}
+
 // ListPermits returns the permits on the owner's linked account. Display callers
 // use this and are content with a partial list.
 func (c *Client) ListPermits(ctx context.Context, owner string) ([]PermitInfo, error) {
@@ -504,6 +523,9 @@ func (c *Client) ListPermitsComplete(ctx context.Context, owner string) ([]Permi
 // CurrentVehicle returns the registration currently on the permit, or "" if the
 // permit genuinely has no vehicle.
 func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error) {
+	if err := c.permitMine(p); err != nil {
+		return "", err
+	}
 	var reg string
 	err := c.withSession(ctx, owner, false, func(s *provider.Session) error {
 		v, err := c.p.CurrentVehicle(ctx, s, ref(p))
@@ -518,6 +540,9 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 // reporting success, so every state we then show or store reflects what the
 // council actually has.
 func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
+	if err := c.permitMine(p); err != nil {
+		return err
+	}
 	key := regKey{owner, p.CouncilPermitID}
 	gen := c.regGeneration(key) // so a concurrent ForgetPermit invalidates the cache write below
 	err := c.withSession(ctx, owner, false, func(s *provider.Session) error {
@@ -534,6 +559,9 @@ func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, r
 // on its own — "nothing scheduled" leaves the last plate in place. ErrUnsupported
 // when the provider cannot leave a permit empty.
 func (c *Client) ClearVehicle(ctx context.Context, owner string, p model.Permit) error {
+	if err := c.permitMine(p); err != nil {
+		return err
+	}
 	if !c.Capabilities().CanClearVehicle {
 		return ErrUnsupported
 	}

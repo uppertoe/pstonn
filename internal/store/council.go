@@ -298,6 +298,7 @@ func (s *Store) OwnersWithPermit(ctx context.Context) (map[string]struct{}, erro
 // re-authorise clock) and clears any stale cached access token (a fresh cookie
 // invalidates the old token pairing).
 func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error {
+	defer s.forgetCouncil(cs.Owner)
 	now := nowUTC()
 	if cs.CouncilID == "" {
 		id, err := s.CouncilIDFor(ctx, cs.Owner)
@@ -432,7 +433,8 @@ WHERE owner = ? AND session_generation = ?`,
 func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, sealedCookie string, expectedGen int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
-SET cookie_sealed = ?, updated_at = ?, session_generation = session_generation + 1
+SET cookie_sealed = ?, access_token_sealed = '', token_expiry = '', updated_at = ?,
+    session_generation = session_generation + 1
 WHERE owner = ? AND session_generation = ?`,
 		sealedCookie, nowUTC(), owner, expectedGen)
 	if err != nil {
@@ -459,6 +461,7 @@ func (s *Store) ClearCouncilPassword(ctx context.Context, owner string) error {
 // the cookie expires and re-linking is required). The user's permits, vehicles
 // and schedule are kept so a later re-link resumes exactly where they left off.
 func (s *Store) DeleteCouncilSession(ctx context.Context, owner string) error {
+	defer s.forgetCouncil(owner)
 	_, err := s.db.ExecContext(ctx, `DELETE FROM council_session WHERE owner = ?`, owner)
 	return err
 }
@@ -486,6 +489,7 @@ func (s *Store) DeleteCouncilSession(ctx context.Context, owner string) error {
 // at second precision, so a strict `<` also disagreed with decideWarm for any
 // session inside the cutoff's own second.
 func (s *Store) DeleteCouncilSessionIfIdle(ctx context.Context, owner string, before time.Time) (bool, error) {
+	defer s.forgetCouncil(owner)
 	res, err := s.db.ExecContext(ctx, `
 DELETE FROM council_session
 WHERE owner = ?
@@ -505,6 +509,7 @@ WHERE owner = ?
 // stale recovery work can never retire a session that has since changed. Returns
 // whether a row was actually deleted.
 func (s *Store) DeleteCouncilSessionIfGen(ctx context.Context, owner string, gen int64) (bool, error) {
+	defer s.forgetCouncil(owner)
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM council_session WHERE owner = ? AND session_generation = ?`,
 		owner, gen)
@@ -567,6 +572,12 @@ WHERE excluded.generation >= breaker_state.generation`,
 // sign-up (account_flags), else the council of its linked session, else the
 // process default. One council per account, by design.
 func (s *Store) CouncilIDFor(ctx context.Context, owner string) (string, error) {
+	// Memoised: the scheduler and the mux ask per permit per pass, on the single
+	// SQLite connection everything shares. Invalidated by every write that can
+	// change the answer (choice, link, unlink, account deletion).
+	if v, ok := s.councilCache.Load(owner); ok {
+		return v.(string), nil
+	}
 	var id string
 	err := s.db.QueryRowContext(ctx, `
 SELECT COALESCE(
@@ -579,15 +590,32 @@ SELECT COALESCE(
 	if id == "" {
 		id = s.DefaultCouncil
 	}
+	s.councilCache.Store(owner, id)
 	return id, nil
 }
 
+// forgetCouncil drops the memoised council for an owner.
+func (s *Store) forgetCouncil(owner string) { s.councilCache.Delete(owner) }
+
 // SetAccountCouncil records the council an account chose at sign-up. Refused if
-// the account already holds a session with a DIFFERENT council: switching means
-// disconnecting first, so a permit is never left filed under the wrong portal.
+// the account already holds a session OR permits with a DIFFERENT council:
+// switching means removing those first, so a permit is never scheduled at the
+// wrong portal.
 func (s *Store) SetAccountCouncil(ctx context.Context, owner, councilID string) error {
+	defer s.forgetCouncil(owner)
 	cs, err := s.GetCouncilSession(ctx, owner)
 	if err == nil && cs.CouncilID != "" && cs.CouncilID != councilID {
+		return ErrCouncilMismatch
+	}
+	// Permits outlive an unlink on purpose (a re-link resumes the schedule), so
+	// they bind the account to their council just as a session does: re-pointing
+	// the account would have the scheduler push their rosters at another portal.
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM permit WHERE owner = ? AND council_id != '' AND council_id != ?`, owner, councilID).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
 		return ErrCouncilMismatch
 	}
 	_, err = s.db.ExecContext(ctx, `

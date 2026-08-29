@@ -81,6 +81,8 @@ func TestLoadFromFileAndValidation(t *testing.T) {
 		"bad timezone":  `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"Mars/Olympus","policy":{"visitor_word":"v"},"enabled":true}]}`,
 		"no visitor":    `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{},"enabled":true}]}`,
 		"duplicate":     `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true},{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"http issuer":   `{"councils":[{"id":"a","name":"n","short":"s","connector":"orikan-ssp","endpoints":{"issuer":"http://a/idm","api_base":"https://a/ssp-svc","client_id":"x","redirect_uri":"https://a/ssp/callback","scopes":["openid"]},"timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"js link":       `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"links":{"portal":"javascript:alert(1)"},"enabled":true}]}`,
 		"none enabled":  `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":false}]}`,
 	} {
 		if _, err := Load(config.CouncilConfig{}, write(strings.ReplaceAll(name, " ", "_")+".json", body)); err == nil {

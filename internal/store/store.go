@@ -37,6 +37,9 @@ type Store struct {
 	db   *sql.DB
 	path string // the DB file path, for opening a separate snapshot connection
 
+	// councilCache memoises CouncilIDFor per owner (see there).
+	councilCache sync.Map
+
 	// DefaultCouncil is the council an account belongs to when it has made no
 	// choice and holds no session (the process's only enabled council). Set by
 	// main from the council registry; "" in tests.

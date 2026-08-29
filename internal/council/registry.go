@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -118,6 +119,14 @@ func validate(c *Council) error {
 		if e.Issuer == "" || e.APIBase == "" || e.ClientID == "" || e.RedirectURI == "" || len(e.Scopes) == 0 {
 			return fmt.Errorf("orikan-ssp needs issuer, api_base, client_id, redirect_uri and scopes")
 		}
+		// The login flow carries a resident's plaintext council password; the
+		// scheme it may travel over is decided here and nowhere else.
+		for name, raw := range map[string]string{"issuer": e.Issuer, "api_base": e.APIBase, "redirect_uri": e.RedirectURI} {
+			u, err := url.Parse(raw)
+			if err != nil || u.Scheme != "https" || u.Host == "" {
+				return fmt.Errorf("%s must be an https URL, got %q", name, raw)
+			}
+		}
 	case "fake":
 	default:
 		return fmt.Errorf("unknown connector %q", c.Connector)
@@ -130,6 +139,16 @@ func validate(c *Council) error {
 	}
 	if c.Policy.VisitorWord == "" {
 		return fmt.Errorf("policy.visitor_word is required (nothing would be schedulable)")
+	}
+	// Links land in href attributes across the site; only http(s) may.
+	for name, raw := range map[string]string{"portal": c.Links.Portal, "register": c.Links.Register, "reset_password": c.Links.ResetPassword,
+		"apply_visitor": c.Links.ApplyVisitor, "permits": c.Links.Permits, "faq": c.Links.FAQ} {
+		if raw == "" {
+			continue
+		}
+		if u, err := url.Parse(raw); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return fmt.Errorf("links.%s must be an http(s) URL, got %q", name, raw)
+		}
 	}
 	return nil
 }

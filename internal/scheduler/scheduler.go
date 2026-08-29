@@ -1764,8 +1764,8 @@ func (s *Scheduler) logApply(ctx context.Context, permitID int64, reg, source, s
 // Wednesday's identical failures, so the household heard exactly once however
 // many visitors were exposed. Success keys stay undated; re-confirming an
 // identical success adds nothing.
-func (s *Scheduler) failureKeyDay() string {
-	return time.Now().In(s.loc).Format("2006-01-02")
+func (s *Scheduler) failureKeyDay(owner string) string {
+	return time.Now().In(s.locOf(owner)).Format("2006-01-02")
 }
 
 // notifyUser delivers an apply outcome to the user with guaranteed-retry
@@ -1896,7 +1896,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Reason:      reason,
 		Action:      action,
 		Transient:   kind != parking.FailRejected,
-	}, "error|"+want+"|"+reason+"|"+s.failureKeyDay())
+	}, "error|"+want+"|"+reason+"|"+s.failureKeyDay(p.Owner))
 }
 
 // describeFailure turns a failure classification into a plain-English reason and
@@ -2686,7 +2686,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 						"If " + last.Registration + " parked there during the booking, it was not covered.",
 					// Not transient: this must not sit behind a quiet-hours hold and
 					// arrive as a stale correction long after the next booking started.
-				}, "unapplied|"+last.Registration+"|"+s.failureKeyDay())
+				}, "unapplied|"+last.Registration+"|"+s.failureKeyDay(p.Owner))
 			}
 		}
 	}
@@ -2949,9 +2949,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			// after — left the urgent "act now to avoid a fine" escalation deduped
 			// by the reassuring notice it was supposed to override, so the one
 			// message blockNotifyThreshold exists for was unreachable.
-			key := "busy|" + want + "|" + s.failureKeyDay()
+			key := "busy|" + want + "|" + s.failureKeyDay(p.Owner)
 			if confirmed {
-				key = "busy-blocked|" + want + "|" + s.failureKeyDay()
+				key = "busy-blocked|" + want + "|" + s.failureKeyDay(p.Owner)
 			}
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
@@ -3002,7 +3002,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 				Reason:    reason,
 				Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
 				Transient: true, Urgent: true,
-			}, "session|"+want+"|"+s.failureKeyDay())
+			}, "session|"+want+"|"+s.failureKeyDay(p.Owner))
 		}
 		s.deferRetry(p.ID, 3)
 		return true

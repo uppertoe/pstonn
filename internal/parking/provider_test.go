@@ -317,3 +317,28 @@ func TestFakeProviderEndToEnd(t *testing.T) {
 		t.Fatalf("after landing, SetVehicle = %v, want nil", err)
 	}
 }
+
+// An operation that rotates the session and THEN fails must not persist the
+// rotation: persisting bumps the generation, and the expiry it reports would be
+// tagged with the generation it started from — which the scheduler's
+// generation-checked retire/reconnect could no longer match, leaving a dead
+// session in place. Error paths write nothing; the tag matches the row.
+func TestFailedOperationDoesNotPersistRotation(t *testing.T) {
+	ctx := context.Background()
+	p := &stubProvider{caps: provider.Capabilities{LoginKind: "password"}}
+	p.current = func(s *provider.Session) (provider.Vehicle, error) {
+		*s = provider.Session(`{"u":"o@example.com","n":9}`)  // a token minted mid-op…
+		return provider.Vehicle{}, provider.ErrSessionExpired // …then the session died
+	}
+	c, st, _ := stubClient(t, p)
+	_ = c.Link(ctx, "o@example.com", "o@example.com", "pw", false, true, 0)
+	before, _ := st.GetCouncilSession(ctx, "o@example.com")
+	_, err := c.CurrentVehicle(ctx, "o@example.com", model.Permit{CouncilPermitID: "1"})
+	after, _ := st.GetCouncilSession(ctx, "o@example.com")
+	if after.Cookie != before.Cookie || after.Generation != before.Generation {
+		t.Fatal("a failed operation persisted rotated material (and bumped the generation)")
+	}
+	if gen, ok := SessionGenOf(err); !ok || gen != before.Generation {
+		t.Fatalf("expiry tagged with %d (ok=%v), want the row's generation %d", gen, ok, before.Generation)
+	}
+}
