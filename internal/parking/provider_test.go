@@ -342,3 +342,109 @@ func TestFailedOperationDoesNotPersistRotation(t *testing.T) {
 		t.Fatalf("expiry tagged with %d (ok=%v), want the row's generation %d", gen, ok, before.Generation)
 	}
 }
+
+// A re-link that lands while an operation is in flight wins: the operation's
+// rotated material is dropped (superseded), the call still succeeds, and the
+// next call runs on the re-linked session.
+func TestRotationDuringRelinkKeepsTheNewerSession(t *testing.T) {
+	ctx := context.Background()
+	p := &stubProvider{caps: provider.Capabilities{LoginKind: "password"}}
+	c, st, _ := stubClient(t, p)
+	_ = c.Link(ctx, "o@example.com", "o@example.com", "pw", false, true, 0)
+	relinked := false
+	p.current = func(s *provider.Session) (provider.Vehicle, error) {
+		*s = provider.Session(`{"u":"o@example.com","n":5}`)
+		if !relinked {
+			relinked = true
+			// The user re-links mid-operation (the store has no owner lock).
+			if err := c.Link(ctx, "o@example.com", "o@example.com", "pw2", false, true, 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return provider.Vehicle{Registration: "AAA111"}, nil
+	}
+	perm := model.Permit{CouncilPermitID: "1"}
+	if _, err := c.CurrentVehicle(ctx, "o@example.com", perm); err != nil {
+		t.Fatalf("superseded write must not fail the operation: %v", err)
+	}
+	after, _ := st.GetCouncilSession(ctx, "o@example.com")
+	if _, err := c.CurrentVehicle(ctx, "o@example.com", perm); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.sessionIn[len(p.sessionIn)-1]; !strings.Contains(got, `"n":0`) {
+		t.Fatalf("next call ran on %q, want the re-linked session (n:0), not the superseded rotation", got)
+	}
+	if again, _ := st.GetCouncilSession(ctx, "o@example.com"); again.Generation != after.Generation+0 && again.Cookie == "" {
+		t.Fatal("re-linked session lost")
+	}
+}
+
+// Pre-provider rows: a provider that cannot import them reads as an expiry
+// tagged with the row's generation (retire + re-link), without ever being
+// called; an import that fails for another reason is NOT reported as an expiry.
+func TestLegacyRowsAcrossProviders(t *testing.T) {
+	ctx := context.Background()
+	seed := func(t *testing.T, st *store.Store, box *secretbox.Box) store.CouncilSession {
+		sealed, _ := box.Seal("Permits.IDM.Identity=abc") // un-prefixed: the old shape
+		if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "old@example.com", Cookie: sealed}); err != nil {
+			t.Fatal(err)
+		}
+		cs, _ := st.GetCouncilSession(ctx, "old@example.com")
+		return cs
+	}
+	t.Run("no importer", func(t *testing.T) {
+		p := &stubProvider{caps: provider.Capabilities{LoginKind: "password"}}
+		c, st, box := stubClient(t, p)
+		cs := seed(t, st, box)
+		_, err := c.CurrentVehicle(ctx, "old@example.com", model.Permit{CouncilPermitID: "1"})
+		if gen, ok := SessionGenOf(err); !ok || gen != cs.Generation || !errors.Is(err, ErrSessionExpired) {
+			t.Fatalf("err = %v (gen %d ok=%v), want a tagged expiry at gen %d", err, gen, ok, cs.Generation)
+		}
+		if len(p.calls) != 0 {
+			t.Fatalf("provider was called with material it cannot read: %v", p.calls)
+		}
+	})
+	t.Run("importer fails", func(t *testing.T) {
+		p := &importFailProvider{stubProvider{caps: provider.Capabilities{LoginKind: "password"}}}
+		c, st, box := stubClient(t, p)
+		seed(t, st, box)
+		_, err := c.CurrentVehicle(ctx, "old@example.com", model.Permit{CouncilPermitID: "1"})
+		if err == nil || errors.Is(err, ErrSessionExpired) {
+			t.Fatalf("an import failure must surface as itself, got %v", err)
+		}
+	})
+}
+
+type importFailProvider struct{ stubProvider }
+
+func (p *importFailProvider) ImportLegacy(cookie, token string, exp time.Time) (provider.Session, error) {
+	return nil, errors.New("import: unreadable")
+}
+
+// Reconnect signs in as the recorded council username, falling back to the
+// owner's email for rows that predate the column (every pre-branch row).
+func TestReconnectUsernameFallback(t *testing.T) {
+	ctx := context.Background()
+	p := &stubProvider{caps: provider.Capabilities{LoginKind: "password"}}
+	c, st, box := stubClient(t, p)
+	pw, _ := box.SealCtx(secretbox.CouncilPassword("o@example.com"), "pw")
+	sess, _ := c.sealSession("o@example.com", provider.Session(`{"u":"x"}`))
+	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "o@example.com", Cookie: sess, Password: pw}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Reconnect(ctx, "o@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.calls[len(p.calls)-1]; got != "login:o@example.com" {
+		t.Fatalf("reconnect used %q, want the owner as username", got)
+	}
+	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "o@example.com", CouncilEmail: "other@example.com", Cookie: sess, Password: pw}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Reconnect(ctx, "o@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.calls[len(p.calls)-1]; got != "login:other@example.com" {
+		t.Fatalf("reconnect used %q, want the recorded council username", got)
+	}
+}

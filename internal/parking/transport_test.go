@@ -63,3 +63,24 @@ func TestSharedConcurrencyLimitSpansTransports(t *testing.T) {
 		t.Fatal("a request on a full shared limit must fail with its context, not hang")
 	}
 }
+
+// A waiter on a full shared limit gives up with its context and leaves no slot
+// consumed; a limit of zero takes the default.
+func TestSharedLimitCancellationLeavesNoSlot(t *testing.T) {
+	l := NewConcurrencyLimit(0)
+	if cap(l.slots) != defaultGovConcurrency {
+		t.Fatalf("zero limit = %d, want the default %d", cap(l.slots), defaultGovConcurrency)
+	}
+	l = NewConcurrencyLimit(1)
+	l.slots <- struct{}{}
+	tr := NewTransport(Limits{}).Share(l)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:1/", nil)
+	if _, err := tr.RoundTrip(req); err == nil {
+		t.Fatal("cancelled waiter must fail")
+	}
+	if len(l.slots) != 1 {
+		t.Fatalf("slot count changed to %d after a cancelled wait", len(l.slots))
+	}
+}

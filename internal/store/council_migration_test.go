@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -189,5 +190,59 @@ func TestAccountCouncilChoice(t *testing.T) {
 	id, _ := st.UpsertPermit(ctx, "new@example.com", "9", "14", "V")
 	if p, _ := st.GetPermit(ctx, id); p.CouncilID != "bayside" {
 		t.Fatalf("permit filed under %q", p.CouncilID)
+	}
+}
+
+// Precedence: the sign-up choice wins over the session's council (the state an
+// unlink/re-link can leave behind), and the default only fills a blank.
+func TestCouncilIDForPrecedence(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	st.DefaultCouncil = "stonnington"
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO council_session (owner, council_id, cookie_sealed, updated_at) VALUES ('p@x', 'bayside', 's', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := st.CouncilIDFor(ctx, "p@x"); id != "bayside" {
+		t.Fatalf("session council not used: %q", id)
+	}
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO account_flags (owner, council_id) VALUES ('p@x', 'hume')`); err != nil {
+		t.Fatal(err)
+	}
+	st.forgetCouncil("p@x")
+	if id, _ := st.CouncilIDFor(ctx, "p@x"); id != "hume" {
+		t.Fatalf("the sign-up choice must win: %q", id)
+	}
+	// The memo is invalidated by the writes that can change the answer.
+	if err := st.DeleteCouncilSession(ctx, "p@x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteAllForOwner(ctx, "p@x"); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := st.CouncilIDFor(ctx, "p@x"); id != "stonnington" {
+		t.Fatalf("after deletion the default applies: %q", id)
+	}
+}
+
+// An old database whose breaker_state holds no row migrates and starts closed.
+func TestMigrateBreakerTableWithoutARow(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old2.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := preCouncilSchema[:strings.Index(preCouncilSchema, "INSERT INTO breaker_state")]
+	if _, err := raw.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	st, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	defer st.Close()
+	if bs, err := st.LoadBreakerState(ctx, "stonnington"); err != nil || !bs.OpenUntil.IsZero() || bs.Generation != 0 {
+		t.Fatalf("breaker after migrate without a row: %+v, %v", bs, err)
 	}
 }

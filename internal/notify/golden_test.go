@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -235,5 +236,16 @@ func TestGoldenEmails(t *testing.T) {
 		if !seen[name] {
 			t.Errorf("stale golden %s: no case produces it", e.Name())
 		}
+	}
+}
+
+// With a resolver that knows nothing about the account, wording and links fall
+// back to the default council rather than failing or going blank.
+func TestCouncilOfUnknownAccountUsesDefault(t *testing.T) {
+	svc := &Service{CouncilFor: func(context.Context, string) *council.Council { return nil }}
+	c := svc.councilOf(context.Background(), "nobody@example.com")
+	def := council.Default()
+	if c.Name != def.Name || c.Links.Portal != def.Links.Portal || c.Terms["portal"] == "" {
+		t.Fatalf("default council not applied: %+v", c)
 	}
 }

@@ -203,8 +203,24 @@ copy that mentions fines).
 | Routing | `council.Mux` implements `server.Council` and `scheduler.Council`: choice → linked session → process default |
 | Schema | `council_id` on `council_session`, `permit` (`UNIQUE(council_id, council_permit_id)` via a column-aware rebuild) and `account_flags` (the sign-up choice); `breaker_state` per council; backfill to `stonnington`; tested from the pre-change schema |
 | Product | sign-up council choice (form asks only when >1 enabled; a linked account cannot be re-pointed); per-council timezone in the scheduler and every owner-scoped page; `/status` per-council breakdown |
-| Copy | `internal/i18n` catalogs (en-AU) + council terminology; templates, SEO, FAQ, guides, manifest and mail speak through `.Council`; guard tests keep literals out and keys in sync |
+| Copy | `internal/i18n` catalogs (en-AU) + council terminology; messages are **prose with named slots** (`{{slot "reset"}}Reset it at the council{{endslot}}`) and the call site supplies the markup (`(slots "reset" (link .Council.Links.ResetPassword …))`) — templates own every anchor, attribute and emphasis, a lint keeps markup and entities out of the catalog; templates, SEO, FAQ, guides, manifest and mail speak through `.Council`; guard tests keep council literals out of code and keys in sync |
 | Tests | provider contract; generic client over a scripted stub and the fake; Orikan protocol; HTTP tests of link/picker/add/clear on the real client + fake provider, incl. a two-council run; migration; registry; mux; shared limit; goldens |
+
+## Review pass (2026-08-29)
+
+Security, correctness and test-gap reviews of the branch found and fixed:
+a failed operation persisting rotated session material (bumping the generation
+so the scheduler's generation-checked recovery read an expiry as "superseded"
+and left dead sessions in place — keep-warm was the common path); no guard
+against session material or permits stamped for one council reaching another
+council's client (an unlink → re-link elsewhere would have scheduled the old
+permits at the new portal); `ErrCouncilUnavailable` not reading as not-linked;
+`http://` endpoints accepted for a real connector. Also: the per-owner council
+lookup is memoised; the failure-notice day key follows the owner's timezone;
+the unscoped `PermitByCouncilID` is gone. Known, accepted differences from the
+old client: the plate cache stores the plate the app wrote rather than the
+council's own string for it (comparisons use `SamePlate`); breaker/cooldown
+success is counted per whole operation rather than per 2xx.
 
 ## Remaining (not done in this branch)
 

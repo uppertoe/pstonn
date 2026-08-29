@@ -8,6 +8,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/provider/fake"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
@@ -135,5 +136,28 @@ func TestMuxRefusesSwitchingCouncilWhilePermitsRemain(t *testing.T) {
 	_ = st.SetAccountCouncil(ctx, "ghost@example.com", "gone")
 	if err := m.Refresh(ctx, "ghost@example.com"); !errors.Is(err, parking.ErrNotLinked) {
 		t.Fatalf("unavailable council = %v, want ErrNotLinked", err)
+	}
+}
+
+// Stats/Blocked aggregate across councils: push-back on one council opens its
+// breaker (three owners in the window) and the mux reports the fleet blocked,
+// the pushback total, and the most recent event.
+func TestMuxAggregatesHealth(t *testing.T) {
+	ctx := context.Background()
+	m, st, fakes := muxRig(t, "stonnington", "othertown")
+	fakes["othertown"].LoginErr = &provider.Unavailable{Status: 429, Surface: provider.SurfaceLogin, Ref: "ref-x"}
+	for _, o := range []string{"a@x", "b@x", "c@x"} {
+		_ = st.SetAccountCouncil(ctx, o, "othertown")
+		_ = m.Link(ctx, o, o, "pw", false, true, 0)
+	}
+	if !m.Blocked() {
+		t.Fatal("three owners pushed back on one council must read as blocked fleet-wide")
+	}
+	s := m.Stats()
+	if s.Pushback != 3 || !s.BreakerOpen || s.LastPushbackRef != "ref-x" || s.LastPushbackStatus != 429 {
+		t.Fatalf("aggregate stats = %+v", s)
+	}
+	if c, _ := m.Client("stonnington"); c.Blocked() {
+		t.Fatal("the other council's breaker must stay closed")
 	}
 }
