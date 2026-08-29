@@ -3,138 +3,13 @@ package parking
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/store"
 )
-
-// TestBrowserTransportIdentityBySurface pins the split identity: the OIDC login
-// flow presents the SPA's Chrome identity (with matching client hints), the permit
-// API identifies honestly as p.stonn with NO Chrome client hints, and neither ever
-// ships Go's default UA.
-func TestBrowserTransportIdentityBySurface(t *testing.T) {
-	var gotUA, gotChUA, gotAccept string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUA = r.Header.Get("User-Agent")
-		gotChUA = r.Header.Get("sec-ch-ua")
-		gotAccept = r.Header.Get("Accept")
-	}))
-	defer srv.Close()
-
-	client := &http.Client{Transport: browserTransport{base: http.DefaultTransport}}
-	get := func(path string) {
-		t.Helper()
-		gotUA, gotChUA, gotAccept = "", "", ""
-		req, _ := http.NewRequest("GET", srv.URL+path, nil)
-		if _, err := client.Do(req); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// The OIDC login surface: the SPA's Chrome identity, coherent with its hints.
-	get("/connect/authorize")
-	if !strings.Contains(gotUA, "Chrome/") {
-		t.Fatalf("login-surface UA = %q, want the Chrome identity", gotUA)
-	}
-	if gotChUA == "" {
-		t.Fatal("login-surface sec-ch-ua was not set")
-	}
-
-	// The permit API surface: honest p.stonn, and crucially NO Chrome client hints
-	// — a p.stonn UA carrying Chrome hints would be the exact incoherence the split
-	// removes.
-	get("/ssp-svc/api/Index/grid")
-	if !strings.Contains(gotUA, "p.stonn/") {
-		t.Fatalf("api-surface UA = %q, want the honest p.stonn identity", gotUA)
-	}
-	if strings.Contains(gotUA, "Chrome/") {
-		t.Fatalf("api-surface UA still claims to be Chrome: %q", gotUA)
-	}
-	if gotChUA != "" {
-		t.Fatalf("api-surface leaked Chrome client hints: sec-ch-ua = %q", gotChUA)
-	}
-
-	// Neither surface may ever emit Go's default UA.
-	for _, p := range []string{"/connect/authorize", "/ssp-svc/api/x", "/Account/Login", "/anything"} {
-		get(p)
-		if strings.Contains(gotUA, "Go-http-client") || gotUA == "" {
-			t.Fatalf("path %s shipped a bare/Go UA: %q", p, gotUA)
-		}
-	}
-
-	// Caller-set header must survive on either surface.
-	req, _ := http.NewRequest("GET", srv.URL+"/ssp-svc/api/x", nil)
-	req.Header.Set("Accept", "application/json")
-	if _, err := client.Do(req); err != nil {
-		t.Fatal(err)
-	}
-	if gotAccept != "application/json" {
-		t.Fatalf("caller Accept overwritten: got %q", gotAccept)
-	}
-}
-
-// An unrecognised path must default to the honest identity, never the browser
-// costume: the disguise is granted only to paths positively identified as the
-// SPA's own login flow.
-func TestCouncilIdentityDefaultsHonest(t *testing.T) {
-	for path, wantBrowser := range map[string]bool{
-		"/idm/Account/Login":                 true,
-		"/connect/token":                     true,
-		"/connect/authorize":                 true,
-		"/ssp-svc/api/Index/grid":            false,
-		"/ssp-svc/api/permits/manageVehicle": false,
-		"/something/unexpected":              false,
-		"/":                                  false,
-	} {
-		if got := councilIdentityBrowser(path); got != wantBrowser {
-			t.Errorf("councilIdentityBrowser(%q) = %v, want %v", path, got, wantBrowser)
-		}
-	}
-}
-
-func TestParseRetryAfter(t *testing.T) {
-	mk := func(v string) *http.Response {
-		h := http.Header{}
-		if v != "" {
-			h.Set("Retry-After", v)
-		}
-		return &http.Response{Header: h}
-	}
-	if d := parseRetryAfter(mk("120")); d != 120*time.Second {
-		t.Fatalf("delta-seconds: got %v, want 120s", d)
-	}
-	if d := parseRetryAfter(mk("")); d != 0 {
-		t.Fatalf("absent header: got %v, want 0", d)
-	}
-	if d := parseRetryAfter(mk("garbage")); d != 0 {
-		t.Fatalf("garbage: got %v, want 0", d)
-	}
-}
-
-func TestClassifyCouncilPath(t *testing.T) {
-	cases := []struct{ path, want string }{
-		{"/idm/Account/Login", "login"},
-		{"/idm", "login"}, // the credential POST goes to /idm?returnurl=…
-		{"/idm/", "login"},
-		{"/idm/connect/authorize", "auth"},
-		{"/idm/connect/authorize/callback", "auth"},
-		{"/idm/connect/token", "auth"},
-		{"/ssp-svc/api/Index/grid", "api"},
-		{"/ssp-svc/api/permits/manageVehicle", "api"},
-		{"/ssp/callback", "other"},
-	}
-	for _, c := range cases {
-		if got := classifyCouncilPath(c.path); got != c.want {
-			t.Errorf("classifyCouncilPath(%q) = %q, want %q", c.path, got, c.want)
-		}
-	}
-}
 
 // TestCurrentVehicleCachedNeverBlocks locks in the stale-while-revalidate
 // contract: the call must answer from cache (fresh or stale) or report a miss —
@@ -146,7 +21,7 @@ func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := &Client{store: st} // no session stored: any background refresh fails fast
+	c := NewClient(nil, st, nil, nil) // no session stored: any background refresh fails fast
 	ctx := context.Background()
 	p := model.Permit{CouncilPermitID: "14576"}
 	const owner = "o@example.com"
@@ -181,7 +56,7 @@ func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := &Client{store: st} // unlinked: a background refresh cannot supply an answer
+	c := NewClient(nil, st, nil, nil) // unlinked: a background refresh cannot supply an answer
 	ctx := context.Background()
 	p := model.Permit{CouncilPermitID: "14576"}
 	const first, second = "first@example.com", "second@example.com"
@@ -212,7 +87,7 @@ func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
 // TestCooldownBackoff confirms a penalised owner enters cooldown and that a
 // success clears it.
 func TestCooldownBackoff(t *testing.T) {
-	c := &Client{}
+	c := NewClient(nil, nil, nil, nil)
 	const owner = "a@b.com"
 	if _, blocked := c.cooldownFor(owner); blocked {
 		t.Fatal("owner should start un-penalised")
@@ -240,7 +115,7 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := &Client{store: st} // no session: any background refresh fails fast
+	c := NewClient(nil, st, nil, nil) // no session: any background refresh fails fast
 	ctx := context.Background()
 	p := model.Permit{CouncilPermitID: "14576"}
 	const owner = "o@example.com"
@@ -296,7 +171,7 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 // what stops a dashboard-discovered death waiting ~9h for the next keep-warm
 // pass (observed live 2026-08-11).
 func TestNoteExpiredReportsOnlyTaggedExpiries(t *testing.T) {
-	c := &Client{}
+	c := NewClient(nil, nil, nil, nil)
 	var got []int64
 	c.OnSessionExpired = func(owner string, gen int64) {
 		if owner != "o@example.com" {

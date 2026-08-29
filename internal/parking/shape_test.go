@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"io"
 	"net/http"
 	"strings"
@@ -12,30 +13,6 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/model"
 )
-
-// emptyIsCredible must require every corroborating field to be EXPLICITLY present.
-// A shape change that drops permitVehicleCount (or the permitVehicles array) while
-// keeping permitNumber must NOT read as a credible empty permit.
-func TestEmptyIsCredibleRequiresExplicitFields(t *testing.T) {
-	zero := 0
-	one := 1
-	cases := []struct {
-		name string
-		mv   managedVehicleResp
-		want bool
-	}{
-		{"count 0 and explicit empty array", managedVehicleResp{PermitNumber: "VPP1", PermitVehicleCount: &zero, PermitVehicles: []permitVehicle{}}, true},
-		{"count field absent", managedVehicleResp{PermitNumber: "VPP1", PermitVehicles: []permitVehicle{}}, false},
-		{"permitVehicles key absent", managedVehicleResp{PermitNumber: "VPP1", PermitVehicleCount: &zero}, false},
-		{"permitNumber absent", managedVehicleResp{PermitVehicleCount: &zero, PermitVehicles: []permitVehicle{}}, false},
-		{"count present but non-zero", managedVehicleResp{PermitNumber: "VPP1", PermitVehicleCount: &one, PermitVehicles: []permitVehicle{}}, false},
-	}
-	for _, c := range cases {
-		if got := c.mv.emptyIsCredible(); got != c.want {
-			t.Errorf("%s: emptyIsCredible = %v, want %v", c.name, got, c.want)
-		}
-	}
-}
 
 // End to end through the real client: a response that dropped permitVehicleCount is
 // an unexpected shape, NOT an empty permit — so CurrentVehicle errors rather than
@@ -81,7 +58,7 @@ func TestCurrentVehicleRejectsMultipleVehicles(t *testing.T) {
 // resurrect the cache entry: storeRegIfCurrent drops a write whose generation is
 // stale.
 func TestForgetPermitInvalidatesInFlightRefresh(t *testing.T) {
-	c := &Client{}
+	c := NewClient(nil, nil, nil, nil)
 	key := regKey{"owner@example.com", "p1"}
 
 	gen := c.regGeneration(key)             // captured "before the read"
@@ -250,37 +227,6 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	}
 }
 
-// A token-shape failure must classify as FailUnexpected. Left unclassified, FailureOf
-// defaults it to FailTransient — and a transient verdict on a FLEET-WIDE shape change
-// means every owner retries it on every warm tick instead of the operator being told.
-func TestTokenShapeFailuresAreUnexpectedNotTransient(t *testing.T) {
-	const owner = "tok@example.com"
-	for name, body := range map[string]string{
-		"no expires_in":     `{"access_token":"a","token_type":"Bearer"}`,
-		"zero expires_in":   `{"access_token":"a","expires_in":0,"token_type":"Bearer"}`,
-		"absurd expires_in": `{"access_token":"a","expires_in":999999,"token_type":"Bearer"}`,
-		"wrong token_type":  `{"access_token":"a","expires_in":3600,"token_type":"Mac"}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newFakeCouncil(t)
-			c, st, box := testClient(t, f)
-			linkOwner(t, c, st, box, owner)
-			f.mux.HandleFunc("/idm2/connect/token", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				io.WriteString(w, body)
-			})
-			c.tokenURL = f.srv.URL + "/idm2/connect/token"
-			_, err := c.exchangeCode(context.Background(), owner, "code", "verifier")
-			if err == nil {
-				t.Fatalf("%s should be refused", name)
-			}
-			if kind, _ := FailureOf(err); kind != FailUnexpected {
-				t.Fatalf("%s classified as %v, want FailUnexpected (transient would retry forever)", name, kind)
-			}
-		})
-	}
-}
-
 // The detail id is the only field on the manageVehicle write that was taken on trust.
 // Absent, json.Number("").String() is "", and we would POST an edit with an empty
 // SelectedVehicle/ChangeSetID — on the one code path that can put a wrong plate on a
@@ -299,8 +245,8 @@ func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
 	if err == nil {
 		t.Fatal("a managed vehicle with no PKPermitVehicleDetailID must not be written to")
 	}
-	if kind, _ := FailureOf(err); kind != FailUnexpected {
-		t.Fatalf("kind = %v, want FailUnexpected (a shape change, not a durable refusal)", kind)
+	if kind, _ := provider.FailureOf(err); kind != provider.FailUnexpected {
+		t.Fatalf("kind = %v, want provider.FailUnexpected (a shape change, not a durable refusal)", kind)
 	}
 }
 

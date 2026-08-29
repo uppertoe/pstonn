@@ -30,6 +30,9 @@ import (
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
+	"github.com/uppertoe/pstonn/internal/provider/fake"
+	"github.com/uppertoe/pstonn/internal/provider/orikan"
 	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/server"
@@ -126,8 +129,18 @@ func run() error {
 	// descriptor (Stonnington), endpoints from COUNCIL_* config; the driver is built
 	// from it so the app never names the council directly.
 	tenant := council.FromConfig(cfg.Council)
-	council := parking.New(cfg, st, box)
-	council.DefaultVehicleState = tenant.Policy.DefaultVehicleState
+	transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council))
+	var prov provider.Provider
+	if tenant.Connector == fake.ID {
+		prov = fake.New()
+	} else {
+		prov = orikan.New(orikan.Config{
+			Issuer: tenant.Endpoints.Issuer, APIBase: tenant.Endpoints.APIBase,
+			ClientID: tenant.Endpoints.ClientID, RedirectURI: tenant.Endpoints.RedirectURI,
+			Scopes: tenant.Endpoints.Scopes, DefaultVehicleState: tenant.Policy.DefaultVehicleState,
+		}, transport)
+	}
+	council := parking.NewClient(prov, st, box, transport)
 	if cfg.Council.Sandbox {
 		log.Print("WARNING: COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
 	}

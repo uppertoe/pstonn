@@ -1,4 +1,4 @@
-package parking
+package orikan
 
 import (
 	"fmt"
@@ -27,7 +27,7 @@ import (
 //
 //	PSTONN_DIAG_LOGIN=1 \
 //	PSTONN_DIAG_OUT=/tmp/diag-login-body.html \
-//	go test ./internal/parking -run TestDiagLoginProbe -v
+//	go test ./internal/provider/orikan -run TestDiagLoginProbe -v
 //
 // PSTONN_DIAG_USERNAME/PSTONN_DIAG_PASSWORD override the fake account (never
 // use a real person's email: a nonexistent account cannot be locked out).
@@ -48,14 +48,14 @@ func TestDiagLoginProbe(t *testing.T) {
 		outPath = "diag-login-body.html"
 	}
 
-	c, _, _ := liveClient(t)
+	c := New(liveConfig, nil)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hosts := c.loginHosts()
 	lc := &http.Client{Timeout: 30 * time.Second, Jar: jar,
-		Transport: browserTransport{base: http.DefaultTransport, traffic: &c.traffic, gov: c.gov}}
+		Transport: c.transport}
 
 	verifier, err := randToken()
 	if err != nil {
@@ -127,8 +127,8 @@ func TestDiagLoginProbe(t *testing.T) {
 		cookieNames = append(cookieNames, ck.Name)
 	}
 	t.Logf("jar cookies for /idm: %v", cookieNames)
-	t.Logf("session cookie (%s) present: %v", councilSessionCookie,
-		hasCookieNamed(jarCookieHeader(jar, authURLParsed), councilSessionCookie))
+	t.Logf("session cookie (%s) present: %v", sessionCookie,
+		hasCookieNamed(jarCookieHeader(jar, authURLParsed), sessionCookie))
 
 	// Fingerprint the body without dumping 100KB into the log.
 	low := strings.ToLower(string(body))

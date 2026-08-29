@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/provider/orikan"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -33,20 +35,23 @@ func TestLiveCheckSession(t *testing.T) {
 	ctx := context.Background()
 	c, _, _ := liveClient(t)
 
-	at, exp, next, err := c.silentRenew(ctx, "live-test", cookie)
+	at, exp, next, err := ork(c).SilentRenew(ctx, cookie)
 	switch {
 	case err == nil:
 		t.Logf("ALIVE ✓ the session still stands, silent-renew minted a fresh token (expires %s, %s from now).",
 			exp.Format(time.RFC3339), time.Until(exp).Round(time.Second))
 		t.Logf("cookie rotated on renew: %v; token length: %d", next != "", len(at))
 		t.Log("=> the idle timeout is AT LEAST the time since this cookie was last used.")
-	case errors.Is(err, ErrSessionExpired):
+	case errors.Is(err, provider.ErrSessionExpired):
 		t.Log("EXPIRED ✗ the session has lapsed, a re-link (fresh login) is required.")
 		t.Log("=> the idle timeout is LESS than the time since this cookie was last used.")
 	default:
 		t.Fatalf("probe error (not a clean expiry): %v", err)
 	}
 }
+
+// ork returns the Orikan provider behind a live client, for protocol-level probes.
+func ork(c *Client) *orikan.Client { return c.Provider().(*orikan.Client) }
 
 func liveClient(t *testing.T) (*Client, *secretbox.Box, *store.Store) {
 	t.Helper()
@@ -144,7 +149,7 @@ func TestLiveMeasureIdleTimeout(t *testing.T) {
 		case err == nil:
 			lastGood = gap
 			fmt.Printf("[%s] OK   after %-7s idle → session ALIVE (renewed, cookie slid)\n", time.Now().Format("15:04:05"), gap)
-		case errors.Is(err, ErrSessionExpired):
+		case errors.Is(err, provider.ErrSessionExpired):
 			fmt.Printf("[%s] DEAD after %-7s idle → session LAPSED. IDLE WINDOW is (%s, %s].\n", time.Now().Format("15:04:05"), gap, lastGood, gap)
 			if lastGood > 0 {
 				fmt.Printf("RECOMMENDATION: set COUNCIL_WARM_INTERVAL ~= %s (half the proven-safe %s).\n", (lastGood / 2).Round(time.Minute), lastGood)
@@ -391,7 +396,7 @@ func TestLiveSessionKick(t *testing.T) {
 		case err == nil:
 			fmt.Printf("[%s] RESULT: ALIVE ✓ — the browser login did NOT kick p.stonn's session.\n",
 				time.Now().Format("15:04:05"))
-		case errors.Is(err, ErrSessionExpired):
+		case errors.Is(err, provider.ErrSessionExpired):
 			fmt.Printf("[%s] RESULT: EXPIRED ✗ — the browser login KICKED p.stonn's session. Hypothesis confirmed.\n",
 				time.Now().Format("15:04:05"))
 		default:
@@ -483,30 +488,30 @@ func TestLiveAuthorizeOnlyWarm(t *testing.T) {
 	if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 		t.Fatalf("headless login: %v", err)
 	}
-	cs, err := st.GetCouncilSession(ctx, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cookie, err := c.openCookie(owner, cs.Cookie)
-	if err != nil {
+	_ = st
+	var cookie string
+	if err := c.Diagnose(ctx, owner, func(_ provider.Provider, s *provider.Session) error {
+		cookie = orikan.CookieOf(*s)
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Authorize-only warm, twice, each on the previous result — proving a repeated
 	// authorize-only keeps sliding the session with no token exchange.
-	c1, err := c.warmRenew(ctx, owner, cookie)
+	c1, err := ork(c).Warm(ctx, cookie)
 	if err != nil {
 		t.Fatalf("authorize-only warm #1 failed (session not slid): %v", err)
 	}
 	t.Logf("warm #1 OK — cookie rotated: %v", c1 != cookie)
-	c2, err := c.warmRenew(ctx, owner, c1)
+	c2, err := ork(c).Warm(ctx, c1)
 	if err != nil {
 		t.Fatalf("authorize-only warm #2 failed: %v", err)
 	}
 	t.Logf("warm #2 OK — cookie rotated: %v", c2 != c1)
 
 	// The slid cookie must still be valid for REAL work: a full renew mints a token.
-	at, exp, _, err := c.silentRenew(ctx, owner, c2)
+	at, exp, _, err := ork(c).SilentRenew(ctx, c2)
 	if err != nil {
 		t.Fatalf("full renew on the authorize-only-slid cookie FAILED — warming broke the session: %v", err)
 	}
@@ -518,8 +523,8 @@ func TestLiveAuthorizeOnlyWarm(t *testing.T) {
 	if err := c.Refresh(ctx, owner); err != nil {
 		t.Fatalf("Refresh (authorize-only keep-warm) failed: %v", err)
 	}
-	if _, err := c.accessToken(ctx, owner); err != nil {
-		t.Fatalf("accessToken after an authorize-only Refresh failed: %v", err)
+	if _, err := c.ListPermits(ctx, owner); err != nil {
+		t.Fatalf("a permit read (token minted on demand) after an authorize-only Refresh failed: %v", err)
 	}
 	t.Log("Refresh (authorize-only) end-to-end OK: session slid, and a token still mints on demand.")
 }
@@ -537,7 +542,7 @@ func TestLiveAuthorizeOnlyWarm(t *testing.T) {
 // It mirrors TestLiveMeasureIdleTimeout but drives warmRenew directly, threading
 // the (possibly rotated) cookie forward IN MEMORY so the probe is isolated from the
 // store and exercises only the sliding mechanism. Each success resets the sliding
-// clock, so the idle gap grows; the first ErrSessionExpired brackets the window
+// clock, so the idle gap grows; the first provider.ErrSessionExpired brackets the window
 // between the last success and the failing gap.
 //
 // Preferred (isolated — survives you using the council site in a browser):
@@ -577,16 +582,15 @@ func TestLiveWarmRenewIdleTimeout(t *testing.T) {
 		if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
-		cs, err := c.store.GetCouncilSession(ctx, owner)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cookie, err = c.openCookie(owner, cs.Cookie); err != nil {
+		if err := c.Diagnose(ctx, owner, func(_ provider.Provider, s *provider.Session) error {
+			cookie = orikan.CookieOf(*s)
+			return nil
+		}); err != nil {
 			t.Fatal(err)
 		}
 		fmt.Printf("[%s] fresh headless login OK; probing AUTHORIZE-ONLY warming\n", time.Now().Format("15:04:05"))
 	} else {
-		next, err := c.warmRenew(ctx, owner, seed)
+		next, err := ork(c).Warm(ctx, seed)
 		if err != nil {
 			t.Fatalf("seed cookie is not valid to begin with: %v", err)
 		}
@@ -598,12 +602,12 @@ func TestLiveWarmRenewIdleTimeout(t *testing.T) {
 	for gap := start; gap <= maxGap; gap = time.Duration(float64(gap) * factor) {
 		fmt.Printf("[%s] idling %s (no activity)…\n", time.Now().Format("15:04:05"), gap)
 		time.Sleep(gap)
-		switch next, err := c.warmRenew(ctx, owner, cookie); {
+		switch next, err := ork(c).Warm(ctx, cookie); {
 		case err == nil:
 			cookie = next // thread the (possibly rotated) cookie forward
 			lastGood = gap
 			fmt.Printf("[%s] OK   after %-8s idle → session ALIVE (authorize-only slide)\n", time.Now().Format("15:04:05"), gap)
-		case errors.Is(err, ErrSessionExpired):
+		case errors.Is(err, provider.ErrSessionExpired):
 			fmt.Printf("[%s] DEAD after %-8s idle → session LAPSED. IDLE WINDOW is (%s, %s].\n", time.Now().Format("15:04:05"), gap, lastGood, gap)
 			if lastGood > 0 {
 				fmt.Printf("RESULT: authorize-only warming held the session up to at least %s.\n", lastGood)

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/provider"
+	"github.com/uppertoe/pstonn/internal/provider/orikan"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -136,9 +138,15 @@ func testClient(t *testing.T, f *fakeCouncil) (*Client, *store.Store, *secretbox
 	return clientAt(t, f.srv.URL)
 }
 
-// clientAt builds a Client whose every council endpoint lives on base, with a
-// real store and box behind it.
+// clientAt builds a generic Client over an Orikan provider whose every endpoint
+// lives on base, with a real store and box behind it. issuer overrides where the
+// OIDC endpoints live (tests that point the authorize step at a misbehaving path).
 func clientAt(t *testing.T, base string) (*Client, *store.Store, *secretbox.Box) {
+	t.Helper()
+	return clientAtIssuer(t, base, base+"/idm")
+}
+
+func clientAtIssuer(t *testing.T, base, issuer string) (*Client, *store.Store, *secretbox.Box) {
 	t.Helper()
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -149,26 +157,21 @@ func clientAt(t *testing.T, base string) (*Client, *store.Store, *secretbox.Box)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Client{
-		clientID:    "test-client",
-		redirectURI: base + "/ssp/callback",
-		scope:       "openid",
-		authURL:     base + "/idm/connect/authorize",
-		tokenURL:    base + "/idm/connect/token",
-		loginURL:    base + "/idm/Account/Login",
-		apiBase:     base + "/ssp-svc",
-		origin:      base,
-		store:       st,
-		box:         box,
-		http: &http.Client{
-			Timeout:       10 * time.Second,
-			Transport:     browserTransport{base: http.DefaultTransport},
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-	}
+	p := orikan.New(orikan.Config{
+		Issuer: issuer, APIBase: base + "/ssp-svc", ClientID: "test-client",
+		RedirectURI: base + "/ssp/callback", Scopes: []string{"openid"},
+	}, nil)
+	c := NewClient(p, st, box, nil)
 	return c, st, box
 }
 
+// councilSessionCookie is the IdentityServer session cookie the Orikan provider
+// requires a login to have established.
+const councilSessionCookie = "Permits.IDM.Identity"
+
+// linkOwner seeds a linked owner in the PRE-PROVIDER storage shape (a raw sealed
+// cookie header plus a sealed token in its own column), so every test below also
+// exercises the one-time legacy import into provider session material.
 func linkOwner(t *testing.T, c *Client, st *store.Store, box *secretbox.Box, owner string) {
 	t.Helper()
 	ctx := context.Background()
@@ -197,14 +200,12 @@ func TestAPIRequest401RenewsAndRetries(t *testing.T) {
 	linkOwner(t, c, st, box, "kicked@example.com")
 	f.apiCode.Store(http.StatusUnauthorized)
 
-	resp, err := c.apiRequest(context.Background(), "kicked@example.com", http.MethodGet,
-		"/api/permits/managedVehicle", "read", url.Values{"permitID": {"1"}}, nil)
+	reg, err := c.CurrentVehicle(context.Background(), "kicked@example.com", model.Permit{CouncilPermitID: "1"})
 	if err != nil {
 		t.Fatalf("expected renew+retry to succeed, got %v", err)
 	}
-	drainClose(resp)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 after renew", resp.StatusCode)
+	if reg != "AAA111" {
+		t.Fatalf("plate = %q, want the canned record after renew", reg)
 	}
 	if f.renews.Load() != 1 {
 		t.Fatalf("silent renews = %d, want exactly 1", f.renews.Load())
@@ -219,8 +220,7 @@ func TestAPIRequest403HTMLIsBusy(t *testing.T) {
 	f.apiCode.Store(http.StatusForbidden)
 	f.apiCT.Store("text/html")
 
-	_, err := c.apiRequest(context.Background(), "blocked@example.com", http.MethodGet,
-		"/api/permits/managedVehicle", "read", nil, nil)
+	_, err := c.CurrentVehicle(context.Background(), "blocked@example.com", model.Permit{CouncilPermitID: "1"})
 	if !errors.Is(err, ErrCouncilBusy) {
 		t.Fatalf("err = %v, want ErrCouncilBusy", err)
 	}
@@ -239,8 +239,7 @@ func TestAPIRequest403JSONIsRejected(t *testing.T) {
 	f.apiCode.Store(http.StatusForbidden)
 	f.apiCT.Store("application/json; charset=utf-8")
 
-	_, err := c.apiRequest(context.Background(), "revoked@example.com", http.MethodGet,
-		"/api/permits/managedVehicle", "read", nil, nil)
+	_, err := c.CurrentVehicle(context.Background(), "revoked@example.com", model.Permit{CouncilPermitID: "1"})
 	if errors.Is(err, ErrCouncilBusy) {
 		t.Fatalf("a JSON 403 must not be classified busy, got %v", err)
 	}
@@ -256,14 +255,12 @@ func TestAPIRequest403JSONIsRejected(t *testing.T) {
 // and short-circuit subsequent renews, exactly like the API path.
 func TestSilentRenewPushbackPenalizes(t *testing.T) {
 	f := newFakeCouncil(t)
-	c, st, box := testClient(t, f)
-	linkOwner(t, c, st, box, "idm@example.com")
-	// Replace the authorize handler's behavior via a wrapper server is overkill;
-	// instead point authURL at a 503 endpoint.
+	// Point the OIDC issuer at a 503 authorize endpoint.
 	f.mux.HandleFunc("/idm503/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	})
-	c.authURL = f.srv.URL + "/idm503/connect/authorize"
+	c, st, box := clientAtIssuer(t, f.srv.URL, f.srv.URL+"/idm503")
+	linkOwner(t, c, st, box, "idm@example.com")
 
 	err := c.Refresh(context.Background(), "idm@example.com")
 	if !errors.Is(err, ErrCouncilBusy) {
@@ -293,22 +290,6 @@ func TestReconnectDecryptFailureMapsToNoSavedPassword(t *testing.T) {
 	}
 	if err := c.Reconnect(ctx, "rot@example.com"); !errors.Is(err, ErrNoSavedPassword) {
 		t.Fatalf("err = %v, want ErrNoSavedPassword", err)
-	}
-}
-
-// A cookie the IDM deletes on renew (Max-Age=0 / past Expires) must be removed
-// from the merged header, not carried forward as "name=".
-func TestMergeSetCookieHonoursDeletion(t *testing.T) {
-	got := mergeSetCookie("a=1; b=2; c=3", []*http.Cookie{
-		{Name: "b", Value: "", MaxAge: -1},
-		{Name: "c", Value: "", Expires: time.Now().Add(-time.Hour)},
-		{Name: "d", Value: "4"},
-	})
-	if strings.Contains(got, "b=") || strings.Contains(got, "c=") {
-		t.Fatalf("deleted cookies survived the merge: %q", got)
-	}
-	if !strings.Contains(got, "a=1") || !strings.Contains(got, "d=4") {
-		t.Fatalf("live cookies lost in the merge: %q", got)
 	}
 }
 
@@ -489,8 +470,8 @@ func TestLinkRefusesEmptyAntiforgeryToken(t *testing.T) {
 <input name="Username" value=""><input name="Password" value=""></form>`)
 	}))
 	defer srv.Close()
-	c, _, _ := clientAt(t, f.srv.URL)
-	c.authURL = srv.URL + "/idm/connect/authorize" // serves the page directly
+	_ = f
+	c, _, _ := clientAtIssuer(t, srv.URL, srv.URL+"/idm") // the authorize step serves the page directly
 
 	err := c.Link(context.Background(), "af@example.com", "af@example.com", "hunter2", true, true, 0)
 	if !errors.Is(err, ErrLoginFormUnrecognised) {
@@ -512,9 +493,6 @@ func TestLinkRefusesEmptyAntiforgeryToken(t *testing.T) {
 func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 	const owner = "html@example.com"
 	f := newFakeCouncil(t)
-	c, st, box := testClient(t, f)
-	linkOwner(t, c, st, box, owner)
-
 	var status atomic.Int64
 	var ct atomic.Value
 	var body atomic.Value
@@ -523,7 +501,8 @@ func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 		w.WriteHeader(int(status.Load()))
 		io.WriteString(w, body.Load().(string))
 	})
-	c.authURL = f.srv.URL + "/idm-page/connect/authorize"
+	c, st, box := clientAtIssuer(t, f.srv.URL, f.srv.URL+"/idm-page")
+	linkOwner(t, c, st, box, owner)
 
 	// A genuine IdentityServer sign-in page carries the antiforgery field; an edge
 	// (WAF) challenge page does not — only the former is a real expiry.
@@ -720,48 +699,32 @@ func TestSetVehicleAcceptsWhitespaceVariantAsAlreadySet(t *testing.T) {
 	}
 }
 
-// The council reports a refusal as a JSON ARRAY of message objects. Captured live
-// on 2026-07-31 from a manageVehicle POST that was rejected. Before this was
-// parsed the body was discarded and the user saw only "council returned 400",
-// which says nothing they can act on.
-func TestCouncilErrorMessage(t *testing.T) {
-	const live = `[{"Level":0,"Message":"Vehicle Registration has invalid pattern","ID":null,"LinkURL":null,"Title":null,"CustomMessage":null,"LinkLabel":null}]`
-	if got := councilErrorMessage([]byte(live)); got != "Vehicle Registration has invalid pattern" {
-		t.Errorf("live refusal body parsed to %q", got)
-	}
+// A prompt=none authorize that returns 200 HTML is only a genuine expiry when it is
+// IdentityServer's own sign-in form (carries the antiforgery field). An EDGE
+// challenge page (Azure Front Door / WAF) also arrives as 200 HTML but has no such
+// marker, and must NOT be read as an expired session — otherwise a transient edge
+// event wrongly retires a no-saved-password user and prompts a re-link.
+func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
+	const owner = "html@example.com"
 
-	for name, tc := range map[string]struct{ body, want string }{
-		"custom message wins":     {`[{"Message":"raw","CustomMessage":"Friendlier wording"}]`, "Friendlier wording"},
-		"blank custom falls back": {`[{"Message":"raw","CustomMessage":"  "}]`, "raw"},
-		"multiple joined":         {`[{"Message":"one"},{"Message":"two"}]`, "one; two"},
-		"empty array":             {`[]`, ""},
-		"not an array":            {`{"Message":"nope"}`, ""},
-		"not json":                {`<html>blocked</html>`, ""},
-		"all messages blank":      {`[{"Message":"","CustomMessage":""}]`, ""},
-	} {
-		if got := councilErrorMessage([]byte(tc.body)); got != tc.want {
-			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+	t.Run("real login form is an expiry", func(t *testing.T) {
+		f := newFakeCouncil(t)
+		c, st, box := testClient(t, f)
+		linkOwner(t, c, st, box, owner)
+		f.authHTML.Store(`<html><body><form><input name="__RequestVerificationToken" value="x"></form></body></html>`)
+		if err := c.Refresh(context.Background(), owner); !errors.Is(err, provider.ErrSessionExpired) {
+			t.Fatalf("a real login form should read as expired, got %v", err)
 		}
-	}
+	})
 
-	// Portal-controlled text reaches logs and notifications, so a refusal must not
-	// be able to forge log lines with embedded newlines.
-	got := councilErrorMessage([]byte("[{\"Message\":\"bad\\nJul 31 12:00:00 pstonn: forged\"}]"))
-	if strings.ContainsAny(got, "\n\r") {
-		t.Errorf("newlines survived into an error message: %q", got)
-	}
-}
-
-// The vehicle-state id written on an add or a state-less edit comes from the
-// council descriptor; a bare Client (tests, or an unset descriptor) falls back to
-// VIC so today's single-council behaviour is unchanged.
-func TestVehicleStateDefault(t *testing.T) {
-	c := &Client{}
-	if got := c.vehicleState(); got != "1" {
-		t.Fatalf("bare client vehicleState = %q, want VIC (1)", got)
-	}
-	c.DefaultVehicleState = "3"
-	if got := c.vehicleState(); got != "3" {
-		t.Fatalf("configured vehicleState = %q, want 3", got)
-	}
+	t.Run("edge challenge is transient, not an expiry", func(t *testing.T) {
+		f := newFakeCouncil(t)
+		c, st, box := testClient(t, f)
+		linkOwner(t, c, st, box, owner)
+		f.authHTML.Store(`<html><body>Checking your browser… <script>challenge()</script></body></html>`)
+		err := c.Refresh(context.Background(), owner)
+		if err == nil || errors.Is(err, provider.ErrSessionExpired) {
+			t.Fatalf("an edge challenge must not read as expired, got %v", err)
+		}
+	})
 }

@@ -2,9 +2,10 @@ package parking
 
 import (
 	"log"
-	"net/http"
 	"sync"
 	"time"
+
+	"github.com/uppertoe/pstonn/internal/provider"
 )
 
 // PushbackEvent is a privacy-safe diagnostic snapshot of the last time the council
@@ -22,37 +23,25 @@ type PushbackEvent struct {
 	AzureRef    string // X-Azure-Ref: the Azure Front Door correlation id
 }
 
-// recordPushback captures the diagnostic fields of an edge refusal and logs them,
-// so a block leaves a trail the operator can act on. Called at every pushback site.
-func (c *Client) recordPushback(resp *http.Response) {
-	surface := "other"
-	if resp.Request != nil && resp.Request.URL != nil {
-		surface = classifyCouncilPath(resp.Request.URL.Path)
-	}
+// recordPushback captures the diagnostic fields of an edge refusal (as the
+// provider classified it) and logs them, so an operator can quote the edge's own
+// correlation id back to the council.
+func (c *Client) recordPushback(u *provider.Unavailable) {
 	ev := PushbackEvent{
 		At:          time.Now(),
-		Surface:     surface,
-		Status:      resp.StatusCode,
-		ContentType: resp.Header.Get("Content-Type"),
-		RetryAfter:  parseRetryAfter(resp),
-		AzureRef:    resp.Header.Get("X-Azure-Ref"),
+		Surface:     string(u.Surface),
+		Status:      u.Status,
+		ContentType: u.ContentType,
+		RetryAfter:  u.RetryAfter,
+		AzureRef:    u.Ref,
 	}
 	c.traffic.pbMu.Lock()
 	c.traffic.lastPB = ev
 	c.traffic.pbMu.Unlock()
 	log.Printf("parking: council pushback %s %d (content-type=%q retry-after=%s x-azure-ref=%q)",
-		surface, ev.Status, safeExcerpt(ev.ContentType), ev.RetryAfter.Round(time.Second), safeExcerpt(ev.AzureRef))
+		ev.Surface, ev.Status, ev.ContentType, ev.RetryAfter.Round(time.Second), ev.AzureRef)
 }
 
-// The cumulative per-surface counters answer "how much have we ever asked of the
-// council". They cannot answer the question that matters at fleet scale: "how hard
-// are we hitting the edge RIGHT NOW". The scheduler spaces permit OPERATIONS, but
-// each operation is several HTTP requests (token renew, read, write, confirm), so
-// the instantaneous request rate is a multiple of the operation rate and bursts
-// around a rollover. rollingCounter measures the real thing — requests in the last
-// minute and five minutes — so the operator (and any future dashboard) sees actual
-// load, not an inferred one, and can tell whether we are near a rate that would
-// draw push-back.
 type rollingCounter struct {
 	mu      sync.Mutex
 	buckets []minuteBucket // ring indexed by wall-clock minute

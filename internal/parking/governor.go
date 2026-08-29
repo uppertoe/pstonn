@@ -5,6 +5,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/uppertoe/pstonn/internal/provider"
 )
 
 // The breaker REACTS to a block; the governor tries to PREVENT one. All 500
@@ -132,13 +134,13 @@ func newGovernor(totalPerMin, totalBurst, loginPerMin, loginBurst float64, concu
 // the concurrency cap, returning a release for the concurrency slot. A nil governor
 // is a no-op (feature disabled / tests). Rate is taken BEFORE a concurrency slot so
 // a rate-limited request does not hold a slot other requests need.
-func (g *governor) acquire(ctx context.Context, path string) (release func(), err error) {
+func (g *governor) acquire(ctx context.Context, surface provider.Surface) (release func(), err error) {
 	if g == nil {
 		return func() {}, nil
 	}
 	// The login surface pays into BOTH its own sub-limit and the total, so it can
 	// never exceed either. Everything else pays into the total only.
-	if classifyCouncilPath(path) == "login" {
+	if surface == provider.SurfaceLogin {
 		if err := g.login.wait(ctx); err != nil {
 			return nil, err
 		}

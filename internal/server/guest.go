@@ -22,6 +22,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
@@ -216,7 +217,7 @@ func permitLabel(p model.Permit) string {
 // household their council login needs reconnecting.
 var errApplyBusy = &parking.CouncilError{
 	Kind: parking.FailTransient,
-	Op:   "change the vehicle on your permit",
+	Op:   provider.OpSetVehicle,
 	Err:  errors.New("another plate change for this permit is still in flight"),
 }
 

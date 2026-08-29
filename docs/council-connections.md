@@ -66,36 +66,54 @@ Definitions live in an embedded `councils.yaml`, overridable at runtime by
 variables remain as overrides applied to the `stonnington` entry, so the current
 deployment config keeps working unchanged.
 
-### One driver interface, one multiplexer
+### The provider contract (implemented)
 
-The union of what the scheduler (6 methods) and the server (9 methods) call is small:
+The seam is **session-keyed and stateless**, not owner-keyed: a backend owns one
+portal's protocol and nothing else.
 
 ```go
-type Driver interface {
-    Link(ctx, owner, username, password string, savePassword, interactive bool, gen int64) error
-    Reconnect(ctx, owner string) error
-    Refresh(ctx, owner string) error
-    Linked(ctx, owner string) bool
-    ListPermitsComplete(ctx, owner string) ([]PermitInfo, bool, error)
-    CurrentVehicle(ctx, owner string, p model.Permit) (string, error)
-    CurrentVehicleCached(ctx, owner string, p model.Permit, maxAge time.Duration) (string, time.Duration, bool, error)
-    RefreshFailingFor(owner string, p model.Permit) time.Duration
-    ForgetPermit(owner, councilPermitID string)
-    SetVehicle(ctx, owner string, p model.Permit, registration string) error
-    ClearVehicle(ctx, owner string, p model.Permit) error
-    Blocked() bool
-    Stats() Stats
+// internal/provider
+type Provider interface {
+    ID() string
+    Capabilities() Capabilities
+    Login(ctx, creds Credentials) (Session, error)          // Link and Reconnect are the same call
+    Refresh(ctx, s *Session) error                          // may rotate in place; persisted if changed
+    ListPermits(ctx, s *Session) (permits []Permit, total int, err error) // len<total = partial
+    CurrentVehicle(ctx, s *Session, p PermitRef) (Vehicle, error)
+    SetVehicle(ctx, s *Session, p PermitRef, registration string) error
+    ClearVehicle(ctx, s *Session, p PermitRef) error
 }
 ```
 
-`parking.Client` already satisfies it. Phase 1 is therefore "instantiate one
-`parking.Client` per council", not "rewrite the client". A `council.Mux` implements
-`Driver` by resolving the owner's `council_id` and delegating, so the scheduler and
-server keep calling one thing keyed by owner exactly as they do now. An unknown or
-disabled council yields `ErrCouncilUnavailable`, handled like `ErrNotLinked`.
+- `Session` is an **opaque provider blob** the generic client seals and persists
+  without interpreting (Orikan: cookie + cached token + expiry; another backend: a
+  refresh token). It is stored in the existing `cookie_sealed` column behind a
+  `pstonn-session:` prefix; a value without the prefix is the pre-provider shape and
+  is imported once through the provider's `ImportLegacy` hook — no migration, no
+  re-link.
+- **Errors are typed, never worded.** Providers return the shared sentinels
+  (`ErrSessionExpired`, `ErrLoginRejected`, `ErrUnavailable{RetryAfter,Status,
+  Surface,Ref}`, `ErrPermitInactive`, `ErrUnsupported`, …) and a classified
+  `Error{Kind, Op, Detail}` where `Op` is an identifier (`OpSetVehicle`) and `Detail`
+  is council-supplied text. Wording lives in the core (today `scheduler.opWording`;
+  it moves into the message catalog with the copy pass).
+- `Capabilities{CanClearVehicle, SupportsRefresh, NeedsKeepWarm, IdleWindow,
+  SupportsExpiry, LoginKind}` lets the core adapt (hide the clear button, skip
+  keep-warm, refuse a password reconnect on a device-flow provider) instead of
+  assuming.
+- Requests are tagged with a `Surface` (login / auth / api) on the context; the
+  generic `Transport` governs and counts by surface, so the login sub-limit and
+  the traffic summary are provider-agnostic.
 
-The `COUNCIL_SANDBOX` fake becomes a council (`id: sandbox, connector: fake`) instead
-of nine `if c.sandbox != nil` early-returns inside the real client.
+Layout: `internal/provider` (contract + vocabulary), `internal/provider/orikan`
+(the Orikan ePermits protocol: Duende flow, form replay, browser identity,
+add/edit/delete shapes, paging, diagnostics), `internal/provider/fake` (the
+sandbox — the second, genuinely different implementation, and what the core's
+tests run against), `internal/parking` (the generic per-owner client: sealing and
+persistence, per-owner serialisation, plate cache, backoff, fleet breaker,
+governed transport, expiry tagging). `server.Council` / `scheduler.Council` are
+unchanged: the generic client still satisfies them, and a `Mux` over several
+clients will too.
 
 ### Per-council operational state
 
@@ -197,7 +215,12 @@ must pass with byte-identical rendered output.
    server. The vehicle-state id is set on the client from the descriptor rather than
    hard-coded.
 3. ✅ Permit policy behind `council.PermitPolicy`; the server's helpers delegate.
-4. Sandbox as a `fake` connector; delete the scattered early-returns.
+4. ✅ Provider contract extracted (see above): `internal/provider`, the Orikan
+   provider, the `fake` provider replacing the in-client sandbox branches, and the
+   generic client rewritten over the contract. The parking suite ports across
+   (protocol tests moved to `orikan`; integration tests run the generic client over
+   the Orikan provider at an httptest portal), plus new seam tests driving the
+   generic client with a scripted stub and the fake.
 5. `internal/i18n` scaffold + `T`; templates, `seo.go`, `notify.go`, `mailer` read
    `.Council` and the catalog. Output for Stonnington stays identical.
 

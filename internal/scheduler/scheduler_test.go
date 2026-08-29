@@ -13,6 +13,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -691,10 +692,10 @@ func TestKeepWarmAutoReconnects(t *testing.T) {
 }
 
 func rejectedErr() error {
-	return &parking.CouncilError{Kind: parking.FailRejected, Op: "change the vehicle on your permit", Err: errors.New("no")}
+	return &parking.CouncilError{Kind: parking.FailRejected, Op: provider.OpSetVehicle, Err: errors.New("no")}
 }
 func transientErr() error {
-	return &parking.CouncilError{Kind: parking.FailTransient, Op: "change the vehicle on your permit", Err: errors.New("timeout")}
+	return &parking.CouncilError{Kind: parking.FailTransient, Op: provider.OpSetVehicle, Err: errors.New("timeout")}
 }
 
 // TestFailureNotifyDedupAndSuccess: a repeated identical REJECTION (alarms at

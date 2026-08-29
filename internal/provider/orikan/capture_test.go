@@ -1,22 +1,18 @@
-package parking
+package orikan
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/uppertoe/pstonn/internal/config"
-	"github.com/uppertoe/pstonn/internal/secretbox"
-	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // This file answers the shape questions that block the 500-user traffic work.
@@ -34,7 +30,7 @@ import (
 //	export PSTONN_LIVE_USERNAME='you@example.com' PSTONN_LIVE_PASSWORD='…'
 //	export PSTONN_CAPTURE_PERMIT_ID=14576
 //	export PSTONN_CAPTURE_REGO=ABC123     # optional; see the warning below
-//	go test ./internal/parking -run TestLiveCaptureShapes -count=1 -v
+//	go test ./internal/provider/orikan -run TestLiveCaptureShapes -count=1 -v
 //
 // WARNING: setting PSTONN_CAPTURE_REGO performs a REAL edit on a REAL permit.
 // Pass the plate you actually want on the permit right now, so the write is one
@@ -74,44 +70,26 @@ func TestLiveCaptureShapes(t *testing.T) {
 		t.Skip("set PSTONN_CAPTURE_PERMIT_ID and either PSTONN_LIVE_USERNAME+PSTONN_LIVE_PASSWORD or PSTONN_LIVE_COOKIE")
 	}
 	ctx := context.Background()
-	const owner = "capture@local"
 
-	cfg := &config.Config{Council: config.CouncilConfig{
-		Issuer:      "https://parkingpermits.stonnington.vic.gov.au/idm",
-		ClientID:    "ePermits.ssp.web",
-		RedirectURI: "https://parkingpermits.stonnington.vic.gov.au/ssp/callback",
-		Scopes:      []string{"openid", "profile", "ePermits.ssp.api.all"},
-		APIBase:     "https://parkingpermits.stonnington.vic.gov.au/ssp-svc",
-	}}
-	box, err := secretbox.New(make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "capture.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	c := New(cfg, st, box)
-
+	c := New(liveConfig, nil)
+	var sess provider.Session
+	var err error
 	if user != "" {
-		if err := c.Link(ctx, owner, user, pass, false, true, 0); err != nil {
+		if sess, err = c.Login(ctx, provider.Credentials{Username: user, Password: pass}); err != nil {
 			t.Fatalf("headless login failed: %v", err)
 		}
-	} else {
-		sealed, err := box.SealCtx(secretbox.CouncilCookie(owner), cookie)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed}); err != nil {
-			t.Fatal(err)
-		}
+	} else if sess, err = c.ImportLegacy(cookie, "", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	ss, err := load(&sess)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	findings := map[string]string{}
 
 	// ---- 1. Index/grid -------------------------------------------------------
-	gridRaw := rawGet(t, c, ctx, owner, "/api/Index/grid",
+	gridRaw := rawGet(t, c, ctx, ss, "/api/Index/grid",
 		url.Values{"pageNumber": {"0"}, "pageSize": {"0"}})
 	t.Logf("\n=== RAW /api/Index/grid ===\n%s", pretty(gridRaw))
 
@@ -156,7 +134,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 	}
 
 	// ---- 2. managedVehicle, before -------------------------------------------
-	beforeRaw := rawGet(t, c, ctx, owner, "/api/permits/managedVehicle",
+	beforeRaw := rawGet(t, c, ctx, ss, "/api/permits/managedVehicle",
 		url.Values{"permitID": {permitID}})
 	t.Logf("\n=== RAW /api/permits/managedVehicle (before) ===\n%s", pretty(beforeRaw))
 
@@ -236,7 +214,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	at, err := c.accessToken(ctx, owner)
+	at, err := c.accessToken(ctx, ss, false)
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}
@@ -255,7 +233,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 	// test duly reported "YES — caching it can drop the pre-read" off a 400. Both
 	// questions are gated on the write actually taking effect.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		reason := councilErrorMessage(postBody)
+		reason := refusalMessage(postBody)
 		if reason == "" {
 			reason = safeExcerpt(string(postBody))
 		}
@@ -280,7 +258,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 	}
 
 	// ---- 4. managedVehicle, after --------------------------------------------
-	afterRaw := rawGet(t, c, ctx, owner, "/api/permits/managedVehicle",
+	afterRaw := rawGet(t, c, ctx, ss, "/api/permits/managedVehicle",
 		url.Values{"permitID": {permitID}})
 	t.Logf("\n=== RAW /api/permits/managedVehicle (after) ===\n%s", pretty(afterRaw))
 
@@ -318,9 +296,9 @@ func TestLiveCaptureShapes(t *testing.T) {
 // rawGet issues one authenticated GET and returns the undecoded body, so the
 // capture reports what the council actually sent rather than what this client's
 // structs happen to keep.
-func rawGet(t *testing.T, c *Client, ctx context.Context, owner, path string, q url.Values) []byte {
+func rawGet(t *testing.T, c *Client, ctx context.Context, ss *session, path string, q url.Values) []byte {
 	t.Helper()
-	at, err := c.accessToken(ctx, owner)
+	at, err := c.accessToken(ctx, ss, false)
 	if err != nil {
 		t.Fatalf("access token: %v", err)
 	}

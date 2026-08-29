@@ -1,8 +1,7 @@
 package parking
 
 import (
-	"net/http"
-	"net/url"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"testing"
 	"time"
 )
@@ -60,17 +59,11 @@ func TestClientBreakerGate(t *testing.T) {
 // A pushback must be captured for the operator: the X-Azure-Ref correlation id, the
 // status, and the surface, surfaced through Stats() for the status endpoint.
 func TestRecordPushbackDiagnostics(t *testing.T) {
-	c := &Client{}
-	resp := &http.Response{
-		StatusCode: 429,
-		Header: http.Header{
-			"X-Azure-Ref":  {"20260801T000000Z-abc123"},
-			"Content-Type": {"text/html"},
-			"Retry-After":  {"120"},
-		},
-		Request: &http.Request{URL: &url.URL{Path: "/idm/connect/authorize"}},
-	}
-	c.recordPushback(resp)
+	c := NewClient(nil, nil, nil, nil)
+	c.recordPushback(&provider.Unavailable{
+		Status: 429, Surface: provider.SurfaceAuth, ContentType: "text/html",
+		RetryAfter: 120 * time.Second, Ref: "20260801T000000Z-abc123",
+	})
 
 	s := c.Stats()
 	if s.LastPushbackRef != "20260801T000000Z-abc123" {

@@ -23,6 +23,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -1895,21 +1896,35 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 
 // describeFailure turns a failure classification into a plain-English reason and
 // a next step for the user.
-func describeFailure(kind parking.FailureKind, op string) (reason, action string) {
-	if op == "" {
-		op = "update your permit"
+func describeFailure(kind parking.FailureKind, op parking.Op) (reason, action string) {
+	what := opWording[op]
+	if what == "" {
+		what = "update your permit"
 	}
 	switch kind {
 	case parking.FailRejected:
-		return fmt.Sprintf("The council would not let p.stonn %s.", op),
+		return fmt.Sprintf("The council would not let p.stonn %s.", what),
 			"Please check the permit on the council website, or change the vehicle there yourself. You may also need to re-link p.stonn from the app."
 	case parking.FailUnexpected:
-		return fmt.Sprintf("p.stonn got an unexpected response from the council while trying to %s.", op),
+		return fmt.Sprintf("p.stonn got an unexpected response from the council while trying to %s.", what),
 			"p.stonn will keep trying. If your permit shows the wrong vehicle, change it on the council website in the meantime."
 	default: // FailTransient
-		return fmt.Sprintf("p.stonn is having trouble reaching the council to %s.", op),
+		return fmt.Sprintf("p.stonn is having trouble reaching the council to %s.", what),
 			"p.stonn will keep trying automatically. If it keeps happening, check your permit on the council website."
 	}
+}
+
+// opWording is the plain-English phrase for each provider operation. Providers
+// report an identifier, never a sentence; the words live here (and move to the
+// message catalog with the rest of the copy).
+var opWording = map[parking.Op]string{
+	provider.OpLogin:        "sign in to your council account",
+	provider.OpRefresh:      "keep your council sign-in active",
+	provider.OpListPermits:  "list your permits",
+	provider.OpReadVehicle:  "read the current vehicle on your permit",
+	provider.OpSetVehicle:   "change the vehicle on your permit",
+	provider.OpAddVehicle:   "add a vehicle to your permit",
+	provider.OpClearVehicle: "remove the vehicle from your permit",
 }
 
 // bumpFailStreak increments and returns the consecutive-failure count for a
@@ -2916,7 +2931,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// reassuring "still updating" a brief single-owner hiccup gets.
 		confirmed := s.council.Blocked()
 		threshold := busyNotifyThreshold
-		reason, action := describeFailure(parking.FailTransient, "update your permit")
+		reason, action := describeFailure(parking.FailTransient, provider.OpUnknown)
 		if confirmed {
 			threshold = blockNotifyThreshold
 			reason = "The council is refusing p.stonn's connection right now, so your permit cannot be updated."

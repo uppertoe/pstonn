@@ -1,8 +1,8 @@
-package parking
+package orikan
 
 import (
-	"context"
 	"errors"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,7 +49,7 @@ func TestParseLoginForm(t *testing.T) {
 
 // C4: quoting style is cosmetic, so a page that switches to single quotes, drops
 // the quotes, or spaces its attributes differently must still be harvested. The
-// alternative was every login failing as ErrLoginRejected — users told their
+// alternative was every login failing as provider.ErrLoginRejected — users told their
 // password was wrong and every saved session deleted, over a template tidy-up.
 func TestParseLoginFormQuotingStyles(t *testing.T) {
 	page := `
@@ -131,7 +131,7 @@ func TestParseLoginFormIsFormScoped(t *testing.T) {
 }
 
 // S5: a page with no credential-bearing form must yield nothing, so checkLoginForm
-// reports a page-shape change (FailUnexpected) rather than this client adopting some
+// reports a page-shape change (provider.FailUnexpected) rather than this client adopting some
 // unrelated form's action and posting the password there.
 func TestParseLoginFormNoCredentialForm(t *testing.T) {
 	page := `<form action="/search"><input name="q" value=""></form>`
@@ -139,8 +139,8 @@ func TestParseLoginFormNoCredentialForm(t *testing.T) {
 	if action != "" {
 		t.Fatalf("action = %q, want empty when no form carries a Password input", action)
 	}
-	if err := checkLoginForm(fields); !errors.Is(err, ErrLoginFormUnrecognised) {
-		t.Fatalf("checkLoginForm = %v, want ErrLoginFormUnrecognised", err)
+	if err := checkLoginForm(fields); !errors.Is(err, provider.ErrLoginFormUnrecognised) {
+		t.Fatalf("checkLoginForm = %v, want provider.ErrLoginFormUnrecognised", err)
 	}
 }
 
@@ -165,7 +165,7 @@ func TestRedirectSchemeOK(t *testing.T) {
 	}
 }
 
-// C4: an unrecognised page must NOT come back as ErrLoginRejected. That error is
+// C4: an unrecognised page must NOT come back as provider.ErrLoginRejected. That error is
 // "your password is wrong": it burns the user's attempt throttle and makes the
 // scheduler delete every saved session, so a portal HTML change would masquerade
 // as a fleet-wide credential failure.
@@ -185,11 +185,11 @@ func TestCheckLoginFormRejectsUnrecognisedShapes(t *testing.T) {
 			if err == nil {
 				t.Fatal("want an error, got nil")
 			}
-			if !errors.Is(err, ErrLoginFormUnrecognised) {
-				t.Fatalf("err = %v, want ErrLoginFormUnrecognised", err)
+			if !errors.Is(err, provider.ErrLoginFormUnrecognised) {
+				t.Fatalf("err = %v, want provider.ErrLoginFormUnrecognised", err)
 			}
-			if errors.Is(err, ErrLoginRejected) {
-				t.Fatal("a page-shape problem must never surface as ErrLoginRejected")
+			if errors.Is(err, provider.ErrLoginRejected) {
+				t.Fatal("a page-shape problem must never surface as provider.ErrLoginRejected")
 			}
 		})
 	}
@@ -197,16 +197,15 @@ func TestCheckLoginFormRejectsUnrecognisedShapes(t *testing.T) {
 
 // C4: a page-shape failure must land where the scheduler keeps the session and the
 // saved password (its transient default) and the link handler stops short of
-// blaming the password — and must be classified FailUnexpected, which is the
-// "council changed its API" signal, not FailRejected.
+// blaming the password — and must be classified provider.FailUnexpected, which is the
+// "council changed its API" signal, not provider.FailRejected.
 func TestLinkShapeErrClassification(t *testing.T) {
-	c := &Client{}
-	err := c.linkShapeErr(errors.New("boom"))
-	if kind, op := FailureOf(err); kind != FailUnexpected || op != opLogin {
-		t.Fatalf("FailureOf = (%v, %q), want (FailUnexpected, %q)", kind, op, opLogin)
+	err := linkShapeErr(errors.New("boom"))
+	if kind, op := provider.FailureOf(err); kind != provider.FailUnexpected || op != provider.OpLogin {
+		t.Fatalf("FailureOf = (%v, %q), want (provider.FailUnexpected, %q)", kind, op, provider.OpLogin)
 	}
 	// The classifications the scheduler acts on destructively must not match.
-	for _, sentinel := range []error{ErrLoginRejected, ErrNoSavedPassword, ErrSessionExpired, ErrCouncilBusy} {
+	for _, sentinel := range []error{provider.ErrLoginRejected, provider.ErrNoSavedPassword, provider.ErrSessionExpired, provider.ErrUnavailable} {
 		if errors.Is(err, sentinel) {
 			t.Fatalf("a page-shape failure must not satisfy errors.Is(_, %v)", sentinel)
 		}
@@ -247,8 +246,8 @@ func TestResolveActionPinsToCouncilHosts(t *testing.T) {
 		"https://permits.council.example.attacker.test", // suffix lookalike
 	} {
 		got, err := resolveAction(base, action, allowed)
-		if !errors.Is(err, ErrLoginOffHost) {
-			t.Fatalf("resolveAction(%q) = %q, %v; want ErrLoginOffHost", action, got, err)
+		if !errors.Is(err, provider.ErrLoginOffHost) {
+			t.Fatalf("resolveAction(%q) = %q, %v; want provider.ErrLoginOffHost", action, got, err)
 		}
 		if got != "" {
 			t.Fatalf("resolveAction(%q) returned a target (%q) alongside its refusal", action, got)
@@ -258,7 +257,7 @@ func TestResolveActionPinsToCouncilHosts(t *testing.T) {
 	// A login page served off-host is refused even with a relative action, because
 	// then the base URL itself is the POST target.
 	offHost, _ := url.Parse("https://attacker.example/Account/Login")
-	if _, err := resolveAction(offHost, "/idm", allowed); !errors.Is(err, ErrLoginOffHost) {
+	if _, err := resolveAction(offHost, "/idm", allowed); !errors.Is(err, provider.ErrLoginOffHost) {
 		t.Fatalf("an off-host login page must be refused, got %v", err)
 	}
 }
@@ -295,21 +294,21 @@ func TestLoginHosts(t *testing.T) {
 // existed.
 func TestHasCookieNamedExactMatch(t *testing.T) {
 	siblings := ".AspNetCore.Antiforgery.X=AF1; Permits.IDM.Identity.External=EXT; Permits.IDM.Identity.Nonce=N1"
-	if hasCookieNamed(siblings, councilSessionCookie) {
+	if hasCookieNamed(siblings, sessionCookie) {
 		t.Fatalf("prefixed siblings were accepted as a session: %q", siblings)
 	}
-	if !strings.Contains(siblings, councilSessionCookie) {
+	if !strings.Contains(siblings, sessionCookie) {
 		t.Fatal("test fixture is wrong: it must be one a substring check would accept")
 	}
-	if !hasCookieNamed("idsrv.session=S; Permits.IDM.Identity=ID1; x=y", councilSessionCookie) {
+	if !hasCookieNamed("idsrv.session=S; Permits.IDM.Identity=ID1; x=y", sessionCookie) {
 		t.Fatal("a real session cookie was not recognised")
 	}
 	// A name with no value is the server CLEARING the cookie, not a session.
-	if hasCookieNamed("Permits.IDM.Identity=", councilSessionCookie) {
+	if hasCookieNamed("Permits.IDM.Identity=", sessionCookie) {
 		t.Fatal("an empty session cookie value was accepted")
 	}
 	// Leading/trailing space around the pair is normal in a serialised header.
-	if !hasCookieNamed("a=1;   Permits.IDM.Identity=ID1  ", councilSessionCookie) {
+	if !hasCookieNamed("a=1;   Permits.IDM.Identity=ID1  ", sessionCookie) {
 		t.Fatal("whitespace around the pair defeated the match")
 	}
 }
@@ -362,34 +361,4 @@ func TestMergeSetCookieNoChange(t *testing.T) {
 	if got := mergeSetCookie(existing, nil); got != existing {
 		t.Fatalf("mergeSetCookie with no Set-Cookie changed the header: %q", got)
 	}
-}
-
-// A prompt=none authorize that returns 200 HTML is only a genuine expiry when it is
-// IdentityServer's own sign-in form (carries the antiforgery field). An EDGE
-// challenge page (Azure Front Door / WAF) also arrives as 200 HTML but has no such
-// marker, and must NOT be read as an expired session — otherwise a transient edge
-// event wrongly retires a no-saved-password user and prompts a re-link.
-func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
-	const owner = "html@example.com"
-
-	t.Run("real login form is an expiry", func(t *testing.T) {
-		f := newFakeCouncil(t)
-		c, st, box := testClient(t, f)
-		linkOwner(t, c, st, box, owner)
-		f.authHTML.Store(`<html><body><form><input name="__RequestVerificationToken" value="x"></form></body></html>`)
-		if err := c.Refresh(context.Background(), owner); !errors.Is(err, ErrSessionExpired) {
-			t.Fatalf("a real login form should read as expired, got %v", err)
-		}
-	})
-
-	t.Run("edge challenge is transient, not an expiry", func(t *testing.T) {
-		f := newFakeCouncil(t)
-		c, st, box := testClient(t, f)
-		linkOwner(t, c, st, box, owner)
-		f.authHTML.Store(`<html><body>Checking your browser… <script>challenge()</script></body></html>`)
-		err := c.Refresh(context.Background(), owner)
-		if err == nil || errors.Is(err, ErrSessionExpired) {
-			t.Fatalf("an edge challenge must not read as expired, got %v", err)
-		}
-	})
 }
