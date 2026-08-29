@@ -357,3 +357,30 @@ func TestRosterTieBreakIsDeterministic(t *testing.T) {
 		t.Fatalf("winner depended on slice order: got %d", res.VehicleID)
 	}
 }
+
+// TestFindDisplacedVehicle: a roster (or lingering) car replaced mid-day warns its
+// saved driver; never the actor themself, never an account member, never a car
+// with no address.
+func TestFindDisplacedVehicle(t *testing.T) {
+	vehicles := map[int64]VehicleInfo{
+		1: {Registration: "NAN123", Label: "Nanny", Email: "nanny@example.com"},
+		2: {Registration: "NOMAIL", Label: "Van"},
+		3: {Registration: "MEM456", Label: "Mum", Email: "mum@example.com"},
+	}
+	members := []string{"owner@example.com", "mum@example.com"}
+	if d := FindDisplacedVehicle(vehicles, "nan123", "owner@example.com", members); d.Contact != "nanny@example.com" || d.Reg != "nan123" {
+		t.Fatalf("nanny should be warned: %+v", d)
+	}
+	if d := FindDisplacedVehicle(vehicles, "NAN123", "nanny@example.com", members); d.Contact != "" {
+		t.Fatalf("self-displacement must be silent: %+v", d)
+	}
+	if d := FindDisplacedVehicle(vehicles, "MEM456", "owner@example.com", members); d.Contact != "" {
+		t.Fatalf("a member's car is covered by the fanout: %+v", d)
+	}
+	if d := FindDisplacedVehicle(vehicles, "NOMAIL", "owner@example.com", members); d.Contact != "" {
+		t.Fatalf("no address, nobody to warn: %+v", d)
+	}
+	if d := FindDisplacedVehicle(vehicles, "", "owner@example.com", members); d.Contact != "" {
+		t.Fatalf("empty prev: %+v", d)
+	}
+}

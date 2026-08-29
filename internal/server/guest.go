@@ -1115,7 +1115,7 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 		}
 		return d, false // undeliverable (or unknown): ask the account to pass it on
 	}
-	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, next); err != nil {
+	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, "another car has been put on it", time.Now()); err != nil {
 		log.Printf("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return d, false
 	}

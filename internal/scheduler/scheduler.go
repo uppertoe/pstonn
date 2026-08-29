@@ -76,7 +76,9 @@ type Notifier interface {
 	// NotifyDriverDisplaced warns the driver responsible for a displaced booking
 	// (a guest or a saved vehicle's attached email — no account) that their car
 	// has been taken off the permit.
-	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error
+	// NotifyDriverDisplaced warns a reachable third-party driver that their car came
+	// off a permit mid-window: how says what happened (never who), at is when.
+	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, how string, at time.Time) error
 	// SendOnboardNudge emails a stalled signup (terms accepted, council never
 	// connected) the once-ever recovery note. Email-only, like the renewal
 	// reminder: this person configured no other channel.
@@ -1703,6 +1705,16 @@ func (s *Scheduler) alertReconnectStalled(owner string) {
 // counted as a failure: hitting it means this person has already had six notices in a
 // day, so "we told them" remains true.)
 func (s *Scheduler) warnDisplaced(ctx context.Context, p model.Permit, d model.DisplacedBooking, prev, want string) bool {
+	how := "another car has been put on it"
+	if want == "" {
+		how = "the permit holder took it off"
+	}
+	return s.warnDisplacedHow(ctx, p, d, prev, how)
+}
+
+// warnDisplacedHow is warnDisplaced with the reason spelled out by the caller
+// (the drift path knows the plate was changed at the council, not by p.stonn).
+func (s *Scheduler) warnDisplacedHow(ctx context.Context, p model.Permit, d model.DisplacedBooking, prev, how string) bool {
 	if d.Contact == "" || s.notifier == nil || !s.notifier.Enabled() {
 		return false
 	}
@@ -1712,7 +1724,7 @@ func (s *Scheduler) warnDisplaced(ctx context.Context, p model.Permit, d model.D
 		}
 		return false // undeliverable (or unknown): tell the account to pass it on
 	}
-	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, want); err != nil {
+	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, how, time.Now()); err != nil {
 		log.Printf("scheduler: enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return false
 	}
@@ -2023,6 +2035,9 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 			continue
 		}
 		s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
+		// Whoever's car was on before the portal edit may be parked and now uncovered:
+		// same warning as any other displacement, worded for what actually happened.
+		s.warnExternallyDisplaced(ctx, p, wasActive[p.ID])
 		// Clear the delivered-notification fingerprint. The council now holds a plate we
 		// did not set, and the reconcile this kicks will re-assert the schedule over it.
 		// If the external edit RESTORED the previous plate, that re-assertion is the same
@@ -2559,7 +2574,7 @@ type passStats struct {
 // belonged to a still-live booking: the shared model.FindDisplaced policy, fed
 // this permit's owner-scoped vehicles and account members. Matching on the
 // outgoing plate is a heuristic; a false miss or spurious note is low-harm.
-func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []model.Override, vehByOwnerID map[ownerVehicle]model.VehicleInfo, prev, actor string, now time.Time) model.DisplacedBooking {
+func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []model.Override, vehByOwnerID map[ownerVehicle]model.VehicleInfo, prev, actor string, source model.Source, now time.Time) model.DisplacedBooking {
 	if prev == "" {
 		return model.DisplacedBooking{}
 	}
@@ -2575,7 +2590,23 @@ func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []m
 	if err != nil {
 		return model.DisplacedBooking{} // can't tell member from guest; stay quiet
 	}
-	return model.FindDisplaced(overrides, vehicles, prev, actor, members, now)
+	if d := model.FindDisplaced(overrides, vehicles, prev, actor, members, now); d.Reg != "" {
+		return d
+	}
+	// No live booking had put prev on: it was there through the roster (or lingering).
+	// A roster car replaced by the schedule's own day change is expected and told to
+	// nobody; replaced by a booking, a guest, or a manual change mid-day, its regular
+	// driver is very likely parked — warn them if the saved car carries an address.
+	if source == model.SourceRoster || source == model.SourceNone {
+		return model.DisplacedBooking{}
+	}
+	own := make(map[int64]model.VehicleInfo)
+	for k, v := range vehByOwnerID {
+		if k.owner == p.Owner {
+			own[k.id] = v
+		}
+	}
+	return model.FindDisplacedVehicle(own, prev, actor, members)
 }
 
 // settle ends any failure or council-block episode for a permit that needs no
@@ -2835,7 +2866,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// warn its driver (email only) so they aren't caught out — and tell the
 		// account when that driver was unreachable, so a member can relay it. The
 		// notice is enqueued durably (a fast insert), so no goroutine is needed.
-		d := s.displaced(ctx, p, overrides, vehByOwnerID, prev, res.By, now)
+		d := s.displaced(ctx, p, overrides, vehByOwnerID, prev, res.By, res.Source, now)
 		// Key the notification on the TRANSITION (prev→want), not just the target.
 		// Keying on "success|want" alone would treat a re-assertion after an external
 		// change (someone edited the plate directly in the council portal, which
@@ -2990,5 +3021,38 @@ func (s *Scheduler) sweepFortnightNudges(ctx context.Context) {
 		} else {
 			log.Printf("scheduler: fortnight nudge emailed to %s", redact.Email(owner))
 		}
+	}
+}
+
+// warnExternallyDisplaced warns the driver whose car a council-portal edit just
+// removed. It loads what it needs itself: the drift pass has no override or
+// vehicle context, and this is rare enough that two small reads are fine.
+func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit, prev string) {
+	if prev == "" {
+		return
+	}
+	now := time.Now().In(s.loc)
+	overrides, err := s.store.ListOverrides(ctx, p.ID, now)
+	if err != nil {
+		return
+	}
+	vehicles, err := s.store.ListVehiclesFor(ctx, p.Owner)
+	if err != nil {
+		return
+	}
+	byID := make(map[int64]model.VehicleInfo, len(vehicles))
+	for _, v := range vehicles {
+		byID[v.ID] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email}
+	}
+	members, err := s.store.AccountEmails(ctx, p.Owner)
+	if err != nil {
+		return
+	}
+	d := model.FindDisplaced(overrides, byID, prev, "", members, now)
+	if d.Reg == "" {
+		d = model.FindDisplacedVehicle(byID, prev, "", members)
+	}
+	if d.Contact != "" {
+		s.warnDisplacedHow(ctx, p, d, prev, "it was changed at the council")
 	}
 }

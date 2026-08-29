@@ -415,3 +415,35 @@ func FindDisplaced(overrides []Override, vehicles map[int64]VehicleInfo, prevReg
 	}
 	return DisplacedBooking{Reg: prevReg, Contact: contact}
 }
+
+// FindDisplacedVehicle is the fallback when no live booking put prevReg on the
+// permit: the car was there through the roster (a regular's day) or as a
+// lingering plate, and it has just been replaced by something OTHER than the
+// schedule's own day change. If prevReg is one of the account's saved cars and
+// that car carries a driver email, that driver is the person to warn — the
+// weekly regular is the visitor most likely to be parked and most likely to have
+// an address on file. Same exclusions as FindDisplaced: the actor themself, and
+// account members (the fanout tells them).
+func FindDisplacedVehicle(vehicles map[int64]VehicleInfo, prevReg, actor string, members []string) DisplacedBooking {
+	if prevReg == "" {
+		return DisplacedBooking{}
+	}
+	if a := mailAddr(actor); a != "" {
+		actor = a
+	}
+	for _, v := range vehicles {
+		if !SamePlate(v.Registration, prevReg) || v.Email == "" {
+			continue
+		}
+		if strings.EqualFold(v.Email, actor) {
+			return DisplacedBooking{}
+		}
+		for _, m := range members {
+			if strings.EqualFold(m, v.Email) {
+				return DisplacedBooking{}
+			}
+		}
+		return DisplacedBooking{Reg: prevReg, Contact: v.Email}
+	}
+	return DisplacedBooking{}
+}

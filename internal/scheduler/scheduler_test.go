@@ -313,7 +313,7 @@ func (f *fakeNotifier) setAdminErr(err error) {
 	f.adminErr = err
 }
 
-func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permitLabel, oldReg, newReg string) error {
+func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permitLabel, oldReg, how string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.displaced = append(f.displaced, to)
@@ -1026,22 +1026,22 @@ func TestDisplaced(t *testing.T) {
 		{ID: 1, PermitID: 1, Registration: "GUEST99", StartsAt: now.Add(-time.Hour), EndsAt: &end, CreatedBy: "dad@example.com", CreatedAt: now.Add(-time.Hour)},
 	}
 	// The removed plate was the guest's live activation → that guest is notified.
-	if got := s.displaced(ctx, p, guestOvr, veh, "GUEST99", "", now); got.Contact != "dad@example.com" {
+	if got := s.displaced(ctx, p, guestOvr, veh, "GUEST99", "", model.SourceOverride, now); got.Contact != "dad@example.com" {
 		t.Fatalf("displaced = %+v, want contact dad@example.com", got)
 	}
 	// The same guest displacing their own booking (another car, same person) → quiet.
-	if got := s.displaced(ctx, p, guestOvr, veh, "GUEST99", "dad@example.com", now); got != (model.DisplacedBooking{}) {
+	if got := s.displaced(ctx, p, guestOvr, veh, "GUEST99", "dad@example.com", model.SourceOverride, now); got != (model.DisplacedBooking{}) {
 		t.Fatalf("self-displacement should be quiet, got %+v", got)
 	}
 	// A plate not set by any active override → nobody.
-	if got := s.displaced(ctx, p, guestOvr, veh, "SOMETHINGELSE", "", now); got != (model.DisplacedBooking{}) {
+	if got := s.displaced(ctx, p, guestOvr, veh, "SOMETHINGELSE", "", model.SourceOverride, now); got != (model.DisplacedBooking{}) {
 		t.Fatalf("no match should be empty, got %+v", got)
 	}
 	// The account owner's own ad-hoc booking is not a displaced third party.
 	ownOvr := []model.Override{
 		{ID: 2, PermitID: 1, Registration: "OWN123", StartsAt: now.Add(-time.Hour), EndsAt: &end, CreatedBy: owner, CreatedAt: now},
 	}
-	if got := s.displaced(ctx, p, ownOvr, veh, "OWN123", "", now); got != (model.DisplacedBooking{}) {
+	if got := s.displaced(ctx, p, ownOvr, veh, "OWN123", "", model.SourceOverride, now); got != (model.DisplacedBooking{}) {
 		t.Fatalf("member's own booking should not notify, got %+v", got)
 	}
 	// A member's booking of a saved car with an attached driver email → the
@@ -1049,14 +1049,14 @@ func TestDisplaced(t *testing.T) {
 	memberSavedOvr := []model.Override{
 		{ID: 3, PermitID: 1, VehicleID: 5, StartsAt: now.Add(-time.Hour), EndsAt: &end, CreatedBy: owner, CreatedAt: now},
 	}
-	if got := s.displaced(ctx, p, memberSavedOvr, veh, "MUM123", "", now); got.Contact != "nanny@example.com" {
+	if got := s.displaced(ctx, p, memberSavedOvr, veh, "MUM123", "", model.SourceOverride, now); got.Contact != "nanny@example.com" {
 		t.Fatalf("displaced = %+v, want contact nanny@example.com", got)
 	}
 	// An expired guest override is not "active", so no notification.
 	expired := []model.Override{
 		{ID: 4, PermitID: 1, Registration: "GUEST99", StartsAt: now.Add(-3 * time.Hour), EndsAt: ptr(now.Add(-time.Hour)), CreatedBy: "dad@example.com", CreatedAt: now.Add(-3 * time.Hour)},
 	}
-	if got := s.displaced(ctx, p, expired, veh, "GUEST99", "", now); got != (model.DisplacedBooking{}) {
+	if got := s.displaced(ctx, p, expired, veh, "GUEST99", "", model.SourceOverride, now); got != (model.DisplacedBooking{}) {
 		t.Fatalf("expired override should not notify, got %+v", got)
 	}
 	// An unreachable displaced booking (a QR visitor's ad-hoc plate) reports the
@@ -1064,7 +1064,7 @@ func TestDisplaced(t *testing.T) {
 	qrOvr := []model.Override{
 		{ID: 5, PermitID: 1, Registration: "VIS777", StartsAt: now.Add(-time.Hour), EndsAt: &end, CreatedBy: "visitor (printed QR)", CreatedAt: now},
 	}
-	if got := s.displaced(ctx, p, qrOvr, veh, "VIS777", "", now); got.Reg != "VIS777" || got.Contact != "" {
+	if got := s.displaced(ctx, p, qrOvr, veh, "VIS777", "", model.SourceOverride, now); got.Reg != "VIS777" || got.Contact != "" {
 		t.Fatalf("displaced = %+v, want reg VIS777 with no contact", got)
 	}
 }

@@ -971,35 +971,24 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 // guest who booked it, or the saved vehicle's attached driver — someone with no
 // account, so email only) that the car is no longer on the permit, so they can
 // move it or get it put back before getting caught out. No-op without SMTP.
-func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, newReg string) error {
+func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, how string, at time.Time) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
-	// This recipient is a third party with no account, and the permit label is the
-	// owner's own free text — typically their street address, and in the worst case
-	// anything a malicious account holder cares to type. Keep it out of the Subject
-	// (and out of the body) of mail we send to strangers from our own signed domain.
-	subject := fmt.Sprintf("Heads up: %s is no longer on the visitor parking permit", oldReg)
+	// What happened, when, whose permit, what to do — never the replacing plate:
+	// that is another visitor's registration, and it gives this driver nothing to
+	// act on.
+	subject := fmt.Sprintf("Heads up: %s is no longer covered on the visitor permit", oldReg)
+	when := at.In(s.loc).Format("3:04pm")
 	lines := []string{
-		fmt.Sprintf("%s is no longer the car covered by the visitor parking permit it was on.", oldReg),
-		fmt.Sprintf("The permit now shows %s instead.", newReg),
+		fmt.Sprintf("Your car %s came off the visitor parking permit for %s at %s — %s.", oldReg, permitLabel, when, how),
 		"",
-		fmt.Sprintf("If %s is still parked there, please move it — or put it back on the permit (with your link, or by asking the permit holder) so you stay covered.", oldReg),
+		"If your car is still parked there it's no longer covered. Move it, or put it back on with your link, or check with the permit holder.",
 	}
-	// Per-recipient cap, on top of the dedup below. Every comparable path that mails
-	// an address the account merely NAMED has one (invites, guest links), because
-	// dedup alone only stops the same message twice — it does nothing about an owner
-	// alternating two plates, which yields a fresh key every time. Refusing is not a
-	// lost warning worth an error to the caller: the account's own notification
-	// already carries the "we couldn't reach the driver, please tell them" wording.
 	if !s.displacedTo.allow(to) {
 		log.Printf("notify: displaced-driver notice to %s throttled (per-recipient cap)", RedactEmail(to))
 		return nil
 	}
-	// Dedup key: this recipient has no account and no way to opt out, and a plate
-	// that flips back and forth (a guest double-tap, a schedule fighting an
-	// override) would otherwise mail a non-consenting stranger every transition.
-	// The 15-minute sent-window in the outbox is exactly the right granularity.
 	key := fmt.Sprintf("displaced|%s|%s|%s", to, permitLabel, oldReg)
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
 		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDisplace})
