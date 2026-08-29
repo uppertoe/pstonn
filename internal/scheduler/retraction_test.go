@@ -32,7 +32,7 @@ func TestSettleRetractsANeverAppliedBooking(t *testing.T) {
 	// The target then goes away: the roster day now points at a vehicle whose
 	// plate is what the permit already shows — the same shape as a booking window
 	// ending. Nothing needs the tenant, so settle() runs.
-	veh, err := st.CreateVehicle(ctx, owner, "OLD999", "Already-on car")
+	veh, err := st.CreateVehicle(ctx, owner, "OLD999", "Already-on car", "")
 	if err != nil {
 		t.Fatal(err)
 	}

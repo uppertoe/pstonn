@@ -33,7 +33,7 @@ import (
 // change, and force a keep-warm session renewal. Keeping it an interface lets the
 // reconcile and keep-warm logic be tested without real HTTP.
 type Tenant interface {
-	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
+	SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error
 	// Refresh keeps the owner's session with one tenant (tenant) alive.
 	Refresh(ctx context.Context, owner, tenantID string) error
 	// CurrentVehicle reads the plate the tenant actually has on the permit right
@@ -2538,7 +2538,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	// id can never read another user's registration.
 	vehByOwnerID := make(map[ownerVehicle]model.VehicleInfo, len(vehicles))
 	for _, v := range vehicles {
-		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email}
+		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email, State: v.State}
 	}
 	// The herd the rollover window is sized against. Total permits over-estimates
 	// how many share any one boundary, which errs toward a wider window (gentler on
@@ -2789,11 +2789,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.settle(ctx, p)
 		return false
 	}
-	want := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}].Registration
-	wantName := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}].Label
-	if res.Registration != "" { // an ad-hoc one-off plate (not a saved vehicle)
+	wantInfo := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
+	want := wantInfo.Registration
+	wantName := wantInfo.Label
+	wantRegion := wantInfo.State // the saved vehicle's registration state
+	if res.Registration != "" {  // an ad-hoc one-off plate (not a saved vehicle)
 		want = res.Registration
 		wantName = ""
+		wantRegion = res.State
 	}
 	if want == "" {
 		// The schedule points at a vehicle we cannot turn into a plate: the row was
@@ -2861,7 +2864,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	}
 
 	prev := p.ActiveRegistration // the plate we're changing away from
-	err = s.tenant.SetVehicle(ctx, p.Owner, p, want)
+	err = s.tenant.SetVehicle(ctx, p.Owner, p, want, wantRegion)
 	var commitErr error
 	if err == nil {
 		commitErr = s.commitActive(ctx, p.ID, want)
@@ -3077,7 +3080,7 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	}
 	byID := make(map[int64]model.VehicleInfo, len(vehicles))
 	for _, v := range vehicles {
-		byID[v.ID] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email}
+		byID[v.ID] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email, State: v.State}
 	}
 	members, err := s.store.AccountEmails(ctx, p.Owner)
 	if err != nil {

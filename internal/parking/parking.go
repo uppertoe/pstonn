@@ -539,14 +539,14 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 // The provider confirms the change against the portal's own record before
 // reporting success, so every state we then show or store reflects what the
 // tenant actually has.
-func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
+func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error {
 	if err := c.permitMine(p); err != nil {
 		return err
 	}
 	key := regKey{owner, p.CouncilPermitID}
 	gen := c.regGeneration(key) // so a concurrent ForgetPermit invalidates the cache write below
 	err := c.withSession(ctx, owner, false, func(s *provider.Session) error {
-		return c.p.SetVehicle(ctx, s, ref(p), registration)
+		return c.p.SetVehicle(ctx, s, ref(p), provider.Vehicle{Registration: registration, Region: region})
 	})
 	if err == nil {
 		c.storeRegIfCurrent(key, gen, registration)

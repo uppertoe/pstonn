@@ -126,6 +126,11 @@
   <label class="fld"><span>Your number plate</span>
     <input type="text" id="g-plate" {{if .Guest.KeepForm}}hx-preserve {{end}}name="plate" placeholder="e.g. ABC123" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" required style="text-transform:uppercase;font-size:17px;letter-spacing:1px;text-align:center">
   </label>
+  {{if .Guest.Regions}}
+  <label class="fld"><span>{{T "vehicle.state_label" .}}</span>
+    <select id="g-plate-state" {{if .Guest.KeepForm}}hx-preserve {{end}}name="plate_state" class="vstate" style="width:100%">{{range .Guest.Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>
+  </label>
+  {{end}}
   {{end}}
   {{if .Guest.AllowOvernight}}
   <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" {{if .Guest.KeepForm}}hx-preserve {{end}}name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps the car on until the end of tomorrow instead of the end of today.</span></span></label>

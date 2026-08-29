@@ -282,3 +282,30 @@
   </div>
 </section>
 {{end}}
+
+{{define "page-connectarea"}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1">
+  {{/* The "Connect another area…" picker: the areas this account has not linked
+       yet, each a one-click path into onboarding for that area. Keeps the account
+       menu short — it lists your linked areas, this page holds the rest. */}}
+  <section class="card">
+    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-link"}}</span> Connect another area</div>
+    <p class="subtitle">Manage a permit in another council area from this same account. Pick an area to sign in with its permit account.</p>
+    <div class="pick">
+      {{range .Areas}}
+      <div class="pick-item">
+        <div>
+          <div style="font-weight:650">{{.Name}}</div>
+        </div>
+        <form method="post" action="/tenant/select">
+          <input type="hidden" name="tenant_id" value="{{.ID}}">
+          <button type="submit">{{template "ic-plus"}} Connect</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+    <p class="empty-note" style="margin-top:12px"><a href="/schedule">&larr; Back</a></p>
+  </section>
+</main>
+{{end}}

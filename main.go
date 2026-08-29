@@ -146,7 +146,7 @@ func run() error {
 			prov = orikan.New(orikan.Config{
 				Issuer: tenant.Endpoints.Issuer, APIBase: tenant.Endpoints.APIBase,
 				ClientID: tenant.Endpoints.ClientID, RedirectURI: tenant.Endpoints.RedirectURI,
-				Scopes: tenant.Endpoints.Scopes, DefaultVehicleState: tenant.Policy.DefaultVehicleState,
+				Scopes: tenant.Endpoints.Scopes, HomeState: tenant.Policy.HomeState,
 			}, transport)
 		}
 		clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)

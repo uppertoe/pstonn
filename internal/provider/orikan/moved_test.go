@@ -60,15 +60,19 @@ func TestTenantErrorMessage(t *testing.T) {
 	}
 }
 
-// The vehicle-state id written on an add or a state-less edit comes from the
-// tenant descriptor; a bare Client (tests, or an unset descriptor) falls back to
-// VIC so today's single-tenant behaviour is unchanged.
+// The home state written on an add or a state-less edit comes from the tenant
+// descriptor as a CODE, mapped to the portal token here. A bare Client (tests, or
+// an unset/unknown descriptor) falls back to VIC so today's single-tenant
+// behaviour is unchanged.
 func TestVehicleStateDefault(t *testing.T) {
-	if got := New(Config{}, nil).vehicleState; got != "1" {
-		t.Fatalf("default vehicleState = %q, want VIC (1)", got)
+	if c := New(Config{}, nil); c.homeCode != "VIC" || c.homeToken != "1" {
+		t.Fatalf("default home = %q/%q, want VIC/1", c.homeCode, c.homeToken)
 	}
-	if got := New(Config{DefaultVehicleState: "3"}, nil).vehicleState; got != "3" {
-		t.Fatalf("configured vehicleState = %q, want 3", got)
+	if c := New(Config{HomeState: "nsw"}, nil); c.homeCode != "NSW" || c.homeToken != "3" {
+		t.Fatalf("configured home = %q/%q, want NSW/3", c.homeCode, c.homeToken)
+	}
+	if c := New(Config{HomeState: "ZZ"}, nil); c.homeCode != "VIC" || c.homeToken != "1" {
+		t.Fatalf("unknown home = %q/%q, want fallback VIC/1", c.homeCode, c.homeToken)
 	}
 }
 

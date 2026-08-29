@@ -8,6 +8,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -43,7 +44,9 @@ func samplePermitViewAt(loc *time.Location, at time.Time) permitView {
 		Cal:           cal,
 		Overrides:     []overrideView{{ID: 3, PermitID: 7, Reg: "XYZ789", Label: "Mum", Color: "#127a49", StartsAt: now, EndsAt: &end, CreatedBy: "a@b.com"}},
 		Vehicles:      vv,
-		Loc:           loc,
+		// Registration-state selector on the one-off plate form (home first).
+		Regions: []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}},
+		Loc:     loc,
 	}
 }
 
@@ -561,7 +564,8 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Permits:  []permitView{samplePermitViewAt(loc, now)},
 		}, "Shared access"},
 		{"vehicles", dashboardData{User: user, State: "app", Page: "vehicles", Loc: loc,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", State: "NSW"}},
+			Regions:  []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}},
 		}, "ABC123"},
 		{"activity", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now}},

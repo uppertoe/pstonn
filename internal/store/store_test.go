@@ -28,11 +28,11 @@ func TestOwnerIsolation(t *testing.T) {
 	const alice, bob = "alice@example.com", "bob@example.com"
 
 	// Vehicles: each owner sees only their own.
-	aVeh, err := s.CreateVehicle(ctx, alice, "AAA111", "Alice car")
+	aVeh, err := s.CreateVehicle(ctx, alice, "AAA111", "Alice car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateVehicle(ctx, bob, "BBB222", "Bob car"); err != nil {
+	if _, err := s.CreateVehicle(ctx, bob, "BBB222", "Bob car", ""); err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := s.ListVehiclesFor(ctx, alice); len(v) != 1 || v[0].Registration != "AAA111" {
@@ -94,10 +94,10 @@ func TestVehicleColorStable(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	owner := "v@example.com"
-	if _, err := s.CreateVehicle(ctx, owner, "BBB111", "Bravo"); err != nil {
+	if _, err := s.CreateVehicle(ctx, owner, "BBB111", "Bravo", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateVehicle(ctx, owner, "CCC111", "Charlie"); err != nil {
+	if _, err := s.CreateVehicle(ctx, owner, "CCC111", "Charlie", ""); err != nil {
 		t.Fatal(err)
 	}
 	colorOf := func() map[string]string {
@@ -120,7 +120,7 @@ func TestVehicleColorStable(t *testing.T) {
 	}
 	// Add a plate whose label sorts FIRST — the old position-based scheme would
 	// have shifted Bravo/Charlie onto new colours.
-	if _, err := s.CreateVehicle(ctx, owner, "AAA111", "Alpha"); err != nil {
+	if _, err := s.CreateVehicle(ctx, owner, "AAA111", "Alpha", ""); err != nil {
 		t.Fatal(err)
 	}
 	after := colorOf()
@@ -136,7 +136,7 @@ func TestVehicleOwnedBy(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const alice, bob = "alice@example.com", "bob@example.com"
-	aVeh, err := s.CreateVehicle(ctx, alice, "AAA111", "Alice car")
+	aVeh, err := s.CreateVehicle(ctx, alice, "AAA111", "Alice car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestHasOwnData(t *testing.T) {
 	if has, err := s.HasOwnData(ctx, "fresh@example.com"); err != nil || has {
 		t.Fatalf("fresh email should have no data: has=%v err=%v", has, err)
 	}
-	if _, err := s.CreateVehicle(ctx, "active@example.com", "AAA111", "car"); err != nil {
+	if _, err := s.CreateVehicle(ctx, "active@example.com", "AAA111", "car", ""); err != nil {
 		t.Fatal(err)
 	}
 	if has, err := s.HasOwnData(ctx, "active@example.com"); err != nil || !has {
@@ -434,7 +434,7 @@ func TestCopySchedule(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	owner := "c@example.com"
-	veh, err := s.CreateVehicle(ctx, owner, "AAA111", "Car")
+	veh, err := s.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestCopySchedule(t *testing.T) {
 		t.Fatalf("re-copy duplicated overrides: %d live, want 1", len(ovs))
 	}
 	// Replace clears a rule the destination had that the source lacks.
-	otherVeh, _ := s.CreateVehicle(ctx, owner, "BBB222", "Other")
+	otherVeh, _ := s.CreateVehicle(ctx, owner, "BBB222", "Other", "")
 	if err := s.SetRule(ctx, dst, time.Wednesday, otherVeh); err != nil {
 		t.Fatal(err)
 	}
@@ -833,7 +833,7 @@ func TestDeleteAllForOwner(t *testing.T) {
 		if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c"}); err != nil {
 			t.Fatal(err)
 		}
-		veh, err := s.CreateVehicle(ctx, owner, "REG"+owner[:1], "car")
+		veh, err := s.CreateVehicle(ctx, owner, "REG"+owner[:1], "car", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -894,7 +894,7 @@ func TestDeletePermit(t *testing.T) {
 	ctx := context.Background()
 	const alice, bob = "alice@example.com", "bob@example.com"
 
-	veh, err := s.CreateVehicle(ctx, alice, "AAA111", "car")
+	veh, err := s.CreateVehicle(ctx, alice, "AAA111", "car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -948,7 +948,7 @@ func TestGuestBaselineAndOverrideSweep(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	const owner = "alice@example.com"
-	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum")
+	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum", "")
 	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
 	if _, err := s.CreateGuestGrant(ctx, owner, "", p, "pass", false, []int64{v},
 		[]GuestRecipient{{Email: "kid@example.com", TokenHash: "hashK"}}); err != nil {
@@ -977,7 +977,7 @@ func TestGuestBaselineAndOverrideSweep(t *testing.T) {
 	if _, err := s.CreateGuestOverride(ctx, p, v, time.Now(), &end, "kid", gc.TokenID); err != nil {
 		t.Fatalf("guest override: %v", err)
 	}
-	if _, err := s.CreateGuestPlateOverride(ctx, p, "CCC333", time.Now(), &end, "kid", gc.TokenID); err != nil {
+	if _, err := s.CreateGuestPlateOverride(ctx, p, "CCC333", "", time.Now(), &end, "kid", gc.TokenID); err != nil {
 		t.Fatalf("guest plate override: %v", err)
 	}
 	if _, err := s.CreateOverride(ctx, p, v, time.Now(), &end, owner); err != nil {
@@ -1008,9 +1008,9 @@ func TestGuestPasses(t *testing.T) {
 	ctx := context.Background()
 	const alice, bob = "alice@example.com", "bob@example.com"
 
-	aV1, _ := s.CreateVehicle(ctx, alice, "AAA111", "Mum")
-	aV2, _ := s.CreateVehicle(ctx, alice, "AAA222", "Dad")
-	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob")
+	aV1, _ := s.CreateVehicle(ctx, alice, "AAA111", "Mum", "")
+	aV2, _ := s.CreateVehicle(ctx, alice, "AAA222", "Dad", "")
+	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob", "")
 	aPermit, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
 	bPermit, _ := s.UpsertPermit(ctx, bob, "P2", "14", "Bob permit")
 
@@ -1106,7 +1106,7 @@ func TestResetGuestToken(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	const alice, bob = "alice@example.com", "bob@example.com"
-	aV, _ := s.CreateVehicle(ctx, alice, "AAA111", "Dad")
+	aV, _ := s.CreateVehicle(ctx, alice, "AAA111", "Dad", "")
 	aPermit, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
 	grantID, err := s.CreateGuestGrant(ctx, alice, "", aPermit, "Friday", false, []int64{aV},
 		[]GuestRecipient{{Email: "dad@example.com", TokenHash: "hashD"}})
@@ -1147,9 +1147,9 @@ func TestGuestGrantEdit(t *testing.T) {
 	ctx := context.Background()
 	const alice, bob = "alice@example.com", "bob@example.com"
 
-	v1, _ := s.CreateVehicle(ctx, alice, "AAA111", "Mum")
-	v2, _ := s.CreateVehicle(ctx, alice, "AAA222", "Dad")
-	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob")
+	v1, _ := s.CreateVehicle(ctx, alice, "AAA111", "Mum", "")
+	v2, _ := s.CreateVehicle(ctx, alice, "AAA222", "Dad", "")
+	bV, _ := s.CreateVehicle(ctx, bob, "BBB111", "Bob", "")
 	p, _ := s.UpsertPermit(ctx, alice, "P1", "14", "Alice permit")
 
 	gid, err := s.CreateGuestGrant(ctx, alice, "", p, "Friday", false, []int64{v1}, []GuestRecipient{{Email: "mum@example.com", TokenHash: "h1"}})
@@ -1201,12 +1201,12 @@ func TestPlateOverride(t *testing.T) {
 	ctx := context.Background()
 	const owner = "u@example.com"
 	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
-	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Saved car")
+	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Saved car", "")
 	now := time.Now()
 	end := now.Add(2 * time.Hour)
 
 	// An ad-hoc plate override: no vehicle, literal registration.
-	if _, err := s.CreatePlateOverride(ctx, p, "VISITOR1", now, &end, owner); err != nil {
+	if _, err := s.CreatePlateOverride(ctx, p, "VISITOR1", "", now, &end, owner); err != nil {
 		t.Fatalf("plate override: %v", err)
 	}
 	// A saved-vehicle override for comparison.
@@ -1661,7 +1661,7 @@ func TestActiveGuestOverridePlate(t *testing.T) {
 
 	// This link's live override is reported.
 	seedGuestToken(t, s, owner, pid, 42)
-	if _, err := s.CreateGuestPlateOverride(ctx, pid, "GST111", now.Add(-time.Minute), &end, "visitor", 42); err != nil {
+	if _, err := s.CreateGuestPlateOverride(ctx, pid, "GST111", "", now.Add(-time.Minute), &end, "visitor", 42); err != nil {
 		t.Fatal(err)
 	}
 	if reg, ok := s.ActiveGuestOverridePlate(ctx, pid, 42, now); !ok || reg != "GST111" {
@@ -1784,7 +1784,7 @@ func TestMigrateLegacyOverrideTableKeepsGuestTokenID(t *testing.T) {
 	// another restart.
 	end := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	seedGuestToken(t, s, "legacy@example.com", 1, 7)
-	if _, err := s.CreateGuestPlateOverride(ctx, 1, "BBB222", time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), &end, "guest", 7); err != nil {
+	if _, err := s.CreateGuestPlateOverride(ctx, 1, "BBB222", "", time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), &end, "guest", 7); err != nil {
 		t.Fatalf("guest override insert after legacy migration: %v", err)
 	}
 }
@@ -1837,7 +1837,7 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	const owner = "alice@example.com"
-	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum")
+	v, _ := s.CreateVehicle(ctx, owner, "AAA111", "Mum", "")
 	p, _ := s.UpsertPermit(ctx, owner, "P1", "14", "Permit")
 	gid, err := s.CreateGuestGrant(ctx, owner, "", p, "door", false, []int64{v},
 		[]GuestRecipient{{Email: "door@example.com", TokenHash: "hashD"}})
@@ -1980,7 +1980,7 @@ func TestRemoveMemberRevokesTheirPasses(t *testing.T) {
 	if err := s.AcceptInvite(ctx, member, primary); err != nil {
 		t.Fatal(err)
 	}
-	veh, err := s.CreateVehicle(ctx, primary, "CAR111", "Car")
+	veh, err := s.CreateVehicle(ctx, primary, "CAR111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2082,17 +2082,17 @@ func TestGuestOverridesSubCapProtectsOwner(t *testing.T) {
 	start := time.Now().Add(-time.Minute)
 	end := time.Now().Add(2 * time.Hour)
 	for i := 0; i < MaxLiveGuestOverridesPerPermit; i++ {
-		if _, err := s.CreateGuestPlateOverride(ctx, permitID, fmt.Sprintf("GST%03d", i), start, &end, "v", tokenID); err != nil {
+		if _, err := s.CreateGuestPlateOverride(ctx, permitID, fmt.Sprintf("GST%03d", i), "", start, &end, "v", tokenID); err != nil {
 			t.Fatalf("guest override %d within the sub-cap was refused: %v", i, err)
 		}
 	}
 	// One past the guest sub-cap is refused...
-	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "GSTOVR", start, &end, "v", tokenID); !errors.Is(err, ErrGuestOverrideRefused) {
+	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "GSTOVR", "", start, &end, "v", tokenID); !errors.Is(err, ErrGuestOverrideRefused) {
 		t.Fatalf("guest override past the sub-cap = %v, want ErrGuestOverrideRefused", err)
 	}
 	// ...but the OWNER can still book their own permit: the sub-cap left room under the
 	// overall cap, so a guest flood cannot lock the household out.
-	if _, err := s.CreateOverrideCapped(ctx, permitID, 0, "OWNER1", start, &end, owner, MaxLiveOverridesPerPermit); err != nil {
+	if _, err := s.CreateOverrideCapped(ctx, permitID, 0, "OWNER1", "", start, &end, owner, MaxLiveOverridesPerPermit); err != nil {
 		t.Fatalf("owner locked out of their own permit by guest bookings: %v", err)
 	}
 }
@@ -2109,7 +2109,7 @@ func TestActiveGuestOverridePlateResolvesSavedCar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	veh, err := s.CreateVehicle(ctx, owner, "MYCAR1", "My Car")
+	veh, err := s.CreateVehicle(ctx, owner, "MYCAR1", "My Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2144,11 +2144,11 @@ func TestUpdateGuestGrantSweepsRemovedCar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keep, err := s.CreateVehicle(ctx, owner, "KEEP01", "Keep")
+	keep, err := s.CreateVehicle(ctx, owner, "KEEP01", "Keep", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	drop, err := s.CreateVehicle(ctx, owner, "DROP01", "Drop")
+	drop, err := s.CreateVehicle(ctx, owner, "DROP01", "Drop", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2370,7 +2370,7 @@ func TestRetention(t *testing.T) {
 	}
 
 	// --- revoked guest links stop naming the recipient ---
-	veh, err := s.CreateVehicle(ctx, owner, "CAR1", "Car")
+	veh, err := s.CreateVehicle(ctx, owner, "CAR1", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2865,14 +2865,14 @@ func TestCreateOverrideCappedEnforcesLimit(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const owner = "cap@example.com"
-	veh, _ := s.CreateVehicle(ctx, owner, "REG1", "car")
+	veh, _ := s.CreateVehicle(ctx, owner, "REG1", "car", "")
 	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
 	for i := 0; i < 3; i++ {
-		if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", time.Now(), nil, owner, 3); err != nil {
+		if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", "", time.Now(), nil, owner, 3); err != nil {
 			t.Fatalf("create %d under the limit: %v", i, err)
 		}
 	}
-	if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", time.Now(), nil, owner, 3); !errors.Is(err, ErrOverrideLimit) {
+	if _, err := s.CreateOverrideCapped(ctx, pid, veh, "", "", time.Now(), nil, owner, 3); !errors.Is(err, ErrOverrideLimit) {
 		t.Fatalf("over the limit should be ErrOverrideLimit, got %v", err)
 	}
 }
@@ -2967,14 +2967,14 @@ func TestGuestOverrideRefusedAfterRevoke(t *testing.T) {
 	end := time.Now().Add(6 * time.Hour)
 
 	// While live, the create succeeds.
-	if _, err := s.CreateGuestPlateOverride(ctx, pid, "AAA111", time.Now(), &end, "visitor", tok); err != nil {
+	if _, err := s.CreateGuestPlateOverride(ctx, pid, "AAA111", "", time.Now(), &end, "visitor", tok); err != nil {
 		t.Fatalf("live link should be able to book: %v", err)
 	}
 	// Revoked mid-flight: the next create must be refused, not silently applied.
 	if _, err := s.db.ExecContext(ctx, `UPDATE guest_token SET revoked_at = ? WHERE id = ?`, nowUTC(), tok); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateGuestPlateOverride(ctx, pid, "BBB222", time.Now(), &end, "visitor", tok); !errors.Is(err, ErrGuestOverrideRefused) {
+	if _, err := s.CreateGuestPlateOverride(ctx, pid, "BBB222", "", time.Now(), &end, "visitor", tok); !errors.Is(err, ErrGuestOverrideRefused) {
 		t.Fatalf("revoked link create = %v, want ErrGuestOverrideRefused", err)
 	}
 }
@@ -2990,7 +2990,7 @@ func TestGuestOverrideAuthorisationRevokedBeforeApply(t *testing.T) {
 	tok := seedGuestToken(t, s, owner, pid, 901)
 	end := time.Now().Add(6 * time.Hour)
 
-	ovID, err := s.CreateGuestPlateOverride(ctx, pid, "AAA111", time.Now(), &end, "visitor", tok)
+	ovID, err := s.CreateGuestPlateOverride(ctx, pid, "AAA111", "", time.Now(), &end, "visitor", tok)
 	if err != nil {
 		t.Fatalf("live link should book: %v", err)
 	}
@@ -3043,7 +3043,7 @@ func TestGuestOverrideAuthorisationFollowsGrantScope(t *testing.T) {
 	s := newTestStore(t)
 	const owner = "scope@example.com"
 	pid, _ := s.UpsertPermit(ctx, owner, "p1", "14", "P")
-	veh, _ := s.CreateVehicle(ctx, owner, "CAR111", "car")
+	veh, _ := s.CreateVehicle(ctx, owner, "CAR111", "car", "")
 	tok := seedGuestToken(t, s, owner, pid, 902)
 	// The pass covers that vehicle.
 	if _, err := s.db.ExecContext(ctx,
@@ -3091,7 +3091,7 @@ func TestAcceptInviteIsBlockedByOwnDataAtomically(t *testing.T) {
 		t.Fatalf("invite: %v", err)
 	}
 	// The invitee acquires their own data AFTER the handler would have checked.
-	if _, err := s.CreateVehicle(ctx, invitee, "OWN111", "their car"); err != nil {
+	if _, err := s.CreateVehicle(ctx, invitee, "OWN111", "their car", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AcceptInvite(ctx, invitee, owner); !errors.Is(err, ErrInviteBlocked) {
@@ -3144,7 +3144,7 @@ func setupGuestBooking(t *testing.T, s *Store, owner string) (permitID, grantID 
 		t.Fatalf("token id: %v", err)
 	}
 	end := time.Now().Add(36 * time.Hour) // an overnight booking, live into tomorrow
-	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "STRANGR", time.Now().Add(-time.Minute), &end, "visitor", tokenID); err != nil {
+	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "STRANGR", "", time.Now().Add(-time.Minute), &end, "visitor", tokenID); err != nil {
 		t.Fatalf("guest booking: %v", err)
 	}
 	if ovs, _ := s.ListOverrides(ctx, permitID, time.Now()); len(ovs) != 1 {
@@ -3354,7 +3354,7 @@ func TestReplacedPosterStaysUnderHouseholdControl(t *testing.T) {
 		t.Fatalf("old token: %v", err)
 	}
 	end := time.Now().Add(12 * time.Hour)
-	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "OLDVIS", time.Now().Add(-time.Minute), &end, "visitor", oldToken); err != nil {
+	if _, err := s.CreateGuestPlateOverride(ctx, permitID, "OLDVIS", "", time.Now().Add(-time.Minute), &end, "visitor", oldToken); err != nil {
 		t.Fatalf("approve a visitor through the old poster: %v", err)
 	}
 
@@ -3505,7 +3505,7 @@ func TestVehicleCreateRefusedForAcceptedSecondary(t *testing.T) {
 		t.Fatalf("invite: %v", err)
 	}
 	// A pending invite must not block them: they are still their own household.
-	if _, err := s.CreateVehicle(ctx, member, "PEND01", "car"); err != nil {
+	if _, err := s.CreateVehicle(ctx, member, "PEND01", "car", ""); err != nil {
 		t.Fatalf("a pending invite must not block adding a car: %v", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM vehicle WHERE owner = ?`, member); err != nil {
@@ -3514,7 +3514,7 @@ func TestVehicleCreateRefusedForAcceptedSecondary(t *testing.T) {
 	if err := s.AcceptInvite(ctx, member, primary); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if _, err := s.CreateVehicle(ctx, member, "LATE01", "car"); !errors.Is(err, ErrSecondaryAccount) {
+	if _, err := s.CreateVehicle(ctx, member, "LATE01", "car", ""); !errors.Is(err, ErrSecondaryAccount) {
 		t.Fatalf("CreateVehicle = %v, want ErrSecondaryAccount", err)
 	}
 }

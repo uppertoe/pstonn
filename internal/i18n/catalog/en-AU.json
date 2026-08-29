@@ -12,6 +12,7 @@
     "areas": "areas"
   },
   "messages": {
+    "vehicle.state_label": "Registration state",
     "onboarding.intro": "Sign in once with your {{.Tenant.Name}} {{.Tenant.Terms.portal}} details. p.stonn keeps an encrypted session so it can update your permit for you.",
     "onboarding.email_pinned": "Your {{.Tenant.Terms.portal}} account must use this same email — it can’t be changed here.",
     "onboarding.reset_beside": "Forgot it — or never set one? {{slot \"reset\"}}Reset it at the council{{endslot}}, then link here.",
@@ -36,6 +37,7 @@
     "public.hero_note": "A free service for {{.Tenant.Name}} residents ({{.Tenant.SuburbList}}). Sign in with a one-time code sent to your email.",
     "public.need_account": "You'll need an existing {{.Tenant.Name}} {{slot \"b\"}}{{.Tenant.Terms.portal}}{{endslot}} account with a visitor permit on it. Sign in here with {{slot \"b\"}}the same email address your {{.Tenant.Terms.portal}} account uses{{endslot}} — p.stonn can only connect to the council account that matches. It schedules a permit you already hold; it can't apply for one. {{slot \"how\"}}What you need →{{endslot}}",
     "public.step_link": "Sign in with your {{.Tenant.Terms.portal}} email, then connect with your council password.",
+    "public.other_area": "p.stonn is built to schedule any council that runs this kind of online visitor-permit system, not just {{.Tenant.Name}} — the groundwork for new areas is already in place. Adding one takes someone local with a permit account to help work out how their council's site behaves. If that's your council and you'd like to help bring it here, {{slot \"contact\"}}get in touch{{endslot}} — a test account is all it takes to get started.",
     "public.disclaimer": "An unofficial app, not affiliated with or endorsed by the {{.Tenant.Name}}. You remain responsible for your permit and any fines. {{slot \"security\"}}Security & data{{endslot}}",
     "public.about_unofficial": "p.stonn is a free, unofficial tool for scheduling your {{.Tenant.Name}} visitor parking permit. It is not affiliated with or endorsed by the council. For what it does, see {{slot \"how\"}}How it works{{endslot}}.",
     "public.faq_unofficial": "p.stonn is a free, unofficial tool for scheduling your {{.Tenant.Name}} visitor parking permit. It is not affiliated with the council. For what it does, see {{slot \"how\"}}How it works{{endslot}}.",
@@ -92,6 +94,7 @@
     "menu.area_current": "{{.Tenant.Name}}",
     "menu.area_switch": "Switch to {{.Name}}",
     "menu.area_connect": "Connect {{.Name}}…",
+    "menu.area_add": "Connect another area…",
     "settings.area_connection": "{{.Name}} connection",
     "picker.connect_first": "Connect your {{.Tenant.Name}} account to add a permit from there."
   }

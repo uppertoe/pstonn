@@ -19,7 +19,7 @@ func twoPermits(t *testing.T) (st *Store, owner string, permitA, permitB, ovA, o
 	ctx := context.Background()
 	owner = "owner@example.com"
 
-	vehID, err := st.CreateVehicle(ctx, owner, "ABC123", "Car")
+	vehID, err := st.CreateVehicle(ctx, owner, "ABC123", "Car", "")
 	if err != nil {
 		t.Fatalf("vehicle: %v", err)
 	}

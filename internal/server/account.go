@@ -192,6 +192,31 @@ func (s *Server) tenantSelect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/permits/new", http.StatusSeeOther)
 }
 
+// connectArea renders the picker of areas this account has not linked yet, each a
+// one-click path into onboarding for that area. It is what "Connect another area…"
+// opens, so the account menu never has to list every council inline — the menu
+// stays short as the registry grows.
+func (s *Server) connectArea(w http.ResponseWriter, r *http.Request) {
+	u, ok := s.user(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	_, owner, isPrimary := s.resolveAccount(ctx)
+	areas := s.unlinkedAreas(ctx, owner)
+	if len(areas) == 0 {
+		// Single-area deployment, or every area already linked: nothing to pick.
+		redirectHome(w, r)
+		return
+	}
+	s.render(w, dashboardData{
+		State: "connectarea", User: u, Owner: owner, IsPrimary: isPrimary,
+		OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.locFor(ctx, owner),
+		Contact: s.cfg.ContactEnabled(), Tenants: s.tenantsFor(ctx, owner),
+		CanConnectArea: true, Areas: areas,
+	})
+}
+
 // tenantArg resolves the tenant a settings action names (hidden tenant_id on the
 // per-tenant cards), defaulting to the account's current tenant.
 func (s *Server) tenantArg(r *http.Request, owner string) (string, error) {

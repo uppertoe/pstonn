@@ -13,7 +13,7 @@ import (
 // ListVehicles returns every vehicle across all owners (used by the scheduler to
 // map vehicle IDs to registrations for permits it reconciles).
 func (s *Store) ListVehicles(ctx context.Context) ([]model.Vehicle, error) {
-	return s.queryVehicles(ctx, `SELECT id, registration, label, email, color FROM vehicle ORDER BY label, registration`)
+	return s.queryVehicles(ctx, `SELECT id, registration, label, email, color, state FROM vehicle ORDER BY label, registration`)
 }
 
 // VehicleRef is a vehicle plus its owner, used by the scheduler to resolve a
@@ -25,12 +25,13 @@ type VehicleRef struct {
 	Registration string
 	Label        string
 	Email        string
+	State        string // registration state code ("" = tenant home state)
 }
 
 // ListVehicleRefs returns every vehicle with its owner, for owner-scoped
 // resolution in the scheduler.
 func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email FROM vehicle`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email, state FROM vehicle`)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +39,7 @@ func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
 	var out []VehicleRef
 	for rows.Next() {
 		var v VehicleRef
-		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email); err != nil {
+		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email, &v.State); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -58,7 +59,7 @@ func (s *Store) VehicleOwnedBy(ctx context.Context, owner string, id int64) (boo
 // ListVehiclesFor returns the vehicles owned by one app user.
 func (s *Store) ListVehiclesFor(ctx context.Context, owner string) ([]model.Vehicle, error) {
 	return s.queryVehicles(ctx,
-		`SELECT id, registration, label, email, color FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
+		`SELECT id, registration, label, email, color, state FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
 }
 
 func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([]model.Vehicle, error) {
@@ -70,7 +71,7 @@ func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([
 	var out []model.Vehicle
 	for rows.Next() {
 		var v model.Vehicle
-		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email, &v.Color); err != nil {
+		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email, &v.Color, &v.State); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -127,7 +128,7 @@ func pickVehicleColor(used map[string]bool) string {
 	return vehiclePalette[len(used)%len(vehiclePalette)]
 }
 
-func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label string) (int64, error) {
+func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label, state string) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -160,10 +161,10 @@ func (s *Store) CreateVehicle(ctx context.Context, owner, registration, label st
 	// primary's account and owning data that nothing in the shared UI will ever show.
 	// Narrower window than the tenant-link race, same broken invariant.
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO vehicle (owner, registration, label, color, created_at)
-		 SELECT ?, ?, ?, ?, ?
+		`INSERT INTO vehicle (owner, registration, label, color, state, created_at)
+		 SELECT ?, ?, ?, ?, ?, ?
 		 WHERE NOT EXISTS (SELECT 1 FROM account_member WHERE member_email = ? AND invite_pending = 0)`,
-		owner, registration, label, pickVehicleColor(used), nowUTC(), owner)
+		owner, registration, label, pickVehicleColor(used), state, nowUTC(), owner)
 	if err == nil {
 		if n, _ := res.RowsAffected(); n == 0 {
 			return 0, ErrSecondaryAccount
@@ -256,6 +257,22 @@ func (s *Store) BackfillVehicleColors(ctx context.Context) error {
 func (s *Store) SetVehicleEmail(ctx context.Context, owner string, id int64, email string) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE vehicle SET email = ? WHERE id = ? AND owner = ?`, email, id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetVehicleState sets the registration state code on a vehicle, scoped to its
+// owner. "" means "the tenant's home state" and is a valid value (a correction
+// back to the default). The caller validates the code against the connector's
+// offered regions before storing it.
+func (s *Store) SetVehicleState(ctx context.Context, owner string, id int64, state string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE vehicle SET state = ? WHERE id = ? AND owner = ?`, state, id, owner)
 	if err != nil {
 		return err
 	}

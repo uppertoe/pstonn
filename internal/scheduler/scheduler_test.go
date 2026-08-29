@@ -37,11 +37,12 @@ type fakeTenant struct {
 
 	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
 	// from a handler-style goroutine and the reconcile loop at the same time.
-	mu       sync.Mutex
-	setCalls []string        // tenant_permit_id per SetVehicle call
-	setRegs  []string        // registration per SetVehicle call, in order
-	inFlight map[string]bool // tenant permit ids with a write in flight right now
-	overlaps int             // times two writes to the SAME permit were in flight together
+	mu         sync.Mutex
+	setCalls   []string        // tenant_permit_id per SetVehicle call
+	setRegs    []string        // registration per SetVehicle call, in order
+	setRegions []string        // region code per SetVehicle call, in order
+	inFlight   map[string]bool // tenant permit ids with a write in flight right now
+	overlaps   int             // times two writes to the SAME permit were in flight together
 
 	// current is what the tenant REPORTS is on each permit, keyed by tenant permit
 	// id, and currentErr is a read failure. This used to be hardcoded empty, which
@@ -112,13 +113,14 @@ func (f *fakeTenant) upsertGridLocked(tenantPermitID string, mutate func(*parkin
 	f.permits = append(f.permits, pi)
 }
 
-func (f *fakeTenant) SetVehicle(_ context.Context, _ string, p model.Permit, reg string) error {
+func (f *fakeTenant) SetVehicle(_ context.Context, _ string, p model.Permit, reg, region string) error {
 	if p.CouncilPermitID == f.panicOn {
 		panic("fakeCouncil: forced panic for " + p.CouncilPermitID)
 	}
 	f.mu.Lock()
 	f.setCalls = append(f.setCalls, p.CouncilPermitID)
 	f.setRegs = append(f.setRegs, reg)
+	f.setRegions = append(f.setRegions, region)
 	if f.inFlight == nil {
 		f.inFlight = map[string]bool{}
 	}
@@ -371,7 +373,7 @@ func (f *fakeNotifier) outcomeSnap() []notify.ApplyOutcome {
 func seedSchedule(t *testing.T, s *store.Store, owner string) {
 	t.Helper()
 	ctx := context.Background()
-	veh, err := s.CreateVehicle(ctx, owner, "REG123", "car")
+	veh, err := s.CreateVehicle(ctx, owner, "REG123", "car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +593,7 @@ func TestReconcileSkipsInactivePermits(t *testing.T) {
 	st := newStore(t)
 	owner := "r@example.com"
 	seedSession(t, st, owner)
-	veh, err := st.CreateVehicle(ctx, owner, "AAA111", "Car")
+	veh, err := st.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -983,7 +985,7 @@ func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("permit: %v", err)
 	}
-	vid, err := st.CreateVehicle(ctx, owner, "SCHED01", "car")
+	vid, err := st.CreateVehicle(ctx, owner, "SCHED01", "car", "")
 	if err != nil {
 		t.Fatalf("vehicle: %v", err)
 	}
@@ -1176,7 +1178,7 @@ func TestTenantBusyTellsTheUserEventually(t *testing.T) {
 	st := newStore(t)
 	const owner = "busy@example.com"
 	seedSession(t, st, owner)
-	veh, err := st.CreateVehicle(ctx, owner, "AAA111", "Car")
+	veh, err := st.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1272,7 +1274,7 @@ func seedActivePermit(t *testing.T, st *store.Store, owner, tenantID, reg, activ
 	t.Helper()
 	ctx := context.Background()
 	seedSession(t, st, owner)
-	veh, err := st.CreateVehicle(ctx, owner, reg, "Rostered car")
+	veh, err := st.CreateVehicle(ctx, owner, reg, "Rostered car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1322,7 +1324,7 @@ func TestApplyExclusion(t *testing.T) {
 				release()
 				return
 			}
-			if err := fc.SetVehicle(ctx, owner, handlerPermit, reg); err == nil {
+			if err := fc.SetVehicle(ctx, owner, handlerPermit, reg, ""); err == nil {
 				if err := st.SetPermitActive(ctx, pid, reg); err != nil {
 					t.Errorf("record applied plate: %v", err)
 				}
@@ -1488,7 +1490,7 @@ func TestUnresolvableTargetIsReported(t *testing.T) {
 	// A booking on this permit that points at ANOTHER owner's vehicle: reconcile
 	// resolves vehicles per-owner precisely so a foreign id can never yield a plate,
 	// which is exactly the state this reports.
-	foreign, err := st.CreateVehicle(ctx, "someone@else.example", "BBB222", "Their car")
+	foreign, err := st.CreateVehicle(ctx, "someone@else.example", "BBB222", "Their car", "")
 	if err != nil {
 		t.Fatal(err)
 	}

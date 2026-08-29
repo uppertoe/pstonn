@@ -106,7 +106,7 @@ func TestNoNewGuestLinksForInactivePermit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestGuestsPageOffersOnlyActivePermits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestRenewalRevivesGuestLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestFrozenPassSurfacesOnDeadPermit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestDeadToDeadCopyDoesNotMoveGuests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car", "")
 	if err != nil {
 		t.Fatal(err)
 	}

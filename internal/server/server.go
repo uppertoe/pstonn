@@ -16,6 +16,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/session"
@@ -43,8 +44,14 @@ type Tenant interface {
 	RefreshFailingFor(owner string, p model.Permit) time.Duration
 	// ForgetPermit drops cached state for a permit the owner stopped managing.
 	ForgetPermit(owner, tenantID, tenantPermitID string)
-	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
+	SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error
 	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
+	// Regions are the registration jurisdictions the owner's tenant offers for a
+	// vehicle's state (empty = the provider has no such concept, so no chooser).
+	Regions(ctx context.Context, owner string) []provider.Region
+	// RegionValid reports whether a submitted state code is one the tenant offers
+	// ("" — the tenant home state — is always valid).
+	RegionValid(ctx context.Context, owner, code string) bool
 	// Stats is the traffic / breaker snapshot shown on /status.
 	Stats() parking.Stats
 }
@@ -270,6 +277,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /terms/decline", s.withUser(s.declineTerms))
 	mux.HandleFunc("POST /tenant/link", s.withConsent(s.tenantLink))
 	mux.HandleFunc("POST /tenant/select", s.withConsent(s.tenantSelect))
+	mux.HandleFunc("GET /tenant/connect", s.withUser(s.connectArea))
 	mux.HandleFunc("POST /tenant/unlink", s.withUser(s.tenantUnlink)) // allow leaving without re-consent
 	mux.HandleFunc("POST /tenant/forget-password", s.withUser(s.tenantForgetPassword))
 	mux.HandleFunc("POST /account/delete", s.withUser(s.accountDelete)) // allow leaving without re-consent

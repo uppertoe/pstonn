@@ -23,7 +23,12 @@
 <header class="appbar">
   {{/* Full navigation: the landing page's demo assets live in its head, which a
        boosted body-swap would skip (see publicheader). */}}
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
+  {{/* The current area is a quiet, separated label INSIDE the brand's
+       baseline-aligned text row, so it shares the tag's baseline rather than
+       centring separately. Shown only when the account has MORE THAN ONE linked
+       area — with one there is nothing to disambiguate — and stays visible on
+       mobile (unlike the tag) because knowing your area matters most there. */}}
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span>{{if gt (len .Tenants) 1}}<span class="area-name" title="Current area">{{.Tenant.Short}}</span>{{end}}</span></a>
   <div class="appbar-r">
     <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
       <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>
@@ -35,8 +40,11 @@
         {{- if .Tenants}}
         <div class="menu-note">{{T "menu.area_current" .}}</div>
         {{- range .Tenants}}{{if not .Current}}
-        <form method="post" action="/tenant/select"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="menu-item">{{if .Linked}}{{T "menu.area_switch" .}}{{else}}{{T "menu.area_connect" .}}{{end}}</button></form>
+        <form method="post" action="/tenant/select"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="menu-item">{{T "menu.area_switch" .}}</button></form>
         {{- end}}{{end}}
+        {{- end}}
+        {{- if .CanConnectArea}}
+        <a href="/tenant/connect" class="menu-item">{{template "ic-plus"}} {{T "menu.area_add" .}}</a>
         {{- end}}
         {{if .Contact}}<a href="/contact" class="menu-item">{{template "ic-mail"}} Contact</a>{{end}}
         {{/* The Share page: share sheet, invite-by-email, printable card. */}}

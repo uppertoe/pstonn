@@ -251,11 +251,15 @@ X-Frame-Options: DENY
     :root:not([data-theme="light"]) .th-sun { display:inline-flex; }
   }
 
-  .brand-text { display:inline-flex; align-items:baseline; gap:10px; }
+   
+  .brand-text { display:inline-flex; align-items:baseline; }
   .brand .word { font-family:'Space Grotesk',system-ui,sans-serif; font-weight:600; font-size:20px; letter-spacing:-.02em; line-height:1; }
   .brand .word .dot { color:var(--primary); }
-  .brand .brand-tag { font-family:system-ui,sans-serif; font-weight:500; font-size:12.5px; color:var(--muted); letter-spacing:0; }
+  .brand .brand-tag { font-family:system-ui,sans-serif; font-weight:500; font-size:12.5px; color:var(--muted); letter-spacing:0; margin-left:10px; }
   @media (max-width:560px){ .brand .brand-tag { display:none; } }
+  .brand .area-name { color:var(--muted); font-size:12.5px; font-weight:500; letter-spacing:0; white-space:nowrap; }
+   
+  .brand .area-name::before { content:"·"; margin:0 .5em; }
 
    
   .modal-wrap { position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; }
@@ -369,7 +373,9 @@ X-Frame-Options: DENY
   .pname-title { display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap; min-height:34px; }
   .pdetail { font-size:11.5px; color:var(--muted); letter-spacing:.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pname-title .ghost.icon.sm { opacity:.55; }
-  .pname:hover .ghost.icon.sm { opacity:1; }
+  .pname-title:hover .ghost.icon.sm { opacity:1; }
+  .rename-hint { background:none; border:0; box-shadow:none; padding:2px 4px; margin:0; font:inherit; font-size:12px; font-weight:500; color:var(--muted); cursor:pointer; border-radius:6px; white-space:nowrap; }
+  .rename-hint:hover { color:var(--primary-2); background:var(--surface-2); box-shadow:none; }
   .pname-edit { display:flex; align-items:center; gap:8px; flex:1 1 auto; flex-wrap:wrap; min-width:0; }
    
   .pname-edit input { flex:1; min-width:150px; font-size:17px; font-weight:600; letter-spacing:-.01em; padding:1px 2px; border:0; border-bottom:2px solid var(--primary); border-radius:0; background:transparent; color:var(--ink); }
@@ -593,6 +599,7 @@ X-Frame-Options: DENY
   .qropt button { margin-top:auto; }
    
   .vaddform { border-top:1px solid var(--line); padding-top:16px; }
+  .vstate-chip { color:var(--muted); font-weight:400; font-size:13px; }
   .card.hero.share-hero { width:100%; max-width:820px; margin:16px auto 14px; padding:30px 22px 26px; }
   .share-hero h2 { justify-content:center; }
   .share-hero p { margin:0 auto; max-width:520px; color:var(--muted); }
@@ -806,7 +813,7 @@ X-Frame-Options: DENY
   .hero { text-align:center; padding:34px 22px; max-width:520px; margin:26px auto; }
   .hero .ring { width:60px; height:60px; border-radius:16px; background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:var(--on-primary); display:inline-flex; align-items:center; justify-content:center; margin-bottom:16px; box-shadow:var(--shadow-lg); }
   .hero .ring svg { width:28px; height:28px; }
-  .hero h2 { margin:0 0 8px; font-size:21px; letter-spacing:-.02em; }
+  .hero h2 { margin:0 0 8px; font-size:21px; letter-spacing:-.02em; justify-content:center; }
   .hero p { margin:0 auto 18px; max-width:440px; color:var(--muted); }
   form.stack { display:grid; gap:11px; max-width:none; margin:0; text-align:left; }
    
@@ -1099,6 +1106,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>Sign in with your ePermits email, then connect with your council password.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
+  </section>
+  <section class="paper" style="max-width:640px;margin:44px auto 0;padding:26px 32px">
+    <h2 class="about-h2" style="margin-top:0">In another council area?</h2>
+    <p style="color:var(--muted);font-size:14.5px;margin:0;line-height:1.55">p.stonn is built to schedule any council that runs this kind of online visitor-permit system, not just City of Stonnington — the groundwork for new areas is already in place. Adding one takes someone local with a permit account to help work out how their council's site behaves. If that's your council and you'd like to help bring it here, <a href="/contact">get in touch</a> — a test account is all it takes to get started.</p>
   </section>
   
   <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/security">Security & data</a></p>

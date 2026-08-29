@@ -8,6 +8,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 )
 
 // ErrTenantUnavailable: the account belongs to a tenant this process is not
@@ -150,12 +151,38 @@ func (m *Mux) ForgetPermit(owner, tenantID, tenantPermitID string) {
 	}
 }
 
-func (m *Mux) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
+// Regions returns the registration jurisdictions the owner's tenant offers for a
+// vehicle's state, ordered with the tenant's own state first. Empty means the
+// provider has no such concept (the UI then shows no chooser). Falls back to
+// nothing when the owner's tenant cannot be resolved yet (e.g. before linking).
+func (m *Mux) Regions(ctx context.Context, owner string) []provider.Region {
+	c, err := m.For(ctx, owner)
+	if err != nil || c == nil {
+		return nil
+	}
+	return c.Capabilities().Regions
+}
+
+// RegionValid reports whether code is one the owner's tenant offers. "" (meaning
+// the tenant's home state) is always valid.
+func (m *Mux) RegionValid(ctx context.Context, owner, code string) bool {
+	if code == "" {
+		return true
+	}
+	for _, r := range m.Regions(ctx, owner) {
+		if r.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Mux) SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error {
 	c, err := m.forPermit(ctx, owner, p)
 	if err != nil {
 		return err
 	}
-	return c.SetVehicle(ctx, owner, p, registration)
+	return c.SetVehicle(ctx, owner, p, registration, region)
 }
 
 func (m *Mux) ClearVehicle(ctx context.Context, owner string, p model.Permit) error {

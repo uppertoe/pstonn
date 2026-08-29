@@ -374,7 +374,7 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("permit: %v", err)
 	}
-	vid, err := st.CreateVehicle(ctx, owner, "PAGE01", "car")
+	vid, err := st.CreateVehicle(ctx, owner, "PAGE01", "car", "")
 	if err != nil {
 		t.Fatalf("vehicle: %v", err)
 	}

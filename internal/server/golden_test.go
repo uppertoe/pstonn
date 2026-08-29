@@ -17,6 +17,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/identity"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -188,10 +189,17 @@ func TestGoldenPages(t *testing.T) {
 // page and the public token-driven pages (confirm, decide, unsubscribe, wait,
 // message, door QR, FAQ).
 func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []renderCase {
+	// The registration-state selector and the interstate chip are provider-agnostic
+	// UI: the harness supplies a representative region set (home first) and one
+	// interstate vehicle so both are locked in the shape.
+	regions := []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}}
 	app := func(page string, extra func(*dashboardData)) dashboardData {
+		pv := samplePermitViewAt(loc, now)
+		pv.Regions = regions
 		d := dashboardData{User: user, State: "app", Page: page, IsPrimary: true, Loc: loc, LogoutURL: "https://auth.example.com/logout",
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			Permits:  []permitView{samplePermitViewAt(loc, now)}}
+			Regions:  regions,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", State: "NSW"}},
+			Permits:  []permitView{pv}}
 		if extra != nil {
 			extra(&d)
 		}
@@ -259,6 +267,17 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 			d.Vehicles = []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", Email: "van@example.com"}, {ID: 2, Label: "Mum", Registration: "AAA111", Color: "#127a49"}}
 		}), ""},
 		{"vehicles empty", app("vehicles", func(d *dashboardData) { d.Vehicles = nil }), ""},
+		{"schedule multi-area", app("schedule", func(d *dashboardData) {
+			// Two LINKED areas: the switcher offers "Switch to…" between them, the
+			// app-bar shows the current area, and "Connect another area…" leads to the
+			// picker for anything still unlinked.
+			d.Tenants = []tenantChoice{{ID: "stonnington", Name: "City of Stonnington", Current: true, Linked: true}, {ID: "ryde", Name: "City of Ryde", Linked: true}}
+			d.CanConnectArea = true
+		}), ""},
+		{"connect area", dashboardData{State: "connectarea", User: user, Loc: loc, LogoutURL: "https://auth.example.com/logout",
+			Tenants:        []tenantChoice{{ID: "stonnington", Name: "City of Stonnington", Current: true, Linked: true}},
+			CanConnectArea: true,
+			Areas:          []tenantChoice{{ID: "ryde", Name: "City of Ryde"}, {ID: "othertown", Name: "Othertown Council"}}}, ""},
 	}
 }
 
@@ -277,7 +296,8 @@ func goldenFragmentCases(loc *time.Location, user identity.User, now time.Time) 
 		{"default", "qr-card", dashboardData{Loc: loc, QR: &qrShowView{PermitLabel: "Visitor Permit", ImageURI: template.URL("data:image/png;base64,AAAA"), URL: "https://p.stonn.org/g/tok", StopsAt: "11:59pm"}}},
 		{"menu", "guest-body", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", OwnerEmail: "held@example.com", PermitLabel: "Visitor Permit", CurrentReg: "ABC123",
-			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true, AllowPlate: true}}},
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true, AllowPlate: true,
+			Regions: []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}}}}},
 		{"pending", "guest-req-status", guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}},
 	}
 }

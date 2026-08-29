@@ -91,10 +91,10 @@ type PermitPolicy struct {
 	// scheduled even when it is changeable. Whole-word so that "Residential
 	// Tradesperson Permit" (a different type) is not caught by accident.
 	ResidentWord string `json:"resident_word"`
-	// DefaultVehicleState is the portal's vehicle-state id for the tenant's own
-	// state, used when a plate is written without a prior state to copy
-	// (VIC=1 ACT=2 NSW=3 WA=4 TAS=5 QLD=6 SA=7 NT=8).
-	DefaultVehicleState string `json:"default_vehicle_state"`
+	// HomeState is the tenant's own registration state, as a CODE (e.g. "VIC"),
+	// written when a plate carries no state of its own. The connector maps the code
+	// to the portal's id; empty or unrecognised falls back to VIC.
+	HomeState string `json:"home_state"`
 
 	residentRe *regexp.Regexp
 }

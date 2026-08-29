@@ -14,6 +14,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/store"
 	"github.com/uppertoe/pstonn/internal/tenant"
 )
@@ -127,8 +128,14 @@ type dashboardData struct {
 	ContactFrom   string      // contact form: the reply-to address to redisplay after a validation error
 	// TenantOptions is the sign-up choice, offered only when more than one is enabled.
 	TenantOptions []tenantOption
-	// Tenants drives the user menu\'s area switcher (empty when only one is enabled).
+	// Tenants drives the user menu's area switcher: only the areas the account has
+	// LINKED (empty when the deployment serves one area). Switching between them.
 	Tenants []tenantChoice
+	// CanConnectArea: a multi-area deployment still has an area this account has not
+	// linked, so the menu offers "Connect another area…" → the connect-area picker.
+	CanConnectArea bool
+	// Areas is the unlinked-area list the connect-area picker renders (State "connectarea").
+	Areas []tenantChoice
 	// OtherConnections are the account\'s sessions with tenants other than the current one (Settings).
 	OtherConnections []connectionView
 	Relink           bool // tenant session expired → prompt re-link
@@ -186,6 +193,10 @@ type dashboardData struct {
 	GuestActive bool
 	// dashboard state
 	Vehicles []vehicleView
+	// Regions are the registration jurisdictions the tenant offers for a vehicle's
+	// state, home state first. Empty means no chooser is shown (the provider has no
+	// such concept, or the tenant is not resolvable yet).
+	Regions []provider.Region
 	// LegendVehicles is the Schedule page's colour key: only the cars whose colour
 	// is actually on the page (see legendVehicles). LegendMore counts those left
 	// out, surfaced as a link to the full list.
@@ -338,6 +349,22 @@ func (s *Server) tenantsFor(ctx context.Context, owner string) []tenantChoice {
 		return nil
 	}
 	current, _ := s.store.TenantIDFor(ctx, owner)
+	linked := s.linkedAreaSet(ctx, owner)
+	// Only areas the account has LINKED appear in the switcher: it is the working
+	// set to move BETWEEN, and it stays short no matter how many areas the registry
+	// serves. An area not yet linked is reached via "Connect another area…", not by
+	// listing every council here (which would grow the menu with the registry).
+	out := make([]tenantChoice, 0, len(enabled))
+	for _, c := range enabled {
+		if linked[c.ID] {
+			out = append(out, tenantChoice{ID: c.ID, Name: c.Name, Current: c.ID == current, Linked: true})
+		}
+	}
+	return out
+}
+
+// linkedAreaSet is the set of area ids the account holds a live session with.
+func (s *Server) linkedAreaSet(ctx context.Context, owner string) map[string]bool {
 	linked := map[string]bool{}
 	if sessions, err := s.store.ListTenantSessionsFor(ctx, owner); err == nil {
 		for _, cs := range sessions {
@@ -346,9 +373,32 @@ func (s *Server) tenantsFor(ctx context.Context, owner string) []tenantChoice {
 			}
 		}
 	}
+	return linked
+}
+
+// canConnectArea reports whether a multi-area deployment still has an enabled area
+// the account has not linked, so the menu can offer "Connect another area…".
+func (s *Server) canConnectArea(ctx context.Context, owner string) bool {
+	return len(s.unlinkedAreas(ctx, owner)) > 0
+}
+
+// unlinkedAreas lists the enabled areas the account has NOT linked yet, for the
+// connect-another-area picker. Empty for a single-area deployment or once every
+// area is linked.
+func (s *Server) unlinkedAreas(ctx context.Context, owner string) []tenantChoice {
+	if s.registry == nil || s.store == nil {
+		return nil
+	}
+	enabled := s.registry.Enabled()
+	if len(enabled) < 2 {
+		return nil
+	}
+	linked := s.linkedAreaSet(ctx, owner)
 	out := make([]tenantChoice, 0, len(enabled))
 	for _, c := range enabled {
-		out = append(out, tenantChoice{ID: c.ID, Name: c.Name, Current: c.ID == current, Linked: linked[c.ID]})
+		if !linked[c.ID] {
+			out = append(out, tenantChoice{ID: c.ID, Name: c.Name})
+		}
 	}
 	return out
 }
@@ -460,6 +510,7 @@ type vehicleView struct {
 	Registration string
 	Color        string
 	Email        string // optional driver email (shown on the Vehicles page)
+	State        string // registration state code ("" = tenant home state; shown as a chip)
 }
 
 type memberView struct {
@@ -499,7 +550,13 @@ type permitView struct {
 	Cal         []calView
 	Overrides   []overrideView
 	Vehicles    []vehicleView
-	Loc         *time.Location
+	// Regions are the tenant's registration jurisdictions (home first) for the
+	// one-off plate's state selector; empty hides it.
+	Regions []provider.Region
+	// Unnamed: the permit still carries the picker's default name (its number, or
+	// blank), so a subtle "Name this permit" nudge is offered.
+	Unnamed bool
+	Loc     *time.Location
 	// Expiry surfacing (empty ExpiryLabel = expiry unknown).
 	ExpiryLabel string // "3 Aug 2026"
 	ExpiryIn    string // "in 12 days" / "tomorrow" / "today" / "3 days ago"
@@ -680,7 +737,7 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 		if c == "" {
 			c = "#667085" // defensive: a pre-backfill row with no colour
 		}
-		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c, Email: v.Email}
+		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c, Email: v.Email, State: v.State}
 		colorByID[v.ID] = c
 		regByID[v.ID] = v.Registration
 		labelByID[v.ID] = v.Label
@@ -742,7 +799,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 	ctx := r.Context()
 	user, owner, isPrimary := s.resolveAccount(ctx)
 	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.locFor(ctx, owner), Page: page, Contact: s.cfg.ContactEnabled(),
-		Tenants: s.tenantsFor(ctx, owner)}
+		Tenants: s.tenantsFor(ctx, owner), CanConnectArea: s.canConnectArea(ctx, owner)}
 	if !isPrimary {
 		base.SharedWith = owner
 	}

@@ -1026,25 +1026,674 @@ window.popClamp = window.popClamp || function (el) {
 
 
 
-<main id="main" tabindex="-1" class="guestwrap">
-  <section class="guestcard" style="text-align:center">
-    <div class="gbrand" style="justify-content:center"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    <p class="gmanaged">Managed by <strong>held@example.com</strong></p>
-    <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">GUEST1</span> on the permit.</p>
+
+<header class="appbar">
+  
+  
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span><span class="area-name" title="Current area">Stonnington</span></span></a>
+  <div class="appbar-r">
+    <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
+      <span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span>
+    </button>
+    <div class="usermenu" x-data="{open:false}" @click.outside="open=false" @keydown.escape.window="open=false">
+      <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></button>
+      <div class="menu" x-show="open" x-cloak>
+        <div class="menu-email">a@b.com</div>
+        <div class="menu-note">City of Stonnington</div>
+        <form method="post" action="/tenant/select"><input type="hidden" name="tenant_id" value="ryde"><button type="submit" class="menu-item">Switch to City of Ryde</button></form>
+        <a href="/tenant/connect" class="menu-item"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Connect another area…</a>
+        
+        
+        <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
+        
+        <a href="https://auth.example.com/logout" class="menu-item"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</a>
+        
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item active" style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/guests" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+<main id="main" tabindex="-1">
+  
+  
+
+  
+  
+  
+  
+
+<div id="legend"
+     
+     hx-get="/schedule/legend" hx-trigger="schedule-changed from:body"
+     hx-swap="outerHTML" hx-sync="this:replace">
+  
+</div>
+
+  
+  
+  <section class="card" id="permit-7" style="--hue:var(--sec-schedule)"
+           x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '7') addOpen=true"
+           @htmx:after-request="if(!$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     
-    <div aria-live="polite">
+    <div id="pbody-7">
 
-<div id="reqstatus" hx-get="/g/req/4?n=nn" hx-trigger="every 3s" hx-swap="outerHTML">
-  <div class="gspin"></div>
-  <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
+<div class="permit-head">
+  <div class="pname" x-data="{rename:false}">
+    
+    <div class="pname-title">
+      <h2 x-show="!rename">Visitor</h2>
+      <button x-show="!rename" type="button" class="ghost icon sm" title="Rename permit" aria-label="Rename permit"
+              @click="rename=true; $nextTick(() => $refs.pname.focus())"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+      
+      
+      <form x-show="rename" x-cloak method="post" action="/permits/7/name" class="pname-edit" @submit="rename=false">
+        <input name="label" x-ref="pname" maxlength="40" required autocomplete="off" @keydown.escape="rename=false"
+               placeholder="e.g. Front-unit permit"
+               value="Visitor">
+        <button type="submit" class="sm"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Save</button>
+        <button type="button" class="ghost sm" @click="rename=false">Cancel</button>
+      </form>
+    </div>
+    
+    
+    <div class="permit-actions">
+      <button type="button" class="qrtrigger sm"
+              hx-post="/guests/qr" hx-vals='{"permit_id": "7"}'
+              
+              hx-target="#qrbody-7" hx-swap="innerHTML transition:false"
+              @click="qrOpen=true"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Show visitor QR</button>
+      
+      
+    </div>
+  </div>
+  <div class="nowbadge">
+    <span class="muted" style="font-size:12.5px">on permit now</span>
+    
+    <span class="plate">ABC123</span>
+    
+    <span class="pslot"><span class="pok" title="Checked against the council record"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></span>
+    
+    
+    
+  </div>
 </div>
 
+
+
+
+
+
+
+
+<p class="sub">Weekly roster</p>
+<div class="roster">
+  
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Sun</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Sun: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Sun: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Mon</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Mon: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Mon: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Tue</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Tue: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Tue: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Wed</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Wed: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Wed: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Thu</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Thu: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Thu: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Fri</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Fri: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Fri: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
+  
+  <div class="rcell" x-data="{open:false}">
+    <div class="day">Sat</div>
+    <button type="button" class="chip " @click="open=!open"
+            :aria-expanded="open" aria-haspopup="true"
+            aria-label="Sat: ABC123, change">
+      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+    </button>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      
+      <p class="tt">Sat: pick a vehicle</p>
+      <div class="vopts">
+        <button type="button" class="vopt " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+        
+        <button type="button" class="vopt sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
+      </div>
+      
+    </div>
+  </div>
+  
 </div>
+
+<p class="sub" style="margin-top:20px">This week and next</p>
+<div class="cal">
+  
+  
+  <div class="cday today" x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2, today. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster, has a one-off booking"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"><span class="oneoff"></span></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+  
+  <div class="cday " x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="Mon 2. ABC123, weekly roster"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">Mon 2</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">Mon 2</p>
+      <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
+      
+    </div>
+  </div>
+  
+</div>
+
+<p class="sub" style="margin-top:20px">One-off bookings</p>
+
+<div class="oneoff-list">
+  
+  <div class="oneoff-item">
+    <span class="veh"><span class="dot" style="background:#127a49"></span>Mum <span class="reg">XYZ789</span></span>
+    
+    
+    <span class="when"><span class="nb">Mon 10 Aug, 2:30pm</span> → <span class="nb">Mon 10 Aug, 6:30pm</span> <span class="by">· by a@b.com</span></span>
+    <form hx-post="/permits/7/overrides/3/delete" hx-target="#pbody-7" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
+      <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </form>
+  </div>
+  
+</div>
+
+
+
+
+</div>
+    
+
+<template x-teleport="body">
+
+<div class="modal-wrap" x-show="qrOpen" x-cloak @keydown.escape.window="qrOpen=false"
+     x-effect="qrOpen, $nextTick(() => window.pstonnWake.sync())">
+  <div class="scrim" x-show="qrOpen" x-transition.opacity @click="qrOpen=false"></div>
+  <div class="modal qrmodal" x-show="qrOpen" x-transition>
+    <div class="modal-head"><strong><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Visitor QR</strong>
+      <button type="button" class="icon-btn" @click="qrOpen=false" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div id="qrbody-7" class="qrbody">
+      <p class="empty-note">Getting a code&hellip;</p>
+    </div>
+    <div class="modal-actions">
+      <a href="/guests" class="link-quiet">Other ways to let visitors in &rarr;</a>
+      <button type="button" class="ghost" @click="qrOpen=false">Done</button>
+    </div>
+  </div>
+</div>
+</template>
+
+
+<template x-teleport="body">
+<div class="modal-wrap" x-show="addOpen" x-cloak @keydown.escape.window="addOpen=false" @htmx:after-request="if($event.detail.successful) addOpen=false">
+  <div class="scrim" x-show="addOpen" x-transition.opacity @click="addOpen=false"></div>
+  <div class="modal" x-show="addOpen" x-transition>
+  <div class="modal-head"><strong>Add a one-off booking</strong>
+    <button type="button" class="icon-btn" @click="addOpen=false" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  
+  <p class="empty-note" style="margin:-10px 0 12px">Visitor &middot; on permit now: <span class="reg">ABC123</span></p>
+  
+  <form class="stack" method="post" action="/permits/7/override" data-plate-confirm="plate"
+        hx-post="/permits/7/override" hx-target="#pbody-7" hx-swap="innerHTML"
+        x-init="window.htmx && htmx.process($el)"
+        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
+                 endLabel(offset) {
+                   const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
+                   d.setDate(d.getDate() + offset);
+                   const same = (a, b) => a.toDateString() === b.toDateString();
+                   const today = new Date(), tmw = new Date(); tmw.setDate(tmw.getDate() + 1);
+                   if (same(d, today)) return 'Midnight tonight';
+                   if (same(d, tmw)) return 'Midnight tomorrow night';
+                   return 'Midnight ' + d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
+                 }}">
+    
+    <div class="seg">
+      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved car</button>
+      <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">One-off plate</button>
+    </div>
+    
+    
+    <div class="segpanes">
+      <div class="segpane" :class="{hide: mode!='car'}">
+        <label class="fld">Vehicle
+          <div class="vpick">
+            <input type="hidden" name="vehicle_id" :value="sel">
+            <button type="button" class="vpick-btn" @click="open=!open">
+              <span class="dot" x-show="col" :style="`background:${col}`"></span>
+              <span x-text="lbl || 'Choose a vehicle…'" :class="{'ph': !lbl}"></span>
+              <span class="vpick-caret">▾</span>
+            </button>
+            <div class="vpick-list" x-show="open" x-cloak @click.outside="open=false">
+              
+              <button type="button" class="vopt" data-id="1" data-label="Van (ABC123)" data-color="#2f6feb" @click="sel=$el.dataset.id; lbl=$el.dataset.label; col=$el.dataset.color; open=false"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+              
+            </div>
+          </div>
+        </label>
+        <p class="empty-note" style="margin-top:6px">One of the cars saved on your Vehicles page.</p>
+      </div>
+      <div class="segpane" :class="{hide: mode!='plate'}">
+        <label class="fld">Number plate
+          <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
+        </label>
+        
+        <label class="fld">Registration state
+          <select name="plate_state" class="vstate"><option value="VIC">VIC</option><option value="NSW">NSW</option><option value="SA">SA</option></select>
+        </label>
+        
+        
+        <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
+        
+      </div>
+    </div>
+    
+    <label class="fld">From
+      <div class="dtpair"><input type="date" name="from_date" x-model="fromDate" aria-label="Start date"><input type="time" name="from_time" aria-label="Start time"></div>
+    </label>
+    
+    <label class="fld">Ends
+      
+      <select name="ends" x-model="ends">
+        <option value="day" x-text="endLabel(0)">Midnight tonight</option>
+        <option value="nextday" x-text="endLabel(1)">Midnight tomorrow night</option>
+        <option value="custom">Choose when it ends&hellip;</option>
+        <option value="open">Leave it on until I change it</option>
+      </select>
+    </label>
+    <label class="fld" x-show="ends=='custom'" x-cloak>Ends at
+      <div class="dtpair"><input type="date" name="until_date" aria-label="End date"><input type="time" name="until_time" aria-label="End time"></div>
+    </label>
+    <p class="empty-note" x-show="ends!='open'">Leave "From" blank to start now. <span x-show="ends=='custom'">A date with no time runs to the end of that day.</span></p>
+    <p class="empty-note" x-show="ends=='open'" x-cloak>This booking will keep overriding your weekly roster until you cancel it.</p>
+    <div class="modal-actions">
+      <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
+      
+      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Book</button>
+    </div>
+  </form>
+  </div>
+</div>
+</template>
+
   </section>
   
-  <p class="gcredit">This permit is managed with <a href="/" hx-boost="false">p.stonn</a> — free for City of Stonnington residents.</p>
-</main>
 
+  
+
+  
+  <a class="link-quiet" href="/permits/new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Manage another permit</a>
+  
+  
+  
+  
+  
+  
+  <button class="fab" type="button"
+          data-dispatch="open-oneoff" data-dispatch-permit="7"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="fab-label">Add one-off booking</span></button>
+  
+  
+  
+
+
+
+</main>
 
 
 

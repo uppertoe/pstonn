@@ -53,7 +53,7 @@ func TestMuxRoutesByAccountTenant(t *testing.T) {
 	}
 	// A write from a goes to othertown's portal, not stonnington's.
 	perm := model.Permit{CouncilPermitID: "90001"}
-	if err := m.SetVehicle(ctx, "a@example.com", perm, "AAA111"); err != nil {
+	if err := m.SetVehicle(ctx, "a@example.com", perm, "AAA111", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := fakes["othertown"].Current("90001"); got != "AAA111" {
@@ -125,7 +125,7 @@ func TestMuxTenantIsolationAcrossASwitch(t *testing.T) {
 		t.Fatal("both tenant sessions should be linked")
 	}
 	// The permit still routes to ITS tenant, not the selected one.
-	if err := m.SetVehicle(ctx, o, perm, "AAA111"); err != nil {
+	if err := m.SetVehicle(ctx, o, perm, "AAA111", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := fakes["stonnington"].Current("90001"); got != "AAA111" {
@@ -135,7 +135,7 @@ func TestMuxTenantIsolationAcrossASwitch(t *testing.T) {
 		t.Fatal("the write reached the selected tenant instead of the permit's")
 	}
 	other, _ := m.Client("othertown")
-	if err := other.SetVehicle(ctx, o, perm, "BBB222"); !errors.Is(err, parking.ErrNotLinked) {
+	if err := other.SetVehicle(ctx, o, perm, "BBB222", ""); !errors.Is(err, parking.ErrNotLinked) {
 		t.Fatalf("other tenant's client acted on a foreign permit: %v", err)
 	}
 	_ = st.SetAccountTenant(ctx, "ghost@example.com", "gone")

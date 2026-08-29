@@ -56,8 +56,25 @@ type Permit struct {
 // Vehicle is what is on a permit right now. Registration "" means the permit
 // genuinely has no vehicle (a provider must not report "" for a shape it did not
 // understand — that is FailUnexpected).
+//
+// Region is the vehicle's registration jurisdiction as a provider-agnostic CODE
+// (for an Australian portal, a state code like "NSW"), from the provider's
+// Capabilities().Regions set. "" means unspecified: on a write the provider
+// chooses — its tenant default, or the state already on the permit — exactly as
+// it did before regions existed. The core never sees the provider's own id for a
+// region; the connector maps the code to and from its wire value.
 type Vehicle struct {
 	Registration string
+	Region       string
+}
+
+// Region is one selectable registration jurisdiction a provider offers, so the UI
+// can render a chooser without knowing any portal's ids. Code is the stable token
+// the core stores and passes back on Vehicle.Region ("NSW"); Label is how to name
+// it to a person ("NSW"). A provider with no such concept declares none.
+type Region struct {
+	Code  string
+	Label string
 }
 
 // Capabilities declares what a provider supports, so the core can adapt rather
@@ -77,6 +94,11 @@ type Capabilities struct {
 	SupportsExpiry bool
 	// LoginKind names the credential shape: "password" (username + password).
 	LoginKind string
+	// Regions are the registration jurisdictions this provider lets a vehicle carry
+	// (an Australian portal: the states). Empty means the provider has no such
+	// concept and the UI shows no chooser. The first entry, if any, is the tenant's
+	// own/default region — what an unspecified Vehicle.Region resolves to.
+	Regions []Region
 }
 
 // Provider is one permit backend. Implementations must be safe for concurrent use;
@@ -97,7 +119,10 @@ type Provider interface {
 	// it holds; len(permits) < total means the list is a page, not the account.
 	ListPermits(ctx context.Context, s *Session) (permits []Permit, total int, err error)
 	CurrentVehicle(ctx context.Context, s *Session, p PermitRef) (Vehicle, error)
-	SetVehicle(ctx context.Context, s *Session, p PermitRef, registration string) error
+	// SetVehicle puts v.Registration on the permit. v.Region (a code from
+	// Capabilities().Regions, or "") selects the registration jurisdiction; "" lets
+	// the provider keep its prior/default behaviour.
+	SetVehicle(ctx context.Context, s *Session, p PermitRef, v Vehicle) error
 	ClearVehicle(ctx context.Context, s *Session, p PermitRef) error
 }
 

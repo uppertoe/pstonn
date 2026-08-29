@@ -16,6 +16,7 @@ type Vehicle struct {
 	Label        string // human name, e.g. "Mum's Corolla"
 	Email        string // optional: who drives this car (default guest-pass recipient)
 	Color        string // stable per-plate colour (hex), the at-a-glance cue
+	State        string // registration state code (e.g. "NSW"); "" = the tenant's home state
 }
 
 // Permit is a tenant visitor permit that holds one active vehicle at a time.
@@ -144,6 +145,7 @@ type Override struct {
 	PermitID     int64
 	VehicleID    int64  // 0 for an ad-hoc plate (Registration set instead)
 	Registration string // literal one-off plate, not a saved vehicle ("" = use VehicleID)
+	State        string // registration state code for an ad-hoc plate ("" = tenant home state; unused when VehicleID set)
 	StartsAt     time.Time
 	EndsAt       *time.Time
 	CreatedBy    string
@@ -164,6 +166,7 @@ const (
 type Resolution struct {
 	VehicleID    int64
 	Registration string
+	State        string // ad-hoc one-off plate's state code ("" for a saved-vehicle or roster resolution)
 	Source       Source
 	By           string // creator of the winning override ("" for roster/none)
 
@@ -228,7 +231,7 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 			since, scheduled = best.StartsAt, true
 		}
 		return Resolution{
-			VehicleID: best.VehicleID, Registration: best.Registration,
+			VehicleID: best.VehicleID, Registration: best.Registration, State: best.State,
 			Source: SourceOverride, By: best.CreatedBy,
 			Since: since, Scheduled: scheduled, Until: best.EndsAt,
 		}
@@ -325,6 +328,7 @@ type VehicleInfo struct {
 	Registration string
 	Label        string
 	Email        string
+	State        string // registration state code ("" = tenant home state)
 }
 
 // DisplacedBooking is the outcome of FindDisplaced. Reg == "" means no live

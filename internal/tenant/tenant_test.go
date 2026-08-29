@@ -26,8 +26,8 @@ func TestStonningtonPolicy(t *testing.T) {
 			t.Errorf("IsResident(%q) = %v, want %v", c.typ, got, c.resident)
 		}
 	}
-	if pol.DefaultVehicleState != "1" {
-		t.Errorf("DefaultVehicleState = %q, want VIC (1)", pol.DefaultVehicleState)
+	if pol.HomeState != "VIC" {
+		t.Errorf("HomeState = %q, want VIC", pol.HomeState)
 	}
 	// Under fallback a changeable resident permit is still never schedulable.
 	res := parking.PermitInfo{PermitType: "(A) 1st Resident Permit", CanChangeVehicle: true}

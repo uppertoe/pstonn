@@ -57,6 +57,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			tenantLabel = func(p model.Permit) string { return s.tenantOfPermit(ctx, p).Name }
 		}
 	}
+	regions := s.tenant.Regions(ctx, owner)
 	var pvs []permitView
 	var expired []expiredPermitView
 	for _, p := range managed {
@@ -73,9 +74,11 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		}
 		pv.IsPrimary = base.IsPrimary
 		pv.Tenant = tenantLabel(p)
+		pv.Regions = regions
 		pvs = append(pvs, pv)
 	}
 	base.Vehicles = vviews
+	base.Regions = regions
 	// Only consulted when the garage is empty (the banner's only trigger), so
 	// the extra query is skipped for every set-up household.
 	if len(vviews) == 0 {
@@ -98,8 +101,10 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			base.ShowShareHint = true
 		}
 	}
-	// The home-screen tip waits for the first successful apply: the household has
-	// something worth glancing at, and the tip lands as a reward rather than a chore.
+	// The home-screen tip waits for the first successful apply: it drip-feeds the
+	// setup information rather than piling every tip on at once, and by then the
+	// household has something worth glancing at, so it lands as a reward rather than
+	// a chore.
 	if len(pvs) > 0 {
 		if n, cerr := s.store.CountSuccessfulApplies(ctx, owner); cerr == nil && n > 0 {
 			base.ShowInstallHint = true
@@ -413,9 +418,13 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// Offer "take the car off" only in the lingering-plate state: a plate is on
 		// the permit but nothing is scheduled for now, so the scheduler won't clear
 		// or replace it. With a schedule covering now, a clear would be re-applied.
-		CanClear:        res.Source == model.SourceNone && p.ActiveRegistration != "",
-		ShowSetupNudge:  nudge,
-		Detail:          permitDetail(p),
+		CanClear:       res.Source == model.SourceNone && p.ActiveRegistration != "",
+		ShowSetupNudge: nudge,
+		Detail:         permitDetail(p),
+		// Still on the default name the picker assigned (the permit number, or blank):
+		// a friendly name makes it far easier to tell apart in a multi-permit household,
+		// so a gentle one-time nudge is shown until they set one.
+		Unnamed:         p.Label == "" || p.Label == p.PermitNumber,
 		PlateRefreshing: plateRefreshing,
 		Applying:        applying,
 		// The honesty clock must survive a reload: PlateUnconfirmed used to be
@@ -639,6 +648,12 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// the booking (audit), even though the permit belongs to the shared account.
 	plate := normalizeReg(r.FormValue("plate"))
 	vehicleID := atoi64(r.FormValue("vehicle_id"))
+	// A one-off plate carries its own registration state; a saved-vehicle booking
+	// takes the vehicle's. Only a code the tenant offers is kept ("" = home state).
+	plateState := strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
+	if plateState != "" && !s.tenant.RegionValid(r.Context(), owner, plateState) {
+		plateState = ""
+	}
 	// Cap simultaneously-live bookings per permit, atomically (count+insert in one tx),
 	// so the never-pruned, hot-path override table can't grow without bound — walked on
 	// every dashboard render and reconcile pass. A ceiling a real household never hits.
@@ -655,7 +670,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 			s.formError(w, r, plateFormatMsg)
 			return
 		}
-		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, 0, plate, startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
+		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, 0, plate, plateState, startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
 			if !overLimit(err) {
 				s.serverError(w, err)
 			}
@@ -665,7 +680,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		if !s.ownsVehicle(w, r, owner, vehicleID) {
 			return
 		}
-		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, vehicleID, "", startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
+		if _, err := s.store.CreateOverrideCapped(r.Context(), p.ID, vehicleID, "", "", startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
 			if !overLimit(err) {
 				s.serverError(w, err)
 			}

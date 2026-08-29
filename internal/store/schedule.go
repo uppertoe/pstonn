@@ -125,8 +125,8 @@ SELECT ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?`, dstID, srcI
 		return 0, err
 	}
 	ores, err := tx.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at)
-SELECT ?, vehicle_id, registration, starts_at, ends_at, created_by, created_at
+INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at)
+SELECT ?, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at
 FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
 		dstID, srcID, nowStr)
 	if err != nil {
@@ -156,7 +156,7 @@ var ErrOverrideLimit = errors.New("store: permit has too many live overrides")
 // otherwise releases the single connection between them). A non-zero vehicleID uses a
 // saved vehicle; vehicleID 0 with a non-empty registration is a one-off plate. Returns
 // ErrOverrideLimit when full.
-func (s *Store) CreateOverrideCapped(ctx context.Context, permitID, vehicleID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, limit int) (int64, error) {
+func (s *Store) CreateOverrideCapped(ctx context.Context, permitID, vehicleID int64, registration, state string, startsAt time.Time, endsAt *time.Time, createdBy string, limit int) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -174,11 +174,12 @@ func (s *Store) CreateOverrideCapped(ctx context.Context, permitID, vehicleID in
 	var vid any // NULL for a plate booking
 	if vehicleID != 0 {
 		vid = vehicleID
+		state = "" // a saved-vehicle override takes its state from the vehicle, not the row
 	}
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-		permitID, vid, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
+INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		permitID, vid, registration, state, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
 	if err != nil {
 		return 0, err
 	}
@@ -195,7 +196,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
 // CreateGuestOverride is CreateOverride tagged with the guest link that made it,
 // so a guest's revert can remove exactly their own changes.
 func (s *Store) CreateGuestOverride(ctx context.Context, permitID, vehicleID int64, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
-	return s.createOverrideGuarded(ctx, permitID, vehicleID, "", startsAt, endsAt, createdBy, guestTokenID)
+	return s.createOverrideGuarded(ctx, permitID, vehicleID, "", "", startsAt, endsAt, createdBy, guestTokenID)
 }
 
 // createOverrideGuarded inserts a guest-created override only if that guest link is
@@ -210,10 +211,11 @@ func (s *Store) CreateGuestOverride(ctx context.Context, permitID, vehicleID int
 // off", and then this insert lands anyway. Nothing joins guest_token when resolving a
 // permit's target, so that orphan then steers the permit until its window ends (up to
 // ~2 days with the overnight box): the user's explicit revocation, silently undone.
-func (s *Store) createOverrideGuarded(ctx context.Context, permitID, vehicleID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
+func (s *Store) createOverrideGuarded(ctx context.Context, permitID, vehicleID int64, registration, state string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
 	var vid any // NULL for a plate booking
 	if vehicleID != 0 {
 		vid = vehicleID
+		state = "" // a saved-vehicle override takes its state from the vehicle, not the row
 	}
 	// The liveness EXISTS applies ONLY to real guest creates: guest_token_id 0 is a
 	// member-created override (CreateOverride delegates here), which has no token to
@@ -224,8 +226,8 @@ func (s *Store) createOverrideGuarded(ctx context.Context, permitID, vehicleID i
 	// owner path (CreateOverrideCapped) counts all rows against the larger overall cap,
 	// so the sub-cap always leaves room for the owner.
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
-SELECT ?, ?, ?, ?, ?, ?, ?, ?
+INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
 WHERE (? = 0 OR EXISTS (
         SELECT 1 FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
         WHERE t.id = ? AND t.revoked_at = '' AND g.enabled = 1))
@@ -233,7 +235,7 @@ WHERE (? = 0 OR EXISTS (
        WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)) < ?
   AND (? = 0 OR (SELECT COUNT(*) FROM override
        WHERE permit_id = ? AND guest_token_id != 0 AND (ends_at IS NULL OR ends_at > ?)) < ?)`,
-		permitID, vid, registration, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID,
+		permitID, vid, registration, state, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), guestTokenID,
 		guestTokenID, guestTokenID, permitID, nowUTC(), MaxLiveOverridesPerPermit,
 		guestTokenID, permitID, nowUTC(), MaxLiveGuestOverridesPerPermit)
 	if err != nil {
@@ -268,14 +270,15 @@ const MaxLiveGuestOverridesPerPermit = 20
 
 // CreatePlateOverride books a one-off using a literal, unsaved number plate
 // (vehicle_id IS NULL). The plate is normalised by the caller.
-func (s *Store) CreatePlateOverride(ctx context.Context, permitID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {
-	return s.CreateGuestPlateOverride(ctx, permitID, registration, startsAt, endsAt, createdBy, 0)
+func (s *Store) CreatePlateOverride(ctx context.Context, permitID int64, registration, state string, startsAt time.Time, endsAt *time.Time, createdBy string) (int64, error) {
+	return s.CreateGuestPlateOverride(ctx, permitID, registration, state, startsAt, endsAt, createdBy, 0)
 }
 
 // CreateGuestPlateOverride is CreatePlateOverride tagged with the guest link
-// that made it (see CreateGuestOverride).
-func (s *Store) CreateGuestPlateOverride(ctx context.Context, permitID int64, registration string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
-	return s.createOverrideGuarded(ctx, permitID, 0, registration, startsAt, endsAt, createdBy, guestTokenID)
+// that made it (see CreateGuestOverride). state is the plate's registration state
+// code ("" = the tenant's home state).
+func (s *Store) CreateGuestPlateOverride(ctx context.Context, permitID int64, registration, state string, startsAt time.Time, endsAt *time.Time, createdBy string, guestTokenID int64) (int64, error) {
+	return s.createOverrideGuarded(ctx, permitID, 0, registration, state, startsAt, endsAt, createdBy, guestTokenID)
 }
 
 // DeleteGuestOverrides removes every override a guest link created on a permit
@@ -303,7 +306,7 @@ func endsAtSQL(endsAt *time.Time) sql.NullString {
 func (s *Store) ListOverrides(ctx context.Context, permitID int64, now time.Time) ([]model.Override, error) {
 	nowStr := now.UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at
+SELECT id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at
 FROM override
 WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)
 ORDER BY starts_at ASC`, permitID, nowStr)
@@ -317,7 +320,7 @@ ORDER BY starts_at ASC`, permitID, nowStr)
 		var starts, created string
 		var ends sql.NullString
 		var vid sql.NullInt64
-		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &starts, &ends, &o.CreatedBy, &created); err != nil {
+		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &o.State, &starts, &ends, &o.CreatedBy, &created); err != nil {
 			return nil, err
 		}
 		o.VehicleID = vid.Int64 // 0 when NULL (an ad-hoc plate)

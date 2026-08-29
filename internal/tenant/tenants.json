@@ -20,7 +20,7 @@
       "policy": {
         "visitor_word": "visitor",
         "resident_word": "resident",
-        "default_vehicle_state": "1"
+        "home_state": "VIC"
       },
       "links": {
         "portal": "https://parkingpermits.stonnington.vic.gov.au/",

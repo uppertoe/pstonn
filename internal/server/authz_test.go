@@ -102,7 +102,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	if err := s.store.AcceptInvite(ctx, secondary, owner); err != nil {
 		t.Fatal(err)
 	}
-	vehID, err := s.store.CreateVehicle(ctx, owner, "OWN111", "Owner car")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "OWN111", "Owner car", "")
 	if err != nil {
 		t.Fatal(err)
 	}

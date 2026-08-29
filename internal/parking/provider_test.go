@@ -62,10 +62,14 @@ func (p *stubProvider) CurrentVehicle(ctx context.Context, s *provider.Session, 
 	}
 	return provider.Vehicle{Registration: "AAA111"}, nil
 }
-func (p *stubProvider) SetVehicle(ctx context.Context, s *provider.Session, r provider.PermitRef, reg string) error {
-	p.calls = append(p.calls, "set:"+reg)
+func (p *stubProvider) SetVehicle(ctx context.Context, s *provider.Session, r provider.PermitRef, v provider.Vehicle) error {
+	call := "set:" + v.Registration
+	if v.Region != "" {
+		call += "@" + v.Region
+	}
+	p.calls = append(p.calls, call)
 	if p.set != nil {
-		return p.set(s, reg)
+		return p.set(s, v.Registration)
 	}
 	return nil
 }
@@ -290,7 +294,7 @@ func TestFakeProviderEndToEnd(t *testing.T) {
 		t.Fatalf("list: %d complete=%v err=%v", len(ps), complete, err)
 	}
 	perm := model.Permit{CouncilPermitID: ps[0].CouncilPermitID}
-	if err := c.SetVehicle(ctx, owner, perm, "NEW123"); err != nil {
+	if err := c.SetVehicle(ctx, owner, perm, "NEW123", ""); err != nil {
 		t.Fatalf("SetVehicle = %v", err)
 	}
 	if reg, err := c.CurrentVehicle(ctx, owner, perm); err != nil || reg != "NEW123" {
@@ -308,12 +312,12 @@ func TestFakeProviderEndToEnd(t *testing.T) {
 	// A delayed fake reports transient until the change lands — the pipeline the
 	// sandbox exists to exercise.
 	f.ApplyDelay = 50 * time.Millisecond
-	err = c.SetVehicle(ctx, owner, perm, "LATER1")
+	err = c.SetVehicle(ctx, owner, perm, "LATER1", "")
 	if kind, _ := FailureOf(err); err == nil || kind != FailTransient {
 		t.Fatalf("delayed write = %v (kind %v), want a transient", err, kind)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := c.SetVehicle(ctx, owner, perm, "LATER1"); err != nil {
+	if err := c.SetVehicle(ctx, owner, perm, "LATER1", ""); err != nil {
 		t.Fatalf("after landing, SetVehicle = %v, want nil", err)
 	}
 }

@@ -241,7 +241,7 @@ func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
 	// differs from the target so the no-op short-circuit does not hide it.
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"maxVehicles":1,"canEditOrDeleteVehicle":true,` +
 		`"permitVehicles":[{"RegistrationNumber":"AAA111","FKVehicleStateID":"1"}]}`)
-	err := c.SetVehicle(context.Background(), owner, p, "BBB222")
+	err := c.SetVehicle(context.Background(), owner, p, "BBB222", "")
 	if err == nil {
 		t.Fatal("a managed vehicle with no PKPermitVehicleDetailID must not be written to")
 	}

@@ -40,6 +40,42 @@ import (
 // ID is the connector name a tenant descriptor refers to.
 const ID = "orikan-ssp"
 
+// auState is one Australian registration state as the portal enumerates it. The
+// FKVehicleStateID tokens are an Orikan-wide constant (confirmed live against the
+// GET /permits/vehicleStates lookup on 2026-08-29: VIC=1 ACT=2 NSW=3 WA=4 TAS=5
+// QLD=6 SA=7 NT=8), so the connector carries the code↔token map rather than
+// fetching it per tenant. The app stores the CODE; only this file knows the token.
+type auState struct {
+	Code  string
+	Token string
+}
+
+var auStates = []auState{
+	{"VIC", "1"}, {"ACT", "2"}, {"NSW", "3"}, {"WA", "4"},
+	{"TAS", "5"}, {"QLD", "6"}, {"SA", "7"}, {"NT", "8"},
+}
+
+// regionToken maps a state code (case-insensitive) to its portal token; ok is
+// false for a code the portal does not enumerate.
+func regionToken(code string) (token string, ok bool) {
+	for _, s := range auStates {
+		if strings.EqualFold(s.Code, code) {
+			return s.Token, true
+		}
+	}
+	return "", false
+}
+
+// tokenRegion maps a portal token back to a state code ("" if unrecognised).
+func tokenRegion(token string) string {
+	for _, s := range auStates {
+		if s.Token == token {
+			return s.Code
+		}
+	}
+	return ""
+}
+
 // Config parameterises one tenant of the portal.
 type Config struct {
 	Issuer      string   // …/idm
@@ -47,26 +83,27 @@ type Config struct {
 	ClientID    string   // the public SPA client, no secret
 	RedirectURI string   // that client's REGISTERED callback; the code is read off the 302
 	Scopes      []string // no offline_access — the client rejects it
-	// DefaultVehicleState is the portal's vehicle-state id written when a plate is
-	// added without a prior state to copy (the tenant's own state: VIC=1). Empty
-	// falls back to VIC.
-	DefaultVehicleState string
+	// HomeState is the tenant's own registration state as a CODE (e.g. "VIC"),
+	// written when a plate carries no state of its own. Empty or unrecognised falls
+	// back to VIC.
+	HomeState string
 }
 
 // Client is the provider. Safe for concurrent use; sessions are never shared
 // between concurrent calls by the generic client.
 type Client struct {
-	clientID     string
-	redirectURI  string
-	scope        string
-	authURL      string
-	tokenURL     string
-	loginURL     string
-	apiBase      string
-	origin       string
-	vehicleState string
-	http         *http.Client      // redirects handled manually; cookies passed per call
-	transport    http.RoundTripper // the governed/counted base, shared with the login-flow client
+	clientID    string
+	redirectURI string
+	scope       string
+	authURL     string
+	tokenURL    string
+	loginURL    string
+	apiBase     string
+	origin      string
+	homeCode    string            // the tenant's own state, as a code ("VIC")
+	homeToken   string            // that state's portal FKVehicleStateID ("1")
+	http        *http.Client      // redirects handled manually; cookies passed per call
+	transport   http.RoundTripper // the governed/counted base, shared with the login-flow client
 }
 
 // New builds the provider. base is the transport the generic client governs and
@@ -77,22 +114,24 @@ func New(cfg Config, base http.RoundTripper) *Client {
 	}
 	issuer := strings.TrimRight(cfg.Issuer, "/")
 	apiBase := strings.TrimRight(cfg.APIBase, "/")
-	state := cfg.DefaultVehicleState
-	if state == "" {
-		state = "1" // VIC
+	homeCode := strings.ToUpper(strings.TrimSpace(cfg.HomeState))
+	homeToken, ok := regionToken(homeCode)
+	if !ok {
+		homeCode, homeToken = "VIC", "1"
 	}
 	tr := identityTransport{base: base}
 	return &Client{
-		clientID:     cfg.ClientID,
-		redirectURI:  cfg.RedirectURI,
-		scope:        strings.Join(cfg.Scopes, " "),
-		authURL:      issuer + "/connect/authorize",
-		tokenURL:     issuer + "/connect/token",
-		loginURL:     issuer + "/Account/Login",
-		apiBase:      apiBase,
-		origin:       originOf(issuer, apiBase),
-		vehicleState: state,
-		transport:    tr,
+		clientID:    cfg.ClientID,
+		redirectURI: cfg.RedirectURI,
+		scope:       strings.Join(cfg.Scopes, " "),
+		authURL:     issuer + "/connect/authorize",
+		tokenURL:    issuer + "/connect/token",
+		loginURL:    issuer + "/Account/Login",
+		apiBase:     apiBase,
+		origin:      originOf(issuer, apiBase),
+		homeCode:    homeCode,
+		homeToken:   homeToken,
+		transport:   tr,
 		http: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: tr,
@@ -115,7 +154,40 @@ func (c *Client) Capabilities() provider.Capabilities {
 		IdleWindow:     10 * time.Hour,
 		SupportsExpiry: true,
 		LoginKind:      "password",
+		Regions:        c.regions(),
 	}
+}
+
+// regions is the AU state set the UI offers, ordered with the tenant's own state
+// first (the contract's "first entry is the default").
+func (c *Client) regions() []provider.Region {
+	out := make([]provider.Region, 0, len(auStates))
+	out = append(out, provider.Region{Code: c.homeCode, Label: c.homeCode})
+	for _, s := range auStates {
+		if !strings.EqualFold(s.Code, c.homeCode) {
+			out = append(out, provider.Region{Code: s.Code, Label: s.Code})
+		}
+	}
+	return out
+}
+
+// writeToken resolves the FKVehicleStateID to POST for a plate carrying region
+// code. An empty code means "no state of its own": prior is the state already on
+// the permit (edit) or "" (add), and either way falls back to the tenant home. An
+// unrecognised code (should not happen — the UI only offers regions()) also falls
+// back to home rather than sending a token the portal would reject.
+func (c *Client) writeToken(region, prior string) string {
+	if region != "" {
+		if tok, ok := regionToken(region); ok {
+			return tok
+		}
+		log.Printf("orikan: unknown vehicle-state code %q; writing tenant home state %q", region, c.homeCode)
+		return c.homeToken
+	}
+	if prior != "" {
+		return prior
+	}
+	return c.homeToken
 }
 
 // originOf returns the scheme://host to use as the browser Origin/Referer for
@@ -868,38 +940,41 @@ func (c *Client) CurrentVehicle(ctx context.Context, s *provider.Session, p prov
 	if err != nil {
 		return provider.Vehicle{}, err
 	}
-	reg, err := c.currentVehicle(ctx, ss, p, provider.OpReadVehicle)
+	reg, stateToken, err := c.currentVehicle(ctx, ss, p, provider.OpReadVehicle)
 	if serr := save(s, ss); serr != nil && err == nil {
 		err = serr
 	}
-	return provider.Vehicle{Registration: reg}, err
+	return provider.Vehicle{Registration: reg, Region: tokenRegion(stateToken)}, err
 }
 
-func (c *Client) currentVehicle(ctx context.Context, ss *session, p provider.PermitRef, op provider.Op) (string, error) {
+// currentVehicle returns the plate on the permit and its state token ("" for a
+// genuinely empty permit). The token is the portal's FKVehicleStateID; callers
+// that only need the plate ignore it.
+func (c *Client) currentVehicle(ctx context.Context, ss *session, p provider.PermitRef, op provider.Op) (reg, stateToken string, err error) {
 	mv, err := c.managedVehicle(ctx, ss, p, op)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(mv.PermitVehicles) == 0 {
 		if !mv.emptyIsCredible() {
-			return "", provider.Fail(provider.FailUnexpected, op, errVehicleShape(mv))
+			return "", "", provider.Fail(provider.FailUnexpected, op, errVehicleShape(mv))
 		}
-		return "", nil
+		return "", "", nil
 	}
 	if len(mv.PermitVehicles) != 1 {
 		// The visitor-permit model is one managed vehicle per permit. More than one is
 		// an unexpected shape: reading (or later editing) only [0] could act on the
 		// wrong record, so refuse rather than guess.
-		return "", provider.Fail(provider.FailUnexpected, op,
+		return "", "", provider.Fail(provider.FailUnexpected, op,
 			fmt.Errorf("expected exactly one managed vehicle, got %d: API shape change?", len(mv.PermitVehicles)))
 	}
 	if strings.TrimSpace(mv.PermitVehicles[0].RegistrationNumber) == "" {
 		// A PRESENT vehicle record with a blank plate is not "no vehicle": returning ""
 		// would report an uncorroborated clearing.
-		return "", provider.Fail(provider.FailUnexpected, op,
+		return "", "", provider.Fail(provider.FailUnexpected, op,
 			errors.New("a managed vehicle record has an empty registration: API shape change?"))
 	}
-	return mv.PermitVehicles[0].RegistrationNumber, nil
+	return mv.PermitVehicles[0].RegistrationNumber, mv.PermitVehicles[0].FKVehicleStateID, nil
 }
 
 // SetVehicle reallocates the permit to the given registration, the core action.
@@ -911,19 +986,19 @@ func (c *Client) currentVehicle(ctx context.Context, ss *session, p provider.Per
 // freshly granted permit). Success is any 2xx with an empty body, which says
 // nothing about the resulting state — so the change is confirmed by re-reading the
 // portal's own record before success is reported.
-func (c *Client) SetVehicle(ctx context.Context, s *provider.Session, p provider.PermitRef, registration string) error {
+func (c *Client) SetVehicle(ctx context.Context, s *provider.Session, p provider.PermitRef, v provider.Vehicle) error {
 	ss, err := load(s)
 	if err != nil {
 		return err
 	}
-	err = c.setVehicle(ctx, ss, p, registration)
+	err = c.setVehicle(ctx, ss, p, v.Registration, v.Region)
 	if serr := save(s, ss); serr != nil && err == nil {
 		err = serr
 	}
 	return err
 }
 
-func (c *Client) setVehicle(ctx context.Context, ss *session, p provider.PermitRef, registration string) error {
+func (c *Client) setVehicle(ctx context.Context, ss *session, p provider.PermitRef, registration, region string) error {
 	const op = provider.OpSetVehicle
 	mv, err := c.managedVehicle(ctx, ss, p, op)
 	if err != nil {
@@ -940,7 +1015,7 @@ func (c *Client) setVehicle(ctx context.Context, ss *session, p provider.PermitR
 		if !*mv.CanAddVehicle {
 			return provider.Fail(provider.FailRejected, op, errors.New("the portal does not allow adding a vehicle to this permit"))
 		}
-		return c.addVehicle(ctx, ss, p, registration)
+		return c.addVehicle(ctx, ss, p, registration, region)
 	}
 	if mv.CanEditOrDeleteVehicle == nil {
 		return provider.Fail(provider.FailUnexpected, op, errors.New("response has no canEditOrDeleteVehicle field: API shape change?"))
@@ -959,18 +1034,19 @@ func (c *Client) setVehicle(ctx context.Context, ss *session, p provider.PermitR
 	if strings.TrimSpace(cur.PKPermitVehicleDetailID.String()) == "" {
 		return provider.Fail(provider.FailUnexpected, op, errors.New("managed vehicle has no PKPermitVehicleDetailID: API shape change?"))
 	}
-	if model.SamePlate(cur.RegistrationNumber, registration) {
-		return nil // already allocated; the read above IS the confirmation
+	// The desired state: an explicit region wins; otherwise keep the state already
+	// on the permit, falling back to the tenant home. A same-plate write is skipped
+	// only when the state is ALSO already what we want — so correcting just the state
+	// on an already-active plate is still applied.
+	state := c.writeToken(region, cur.FKVehicleStateID)
+	if model.SamePlate(cur.RegistrationNumber, registration) && state == cur.FKVehicleStateID {
+		return nil // plate and state already as desired; the read above IS the confirmation
 	}
 	permitID, err := strconv.ParseInt(p.ID, 10, 64)
 	if err != nil {
 		return provider.Fail(provider.FailRejected, op, fmt.Errorf("invalid permit id %q", p.ID))
 	}
 	detailID := cur.PKPermitVehicleDetailID.String()
-	state := cur.FKVehicleStateID
-	if state == "" {
-		state = c.vehicleState
-	}
 	reqBody := manageVehicleReq{
 		PKPermitID:          permitID,
 		SelectedVehicle:     detailID,
@@ -1009,7 +1085,7 @@ func (c *Client) postManage(ctx context.Context, ss *session, reqBody manageVehi
 // refusal (act-now notice), an unreadable confirm is transient (retry).
 // registration "" means "expect the permit empty" (the clear path).
 func (c *Client) confirmWrite(ctx context.Context, ss *session, p provider.PermitRef, registration string, op provider.Op) error {
-	confirmed, err := c.currentVehicle(ctx, ss, p, op)
+	confirmed, _, err := c.currentVehicle(ctx, ss, p, op)
 	if err != nil {
 		return provider.Fail(provider.FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
 	}
@@ -1023,7 +1099,7 @@ func (c *Client) confirmWrite(ctx context.Context, ss *session, p provider.Permi
 // portal's "add" action, distinct from "edit". Captured live 2026-08-23 against an
 // empty permit: VehicleActionOption "add", an empty SelectedVehicle, and a Vehicle
 // with no prior detail id / change-set (the portal assigns a fresh one).
-func (c *Client) addVehicle(ctx context.Context, ss *session, p provider.PermitRef, registration string) error {
+func (c *Client) addVehicle(ctx context.Context, ss *session, p provider.PermitRef, registration, region string) error {
 	const op = provider.OpAddVehicle
 	permitID, err := strconv.ParseInt(p.ID, 10, 64)
 	if err != nil {
@@ -1036,8 +1112,8 @@ func (c *Client) addVehicle(ctx context.Context, ss *session, p provider.PermitR
 		Vehicle: manageVehicleV{
 			ChangeSetID:             "",
 			FKPermitID:              permitID,
-			FKVehicleStateID:        c.vehicleState, // a bare-plate add carries no prior state
-			PKPermitVehicleDetailID: "",             // new record — the portal assigns the id
+			FKVehicleStateID:        c.writeToken(region, ""), // a bare-plate add carries no prior state
+			PKPermitVehicleDetailID: "",                       // new record — the portal assigns the id
 			RegisteredAtAddress:     false,
 			RegistrationNumber:      registration,
 		},
@@ -1089,7 +1165,7 @@ func (c *Client) clearVehicle(ctx context.Context, ss *session, p provider.Permi
 	}
 	state := cur.FKVehicleStateID
 	if state == "" {
-		state = c.vehicleState
+		state = c.homeToken
 	}
 	reqBody := manageVehicleReq{
 		PKPermitID:          permitID,

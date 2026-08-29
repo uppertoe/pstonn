@@ -299,7 +299,7 @@ func TestLiveSetVehicle(t *testing.T) {
 	}
 	t.Logf("before: %q", before)
 
-	if err := c.SetVehicle(ctx, owner, permit, rego); err != nil {
+	if err := c.SetVehicle(ctx, owner, permit, rego, ""); err != nil {
 		t.Fatalf("SetVehicle(%q): %v", rego, err)
 	}
 	after, err := c.CurrentVehicle(ctx, owner, permit)

@@ -489,7 +489,7 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 			t.Fatalf("seed permit %d: %v", i, err)
 		}
 		plate := fmt.Sprintf("NEW%03d", i%1000)
-		vid, err := st.CreateVehicle(ctx, owner, plate, "car")
+		vid, err := st.CreateVehicle(ctx, owner, plate, "car", "")
 		if err != nil {
 			t.Fatalf("seed vehicle %d: %v", i, err)
 		}

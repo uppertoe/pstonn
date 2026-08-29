@@ -26,7 +26,7 @@ func TestEnrichRoster(t *testing.T) {
 	}
 	for wd := time.Sunday; wd <= time.Saturday; wd++ {
 		vid, verr := s.store.CreateVehicle(ctx, "scheduled@example.com",
-			"CAR"+string(rune('0'+wd)), wd.String())
+			"CAR"+string(rune('0'+wd)), wd.String(), "")
 		if verr != nil {
 			t.Fatal(verr)
 		}

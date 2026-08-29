@@ -43,7 +43,7 @@ func TestOnboardNudgeCandidates(t *testing.T) {
 	// Saved vehicles must NOT exclude — adding cars then failing at the tenant
 	// password is exactly the stall the email unsticks.
 	consentAt(t, s, "cars-only@example.com", twoDaysAgo)
-	if _, err := s.CreateVehicle(ctx, "cars-only@example.com", "AAA111", "car"); err != nil {
+	if _, err := s.CreateVehicle(ctx, "cars-only@example.com", "AAA111", "car", ""); err != nil {
 		t.Fatal(err)
 	}
 

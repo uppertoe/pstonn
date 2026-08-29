@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS vehicle (
     registration TEXT NOT NULL DEFAULT '',
     label        TEXT NOT NULL DEFAULT '',
     color        TEXT NOT NULL DEFAULT '',   -- stable per-plate colour, assigned at creation
+    state        TEXT NOT NULL DEFAULT '',   -- registration state code ("NSW"); '' = tenant home state
     created_at   TEXT NOT NULL,
     UNIQUE(owner, registration)
 );
@@ -201,6 +202,7 @@ CREATE TABLE IF NOT EXISTS override (
     permit_id      INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
     vehicle_id     INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,  -- NULL for an ad-hoc plate
     registration   TEXT NOT NULL DEFAULT '',   -- literal plate used when vehicle_id IS NULL (not a saved car)
+    state          TEXT NOT NULL DEFAULT '',   -- ad-hoc plate's registration state code ('' = tenant home state)
     starts_at      TEXT NOT NULL,              -- RFC3339 UTC
     ends_at        TEXT,                       -- RFC3339 UTC, NULL = open-ended
     created_by     TEXT NOT NULL DEFAULT '',
@@ -453,6 +455,8 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		`ALTER TABLE notify_pref ADD COLUMN quiet_until INTEGER NOT NULL DEFAULT 6`,
 		`ALTER TABLE vehicle ADD COLUMN color TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vehicle ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE override ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN on_screen INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_grant ADD COLUMN request_only INTEGER NOT NULL DEFAULT 0`,
@@ -662,14 +666,18 @@ func (s *Store) rebuildOverrideTable() error {
     permit_id      INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
     vehicle_id     INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,
     registration   TEXT NOT NULL DEFAULT '',
+    state          TEXT NOT NULL DEFAULT '',
     starts_at      TEXT NOT NULL,
     ends_at        TEXT,
     created_by     TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
     guest_token_id INTEGER NOT NULL DEFAULT 0
 )`,
-		`INSERT INTO override_new (id, permit_id, vehicle_id, registration, starts_at, ends_at, created_by, created_at, guest_token_id)
-    SELECT id, permit_id, vehicle_id, '', starts_at, ends_at, created_by, created_at, guest_token_id FROM override`,
+		// This legacy rebuild predates the state column, so the source table has no
+		// state to copy: new rows take '' (= the tenant's home state), the same
+		// default the ALTER path gives existing rows.
+		`INSERT INTO override_new (id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id)
+    SELECT id, permit_id, vehicle_id, '', '', starts_at, ends_at, created_by, created_at, guest_token_id FROM override`,
 		`DROP TABLE override`,
 		`ALTER TABLE override_new RENAME TO override`,
 		`CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id)`,

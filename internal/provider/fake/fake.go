@@ -56,8 +56,17 @@ func New() *Provider {
 
 func (f *Provider) ID() string { return ID }
 
+// fakeRegions mirrors an Australian council's state set (home VIC first), so a
+// COUNCIL_SANDBOX run exercises the registration-state chooser exactly as the real
+// Orikan connector would rather than hiding it.
+var fakeRegions = []provider.Region{
+	{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "ACT", Label: "ACT"},
+	{Code: "QLD", Label: "QLD"}, {Code: "SA", Label: "SA"}, {Code: "WA", Label: "WA"},
+	{Code: "TAS", Label: "TAS"}, {Code: "NT", Label: "NT"},
+}
+
 func (f *Provider) Capabilities() provider.Capabilities {
-	return provider.Capabilities{CanClearVehicle: true, SupportsRefresh: true, NeedsKeepWarm: false, SupportsExpiry: true, LoginKind: "password"}
+	return provider.Capabilities{CanClearVehicle: true, SupportsRefresh: true, NeedsKeepWarm: false, SupportsExpiry: true, LoginKind: "password", Regions: fakeRegions}
 }
 
 type session struct {
@@ -133,7 +142,8 @@ func (f *Provider) CurrentVehicle(ctx context.Context, s *provider.Session, p pr
 	return provider.Vehicle{}, provider.Fail(provider.FailTransient, provider.OpReadVehicle, errors.New("fake: no reading for this permit yet"))
 }
 
-func (f *Provider) SetVehicle(ctx context.Context, s *provider.Session, p provider.PermitRef, registration string) error {
+func (f *Provider) SetVehicle(ctx context.Context, s *provider.Session, p provider.PermitRef, v provider.Vehicle) error {
+	registration := v.Registration
 	if cur, ok := f.Current(p.ID); ok && model.SamePlate(cur, registration) {
 		return nil // the fake portal's own record confirms the plate
 	}

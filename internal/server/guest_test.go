@@ -209,7 +209,7 @@ func TestRequestLiveState(t *testing.T) {
 
 	// With the approval's own override live, the state tracks the tenant record:
 	// applying until it shows the plate, applied once it does.
-	if _, err := s.store.CreatePlateOverride(ctx, pid, "GUEST1", now, &end, "visitor (printed QR)"); err != nil {
+	if _, err := s.store.CreatePlateOverride(ctx, pid, "GUEST1", "", now, &end, "visitor (printed QR)"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.requestLiveState(ctx, permit, base); got != "approved" {
@@ -229,7 +229,7 @@ func TestRequestLiveState(t *testing.T) {
 	// A later booking over the top supersedes the pass — and names the winner
 	// (owner-facing surfaces may show it; public ones must not).
 	time.Sleep(1100 * time.Millisecond) // the resolve tie-break is freshest CreatedAt (second granularity)
-	if _, err := s.store.CreatePlateOverride(ctx, pid, "OWNER9", time.Now().UTC(), &end, owner); err != nil {
+	if _, err := s.store.CreatePlateOverride(ctx, pid, "OWNER9", "", time.Now().UTC(), &end, owner); err != nil {
 		t.Fatal(err)
 	}
 	if got, repl := s.requestLiveState(ctx, onPermit, base); got != "superseded" || repl != "OWNER9" {
@@ -570,7 +570,7 @@ func TestRevokeGuestTokenCannotKillAPrintedQR(t *testing.T) {
 		t.Fatalf("the printed door QR stopped working through the per-recipient route: %v", err)
 	}
 	// The route it IS for still works.
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Mum")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Mum", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +602,7 @@ func TestUpdateGuestGrantCannotTouchAPrintedGrant(t *testing.T) {
 	ctx := context.Background()
 	const owner = "owner@example.com"
 	_, grantID, raw := seedDoorQR(t, s, owner, "Door")
-	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Mum")
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Mum", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +645,7 @@ func TestRevocationSweepsLiveGuestOverrides(t *testing.T) {
 		if printed {
 			grantID, err = s.store.CreatePrintedGrant(ctx, owner, owner, permitID, hashGuestToken("tok-"+name), "sealed")
 		} else {
-			vehID, verr := s.store.CreateVehicle(ctx, owner, "OWN"+name, "Car "+name)
+			vehID, verr := s.store.CreateVehicle(ctx, owner, "OWN"+name, "Car "+name, "")
 			if verr != nil {
 				t.Fatal(verr)
 			}
@@ -661,14 +661,14 @@ func TestRevocationSweepsLiveGuestOverrides(t *testing.T) {
 		}
 		now := time.Now()
 		live := now.Add(20 * time.Hour)
-		if _, err := s.store.CreateGuestPlateOverride(ctx, permitID, "GUEST1", now, &live, "visitor", tokenID); err != nil {
+		if _, err := s.store.CreateGuestPlateOverride(ctx, permitID, "GUEST1", "", now, &live, "visitor", tokenID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.store.CreatePlateOverride(ctx, permitID, "OWNER1", now, &live, owner); err != nil {
+		if _, err := s.store.CreatePlateOverride(ctx, permitID, "OWNER1", "", now, &live, owner); err != nil {
 			t.Fatal(err)
 		}
 		past, ended := now.Add(-4*time.Hour), now.Add(-2*time.Hour)
-		if _, err := s.store.CreateGuestPlateOverride(ctx, permitID, "OLDGST", past, &ended, "visitor", tokenID); err != nil {
+		if _, err := s.store.CreateGuestPlateOverride(ctx, permitID, "OLDGST", "", past, &ended, "visitor", tokenID); err != nil {
 			t.Fatal(err)
 		}
 		return seeded{permitID: permitID, grantID: grantID, tokenID: tokenID}

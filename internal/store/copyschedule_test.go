@@ -36,7 +36,7 @@ func copyFixture(t *testing.T, st *Store, owner string) (src, dst, vehID int64) 
 	t.Helper()
 	ctx := context.Background()
 	var err error
-	if vehID, err = st.CreateVehicle(ctx, owner, "SRC111", "Source car"); err != nil {
+	if vehID, err = st.CreateVehicle(ctx, owner, "SRC111", "Source car", ""); err != nil {
 		t.Fatalf("vehicle: %v", err)
 	}
 	if src, err = st.UpsertPermit(ctx, owner, "src-permit", "14", "Source"); err != nil {

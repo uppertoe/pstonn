@@ -599,7 +599,7 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 	p := model.Permit{CouncilPermitID: "1"}
 
 	f.apiBody.Store(`{}`)
-	err := c.SetVehicle(context.Background(), owner, p, "ABC123")
+	err := c.SetVehicle(context.Background(), owner, p, "ABC123", "")
 	if kind, _ := FailureOf(err); kind != FailUnexpected {
 		t.Fatalf("kind = %v (%v), want FailUnexpected", kind, err)
 	}
@@ -610,7 +610,7 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 	// A corroborated empty permit that OMITS canAddVehicle is a shape we can't
 	// read: absent must be unexpected (retry + alert), never a plain refusal.
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":0,"permitVehicles":[]}`)
-	err = c.SetVehicle(context.Background(), owner, p, "ABC123")
+	err = c.SetVehicle(context.Background(), owner, p, "ABC123", "")
 	if kind, _ := FailureOf(err); kind != FailUnexpected {
 		t.Fatalf("kind = %v (%v), want FailUnexpected for empty-without-canAddVehicle", kind, err)
 	}
@@ -618,7 +618,7 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 	// A corroborated empty permit the tenant says can't take a vehicle IS a
 	// durable refusal (but no longer the misleading "no vehicle to change").
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":0,"canAddVehicle":false,"permitVehicles":[]}`)
-	err = c.SetVehicle(context.Background(), owner, p, "ABC123")
+	err = c.SetVehicle(context.Background(), owner, p, "ABC123", "")
 	if kind, _ := FailureOf(err); kind != FailRejected {
 		t.Fatalf("kind = %v (%v), want FailRejected for canAddVehicle:false", kind, err)
 	}
@@ -641,7 +641,7 @@ func TestSetVehicleAddsToEmptyPermit(t *testing.T) {
 	f.live.Store(true)
 	f.plate.Store("") // freshly granted: no vehicle yet
 
-	if err := c.SetVehicle(context.Background(), owner, p, "NEW123"); err != nil {
+	if err := c.SetVehicle(context.Background(), owner, p, "NEW123", ""); err != nil {
 		t.Fatalf("SetVehicle on empty permit = %v, want nil (add path)", err)
 	}
 	if got, _ := c.CurrentVehicle(context.Background(), owner, p); !model.SamePlate(got, "NEW123") {
@@ -672,7 +672,7 @@ func TestClearVehicle(t *testing.T) {
 		t.Fatalf("ClearVehicle on empty permit = %v, want nil (idempotent)", err)
 	}
 	// And a permit can be re-populated after a clear (add path again).
-	if err := c.SetVehicle(context.Background(), owner, p, "BACK111"); err != nil {
+	if err := c.SetVehicle(context.Background(), owner, p, "BACK111", ""); err != nil {
 		t.Fatalf("SetVehicle after clear = %v, want nil", err)
 	}
 	if got, _ := c.CurrentVehicle(context.Background(), owner, p); !model.SamePlate(got, "BACK111") {
@@ -694,7 +694,7 @@ func TestSetVehicleAcceptsWhitespaceVariantAsAlreadySet(t *testing.T) {
 
 	// The tenant's own record shows the plate with a space; the target has none.
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"maxVehicles":1,"canEditOrDeleteVehicle":true,"permitVehicles":[{"PKPermitVehicleDetailID":1,"RegistrationNumber":"ABC 123","FKVehicleStateID":"1"}]}`)
-	if err := c.SetVehicle(context.Background(), owner, p, "ABC123"); err != nil {
+	if err := c.SetVehicle(context.Background(), owner, p, "ABC123", ""); err != nil {
 		t.Fatalf("a whitespace-only variant should be treated as already set, got %v", err)
 	}
 }

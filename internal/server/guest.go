@@ -48,23 +48,24 @@ func qrDataURI(text string) (string, error) {
 
 // guestActView drives the public activation menu (State "guest").
 type guestActView struct {
-	Token          string         // raw token, echoed into the POST form
-	OwnerEmail     string         // account holder, shown for trust
-	PermitLabel    string         // which permit this affects
-	CurrentReg     string         // what is on the permit right now ("" if unknown)
-	CheckedAgo     string         // how long ago CurrentReg was confirmed with the tenant; "" while fresh ("4 hr ago" turns "on now" into "last known")
-	Cars           []vehicleView  // the cars this link may activate
-	AllowOvernight bool           // whether the overnight checkbox is offered
-	AllowPlate     bool           // whether the visitor may type an arbitrary plate
-	RequestOnly    bool           // printed QR: entering a plate only requests approval
-	RevertPlate    string         // pre-existing plate the guest may put back ("" = no revert offered)
-	PendingReg     string         // plate the schedule targets but the tenant doesn't show yet ("" = settled)
-	Stalled        bool           // the pending change has taken suspiciously long; stop polling
-	SelectedReg    string         // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
-	UntilText      string         // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
-	KeepForm       bool           // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
-	FP             string         // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
-	Req            *guestWaitView // printed door QR only: this browser's own remembered request (from the greq cookie), so a re-scan shows its fate instead of a blank form
+	Token          string            // raw token, echoed into the POST form
+	OwnerEmail     string            // account holder, shown for trust
+	PermitLabel    string            // which permit this affects
+	CurrentReg     string            // what is on the permit right now ("" if unknown)
+	CheckedAgo     string            // how long ago CurrentReg was confirmed with the tenant; "" while fresh ("4 hr ago" turns "on now" into "last known")
+	Cars           []vehicleView     // the cars this link may activate
+	AllowOvernight bool              // whether the overnight checkbox is offered
+	AllowPlate     bool              // whether the visitor may type an arbitrary plate
+	Regions        []provider.Region // registration-state options for a typed plate (empty hides the chooser)
+	RequestOnly    bool              // printed QR: entering a plate only requests approval
+	RevertPlate    string            // pre-existing plate the guest may put back ("" = no revert offered)
+	PendingReg     string            // plate the schedule targets but the tenant doesn't show yet ("" = settled)
+	Stalled        bool              // the pending change has taken suspiciously long; stop polling
+	SelectedReg    string            // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
+	UntilText      string            // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
+	KeepForm       bool              // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
+	FP             string            // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
+	Req            *guestWaitView    // printed door QR only: this browser's own remembered request (from the greq cookie), so a re-scan shows its fate instead of a blank form
 }
 
 // guestWaitView drives the visitor's "waiting for approval" page (State
@@ -547,6 +548,12 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
 		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
 	}
+	// A typed plate carries its own registration state; the options come from the
+	// permit owner's tenant (empty when the provider has no such concept, or — in
+	// tests — when no tenant is wired).
+	if gc.Grant.AllowPlate && s.tenant != nil {
+		view.Regions = s.tenant.Regions(ctx, permit.Owner)
+	}
 	// The label is the owner's own free text (or, failing that, the tenant permit
 	// id) and it headlines the page. On a printed door QR — left on a wall for
 	// anyone to scan — that leaks whatever the owner typed, typically an address
@@ -737,7 +744,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// The target is either an arbitrary plate (when the grant allows it, e.g. a
 	// visitor QR) or one of the grant's saved cars. Each becomes a fresh override,
 	// created now, so it wins the resolution tie-break for its window.
-	var reg, name, createdBy string
+	var reg, name, createdBy, regState string
 	var overrideID int64
 	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
 		if !validRego(plate) {
@@ -745,11 +752,17 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reg = plate
+		// The typed plate's registration state, validated against the owner's tenant
+		// ("" — the tenant home state — when absent, unknown, or state-less provider).
+		regState = strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
+		if regState != "" && !s.tenant.RegionValid(r.Context(), permit.Owner, regState) {
+			regState = ""
+		}
 		createdBy = gc.Recipient
 		if createdBy == "" {
 			createdBy = "visitor (QR)"
 		}
-		id, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, now, &end, createdBy, gc.TokenID)
+		id, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, regState, now, &end, createdBy, gc.TokenID)
 		if err != nil {
 			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your plate. Please try again."))
 			return
@@ -768,7 +781,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			s.renderGuestMenu(w, r, gc, permit, current, "", "Please choose one of the cars on your link.")
 			return
 		}
-		reg, name, createdBy = chosen.Registration, chosen.Label, gc.Recipient
+		reg, name, createdBy, regState = chosen.Registration, chosen.Label, gc.Recipient, chosen.State
 		id, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID)
 		if err != nil {
 			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your choice. Please try again."))
@@ -826,7 +839,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
 			return
 		}
-		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
+		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, reg, regState); err == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, reg); e != nil {
 				// Tenant confirmed the change; only the local record failed. The Kick
 				// below drives a reconcile that re-records it (and alerts if it persists).
@@ -914,7 +927,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		target = want
 	} else {
 		end := revertPinEnd(now, gc.BaselineUntil)
-		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
+		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, "", now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
 			// The sweep above ALREADY committed, so "the permit wasn't changed" would be
 			// false. Say what actually happened and let reconcile settle the target.
 			log.Printf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
@@ -950,7 +963,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
 			return
 		}
-		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, target); err == nil {
+		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, target, ""); err == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, target); e != nil {
 				log.Printf("guest: reverted permit %d to %q at council but local commit failed: %v", permit.ID, target, e)
 			}
@@ -2613,7 +2626,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	if terr != nil {
 		log.Printf("doorqr approve: no token for grant %d: %v", req.GrantID, terr)
 	}
-	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, now, &end, "visitor (printed QR)", doorToken)
+	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, "", now, &end, "visitor (printed QR)", doorToken)
 	if errors.Is(cerr, store.ErrGuestOverrideRefused) {
 		// The permit is at its guest-booking sub-cap. Tell the owner plainly instead of
 		// returning a 500 — approving a door-QR request must not look like the app is
@@ -2662,7 +2675,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 			s.kickScheduler()
 			return decideOutcome{kind: decideRevoked}
 		}
-		if applyErr = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
+		if applyErr = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, req.Plate, ""); applyErr == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, req.Plate); e != nil {
 				log.Printf("guest: approved plate %q for permit %d at council but local commit failed: %v", req.Plate, permit.ID, e)
 			}

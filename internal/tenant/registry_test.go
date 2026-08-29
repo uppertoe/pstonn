@@ -18,7 +18,7 @@ func TestEmbeddedRegistryIsValid(t *testing.T) {
 	if !ok || c.Name != "City of Stonnington" || c.Connector != "orikan-ssp" || !c.Enabled {
 		t.Fatalf("stonnington entry: %+v", c)
 	}
-	if c.Policy.DefaultVehicleState != "1" || !c.Policy.IsVisitor("(A) 1st Visitor Permit") || !c.Policy.IsResident("(A) 2nd Resident Permit") {
+	if c.Policy.HomeState != "VIC" || !c.Policy.IsVisitor("(A) 1st Visitor Permit") || !c.Policy.IsResident("(A) 2nd Resident Permit") {
 		t.Fatalf("policy not compiled from the file: %+v", c.Policy)
 	}
 	if c.Location().String() != "Australia/Melbourne" {
@@ -61,7 +61,7 @@ func TestLoadFromFileAndValidation(t *testing.T) {
 	   "endpoints":{"issuer":"https://a/idm","api_base":"https://a/ssp-svc","client_id":"x","redirect_uri":"https://a/ssp/callback","scopes":["openid"]},
 	   "timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor"},"enabled":false},
 	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake",
-	   "timezone":"Australia/Perth","policy":{"visitor_word":"guest","default_vehicle_state":"4"},"enabled":true}
+	   "timezone":"Australia/Perth","policy":{"visitor_word":"guest","home_state":"WA"},"enabled":true}
 	]}`)
 	reg, err := Load(config.CouncilConfig{}, good)
 	if err != nil {

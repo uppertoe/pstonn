@@ -41,8 +41,12 @@
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
   </section>
+  <section class="paper" style="max-width:640px;margin:44px auto 0;padding:26px 32px">
+    <h2 class="about-h2" style="margin-top:0">In another council area?</h2>
+    <p style="color:var(--muted);font-size:14.5px;margin:0;line-height:1.55">{{T "public.other_area" . (slots "contact" (link "/contact"))}}</p>
+  </section>
   {{if .Contact}}
-  <section class="paper" style="max-width:640px;margin:48px auto 0;padding:30px 34px">
+  <section class="paper" style="max-width:640px;margin:20px auto 0;padding:30px 34px">
     <h2 class="about-h2" style="margin-top:0">Get in touch</h2>
     <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">Questions, problems, or feedback? Send me a message. Your email is optional, but it's the only way to get a reply.</p>
     <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:0">

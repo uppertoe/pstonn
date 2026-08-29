@@ -150,12 +150,18 @@
     {{/* Only the TITLE line swaps between the name and the rename form; the
          subtitle stays put below, so editing never collapses the header. */}}
     <div class="pname-title">
-      <h2 x-show="!rename">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</h2>
+      <h2 x-show="!rename">{{if .Permit.Label}}{{.Permit.Label}}{{else if .Permit.PermitNumber}}{{.Permit.PermitNumber}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</h2>
       <button x-show="!rename" type="button" class="ghost icon sm" title="Rename permit" aria-label="Rename permit"
               @click="rename=true; $nextTick(() => $refs.pname.focus())">{{template "ic-edit"}}</button>
+      {{/* A subtle, one-time nudge while the permit still has no name of its own:
+           the permit number identifies it in the subtitle regardless, but a named
+           permit is far easier to tell apart in a multi-permit household. */}}
+      {{if .Unnamed}}<button x-show="!rename" type="button" class="rename-hint"
+              @click="rename=true; $nextTick(() => $refs.pname.focus())">Name this permit</button>{{end}}
       <form x-show="rename" x-cloak method="post" action="/permits/{{.Permit.ID}}/name" class="pname-edit" @submit="rename=false">
         <input name="label" x-ref="pname" maxlength="40" required autocomplete="off" @keydown.escape="rename=false"
-               value="{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}">
+               placeholder="e.g. Front-unit permit"
+               value="{{if .Unnamed}}{{else}}{{.Permit.Label}}{{end}}">
         <button type="submit" class="sm">{{template "ic-check"}} Save</button>
         <button type="button" class="ghost sm" @click="rename=false">Cancel</button>
       </form>
@@ -473,6 +479,11 @@
         <label class="fld">Number plate
           <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
         </label>
+        {{if .Regions}}
+        <label class="fld">{{T "vehicle.state_label" .}}
+          <select name="plate_state" class="vstate">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>
+        </label>
+        {{end}}
         {{if .Vehicles}}
         <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
         {{else}}

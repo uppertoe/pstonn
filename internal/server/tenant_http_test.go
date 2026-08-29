@@ -251,7 +251,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 	path := "/permits/" + strconv.FormatInt(pid, 10) + "/clear"
 
 	t.Run("a scheduled permit cannot be emptied", func(t *testing.T) {
-		vid, err := r.st.CreateVehicle(r.ctx, rigUser, "ABC123", "Van")
+		vid, err := r.st.CreateVehicle(r.ctx, rigUser, "ABC123", "Van", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -443,13 +443,23 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 	if rr := post("/permits", url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("add: %d", rr.Code)
 	}
-	// The menu offers the other tenant as "connect".
+	// The menu names the current area and offers "Connect another area…" (the
+	// picker), rather than listing every unlinked council inline — the menu length
+	// tracks the areas you use, not the areas the registry serves.
 	page := s.doReq(http.MethodGet, "/schedule", user, "", nil).Body.String()
-	if !strings.Contains(page, `name="tenant_id" value="othertown"`) || !strings.Contains(page, "Connect Othertown Council…") || !strings.Contains(page, "City of Stonnington") {
+	if !strings.Contains(page, `href="/tenant/connect"`) || !strings.Contains(page, "Connect another area…") || !strings.Contains(page, "City of Stonnington") {
 		t.Fatalf("switcher missing:\n%s", excerpt(page))
+	}
+	if strings.Contains(page, "Connect Othertown Council…") {
+		t.Fatal("the menu must not list unlinked areas inline; they live on /tenant/connect")
 	}
 	if strings.Contains(page, `class="pdetail ptenant"`) {
 		t.Fatal("a single-tenant account must not show tenant labels")
+	}
+	// The connect-area picker lists the unlinked area with a one-click connect.
+	connect := s.doReq(http.MethodGet, "/tenant/connect", user, "", nil).Body.String()
+	if !strings.Contains(connect, `name="tenant_id" value="othertown"`) || !strings.Contains(connect, "Othertown Council") {
+		t.Fatalf("connect-area picker missing othertown:\n%s", excerpt(connect))
 	}
 	// Selecting an unlinked tenant lands on the picker, which offers its link form.
 	rr := post("/tenant/select", url.Values{"tenant_id": {"othertown"}})
