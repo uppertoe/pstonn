@@ -3,14 +3,14 @@
 {{template "publicheader" .}}
 <main id="main" tabindex="-1" class="landing">
   <section class="lhero">
-    <h1>Schedule your City of Stonnington visitor parking permit.</h1>
+    <h1>{{T "public.hero" .}}</h1>
     <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
     <a href="/schedule" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
-    <p class="lnote">A free service for City of Stonnington residents (Prahran, Windsor, South Yarra, Toorak, Armadale, Malvern, Malvern East and Kooyong). Sign in with a one-time code sent to your email.</p>
+    <p class="lnote">{{T "public.hero_note" .}}</p>
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
          up stuck, and the failure looks like "wrong password" when it isn't. */}}
-    <p class="lnote">You'll need an existing City of Stonnington <strong>ePermits</strong> account with a visitor permit on it. Sign in here with <strong>the same email address your ePermits account uses</strong> &mdash; p.stonn can only connect to the council account that matches. It schedules a permit you already hold; it can't apply for one. <a href="/how" hx-boost="false">What you need &rarr;</a></p>
+    <p class="lnote">{{T "public.need_account" .}}</p>
   </section>
   <div class="demos">
     <div class="dm-mini dm-showcase" data-demo="showcase">
@@ -37,7 +37,7 @@
     </div>
   </div>
   <section class="lsteps">
-    <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>Sign in with your ePermits email, then connect with your council password.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>{{T "public.step_link" .}}</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
   </section>
@@ -53,7 +53,7 @@
     </form>
   </section>
   {{end}}
-  <p class="ldisclaimer">An unofficial app, not affiliated with or endorsed by the City of Stonnington. You remain responsible for your permit and any fines. <a href="/security">Security &amp; data</a></p>
+  <p class="ldisclaimer">{{T "public.disclaimer" .}}</p>
 </main>
 
 {{end}}
@@ -64,7 +64,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. For what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
+    <p>{{T "public.about_unofficial" .}}</p>
 
     <h2 class="about-h2">The short version</h2>
     <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
@@ -106,14 +106,14 @@
     </details>
 
     <details class="sec"><summary>If the server were compromised</summary>
-      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can &mdash; to view what is held in your ePermits account and manage the permits in it. Changing your ePermits password shuts the session out immediately. Encryption makes that exposure unlikely, using a password that is unique to your council account keeps any fallout contained there, and &mdash; as with any online service &mdash; none of this is an absolute guarantee.</p>
+      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can &mdash; to view what is held in your {{.Council.Terms.portal}} account and manage the permits in it. Changing your {{.Council.Terms.portal}} password shuts the session out immediately. Encryption makes that exposure unlikely, using a password that is unique to your council account keeps any fallout contained there, and &mdash; as with any online service &mdash; none of this is an absolute guarantee.</p>
     </details>
 
     <h2 class="about-h2">Notifications</h2>
     <p>p.stonn tries to tell you, by email and/or push, each time it changes your permit or can&rsquo;t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Treat it as a convenience, not a guarantee &mdash; you remain responsible for your permit and for any fines.</p>
 
-    <h2 class="about-h2">For the City of Stonnington</h2>
-    <p>If you work for the council and have questions about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident&rsquo;s own login, on their own permit, and only when that resident&rsquo;s schedule needs a change. It signs in the same way the ePermits website does, then uses the council&rsquo;s own permit API to change the vehicle &mdash; and on those API requests it identifies itself as p.stonn, with a link back to this site. It keeps its load light: a single plate change is three requests (read the current vehicle, change it, read back to confirm), fewer than a resident doing the same by hand in a browser; between changes it touches the council only a handful of times a day &mdash; one request roughly every eight hours to keep the session from lapsing, and a permit read twice a day to stay in sync. All told that is on the order of a dozen requests across a whole day for one household, spaced out and backing off if the portal is busy. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
+    <h2 class="about-h2">{{T "public.for_council_heading" .}}</h2>
+    <p>If you work for the council and have questions about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident&rsquo;s own login, on their own permit, and only when that resident&rsquo;s schedule needs a change. It signs in the same way the {{.Council.Terms.portal}} website does, then uses the council&rsquo;s own permit API to change the vehicle &mdash; and on those API requests it identifies itself as p.stonn, with a link back to this site. It keeps its load light: a single plate change is three requests (read the current vehicle, change it, read back to confirm), fewer than a resident doing the same by hand in a browser; between changes it touches the council only a handful of times a day &mdash; one request roughly every eight hours to keep the session from lapsing, and a permit read twice a day to stay in sync. All told that is on the order of a dozen requests across a whole day for one household, spaced out and backing off if the portal is busy. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
 
     <h2 class="about-h2">No promises</h2>
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
@@ -130,9 +130,9 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">How it works</h1>
-    <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
+    <p>{{T "public.history" .}}</p>
     <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
-    <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
+    <p>{{T "public.attempt" .}}</p>
     <p>I got tired of logging in to swap the plate every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
   </section>
 
@@ -141,7 +141,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>Connect once</h2>
-        <p>Sign in to p.stonn with <strong>the same email address your ePermits account uses</strong> &mdash; it can only connect to the council account that matches. Then link once with your council password: p.stonn keeps an encrypted connection so it can update your permit on your schedule, and you don&rsquo;t sign in again each time.</p>
+        <p>Sign in to p.stonn with <strong>the same email address your {{.Council.Terms.portal}} account uses</strong> &mdash; it can only connect to the council account that matches. Then link once with your council password: p.stonn keeps an encrypted connection so it can update your permit on your schedule, and you don&rsquo;t sign in again each time.</p>
       </div>
       <div class="feature-demo">
         <figure class="dm" data-demo="connect">
@@ -209,21 +209,21 @@
   </div>
 
   <section class="paper">
-    <h2 class="about-h2" style="margin-top:0">Before you start: get a Stonnington ePermit</h2>
-    <p>p.stonn does not replace the council's system. It works on top of a permit you already hold, so you need a City of Stonnington ePermits account with at least one visitor permit first.</p>
+    <h2 class="about-h2" style="margin-top:0">{{T "public.before_heading" .}}</h2>
+    <p>{{T "public.before_intro" .}}</p>
     <p>If you are not set up yet:</p>
     <ul>
       <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
       <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
       <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
       <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
-      <li><strong>Note the email address your ePermits account uses.</strong> You&rsquo;ll sign in to p.stonn with that same address &mdash; it&rsquo;s how p.stonn knows which council account is yours.</li>
+      <li><strong>Note the email address your {{.Council.Terms.portal}} account uses.</strong> You&rsquo;ll sign in to p.stonn with that same address &mdash; it&rsquo;s how p.stonn knows which council account is yours.</li>
     </ul>
     <p>The council's own pages have the current fees, forms and details:</p>
     <ul>
-      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits" rel="noopener noreferrer">Parking permits</a></li>
-      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
-      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
+      <li><a href="{{.Council.Links.Permits}}" rel="noopener noreferrer">Parking permits</a></li>
+      <li><a href="{{.Council.Links.ApplyVisitor}}" rel="noopener noreferrer">Visitor parking permits</a></li>
+      <li><a href="{{.Council.Links.FAQ}}" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
     </ul>
     <p>Once your council account has a visitor permit, <a href="/schedule" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
   </section>
@@ -242,7 +242,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Frequently asked questions</h1>
-    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with the council. For what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
+    <p>{{T "public.faq_unofficial" .}}</p>
     {{range .FAQ}}
     <div class="faq-item">
       <h2 class="about-h2">{{.Q}}</h2>
@@ -252,9 +252,9 @@
     <p class="faq-more">More detail on what is stored and how it is protected is on the <a href="/security" hx-boost="false">Security &amp; data</a> page.</p>
     <h2 class="about-h2" style="margin-top:28px">Guides</h2>
     <ul class="guide-list">
-      <li><a href="/guide/change-car-on-visitor-permit" hx-boost="false">How do I change the car on my Stonnington visitor permit?</a></li>
-      <li><a href="/guide/visitor-parking-cleaner-nanny-carer" hx-boost="false">Visitor parking for a cleaner, nanny or carer in Stonnington</a></li>
-      <li><a href="/guide/paper-visitor-permits" hx-boost="false">Do visitors need a paper permit in Stonnington?</a></li>
+      {{- range guidesFor .Council}}
+      <li><a href="/guide/{{.Slug}}" hx-boost="false">{{.H1}}</a></li>
+      {{- end}}
     </ul>
   </section>
 </main>
@@ -284,7 +284,7 @@
       </div>
     </div>
     <p style="margin-top:22px"><a href="/schedule" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
-    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council&rsquo;s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener">parking permit FAQs</a>. See also <a href="/how" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
+    <p class="faq-more">{{T "public.faq_more" .}}</p>
   </section>
 </main>
 {{end}}

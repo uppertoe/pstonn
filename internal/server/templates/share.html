@@ -10,7 +10,7 @@
   <section class="card hero share-hero">
     <div class="ring">{{template "ic-link"}}</div>
     <h2>Pass p.stonn on</h2>
-    <p>Free for any Stonnington household with a visitor parking permit. If someone you know is still changing the plate by hand, here&rsquo;s how to send it their way.</p>
+    <p>{{T "share.intro" .}}</p>
   </section>
   <section class="card share-card">
     <div class="share-opts">
@@ -55,10 +55,10 @@
       <span class="poster-brand"><span class="poster-mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></span>
       <span class="poster-kicker">Visitor parking</span>
     </div>
-    <p class="poster-lead">Your Stonnington visitor parking permit, on a schedule.</p>
+    <p class="poster-lead">{{T "share.poster_lead" .}}</p>
     <img class="poster-qr" src="{{.ShareQR}}" alt="QR code to {{.ShareURL}}" width="240" height="240">
     <p class="poster-url">{{.ShareURL}}</p>
-    <p class="poster-note">A weekly roster for regulars, one-off bookings for everyone else, and a link or QR code your visitors can use themselves. Free for City of Stonnington residents.</p>
+    <p class="poster-note">{{T "share.poster_note" .}}</p>
   </article>
 </main>
 {{end}}

@@ -16,8 +16,8 @@
        site is another origin. */}}
   <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
     <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
-    Either the password is wrong, or your ePermits account isn&rsquo;t under <strong>{{.User.Email}}</strong>.
-    <span style="display:block;margin-top:12px">&bull; <strong>Forgot your council password &mdash; or never set one?</strong> <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">Reset it at the council</a>, then come back and link. This is the most common fix.</span>
+    {{T "onboarding.rejected_lead" .}}
+    <span style="display:block;margin-top:12px">{{T "onboarding.rejected_reset" .}}</span>
     {{if .LogoutURL}}
     <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
       <span>&bull; <strong>Council account under a different email?</strong></span>
@@ -27,7 +27,7 @@
     {{else}}
     <span style="display:block;margin-top:10px">&bull; <strong>Council account under a different email?</strong> Sign out, then sign back in here with that address.</span>
     {{end}}
-    <span style="display:block;margin-top:10px;font-size:13px">Unsure which it is? Try your details at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a> first.</span>
+    <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" .}}</span>
   </span></div>
   {{end}}
   {{if .LinkThrottled}}
@@ -40,8 +40,8 @@
     <strong>Paused after several sign-in tries &mdash; please wait about 15 minutes.</strong><br>
     Too many attempts in a row could lock your real council account, so p.stonn stops first.
     <span style="display:block;margin-top:10px">While you wait, two things worth checking:</span>
-    <span style="display:block;margin-top:6px">&bull; Your password &mdash; try it at the council&rsquo;s own <a href="https://parkingpermits.stonnington.vic.gov.au/" hx-boost="false" target="_blank" rel="noopener">ePermits site</a>. If it fails there too, <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">reset it at the council</a>.</span>
-    <span style="display:block;margin-top:6px">&bull; Your email &mdash; your ePermits account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
+    <span style="display:block;margin-top:6px">{{T "onboarding.throttled_password" .}}</span>
+    <span style="display:block;margin-top:6px">&bull; Your email &mdash; your {{.Council.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
     {{- if .LogoutURL}} <a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}} sign out{{end}} and sign back in here with that one.</span>
   </span></div>
   {{end}}
@@ -62,7 +62,7 @@
          admission lock; this is the honest front door. */}}
     <h2>p.stonn is full at the moment</h2>
     <p>
-      It&rsquo;s run by one person for a small number of Stonnington households, and taking on more right now
+      It&rsquo;s run by one person for a small number of {{.Council.Short}} households, and taking on more right now
       would make it slower and less reliable for everyone already using it.
     </p>
     <p class="empty-note" style="margin-top:10px">
@@ -73,7 +73,7 @@
     <h2>{{if .Relink}}Reconnect your council account{{else}}Link your council account{{end}}</h2>
     <p>
       {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, cars and schedule are all still here.
-      {{else}}Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.{{end}}
+      {{else}}{{T "onboarding.intro" .}}{{end}}
     </p>
     {{if .InAppBrowser}}
     {{/* The visitor is inside Facebook's (or Instagram's) built-in browser,
@@ -102,7 +102,7 @@
            the failure toast after a rejected login, which also burns one of the
            council's own lockout-budget attempts. Say it before the password. */}}
       <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email &mdash; it can&rsquo;t be changed here.
+        {{T "onboarding.email_pinned" .}}
         If your council account uses a different address, {{if .LogoutURL}}<a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}}sign out{{end}} and sign back in with that one.
         And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
         invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
@@ -122,7 +122,7 @@
            ePermits account but has never held a working portal password, and
            for them this field is unanswerable — every guess burns one of the
            council's own lockout-budget attempts first. */}}
-      <p class="empty-note" style="margin-top:-4px">Forgot it &mdash; or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">Reset it at the council</a>, then link here.</p>
+      <p class="empty-note" style="margin-top:-4px">{{T "onboarding.reset_beside" .}}</p>
       <label class="optin">
         {{/* Ticked by default, deliberately. Without a saved password the schedule
              stops the first time the council ends the session — which happens
@@ -134,7 +134,7 @@
         <input type="checkbox" name="save_password" value="1"{{if or (not .Relink) .AutoReconnect}} checked{{end}}>
         <span>
           <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
+          {{T "onboarding.saved_password_why" .}}
           Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
         </span>
       </label>
@@ -241,13 +241,13 @@
          broken loop. */}}
     {{if .PermitsUnknown}}
     <p class="empty-note">We couldn't load your permit list from the council just now, so we can't tell what's on your account. Nothing has changed &mdash; please try again in a few minutes.</p>
-    <p class="empty-note" style="margin-top:8px">If this keeps happening, check the council's own ePermits site is working. <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_error" .}} <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else if .HasPermits}}
     <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
-    <p class="empty-note" style="margin-top:8px">If you expected a visitor permit here, check it on the council's own ePermits site: it may have expired, or be held by another resident at your address. It's also possible the council changed something on its side that p.stonn doesn't recognise yet{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/how" hx-boost="false">What p.stonn can and cannot do</a></p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/how" hx-boost="false">What p.stonn can and cannot do</a></p>
     {{else}}
     <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
-    <p class="empty-note" style="margin-top:8px">Apply for a visitor permit on the council's ePermits site first, then come back and it will appear here. <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_apply" .}} <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{end}}
     {{end}}
   </section>

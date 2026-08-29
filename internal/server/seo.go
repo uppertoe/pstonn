@@ -20,28 +20,18 @@ import (
 // seoFor returns the <title>, meta description, and canonical PATH for a page
 // State. An empty path marks the page NON-indexable (app, guest, confirm, token
 // pages): the head emits noindex and no canonical/OG for those.
-func seoFor(state string) (title, desc, canonPath string) {
+func seoFor(state string, c councilView) (title, desc, canonPath string) {
 	switch state {
 	case "landing":
-		return "Stonnington visitor parking permits, on a schedule — p.stonn",
-			"Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.",
-			"/"
+		return trText(c, "seo.landing_title"), trText(c, "seo.landing_desc"), "/"
 	case "how":
-		return "How p.stonn manages your Stonnington visitor permit",
-			"Connect your Stonnington ePermits login once; p.stonn sets your visitor permit to your weekly car schedule, plus one-off changes and guest QR links.",
-			"/how"
+		return trText(c, "seo.how_title"), trText(c, "seo.how_desc"), "/how"
 	case "security":
-		return "Security & data — p.stonn",
-			"What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial Stonnington parking tool.",
-			"/security"
+		return "Security & data — p.stonn", trText(c, "seo.security_desc"), "/security"
 	case "contact":
-		return "Contact — p.stonn",
-			"Questions about p.stonn, the free scheduler for City of Stonnington visitor parking permits? Get in touch.",
-			"/contact"
+		return "Contact — p.stonn", trText(c, "seo.contact_desc"), "/contact"
 	case "faq":
-		return "FAQ — p.stonn visitor parking permit scheduler",
-			"Answers about scheduling your City of Stonnington visitor parking permit with p.stonn — recurring visitor parking, sharing with family, cost, and safety.",
-			"/faq"
+		return "FAQ — p.stonn visitor parking permit scheduler", trText(c, "seo.faq_desc"), "/faq"
 	default:
 		// App, guest, confirm and token pages: a stable generic title, never indexed.
 		return "p.stonn Visitor Permit Scheduler", "", ""
@@ -53,42 +43,45 @@ func seoFor(state string) (title, desc, canonPath string) {
 // structured data (Google rejects HTML it doesn't expect there).
 type faqItem struct{ Q, A string }
 
-var faqItems = []faqItem{
-	{
-		"Can I set up recurring visitor parking for a carer or family member?",
-		"Yes. Set a weekly roster — say a carer's car every Tuesday and Thursday — or share a permanent guest link so a trusted person can put their own car on the permit when they arrive, with no account needed on their end.",
-	},
-	{
-		"Is p.stonn affiliated with the City of Stonnington?",
-		"No. p.stonn is a free, independent, open-source tool. It is not made by, endorsed by, or affiliated with the council.",
-	},
-	{
-		"Is it safe to give p.stonn my ePermits login?",
-		"Your login is encrypted, used only to manage your own permit, and you can disconnect or delete everything at any time. It is a council parking account, not a bank login. If you would rather not share it at all, p.stonn is open source and you can run your own copy — the Security & data page has the full detail.",
-	},
-	{
-		"My partner set up the permit — can I manage the schedule too?",
-		"Yes. Whoever set it up can invite up to two other people from Settings → Shared access. You sign in with your own email and manage the same schedule — no council password changes hands.",
-	},
-	{
-		"What does p.stonn cost?",
-		"Nothing. It is free.",
-	},
-	{
-		"Which council does p.stonn work with?",
-		"The City of Stonnington's visitor parking permits (the ePermits system) — covering Prahran, Windsor, South Yarra, Toorak, Armadale, Malvern, Malvern East and Kooyong. It does not support other councils yet.",
-	},
+// faqFor is the FAQ for a council.
+func faqFor(c councilView) []faqItem {
+	return []faqItem{
+		{
+			"Can I set up recurring visitor parking for a carer or family member?",
+			"Yes. Set a weekly roster — say a carer's car every Tuesday and Thursday — or share a permanent guest link so a trusted person can put their own car on the permit when they arrive, with no account needed on their end.",
+		},
+		{
+			trText(c, "faq.affiliated_q"),
+			"No. p.stonn is a free, independent, open-source tool. It is not made by, endorsed by, or affiliated with the council.",
+		},
+		{
+			trText(c, "faq.safe_q"),
+			"Your login is encrypted, used only to manage your own permit, and you can disconnect or delete everything at any time. It is a council parking account, not a bank login. If you would rather not share it at all, p.stonn is open source and you can run your own copy — the Security & data page has the full detail.",
+		},
+		{
+			"My partner set up the permit — can I manage the schedule too?",
+			"Yes. Whoever set it up can invite up to two other people from Settings → Shared access. You sign in with your own email and manage the same schedule — no council password changes hands.",
+		},
+		{
+			"What does p.stonn cost?",
+			"Nothing. It is free.",
+		},
+		{
+			"Which council does p.stonn work with?",
+			trText(c, "faq.which_council_a"),
+		},
+	}
 }
 
 // jsonLDFor returns the structured-data script body for a page State, already
 // JSON-encoded (json.Marshal escapes < > & so it is safe to drop into a
 // <script type="application/ld+json"> without html/template re-escaping it). Empty
 // for pages that carry no structured data.
-func jsonLDFor(state, baseURL string) template.JS {
+func jsonLDFor(state, baseURL string, c councilView) template.JS {
 	var v any
 	switch state {
 	case "landing":
-		title, desc, path := seoFor("landing")
+		title, desc, path := seoFor("landing", c)
 		v = map[string]any{
 			"@context":            "https://schema.org",
 			"@type":               "WebApplication",
@@ -102,8 +95,9 @@ func jsonLDFor(state, baseURL string) template.JS {
 			"offers":              map[string]any{"@type": "Offer", "price": "0", "priceCurrency": "AUD"},
 		}
 	case "faq":
-		qs := make([]map[string]any, 0, len(faqItems))
-		for _, f := range faqItems {
+		faq := faqFor(c)
+		qs := make([]map[string]any, 0, len(faq))
+		for _, f := range faq {
 			qs = append(qs, map[string]any{
 				"@type":          "Question",
 				"name":           f.Q,
@@ -125,7 +119,7 @@ func jsonLDFor(state, baseURL string) template.JS {
 // FAQPage structured data so an answer can surface directly in search results.
 func (s *Server) faq(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "faq", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation, FAQ: faqItems})
+	s.render(w, dashboardData{State: "faq", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation, FAQ: faqFor(s.councilViewFor(r.Context(), ""))})
 }
 
 // robotsTxt lets crawlers index the public pages while keeping them off the app,
@@ -169,9 +163,10 @@ func (s *Server) faviconICO(w http.ResponseWriter, r *http.Request) {
 func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
+	name, _ := json.Marshal(trText(s.councilViewFor(r.Context(), ""), "seo.manifest_name"))
 	fmt.Fprint(w, `{
   "id": "/",
-  "name": "p.stonn — Stonnington visitor parking permits",
+  "name": `+string(name)+`,
   "short_name": "p.stonn",
   "start_url": "/",
   "scope": "/",
@@ -195,7 +190,7 @@ func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
 	for _, p := range []string{"/", "/how", "/security", "/contact", "/faq"} {
 		fmt.Fprintf(&b, "  <url><loc>%s%s</loc></url>\n", base, p)
 	}
-	for _, g := range guides {
+	for _, g := range guidesFor(s.councilViewFor(r.Context(), "")) {
 		fmt.Fprintf(&b, "  <url><loc>%s/guide/%s</loc></url>\n", base, g.Slug)
 	}
 	b.WriteString("</urlset>\n")
@@ -222,75 +217,74 @@ type guidePage struct {
 	Demo           string // "roster" | "oneoff" | "guest" — the How page demo to embed
 }
 
-const (
-	councilPortal   = "https://parkingpermits.stonnington.vic.gov.au/"
-	councilRegister = "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register"
-	councilReset    = "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword"
-	councilVisitor  = "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits"
-)
-
 // The council's own instructions (its visitor-permits page, read 2026-08-29):
 // allocate via the ePermit platform — "Update Vehicle" in the Current Permit
-// list, registration plus state — or by phone on 03 8290 1333; a physical
-// permit is available on application under "exceptional circumstances"
-// (disability, carer arrangements, limits with online connection and capability).
-var councilSignInSteps = []template.HTML{
-	template.HTML(`Sign in at <a href="` + councilPortal + `" target="_blank" rel="noopener">parkingpermits.stonnington.vic.gov.au</a> &mdash; <a href="` + councilRegister + `" target="_blank" rel="noopener">register</a> first if you haven&rsquo;t, or <a href="` + councilReset + `" target="_blank" rel="noopener">reset your password</a> if you&rsquo;ve never used it.`),
-	template.HTML(`In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.`),
-	template.HTML(`Enter the new registration and the state it&rsquo;s registered in, and save.`),
+// list, registration plus state — or by phone; a physical permit is available on
+// application under "exceptional circumstances" (disability, carer arrangements,
+// limits with online connection and capability).
+func councilSignInSteps(c councilView) []template.HTML {
+	return []template.HTML{
+		tr(c, "guide.signin_step", nil),
+		template.HTML(`In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.`),
+		template.HTML(`Enter the new registration and the state it&rsquo;s registered in, and save.`),
+	}
 }
 
-var guides = []guidePage{
-	{
-		Slug:  "change-car-on-visitor-permit",
-		Title: "How do I change the car on my Stonnington visitor permit? — p.stonn",
-		Desc:  "Changing the vehicle on a City of Stonnington visitor parking permit: the steps on the council's ePermits site, and how to stop doing it by hand.",
-		H1:    "How do I change the car on my Stonnington visitor permit?",
-		Paras: []string{
-			"On the council's ePermits site: sign in, choose Update Vehicle on the permit, enter the new plate, save. It has to be done before each visitor parks.",
+// guidesFor is the guide set for a council: the same questions, with the
+// council's name, links and vocabulary in the answers.
+func guidesFor(c councilView) []guidePage {
+	steps := councilSignInSteps(c)
+	return []guidePage{
+		{
+			Slug:           "change-car-on-visitor-permit",
+			Title:          trText(c, "guide.change_title"),
+			Desc:           trText(c, "guide.change_desc"),
+			H1:             trText(c, "guide.change_h1"),
+			Paras:          []string{trText(c, "guide.change_para")},
+			CouncilHeading: "At the council",
+			Steps: append(append([]template.HTML{}, steps...),
+				template.HTML(`Repeat for each new visitor, before they park.`)),
+			CouncilNote: tr(c, "guide.change_note", nil),
+			Pstonn:      "Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.",
+			Demo:        "roster",
 		},
-		CouncilHeading: "At the council",
-		Steps: append(append([]template.HTML{}, councilSignInSteps...),
-			template.HTML(`Repeat for each new visitor, before they park.`)),
-		CouncilNote: template.HTML(`You can also ring the council on 03 8290 1333 to have the vehicle changed.`),
-		Pstonn:      "Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.",
-		Demo:        "roster",
-	},
-	{
-		Slug:  "visitor-parking-cleaner-nanny-carer",
-		Title: "Visitor parking for a cleaner, nanny or carer in Stonnington — p.stonn",
-		Desc:  "A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.",
-		H1:    "Visitor parking for a cleaner, nanny or carer in Stonnington",
-		Paras: []string{
-			"A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn't, they will not be covered by the permit.",
+		{
+			Slug:  "visitor-parking-cleaner-nanny-carer",
+			Title: trText(c, "guide.carer_title"),
+			Desc:  trText(c, "guide.carer_desc"),
+			H1:    trText(c, "guide.carer_h1"),
+			Paras: []string{
+				"A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn't, they will not be covered by the permit.",
+			},
+			CouncilHeading: "At the council, each visit",
+			Steps:          steps,
+			CouncilNote:    tr(c, "guide.carer_note", nil),
+			Pstonn:         "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
+			Demo:           "guest",
 		},
-		CouncilHeading: "At the council, each visit",
-		Steps:          councilSignInSteps,
-		CouncilNote:    template.HTML(`Carer arrangements can also qualify for a physical permit under the council&rsquo;s <a href="` + councilVisitor + `" target="_blank" rel="noopener">exceptional circumstances</a> provision &mdash; worth asking about if the online system doesn&rsquo;t suit your household.`),
-		Pstonn:         "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
-		Demo:           "guest",
-	},
-	{
-		Slug:  "paper-visitor-permits",
-		Title: "Do visitors need a paper permit in Stonnington? — p.stonn",
-		Desc:  "City of Stonnington visitor parking permits are digital by default: nothing to display, but the number plate has to be right before each visitor parks. What that means in practice.",
-		H1:    "Do visitors need a paper permit in Stonnington?",
-		Paras: []string{
-			"Not usually. Permits are digital by default: there's nothing to display, and parking officers check the plate against your permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.",
+		{
+			Slug:  "paper-visitor-permits",
+			Title: trText(c, "guide.paper_title"),
+			Desc:  trText(c, "guide.paper_desc"),
+			H1:    trText(c, "guide.paper_h1"),
+			Paras: []string{
+				"Not usually. Permits are digital by default: there's nothing to display, and parking officers check the plate against your permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.",
+			},
+			CouncilHeading: "To see which plate is on your permit now",
+			Steps: []template.HTML{
+				steps[0],
+				template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
+				template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
+			},
+			CouncilNote: tr(c, "guide.paper_note", nil),
+			Pstonn:      "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
+			Demo:        "oneoff",
 		},
-		CouncilHeading: "To see which plate is on your permit now",
-		Steps: []template.HTML{
-			councilSignInSteps[0],
-			template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
-			template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
-		},
-		CouncilNote: template.HTML(`Physical permits: see <a href="` + councilVisitor + `" target="_blank" rel="noopener">the council&rsquo;s visitor-permit page</a> for the exceptional-circumstances application, or ring 03 8290 1333.`),
-		Pstonn:      "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
-		Demo:        "oneoff",
-	},
+	}
 }
 
-func guideBySlug(slug string) *guidePage {
+func guideBySlug(slug string, c councilView) *guidePage {
+	guides := guidesFor(c)
 	for i := range guides {
 		if guides[i].Slug == slug {
 			return &guides[i]
@@ -301,7 +295,7 @@ func guideBySlug(slug string) *guidePage {
 
 // guide serves one public question page.
 func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
-	g := guideBySlug(r.PathValue("slug"))
+	g := guideBySlug(r.PathValue("slug"), s.councilViewFor(r.Context(), ""))
 	if g == nil {
 		http.NotFound(w, r)
 		return

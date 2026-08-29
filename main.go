@@ -210,6 +210,14 @@ func run() error {
 	for _, c := range clients {
 		c.OnSessionExpired = sched.NoteSessionExpired
 	}
+	notifier.CouncilFor = func(ctx context.Context, owner string) *councilpkg.Council {
+		id, err := st.CouncilIDFor(ctx, owner)
+		if err != nil {
+			return nil
+		}
+		c, _ := registry.ByID(id)
+		return c
+	}
 	// State the rollover guarantee at startup rather than leaving it implicit: with
 	// a shared boundary (midnight, overwhelmingly) the question that matters is not
 	// the window setting but when every permit is actually expected to have

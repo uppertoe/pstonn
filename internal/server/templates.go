@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"github.com/uppertoe/pstonn/internal/i18n"
 	"html/template"
 	"io/fs"
 	"time"
@@ -60,8 +61,21 @@ var weekdaysDisplay = []time.Weekday{
 // directly. Cloning the parsed template set is not an option: html/template refuses
 // to Clone once anything has executed, so a test doing that passes alone and fails in
 // a full run.
+// catalog is the message catalog every page and mail renders through.
+var catalog = i18n.Default()
+
 var templateFuncs = template.FuncMap{
-	"asset":       asset,
+	"asset":     asset,
+	"guidesFor": guidesFor, // the council's guide pages, for the landing list
+	// T renders a catalog message for the page's locale and council: the page's
+	// data (which carries Council) is the message's data.
+	"T": func(key string, data any) (template.HTML, error) {
+		locale := i18n.DefaultLocale
+		if l, ok := data.(interface{ LocaleTag() string }); ok && l.LocaleTag() != "" {
+			locale = l.LocaleTag()
+		}
+		return catalog.For(locale).HTML(key, data)
+	},
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	// sourceLabel turns an apply-log source code into words for the Activity page.
 	// The stored codes are internal; the page is read by householders.

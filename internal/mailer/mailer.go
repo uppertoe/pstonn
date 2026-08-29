@@ -53,33 +53,6 @@ func New(cfg config.SMTPConfig) *Mailer {
 // Enabled reports whether email will actually be sent.
 func (m *Mailer) Enabled() bool { return m != nil }
 
-// SendRenewalReminder emails one user the "confirm you're still using this" note
-// with a single-click link. deadline is when the session would otherwise stop.
-func (m *Mailer) SendRenewalReminder(to string, deadline time.Time, confirmURL string, o Options) error {
-	if m == nil {
-		return nil
-	}
-	when := deadline.Format("Monday 2 January 2006")
-	subject := "Keep your Stonnington parking scheduler running"
-	body := strings.Join([]string{
-		"Hi,",
-		"",
-		"Your visitor-permit scheduler is still running and updating your permit automatically.",
-		"",
-		"We haven't seen you in p.stonn for a while, so this is a check that you still want it running. If you do nothing, it will stop on " + when + " and you'll need to link your council account again.",
-		"",
-		"(Opening p.stonn and signing in does the same thing as clicking below — either way the clock resets.)",
-		"",
-		"Confirm and keep it running (one click):",
-		confirmURL,
-		"",
-		"If you no longer want the service, just ignore this email and it will stop on its own.",
-		"",
-		"-- p.stonn",
-	}, "\r\n")
-	return m.SendOpts(to, subject, body, o)
-}
-
 // Options carries the per-message extras. Zero value = a plain notice.
 type Options struct {
 	// ReplyTo sets Reply-To, so a reply reaches a submitter rather than the From
@@ -94,6 +67,9 @@ type Options struct {
 	// message ("Sent to x@y because ..."). Recipients with no account otherwise
 	// have no idea who we are or how we got their address.
 	Provenance string
+	// Footer is the affiliation line under the HTML card ("Not affiliated with
+	// the City of X."); the council is the sender's business, not the mailer's.
+	Footer string
 }
 
 // Send delivers a plain-text email. A nil *Mailer is a no-op.
@@ -192,7 +168,7 @@ func (m *Mailer) send(to, subject, body string, o Options) error {
 	b.WriteString("--" + emailBoundary + "\r\n")
 	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(b64Wrap(htmlDocument(subject, body)) + "\r\n")
+	b.WriteString(b64Wrap(htmlDocument(subject, body, o.Footer)) + "\r\n")
 	b.WriteString("--" + emailBoundary + "--\r\n")
 	return m.deliver(to, []byte(b.String()))
 }

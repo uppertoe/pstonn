@@ -198,8 +198,8 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 		return d
 	}
 	return []renderCase{
-		{"faq", dashboardData{State: "faq", Loc: loc, Contact: true, FAQ: faqItems}, ""},
-		{"faq signed in", dashboardData{State: "faq", Loc: loc, SignedIn: true, FAQ: faqItems}, ""},
+		{"faq", dashboardData{State: "faq", Loc: loc, Contact: true, FAQ: faqFor(defaultCouncilView)}, ""},
+		{"faq signed in", dashboardData{State: "faq", Loc: loc, SignedIn: true, FAQ: faqFor(defaultCouncilView)}, ""},
 		{"message plain", dashboardData{State: "message", Loc: loc, Contact: true, Message: &messageView{Text: "Something happened."}}, ""},
 		{"message with link", dashboardData{State: "message", Loc: loc, Message: &messageView{Text: "Done.", LinkLabel: "Back to schedule", LinkHref: "/schedule", After: "or close this tab."}}, ""},
 		{"confirm ask", dashboardData{State: "confirm", Loc: loc, Confirm: &confirmView{Token: "tok", Until: "15 Oct 2026"}}, ""},
@@ -291,7 +291,7 @@ func TestGoldenPublicHTTP(t *testing.T) {
 	s := &Server{cfg: cfg, terms: loadTerms("")}
 	h := s.Handler()
 	paths := []string{"/", "/how", "/security", "/faq", "/contact", "/robots.txt", "/sitemap.xml", "/site.webmanifest", "/healthz", "/no-such-page"}
-	for _, gd := range guides {
+	for _, gd := range guidesFor(defaultCouncilView) {
 		paths = append(paths, "/guide/"+gd.Slug)
 	}
 	sort.Strings(paths)

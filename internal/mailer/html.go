@@ -3,6 +3,7 @@ package mailer
 import (
 	"encoding/base64"
 	"html"
+	"html/template"
 	"regexp"
 	"strings"
 )
@@ -34,7 +35,7 @@ var (
 )
 
 // htmlDocument renders the branded HTML alternative for a plain-text email body.
-func htmlDocument(subject, body string) string {
+func htmlDocument(subject, body, footer string) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html><head><meta charset="utf-8">`)
 	b.WriteString(`<meta name="viewport" content="width=device-width,initial-scale=1">`)
@@ -50,7 +51,10 @@ func htmlDocument(subject, body string) string {
 	b.WriteString(`</td></tr>`)
 	// Footer
 	b.WriteString(`<tr><td style="padding:18px 30px;text-align:center;font-family:` + emailFont + `;font-size:12px;line-height:1.5;color:` + colMuted + `;">`)
-	b.WriteString(`p<span style="color:` + colPrimary + `;">.</span>stonn — a free, unofficial tool. Not affiliated with the City of Stonnington.`)
+	b.WriteString(`p<span style="color:` + colPrimary + `;">.</span>stonn — a free, unofficial tool.`)
+	if footer != "" {
+		b.WriteString(` ` + template.HTMLEscapeString(footer))
+	}
 	b.WriteString(`</td></tr>`)
 	b.WriteString(`</table></td></tr></table></body></html>`)
 	return b.String()

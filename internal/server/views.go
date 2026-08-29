@@ -6,9 +6,12 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/council"
+	"github.com/uppertoe/pstonn/internal/i18n"
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
@@ -26,12 +29,83 @@ func (s *Server) logoutURL() string {
 
 func shortDay(w time.Weekday) string { return w.String()[:3] }
 
+// councilView is the council as every page and message sees it: names, links,
+// facts and vocabulary. Templates reach it through dashboardData.Council.
+type councilView struct {
+	ID, Name, Short string
+	Links           council.Links
+	Phone           string
+	Suburbs         []string
+	SuburbList      string // "Prahran, Windsor, … and Kooyong"
+	PortalHost      string // the portal's bare host, for prose
+	Terms           map[string]string
+}
+
+// tr renders a catalog message with a council and extra fields, for Go-composed
+// page text (SEO titles, FAQ entries, guides). HTML markup in the message is
+// trusted; interpolated fields are escaped.
+func tr(c councilView, key string, extra map[string]any) template.HTML {
+	data := map[string]any{"Council": c}
+	for k, v := range extra {
+		data[k] = v
+	}
+	out, err := catalog.For(i18n.DefaultLocale).HTML(key, data)
+	if err != nil {
+		log.Printf("i18n: %v", err)
+		return template.HTML(template.HTMLEscapeString(key))
+	}
+	return out
+}
+
+// trText is tr as plain text (titles, descriptions, JSON-LD).
+func trText(c councilView, key string) string {
+	out, err := catalog.For(i18n.DefaultLocale).Text(key, map[string]any{"Council": c})
+	if err != nil {
+		log.Printf("i18n: %v", err)
+		return key
+	}
+	return out
+}
+
+// councilViewOf builds the view for a descriptor.
+func councilViewOf(c *council.Council) councilView {
+	v := councilView{ID: c.ID, Name: c.Name, Short: c.Short, Links: c.Links, Phone: c.Copy.Phone,
+		Suburbs: c.Copy.Suburbs, Terms: catalog.For(i18n.DefaultLocale).Terms(c.Terms)}
+	switch n := len(c.Copy.Suburbs); {
+	case n == 0:
+	case n == 1:
+		v.SuburbList = c.Copy.Suburbs[0]
+	default:
+		v.SuburbList = strings.Join(c.Copy.Suburbs[:n-1], ", ") + " and " + c.Copy.Suburbs[n-1]
+	}
+	if u, err := url.Parse(c.Links.Portal); err == nil {
+		v.PortalHost = u.Host
+	}
+	return v
+}
+
+// defaultCouncilView is Stonnington, for pages rendered outside a request (tests)
+// and as the fallback when no council can be resolved.
+var defaultCouncilView = councilViewOf(council.Default())
+
+// councilViewFor is the view for an owner's council (the registry default, or
+// Stonnington, when none resolves).
+func (s *Server) councilViewFor(ctx context.Context, owner string) councilView {
+	if s.councils == nil {
+		return defaultCouncilView
+	}
+	return councilViewOf(s.councilFor(ctx, owner))
+}
+
 type dashboardData struct {
 	// Nonce is the CSP script nonce for this response, stamped on every inline
 	// <script> in layout.html. render() fills it in from the response's own CSP
 	// header, so no handler has to remember to set it — and a page rendered with
 	// no policy in force simply gets "" (see scriptNonce).
-	Nonce       string
+	Nonce string
+	// council is the resolved council for this page; Council() serves it, or the
+	// default when a page is rendered without one (fragments, tests).
+	council     *councilView
 	User        identity.User
 	OIDCEnabled bool
 	State       string // "landing" | "terms" | "onboarding" | "picker" | "app"
@@ -204,6 +278,14 @@ type confirmView struct {
 	Until string // when the session would otherwise lapse ("" if unknown)
 	Done  bool
 	Stale bool // token unknown/used/expired — reassure rather than alarm
+}
+
+// Council is the council this page speaks for (see councilView).
+func (d dashboardData) Council() councilView {
+	if d.council != nil {
+		return *d.council
+	}
+	return defaultCouncilView
 }
 
 // councilChoice is one option in the sign-up council picker.
@@ -550,9 +632,13 @@ func (s *Server) render(w http.ResponseWriter, data dashboardData) {
 // CanonicalPath, which the head turns into a noindex.
 func (s *Server) renderBuf(w http.ResponseWriter, data dashboardData) (*bytes.Buffer, error) {
 	data.Nonce = scriptNonce(w)
+	if data.council == nil {
+		cv := s.councilViewFor(context.Background(), data.Owner)
+		data.council = &cv
+	}
 	data.BaseURL = s.cfg.PublicBaseURL
-	data.Title, data.Description, data.CanonicalPath = seoFor(data.State)
-	data.JSONLD = jsonLDFor(data.State, data.BaseURL)
+	data.Title, data.Description, data.CanonicalPath = seoFor(data.State, data.Council())
+	data.JSONLD = jsonLDFor(data.State, data.BaseURL, data.Council())
 	if data.Guide != nil {
 		data.Title, data.Description, data.CanonicalPath = data.Guide.Title, data.Guide.Desc, "/guide/"+data.Guide.Slug
 		data.JSONLD = guideJSONLD(data.Guide)

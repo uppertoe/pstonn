@@ -10,7 +10,11 @@
         "api_base": "https://parkingpermits.stonnington.vic.gov.au/ssp-svc",
         "client_id": "ePermits.ssp.web",
         "redirect_uri": "https://parkingpermits.stonnington.vic.gov.au/ssp/callback",
-        "scopes": ["openid", "profile", "ePermits.ssp.api.all"]
+        "scopes": [
+          "openid",
+          "profile",
+          "ePermits.ssp.api.all"
+        ]
       },
       "timezone": "Australia/Melbourne",
       "policy": {
@@ -22,14 +26,31 @@
         "portal": "https://parkingpermits.stonnington.vic.gov.au/",
         "register": "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register",
         "reset_password": "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword",
-        "apply_visitor": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits"
+        "apply_visitor": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits",
+        "permits": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits",
+        "faq": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs"
       },
       "copy": {
-        "suburbs": ["Prahran", "Windsor", "South Yarra", "Toorak", "Armadale", "Malvern", "Malvern East", "Kooyong"],
+        "suburbs": [
+          "Prahran",
+          "Windsor",
+          "South Yarra",
+          "Toorak",
+          "Armadale",
+          "Malvern",
+          "Malvern East",
+          "Kooyong"
+        ],
         "phone": "03 8290 1333"
       },
       "enabled": true,
-      "capacity": 0
+      "capacity": 0,
+      "terms": {
+        "portal": "ePermits",
+        "portal_site": "ePermits site",
+        "epermit": "ePermit",
+        "parking_brand": "Stonnington Parking"
+      }
     }
   ]
 }

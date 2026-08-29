@@ -110,9 +110,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 				return
 			} else if n >= s.cfg.MaxAccounts {
 				log.Printf("capacity: refused a new link for %s (%d/%d accounts)", redact.Email(user), n, s.cfg.MaxAccounts)
-				s.message(w, http.StatusServiceUnavailable,
-					"p.stonn is full at the moment. It's run by one person for a small number of Stonnington households, and taking on more right now would make it slower and less reliable for everyone already using it. "+
-						"Please try again in a while, or get in touch and I'll let you know when there's room.")
+				s.message(w, http.StatusServiceUnavailable, s.say(r.Context(), user, "capacity.full"))
 				return
 			}
 		}

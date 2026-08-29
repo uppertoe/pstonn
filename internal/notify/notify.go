@@ -19,18 +19,53 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/council"
+	"github.com/uppertoe/pstonn/internal/i18n"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// councilPortalURL is the council's self-service permit portal, linked in
-// failure and re-link notices so a user can set their permit's vehicle
-// themselves (and avoid a fine) when p.stonn can't.
-const councilPortalURL = "https://parkingpermits.stonnington.vic.gov.au/"
+// mailCouncil is the council as a message sees it (see internal/i18n).
+type mailCouncil struct {
+	Name, Short string
+	Links       council.Links
+	Terms       map[string]string
+}
+
+// councilOf resolves the council for an account (owner), or the default council
+// when the resolver is unset or the account is unknown.
+func (s *Service) councilOf(ctx context.Context, owner string) mailCouncil {
+	var c *council.Council
+	if s.CouncilFor != nil {
+		c = s.CouncilFor(ctx, owner)
+	}
+	if c == nil {
+		c = council.Default()
+	}
+	return mailCouncil{Name: c.Name, Short: c.Short, Links: c.Links,
+		Terms: i18n.Default().For(i18n.DefaultLocale).Terms(c.Terms)}
+}
+
+// say renders a catalog message as text for a council with extra fields.
+func say(c mailCouncil, key string, extra map[string]any) string {
+	data := map[string]any{"Council": c}
+	for k, v := range extra {
+		data[k] = v
+	}
+	out, err := i18n.Default().For(i18n.DefaultLocale).Text(key, data)
+	if err != nil {
+		log.Printf("i18n: %v", err)
+		return key
+	}
+	return out
+}
 
 // Service dispatches notifications according to each user's stored preferences.
 type Service struct {
+	// CouncilFor resolves an account's council, for wording and links; nil means
+	// the default council. Set by main.
+	CouncilFor func(ctx context.Context, owner string) *council.Council
 	store      *store.Store
 	mail       *mailer.Mailer
 	ntfyBase   string
@@ -185,10 +220,6 @@ const (
 // their remedy lives at the council. Bare paths on purpose: the portal decorates
 // these with one-time OIDC state (nonce, PKCE challenge) that would be stale in
 // a stored link, and both pages work without it.
-const (
-	CouncilPasswordResetURL = "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword"
-	CouncilRegisterURL      = "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register"
-)
 
 // ErrSuppressed reports that an address is on the suppression list, so nothing
 // was sent. It is a permanent condition, not a delivery failure: callers must
@@ -223,6 +254,12 @@ func (s *Service) sendEmailCritical(ctx context.Context, to, subject, body, reas
 }
 
 func (s *Service) sendEmailWith(ctx context.Context, to, subject, body, reason string, critical bool) error {
+	return s.sendEmailAs(ctx, to, to, subject, body, reason, critical)
+}
+
+// sendEmailAs is sendEmailWith for a recipient whose council is that of
+// councilOwner (a guest or invitee has no account; the owner who reached them does).
+func (s *Service) sendEmailAs(ctx context.Context, councilOwner, to, subject, body, reason string, critical bool) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -237,9 +274,10 @@ func (s *Service) sendEmailWith(ctx context.Context, to, subject, body, reason s
 			log.Printf("notify: critical notice to unsubscribed %s goes out anyway (unsubscribe mutes routine mail, not safety alerts)", RedactEmail(to))
 		}
 	}
-	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to)}
+	c := s.councilOf(ctx, councilOwner)
+	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to), Footer: say(c, "mail.footer_affiliation", nil)}
 	if reason != "" {
-		opts.Provenance = "You received this at " + to + " because " + reason + ". p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits."
+		opts.Provenance = say(c, "mail.provenance", map[string]any{"To": to, "Reason": reason})
 	}
 	err := s.mail.SendOpts(to, subject, body, opts)
 	// Only a REJECTED RECIPIENT earns a suppression. A permanent failure at MAIL
@@ -292,7 +330,7 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	if s.appURL != "" {
 		body += "\n\nRe-link: " + s.appURL
 	}
-	body += "\nCouncil portal: " + councilPortalURL
+	body += "\nCouncil portal: " + s.councilOf(ctx, owner).Links.Portal
 	return s.broadcastAccount(ctx, owner, "relink", subject, body)
 }
 
@@ -311,7 +349,7 @@ func (s *Service) NotifyReconnectStalled(ctx context.Context, owner string) int 
 		"change the vehicle yourself on the council website now, or that car is not covered and can be fined.\n\n" +
 		"p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. " +
 		"If this persists, it will email you again if re-linking becomes necessary."
-	body += "\n\nCouncil portal: " + councilPortalURL
+	body += "\n\nCouncil portal: " + s.councilOf(ctx, owner).Links.Portal
 	if s.appURL != "" {
 		body += "\nOpen p.stonn: " + s.appURL
 	}
@@ -363,7 +401,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 	if s.appURL != "" {
 		body += "\n\nOpen p.stonn: " + s.appURL
 	}
-	body += "\nRenew with the council: " + councilPortalURL
+	body += "\nRenew with the council: " + s.councilOf(ctx, owner).Links.Portal
 	dels, err := s.accountDeliveries(ctx, owner)
 	if err != nil {
 		return 0
@@ -454,11 +492,14 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 		}
 	}
 	// Same envelope obligations as every other person-facing mail: an unsubscribe
-	// and a "why you got this". This one composes its own body in the mailer, which
-	// is why the options are passed rather than going through sendEmail.
-	err := s.mail.SendRenewalReminder(to, deadline, confirmURL, mailer.Options{
+	// and a "why you got this".
+	c := s.councilOf(ctx, to)
+	subject := say(c, "mail.renewal_subject", nil)
+	body := say(c, "mail.renewal_body", map[string]any{"When": deadline.Format("Monday 2 January 2006"), "URL": confirmURL})
+	err := s.mail.SendOpts(to, subject, body, mailer.Options{
 		UnsubscribeURL: s.UnsubscribeURL(to),
-		Provenance:     "You received this at " + to + " because " + reasonAccount + ". p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.",
+		Provenance:     say(c, "mail.provenance", map[string]any{"To": to, "Reason": reasonAccount}),
+		Footer:         say(c, "mail.footer_affiliation", nil),
 	})
 	// As in sendEmail: only a rejected recipient is evidence about this address.
 	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
@@ -542,12 +583,12 @@ func (s *Service) firstApplyLine(ctx context.Context, o ApplyOutcome) string {
 	if n, err := s.store.CountSuccessfulApplies(ctx, o.Owner); err != nil || n != 1 {
 		return ""
 	}
-	return "\n\nKnow another Stonnington household with a visitor permit? Send them p.stonn.org."
+	return "\n\n" + say(s.councilOf(ctx, o.Owner), "mail.referral_line", nil)
 }
 
 // composeApply builds the subject/body/priority/tags for an apply notification,
 // shared by the inline NotifyApply (scheduler) and the durable EnqueueApply.
-func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
+func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, tags string) {
 	// "car" names the vehicle by friendly name and plate where we have both, joined
 	// with an em-dash so a nickname that itself contains brackets (e.g.
 	// "Anita's Car (Nanny)") doesn't produce confusing nested parentheses.
@@ -613,7 +654,7 @@ func composeApply(o ApplyOutcome) (subject, body, priority, tags string) {
 			lines = append(lines, o.Action)
 		}
 		// A failure is a "sort it yourself" moment: link the council portal.
-		lines = append(lines, "", "You can set the vehicle on your permit yourself at the council:", councilPortalURL)
+		lines = append(lines, "", "You can set the vehicle on your permit yourself at the council:", portalURL)
 		body = strings.Join(lines, "\n")
 	}
 	priority, tags = "default", "white_check_mark"
@@ -666,7 +707,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	if err != nil {
 		return err
 	}
-	subject, body, priority, tags := composeApply(o)
+	subject, body, priority, tags := composeApply(o, s.councilOf(ctx, o.Owner).Links.Portal)
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
@@ -710,7 +751,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if err != nil {
 		return 0, err
 	}
-	subject, body, priority, tags := composeApply(o)
+	subject, body, priority, tags := composeApply(o, s.councilOf(ctx, o.Owner).Links.Portal)
 	emailBody := body
 	if s.appURL != "" {
 		emailBody += "\n\n" + s.appURL
@@ -856,7 +897,7 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	}
 	subject := "You have been given access to a p.stonn account"
 	lines := []string{
-		ownerEmail + " has given you shared access to their p.stonn account, which schedules a City of Stonnington visitor parking permit.",
+		say(s.councilOf(ctx, ownerEmail), "mail.invite_lead", map[string]any{"Owner": ownerEmail}),
 		"",
 		"Sign in with this email address — you will get a one-time code to confirm it is you — then tap Accept on the page you land on.",
 		"",
@@ -889,14 +930,14 @@ func (s *Service) SendOnboardNudge(ctx context.Context, to string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
-	subject, body := onboardNudgeMessage(to, s.appURL)
+	subject, body := onboardNudgeMessage(to, s.appURL, s.councilOf(ctx, to))
 	return s.sendEmail(ctx, to, subject, body, reasonOnboard)
 }
 
 // onboardNudgeMessage composes the recovery email. Split from the send so its
 // content — each line answers a distinct observed drop-off cause — is testable
 // without an SMTP conversation.
-func onboardNudgeMessage(to, appURL string) (subject, body string) {
+func onboardNudgeMessage(to, appURL string, c mailCouncil) (subject, body string) {
 	subject = "One step left to start managing your visitor permit"
 	// Layout note: a SHORT "do this:" line directly above each URL becomes that
 	// button's label in the HTML alternative (see mailer/html.go). Folding the
@@ -904,13 +945,13 @@ func onboardNudgeMessage(to, appURL string) (subject, body string) {
 	lines := []string{
 		"You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly plate schedule, guest QR codes and one-off bookings all start from that one connection.",
 		"",
-		"Connecting takes one sign-in with your City of Stonnington ePermits details. Three things trip most people up:",
+		say(c, "mail.nudge_connect", nil),
 		"",
-		"1. The ePermits password. Forgot it — or never set one?",
+		say(c, "mail.nudge_password", nil),
 		"Reset it at the council:",
-		CouncilPasswordResetURL,
+		c.Links.ResetPassword,
 		"",
-		"2. An ePermits account under a different email address. p.stonn can only connect to the ePermits account registered under the address you signed up with (" + to + "). If your council account uses a different address, sign in to p.stonn with that one instead.",
+		say(c, "mail.nudge_email", map[string]any{"To": to}),
 		"",
 	}
 	// The webview escape needs somewhere to point; a deployment that never set
@@ -929,9 +970,9 @@ func onboardNudgeMessage(to, appURL string) (subject, body string) {
 	lines = append(lines,
 		"One thing to know: p.stonn manages VISITOR permits only — the permit your guests' cars go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.",
 		"",
-		"No ePermits account or visitor permit yet? Apply for a visitor permit on the council's ePermits site first, then come back.",
+		say(c, "mail.nudge_apply", nil),
 		"Register with the council:",
-		CouncilRegisterURL,
+		c.Links.Register,
 		"",
 		"This is the only reminder p.stonn sends. If you've decided it's not for you, there's nothing to undo — your details go no further than the sign-up you made.",
 	)
@@ -952,7 +993,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 		// into a clickable link. It stays in the body because it is how the recipient
 		// knows WHICH permit this is ("Nanny", the flat number), which matters in a
 		// household with more than one.
-		ownerEmail + " has given you a link to put a car on their City of Stonnington visitor parking permit (" + neutraliseLinks(permitLabel) + ").",
+		say(s.councilOf(ctx, ownerEmail), "mail.guest_lead", map[string]any{"Owner": ownerEmail, "Label": neutraliseLinks(permitLabel)}),
 		"",
 		"When you arrive, open the link and choose your car. It stays on the permit until the end of the day.",
 		"",
@@ -962,9 +1003,9 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
 		"",
-		"Got a visitor permit of your own? p.stonn is free for City of Stonnington residents — p.stonn.org",
+		say(s.councilOf(ctx, ownerEmail), "mail.guest_promo", nil),
 	}
-	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonGuest)
+	return s.sendEmailAs(ctx, ownerEmail, to, subject, strings.Join(lines, "\n"), reasonGuest, false)
 }
 
 // NotifyDriverDisplaced warns whoever is responsible for a displaced car (the
@@ -1545,7 +1586,7 @@ func (s *Service) SendFortnightNudge(ctx context.Context, to string) error {
 	body := strings.Join([]string{
 		"Hi — you've had p.stonn looking after your visitor permit for a couple of weeks now.",
 		"",
-		"If it's been handy, you might know someone else in Stonnington with a visitor permit who'd get some use out of it too.",
+		say(s.councilOf(ctx, to), "mail.fortnight_line", nil),
 		"",
 		"Send them an invite: " + base + "/share",
 		"Or print a card with a QR code they can scan to get started: " + base + "/share#card",
@@ -1562,9 +1603,9 @@ func (s *Service) SendReferralInvite(ctx context.Context, to, sender string) err
 	}
 	subject := sender + " thought you might like p.stonn"
 	body := strings.Join([]string{
-		sender + " uses p.stonn to look after their City of Stonnington visitor parking permit, and thought it might be useful for you too.",
+		say(s.councilOf(ctx, sender), "mail.referral_lead", map[string]any{"Sender": sender}),
 		"",
-		"p.stonn changes the car on your visitor permit for you — a weekly roster for regulars, one-off bookings for everyone else, and a link or QR code your visitors can use themselves. It's free for Stonnington residents.",
+		say(s.councilOf(ctx, sender), "mail.referral_body", nil),
 		"",
 		"Have a look: https://p.stonn.org",
 		"",

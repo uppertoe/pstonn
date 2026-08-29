@@ -30,8 +30,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	case "1":
 		base.Flash = "Permit added. Pick a car for each day of the week below, or make a one-off booking."
 	case "expired":
-		base.Warn = "That permit was added, but it is no longer active at the council, so nothing will be applied to it. " +
-			"It's under “Permits no longer active” below — renew it on the council's ePermits site, then copy its schedule onto the new permit when it appears here."
+		base.Warn = s.say(r.Context(), base.Owner, "schedule.added_expired")
 	}
 	ctx := r.Context()
 	owner := base.Owner

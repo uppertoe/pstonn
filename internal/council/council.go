@@ -43,6 +43,9 @@ type Council struct {
 	Links Links `json:"links"`
 	// Copy is council-specific prose and facts for the public pages.
 	Copy Copy `json:"copy"`
+	// Terms is the council's own vocabulary, laid over the catalog defaults (see
+	// internal/i18n): what it calls its portal, its permits, its parking brand.
+	Terms map[string]string `json:"terms"`
 	// Enabled gates sign-up; Capacity (0 = unlimited) caps linked accounts.
 	Enabled  bool `json:"enabled"`
 	Capacity int  `json:"capacity"`
@@ -63,6 +66,8 @@ type Links struct {
 	Register      string `json:"register"`       // create a portal account
 	ResetPassword string `json:"reset_password"` // forgotten-password page
 	ApplyVisitor  string `json:"apply_visitor"`  // the council's page on applying for a visitor permit
+	Permits       string `json:"permits"`        // the council's parking-permits overview page
+	FAQ           string `json:"faq"`            // the council's permit FAQ page
 }
 
 // Copy is council-specific prose and facts. It is deliberately small: anything
@@ -149,6 +154,27 @@ func (p PermitPolicy) compiled() PermitPolicy {
 		p.residentRe = regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(p.ResidentWord) + `\b`)
 	}
 	return p
+}
+
+// Default is the embedded registry's default council (a copy): the fallback
+// wherever a page or message is rendered with no resolvable council.
+func Default() *Council {
+	reg, err := LoadEmbedded()
+	if err != nil {
+		panic(err) // the embedded registry is validated by tests
+	}
+	var c *Council
+	for _, e := range reg.list {
+		if e.Enabled {
+			c = e
+			break
+		}
+	}
+	if c == nil {
+		c = reg.list[0]
+	}
+	cp := *c
+	return &cp
 }
 
 // Stonnington is the City of Stonnington descriptor from the embedded registry

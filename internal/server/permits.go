@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/council"
+	"github.com/uppertoe/pstonn/internal/i18n"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/redact"
@@ -72,12 +74,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				// The one thing this person must NOT be shown is the password form
 				// again: their password already worked, and every resubmit is a real
 				// council login. Say what actually happened and where to look.
-				s.message(w, http.StatusBadGateway,
-					"Your council password was accepted — the sign-in itself worked. But when p.stonn then asked the council for your permit list, "+
-						"the council turned the request away. That usually means the ePermits account isn't fully set up yet — for example it was only just created, "+
-						"or doesn't have a permit on it. Entering your password here again won't change this. "+
-						"Please sign in at the council's own site (parkingpermits.stonnington.vic.gov.au) and check your visitor permit appears there, then come back and link again. "+
-						"If the permit is there and this keeps happening, please get in touch via the contact form.")
+				s.message(w, http.StatusBadGateway, s.say(ctx, owner, "picker.session_rejected"))
 				return
 			}
 			base.State = "onboarding"
@@ -232,12 +229,25 @@ const claimedByAnotherAccount = "That permit is already being scheduled through 
 // rename fallback, with the reasoning for each). The helpers below are the server's
 // view of the policy for the council this account belongs to.
 
+// say renders a catalog message as plain text for the owner's council (message
+// pages, redirect flashes). A missing key is a programming error, logged, and
+// the key itself is shown rather than nothing.
+func (s *Server) say(ctx context.Context, owner, key string) string {
+	data := map[string]any{"Council": s.councilViewFor(ctx, owner)}
+	out, err := catalog.For(i18n.DefaultLocale).Text(key, data)
+	if err != nil {
+		log.Printf("i18n: %v", err)
+		return key
+	}
+	return html.UnescapeString(out)
+}
+
 // councilFor returns the descriptor of the owner's council. Nil-safe for tests
 // that build a Server without a registry (Stonnington), and falls back to the
 // registry default when the account has no resolvable council.
 func (s *Server) councilFor(ctx context.Context, owner string) *council.Council {
 	if s.councils == nil {
-		return council.Stonnington()
+		return council.Default()
 	}
 	if s.store != nil && owner != "" {
 		if id, err := s.store.CouncilIDFor(ctx, owner); err == nil {

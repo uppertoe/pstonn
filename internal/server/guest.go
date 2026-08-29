@@ -70,6 +70,7 @@ type guestActView struct {
 // guestWaitView drives the visitor's "waiting for approval" page (State
 // "guest-wait"), which polls the status endpoint.
 type guestWaitView struct {
+	council    *councilView // the permit owner's council, for the referral line
 	OwnerEmail string
 	Plate      string
 	ReqID      int64
@@ -115,6 +116,14 @@ type qrShowView struct {
 
 // doorQRView drives the styled, printable door-QR poster (State "doorqr"). It is a
 // durable artifact: the same code reprints because the token is kept sealed.
+// Council is the council a wait fragment speaks for (the default when unknown).
+func (v guestWaitView) Council() councilView {
+	if v.council != nil {
+		return *v.council
+	}
+	return defaultCouncilView
+}
+
 type doorQRView struct {
 	GrantID     int64
 	PermitLabel string
@@ -2247,6 +2256,10 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		// Status passes through as-is: "expired" (aged out unanswered) renders its
 		// own message, distinct from an actual "denied".
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
+		if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil {
+			cv := s.councilViewFor(r.Context(), permit.Owner)
+			v.council = &cv
+		}
 		// "approved" means the resident said yes; requestLiveState only reports it
 		// as ON the permit once the council's own record actually shows the plate
 		// ("applied"), flags a long-unconfirmed apply ("stalled"), and — the states
