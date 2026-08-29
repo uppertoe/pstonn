@@ -325,7 +325,12 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 
 	// Never take over a permit another account already manages (e.g. a shared
 	// household permit both council accounts can see).
-	if existing, err := s.store.PermitByCouncilID(ctx, cpid); err == nil && existing.Owner != owner {
+	councilID, err := s.store.CouncilIDFor(ctx, owner)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if existing, err := s.store.PermitInCouncil(ctx, councilID, cpid); err == nil && existing.Owner != owner {
 		s.message(w, http.StatusConflict, claimedByAnotherAccount)
 		return
 	}

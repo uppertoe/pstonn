@@ -3282,14 +3282,14 @@ func TestSaveBreakerStateIsGenerationGuarded(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	newer := BreakerState{OpenUntil: time.Now().Add(time.Hour), LastPushback: time.Now(), Generation: 9}
-	if err := s.SaveBreakerState(ctx, newer); err != nil {
+	if err := s.SaveBreakerState(ctx, "stonnington", newer); err != nil {
 		t.Fatal(err)
 	}
 	older := BreakerState{OpenUntil: time.Time{}, LastPushback: time.Now(), Generation: 4}
-	if err := s.SaveBreakerState(ctx, older); err != nil {
+	if err := s.SaveBreakerState(ctx, "stonnington", older); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.LoadBreakerState(ctx)
+	got, err := s.LoadBreakerState(ctx, "stonnington")
 	if err != nil {
 		t.Fatal(err)
 	}

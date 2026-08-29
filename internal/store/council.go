@@ -48,6 +48,7 @@ func hashConfirmToken(token string) string {
 // secret fields are sealed (secretbox). Keyed by Owner = app-user email.
 type CouncilSession struct {
 	Owner        string
+	CouncilID    string // the council this session is with
 	Sub          string
 	CouncilEmail string
 	Cookie       string // sealed session cookie header; empty if not linked
@@ -98,9 +99,9 @@ func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSes
 	var cs CouncilSession
 	var expiry, updated, linked, reminded, reconnected, lastActive, driftChecked string
 	err := s.db.QueryRowContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at, drift_checked_at, session_generation
+SELECT owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at, drift_checked_at, session_generation
 FROM council_session WHERE owner = ?`, owner).
-		Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive, &driftChecked, &cs.Generation)
+		Scan(&cs.Owner, &cs.CouncilID, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive, &driftChecked, &cs.Generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
 	}
@@ -122,7 +123,7 @@ FROM council_session WHERE owner = ?`, owner).
 // secrets are included so callers can renew without a second lookup.
 func (s *Store) ListCouncilSessions(ctx context.Context) ([]CouncilSession, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at, session_generation
+SELECT owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at, session_generation
 FROM council_session`)
 	if err != nil {
 		return nil, err
@@ -132,7 +133,7 @@ FROM council_session`)
 	for rows.Next() {
 		var cs CouncilSession
 		var expiry, updated, linked, reminded, lastActive, driftChecked string
-		if err := rows.Scan(&cs.Owner, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive, &driftChecked, &cs.Generation); err != nil {
+		if err := rows.Scan(&cs.Owner, &cs.CouncilID, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &lastActive, &driftChecked, &cs.Generation); err != nil {
 			return nil, err
 		}
 		cs.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
@@ -298,6 +299,13 @@ func (s *Store) OwnersWithPermit(ctx context.Context) (map[string]struct{}, erro
 // invalidates the old token pairing).
 func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error {
 	now := nowUTC()
+	if cs.CouncilID == "" {
+		id, err := s.CouncilIDFor(ctx, cs.Owner)
+		if err != nil {
+			return err
+		}
+		cs.CouncilID = id
+	}
 	// Refuse to write a council session for someone who is now an ACCEPTED secondary.
 	// AcceptInvite already refuses to make a linker into a secondary, but that only
 	// closes one direction: a council link started before the invite was accepted lands
@@ -306,10 +314,11 @@ func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error
 	// own council session — where a member sees two sets of permits and the scheduler
 	// warms a session nothing owns.
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO council_session (owner, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at, session_generation)
-SELECT ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?
+INSERT INTO council_session (owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at, session_generation)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM account_member WHERE member_email = ? AND invite_pending = 0)
 ON CONFLICT(owner) DO UPDATE SET
+    council_id          = excluded.council_id,
     sub                 = excluded.sub,
     council_email       = excluded.council_email,
     cookie_sealed       = excluded.cookie_sealed,
@@ -322,7 +331,7 @@ ON CONFLICT(owner) DO UPDATE SET
     password_sealed     = excluded.password_sealed,
     last_active_at      = excluded.last_active_at,
     session_generation  = council_session.session_generation + 1`,
-		cs.Owner, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
+		cs.Owner, cs.CouncilID, cs.Sub, cs.CouncilEmail, cs.Cookie, cs.AccessToken,
 		cs.TokenExpiry.UTC().Format(time.RFC3339), now, now, cs.Password, now, s.newSessionGeneration(),
 		cs.Owner)
 	if err != nil {
@@ -517,12 +526,15 @@ type BreakerState struct {
 
 // LoadBreakerState reads the persisted breaker pause (zero-value times when never
 // set). Errors are returned so a boot can log and proceed closed rather than crash.
-func (s *Store) LoadBreakerState(ctx context.Context) (BreakerState, error) {
+func (s *Store) LoadBreakerState(ctx context.Context, councilID string) (BreakerState, error) {
 	var openUntil, lastPushback string
 	var gen int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT open_until, generation, last_pushback FROM breaker_state WHERE id = 1`).
+		`SELECT open_until, generation, last_pushback FROM breaker_state WHERE council_id = ?`, councilID).
 		Scan(&openUntil, &gen, &lastPushback)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BreakerState{}, nil // never paused: start closed
+	}
 	if err != nil {
 		return BreakerState{}, err
 	}
@@ -534,19 +546,55 @@ func (s *Store) LoadBreakerState(ctx context.Context) (BreakerState, error) {
 
 // SaveBreakerState persists the breaker pause on every open/close/pushback
 // transition, so a restart resumes from the real state rather than a clean slate.
-func (s *Store) SaveBreakerState(ctx context.Context, b BreakerState) error {
+func (s *Store) SaveBreakerState(ctx context.Context, councilID string, b BreakerState) error {
 	// Generation-guarded, so an older snapshot cannot overwrite a newer one even if two
 	// transitions race to the database. That makes ordering safe WITHOUT holding a lock
 	// across this write — which matters because /status reads the persist health under
 	// the same mutex, and a fleet block is exactly when both are busiest.
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO breaker_state (id, open_until, last_pushback, generation)
-VALUES (1, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
+INSERT INTO breaker_state (council_id, open_until, last_pushback, generation)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(council_id) DO UPDATE SET
     open_until    = excluded.open_until,
     last_pushback = excluded.last_pushback,
     generation    = excluded.generation
 WHERE excluded.generation >= breaker_state.generation`,
-		b.OpenUntil.UTC().Format(time.RFC3339), b.LastPushback.UTC().Format(time.RFC3339), b.Generation)
+		councilID, b.OpenUntil.UTC().Format(time.RFC3339), b.LastPushback.UTC().Format(time.RFC3339), b.Generation)
 	return err
 }
+
+// CouncilIDFor resolves which council an account belongs to: the choice made at
+// sign-up (account_flags), else the council of its linked session, else the
+// process default. One council per account, by design.
+func (s *Store) CouncilIDFor(ctx context.Context, owner string) (string, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+SELECT COALESCE(
+    NULLIF((SELECT council_id FROM account_flags WHERE owner = ?), ''),
+    NULLIF((SELECT council_id FROM council_session WHERE owner = ?), ''),
+    '')`, owner, owner).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		id = s.DefaultCouncil
+	}
+	return id, nil
+}
+
+// SetAccountCouncil records the council an account chose at sign-up. Refused if
+// the account already holds a session with a DIFFERENT council: switching means
+// disconnecting first, so a permit is never left filed under the wrong portal.
+func (s *Store) SetAccountCouncil(ctx context.Context, owner, councilID string) error {
+	cs, err := s.GetCouncilSession(ctx, owner)
+	if err == nil && cs.CouncilID != "" && cs.CouncilID != councilID {
+		return ErrCouncilMismatch
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO account_flags (owner, council_id) VALUES (?, ?)
+ON CONFLICT(owner) DO UPDATE SET council_id = excluded.council_id`, owner, councilID)
+	return err
+}
+
+// ErrCouncilMismatch: the account is linked to a different council than asked for.
+var ErrCouncilMismatch = errors.New("store: account is linked to a different council")

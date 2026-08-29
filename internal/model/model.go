@@ -22,6 +22,7 @@ type Vehicle struct {
 type Permit struct {
 	ID                 int64
 	Owner              string // app-user email that linked/owns this permit
+	CouncilID          string // the council this permit belongs to
 	CouncilPermitID    string // e.g. "14423"
 	PermitTypeID       string // fkPermitTypeID, e.g. "15"
 	Label              string

@@ -70,6 +70,9 @@ type Client struct {
 	p     provider.Provider
 	store *store.Store
 	box   *secretbox.Box
+	// CouncilID names the council this client serves; it keys the persisted
+	// breaker state and is stamped on sessions this client links.
+	CouncilID string
 
 	regCache   sync.Map // regKey -> cachedReg, to bound council reads
 	regRefresh sync.Map // regKey -> struct{}, dedupes in-flight background plate refreshes
@@ -146,10 +149,16 @@ func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 // provider was built on (its traffic is what Stats reports); nil is fine for a
 // provider that makes no requests.
 func NewClient(p provider.Provider, st *store.Store, box *secretbox.Box, tr *Transport) *Client {
+	return NewClientFor("", p, st, box, tr)
+}
+
+// NewClientFor is NewClient for a named council (see Client.CouncilID).
+func NewClientFor(councilID string, p provider.Provider, st *store.Store, box *secretbox.Box, tr *Transport) *Client {
 	c := &Client{
-		p:     p,
-		store: st,
-		box:   box,
+		CouncilID: councilID,
+		p:         p,
+		store:     st,
+		box:       box,
 		breaker: newBreaker(defaultBreakerThreshold, defaultBreakerWindow,
 			defaultBreakerCooldown, defaultBreakerProbe),
 		loginFlow: make(chan struct{}, 1),
@@ -162,7 +171,7 @@ func NewClient(p provider.Provider, st *store.Store, box *secretbox.Box, tr *Tra
 	// Restore a persisted breaker pause: if a block was in force when this process
 	// last stopped, resume paused rather than resuming full traffic into the block.
 	if st != nil {
-		if bs, err := st.LoadBreakerState(context.Background()); err == nil {
+		if bs, err := st.LoadBreakerState(context.Background(), councilID); err == nil {
 			c.breaker.restore(bs.OpenUntil, bs.LastPushback, bs.Generation)
 			if bs.OpenUntil.After(time.Now()) {
 				log.Printf("parking: fleet circuit restored OPEN from persisted state (paused %s) — a block survived a restart", time.Until(bs.OpenUntil).Round(time.Second))
@@ -210,7 +219,7 @@ func (c *Client) persistBreaker() {
 	openUntil, lastPushback, gen := c.breaker.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := c.store.SaveBreakerState(ctx, store.BreakerState{
+	err := c.store.SaveBreakerState(ctx, c.CouncilID, store.BreakerState{
 		OpenUntil: openUntil, LastPushback: lastPushback, Generation: gen,
 	})
 	c.persistMu.Lock()
@@ -399,7 +408,7 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 			return err
 		}
 	}
-	cs := store.CouncilSession{Owner: owner, CouncilEmail: username, Cookie: sealed, Password: sealedPass}
+	cs := store.CouncilSession{Owner: owner, CouncilID: c.CouncilID, CouncilEmail: username, Cookie: sealed, Password: sealedPass}
 	if interactive {
 		return c.store.SaveCouncilSession(ctx, cs) // stamps linked_at = now, bumps generation
 	}

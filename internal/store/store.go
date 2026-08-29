@@ -37,6 +37,11 @@ type Store struct {
 	db   *sql.DB
 	path string // the DB file path, for opening a separate snapshot connection
 
+	// DefaultCouncil is the council an account belongs to when it has made no
+	// choice and holds no session (the process's only enabled council). Set by
+	// main from the council registry; "" in tests.
+	DefaultCouncil string
+
 	// genMu/lastGen make freshly-seeded session generations strictly increasing
 	// within this process; see newSessionGeneration.
 	genMu   sync.Mutex

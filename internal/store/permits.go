@@ -25,14 +25,14 @@ func (s *Store) ListPermitsFor(ctx context.Context, owner string) ([]model.Permi
 }
 
 // permitCols is the column list backing scanPermit; keep the two in lockstep.
-const permitCols = `id, owner, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak, copy_offer_done`
+const permitCols = `id, owner, council_id, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak, copy_offer_done`
 
 // scanPermit reads one permit row (permitCols order), parsing the stored strings.
 func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 	var p model.Permit
 	var endDate, reminded string
 	var copyDone int
-	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
+	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilID, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
 		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType,
 		&p.FailStreak, &copyDone)
 	if err != nil {
@@ -77,7 +77,18 @@ func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
 // claiming it. Returns ErrNotFound when no row exists.
 func (s *Store) PermitByCouncilID(ctx context.Context, councilPermitID string) (model.Permit, error) {
 	p, err := scanPermit(s.db.QueryRowContext(ctx,
-		`SELECT `+permitCols+` FROM permit WHERE council_permit_id = ?`, councilPermitID))
+		`SELECT `+permitCols+` FROM permit WHERE council_permit_id = ? ORDER BY council_id LIMIT 1`, councilPermitID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
+}
+
+// PermitInCouncil looks a permit up by the council's own id WITHIN one council —
+// the lookup a handler must use, since two councils' id spaces overlap.
+func (s *Store) PermitInCouncil(ctx context.Context, councilID, councilPermitID string) (model.Permit, error) {
+	p, err := scanPermit(s.db.QueryRowContext(ctx,
+		`SELECT `+permitCols+` FROM permit WHERE council_id = ? AND council_permit_id = ?`, councilID, councilPermitID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -92,14 +103,21 @@ func (s *Store) PermitByCouncilID(ctx context.Context, councilPermitID string) (
 // defence. The label is only set on first insert — re-adding a permit keeps any
 // name the user has since chosen (see SetPermitLabel). Returns the row id.
 func (s *Store) UpsertPermit(ctx context.Context, owner, councilPermitID, permitTypeID, label string) (int64, error) {
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO permit (owner, council_permit_id, permit_type_id, label, updated_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(council_permit_id) DO UPDATE SET
+	// The permit is filed under the owner's council: an account belongs to exactly
+	// one, so the council is a property of the owner, not an input a caller can get
+	// wrong.
+	councilID, err := s.CouncilIDFor(ctx, owner)
+	if err != nil {
+		return 0, err
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO permit (owner, council_id, council_permit_id, permit_type_id, label, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(council_id, council_permit_id) DO UPDATE SET
     permit_type_id = excluded.permit_type_id,
     updated_at     = excluded.updated_at
 WHERE permit.owner = excluded.owner`,
-		owner, councilPermitID, permitTypeID, label, nowUTC())
+		owner, councilID, councilPermitID, permitTypeID, label, nowUTC())
 	if err != nil {
 		return 0, err
 	}
@@ -109,7 +127,7 @@ WHERE permit.owner = excluded.owner`,
 	// through it (the handler pre-checks, but a check/upsert race gets here).
 	var id int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id FROM permit WHERE council_permit_id = ? AND owner = ?`, councilPermitID, owner).Scan(&id)
+		`SELECT id FROM permit WHERE council_id = ? AND council_permit_id = ? AND owner = ?`, councilID, councilPermitID, owner).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrDuplicate // held by another account
 	}

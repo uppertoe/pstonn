@@ -143,6 +143,7 @@ func (s *Store) applyMigrations() error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS council_session (
     owner                TEXT PRIMARY KEY,        -- app-user email
+    council_id           TEXT NOT NULL DEFAULT '', -- which council this session is with (see council registry)
     sub                  TEXT NOT NULL DEFAULT '',
     council_email        TEXT NOT NULL DEFAULT '',
     cookie_sealed        TEXT NOT NULL DEFAULT '',
@@ -172,7 +173,8 @@ CREATE TABLE IF NOT EXISTS vehicle (
 CREATE TABLE IF NOT EXISTS permit (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     owner               TEXT NOT NULL DEFAULT '',   -- app-user email that owns this permit
-    council_permit_id   TEXT NOT NULL UNIQUE,
+    council_id          TEXT NOT NULL DEFAULT '',   -- the council whose permit this is
+    council_permit_id   TEXT NOT NULL,              -- the council's own id; unique only WITHIN a council
     permit_type_id      TEXT NOT NULL DEFAULT '',
     label               TEXT NOT NULL DEFAULT '',
     active_registration TEXT NOT NULL DEFAULT '',
@@ -181,7 +183,8 @@ CREATE TABLE IF NOT EXISTS permit (
     expiry_reminded     TEXT NOT NULL DEFAULT '',   -- '1' once an expiry reminder is sent (cleared when end_date changes)
     permit_number       TEXT NOT NULL DEFAULT '',   -- council permit number, e.g. "VPP24714"
     permit_type         TEXT NOT NULL DEFAULT '',   -- council permit type, e.g. "(A) 1st Visitor Permit"
-    updated_at          TEXT NOT NULL
+    updated_at          TEXT NOT NULL,
+    UNIQUE(council_id, council_permit_id)
 );
 
 CREATE TABLE IF NOT EXISTS weekly_rule (
@@ -346,7 +349,8 @@ CREATE INDEX IF NOT EXISTS idx_guest_request_owner ON guest_request(owner, statu
 -- Per-account flags. guests_enabled is the global kill-switch for guest passes.
 CREATE TABLE IF NOT EXISTS account_flags (
     owner          TEXT PRIMARY KEY,
-    guests_enabled INTEGER NOT NULL DEFAULT 1
+    guests_enabled INTEGER NOT NULL DEFAULT 1,
+    council_id     TEXT NOT NULL DEFAULT ''     -- the council chosen at sign-up, before any link exists
 );
 
 -- Durable notification outbox: a message is enqueued (composed + addressed) and a
@@ -410,7 +414,7 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
 -- in the future the breaker starts paused. generation is carried forward so it stays
 -- monotonic across restarts.
 CREATE TABLE IF NOT EXISTS breaker_state (
-    id            INTEGER PRIMARY KEY CHECK (id = 1),  -- one row, ever
+    council_id    TEXT PRIMARY KEY,                  -- one row per council: edge blocks are per portal host
     open_until    TEXT NOT NULL DEFAULT '',            -- RFC3339 UTC; while now < this, traffic is paused
     generation    INTEGER NOT NULL DEFAULT 0,
     last_pushback TEXT NOT NULL DEFAULT '',            -- RFC3339 UTC of the most recent pushback
@@ -427,7 +431,6 @@ CREATE TABLE IF NOT EXISTS referral_invite (
 );
 CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at);
 
-INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -502,12 +505,47 @@ INSERT OR IGNORE INTO breaker_state (id) VALUES (1);
 		// on existing permits, which is safe: any permit with a roster already
 		// renders the quiet button, not the pitch.
 		`ALTER TABLE permit ADD COLUMN copy_offer_done INTEGER NOT NULL DEFAULT 0`,
+		// Which council a row belongs to (docs/council-connections.md). Every row that
+		// predates the column is the City of Stonnington's — the only council the app
+		// has ever served — which the backfill below records.
+		`ALTER TABLE council_session ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE account_flags ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
 		// The message text comes from SQLite core itself and is stable.
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
+		}
+	}
+	// Backfill council_id on rows that predate multi-council support: they are all
+	// Stonnington's. Idempotent (only '' rows are touched).
+	for _, stmt := range []string{
+		`UPDATE council_session SET council_id = 'stonnington' WHERE council_id = ''`,
+		`UPDATE permit SET council_id = 'stonnington' WHERE council_id = ''`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate %q: %w", stmt, err)
+		}
+	}
+	// Rebuild `permit` if its uniqueness is still the global UNIQUE(council_permit_id):
+	// two councils' permit id spaces overlap, so the constraint must be per council.
+	// SQLite cannot change a constraint in place; redefine the table and copy the rows.
+	if scoped, err := s.permitUniqueIsScoped(); err != nil {
+		return err
+	} else if !scoped {
+		if err := s.rebuildPermitTable(); err != nil {
+			return fmt.Errorf("migrate permit table: %w", err)
+		}
+	}
+	// Rebuild `breaker_state` from the single-row shape to one row per council,
+	// carrying the existing pause across under Stonnington.
+	if has, err := s.columnExists("breaker_state", "council_id"); err != nil {
+		return err
+	} else if !has {
+		if err := s.rebuildBreakerTable(); err != nil {
+			return fmt.Errorf("migrate breaker_state table: %w", err)
 		}
 	}
 	// Backfill the re-authorise clock for pre-existing sessions so they are not
@@ -625,6 +663,128 @@ func (s *Store) rebuildOverrideTable() error {
 		`DROP TABLE override`,
 		`ALTER TABLE override_new RENAME TO override`,
 		`CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// permitUniqueIsScoped reports whether the permit table already carries the
+// per-council uniqueness constraint (read from its stored definition).
+func (s *Store) permitUniqueIsScoped() (bool, error) {
+	var sqlText string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'permit'`).Scan(&sqlText)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(strings.ToLower(sqlText), "unique(council_id, council_permit_id)"), nil
+}
+
+// rebuildPermitTable redefines permit with UNIQUE(council_id, council_permit_id),
+// preserving rows and ids. Tables that reference permit(id) (weekly_rule,
+// override, apply_log, permit_notify, guest_grant) keep referencing "permit" by
+// name, which the renamed table satisfies; foreign keys are toggled off around
+// the DROP/RENAME per the SQLite table-redefinition guidance, and the migration
+// lock guarantees a single migrator.
+func (s *Store) rebuildPermitTable() error {
+	// Copy only the columns the existing table actually has (a very old database
+	// may predate some), defaulting the rest, so the rebuild never fails on shape.
+	existing := map[string]bool{}
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('permit')`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	cols := []struct{ name, def string }{
+		{"id", "NULL"}, {"owner", "''"}, {"council_id", "''"}, {"council_permit_id", "''"},
+		{"permit_type_id", "''"}, {"label", "''"}, {"active_registration", "''"}, {"end_date", "''"},
+		{"status", "''"}, {"expiry_reminded", "''"}, {"permit_number", "''"}, {"permit_type", "''"},
+		{"updated_at", "''"}, {"fail_streak", "0"}, {"copy_offer_done", "0"},
+	}
+	var names, selects []string
+	for _, c := range cols {
+		names = append(names, c.name)
+		if existing[c.name] {
+			selects = append(selects, c.name)
+		} else {
+			selects = append(selects, c.def)
+		}
+	}
+
+	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys=ON`)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Mirrors the base schema PLUS every ALTER-added column, in the same order the
+	// ALTER loop (which has already run) leaves them.
+	for _, stmt := range []string{
+		`CREATE TABLE permit_new (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner               TEXT NOT NULL DEFAULT '',
+    council_id          TEXT NOT NULL DEFAULT '',
+    council_permit_id   TEXT NOT NULL,
+    permit_type_id      TEXT NOT NULL DEFAULT '',
+    label               TEXT NOT NULL DEFAULT '',
+    active_registration TEXT NOT NULL DEFAULT '',
+    end_date            TEXT NOT NULL DEFAULT '',
+    status              TEXT NOT NULL DEFAULT '',
+    expiry_reminded     TEXT NOT NULL DEFAULT '',
+    permit_number       TEXT NOT NULL DEFAULT '',
+    permit_type         TEXT NOT NULL DEFAULT '',
+    updated_at          TEXT NOT NULL,
+    fail_streak         INTEGER NOT NULL DEFAULT 0,
+    copy_offer_done     INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(council_id, council_permit_id)
+)`,
+		`INSERT INTO permit_new (` + strings.Join(names, ", ") + `) SELECT ` + strings.Join(selects, ", ") + ` FROM permit`,
+		`DROP TABLE permit`,
+		`ALTER TABLE permit_new RENAME TO permit`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// rebuildBreakerTable converts the single-row breaker_state into one row per
+// council, carrying any existing pause across as Stonnington's.
+func (s *Store) rebuildBreakerTable() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`CREATE TABLE breaker_state_new (
+    council_id    TEXT PRIMARY KEY,
+    open_until    TEXT NOT NULL DEFAULT '',
+    generation    INTEGER NOT NULL DEFAULT 0,
+    last_pushback TEXT NOT NULL DEFAULT '',
+    updated_at    TEXT NOT NULL DEFAULT ''
+)`,
+		`INSERT INTO breaker_state_new (council_id, open_until, generation, last_pushback, updated_at)
+    SELECT 'stonnington', open_until, generation, last_pushback, updated_at FROM breaker_state WHERE id = 1`,
+		`DROP TABLE breaker_state`,
+		`ALTER TABLE breaker_state_new RENAME TO breaker_state`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return err

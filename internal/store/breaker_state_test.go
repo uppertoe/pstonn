@@ -18,13 +18,13 @@ func TestBreakerStatePersistsAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A fresh DB starts closed (zero times, generation 0).
-	if bs, err := st.LoadBreakerState(ctx); err != nil || !bs.OpenUntil.IsZero() || bs.Generation != 0 {
+	if bs, err := st.LoadBreakerState(ctx, "stonnington"); err != nil || !bs.OpenUntil.IsZero() || bs.Generation != 0 {
 		t.Fatalf("fresh breaker state = %+v, err=%v; want zero", bs, err)
 	}
 
 	until := time.Now().Add(5 * time.Minute).UTC().Truncate(time.Second)
 	last := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
-	if err := st.SaveBreakerState(ctx, BreakerState{OpenUntil: until, Generation: 9, LastPushback: last}); err != nil {
+	if err := st.SaveBreakerState(ctx, "stonnington", BreakerState{OpenUntil: until, Generation: 9, LastPushback: last}); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()
@@ -35,7 +35,7 @@ func TestBreakerStatePersistsAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	bs, err := st2.LoadBreakerState(ctx)
+	bs, err := st2.LoadBreakerState(ctx, "stonnington")
 	if err != nil {
 		t.Fatal(err)
 	}
