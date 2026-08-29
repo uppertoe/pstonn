@@ -72,18 +72,6 @@ func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
 	return p, err
 }
 
-// PermitByCouncilID looks up a permit by its globally-unique council permit id,
-// so a caller can check whether it is already managed (and by whom) before
-// claiming it. Returns ErrNotFound when no row exists.
-func (s *Store) PermitByCouncilID(ctx context.Context, councilPermitID string) (model.Permit, error) {
-	p, err := scanPermit(s.db.QueryRowContext(ctx,
-		`SELECT `+permitCols+` FROM permit WHERE council_permit_id = ? ORDER BY council_id LIMIT 1`, councilPermitID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return p, ErrNotFound
-	}
-	return p, err
-}
-
 // PermitInCouncil looks a permit up by the council's own id WITHIN one council —
 // the lookup a handler must use, since two councils' id spaces overlap.
 func (s *Store) PermitInCouncil(ctx context.Context, councilID, councilPermitID string) (model.Permit, error) {

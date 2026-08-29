@@ -562,7 +562,7 @@ func TestPermitExpiryReminder(t *testing.T) {
 		t.Fatalf("expected one expiry warning, got %d (%v)", got, nf.expiries)
 	}
 	// Expiry + status were written back to the permit.
-	if p, _ := st.PermitByCouncilID(ctx, cpid); p.Status != "Granted" || p.EndDate.IsZero() {
+	if p, _ := st.PermitInCouncil(ctx, "", cpid); p.Status != "Granted" || p.EndDate.IsZero() {
 		t.Fatalf("permit meta not persisted: status=%q end=%v", p.Status, p.EndDate)
 	}
 	// A second pass must NOT re-warn for the same expiry date.
@@ -577,7 +577,7 @@ func TestPermitExpiryReminder(t *testing.T) {
 	if got := len(nf.expiries); got != 1 {
 		t.Fatalf("far-off renewal should not warn, got %d", got)
 	}
-	if p, _ := st.PermitByCouncilID(ctx, cpid); p.ExpiryReminded {
+	if p, _ := st.PermitInCouncil(ctx, "", cpid); p.ExpiryReminded {
 		t.Fatal("renewal to a new date should clear the reminded flag")
 	}
 }
