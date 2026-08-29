@@ -96,12 +96,12 @@ func TestLinkSealsProviderSessionAndPinsUsername(t *testing.T) {
 	if err := c.Link(ctx, "o@example.com", "o@example.com", "pw", true, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := st.GetCouncilSession(ctx, "o@example.com")
+	cs, err := st.GetTenantSession(ctx, "o@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Stored material is the provider's blob, prefixed and sealed under the owner.
-	plain, _, err := box.OpenCtx(secretbox.CouncilCookie("o@example.com"), cs.Cookie)
+	plain, _, err := box.OpenCtx(secretbox.TenantCookie("o@example.com"), cs.Cookie)
 	if err != nil {
 		t.Fatalf("session not sealed under the owner's context: %v", err)
 	}
@@ -111,8 +111,8 @@ func TestLinkSealsProviderSessionAndPinsUsername(t *testing.T) {
 	if cs.Password == "" {
 		t.Fatal("opted-in password was not saved")
 	}
-	if cs.CouncilEmail != "o@example.com" {
-		t.Fatalf("council username not recorded: %q", cs.CouncilEmail)
+	if cs.TenantEmail != "o@example.com" {
+		t.Fatalf("council username not recorded: %q", cs.TenantEmail)
 	}
 	if !c.Linked(ctx, "o@example.com") {
 		t.Fatal("Linked = false after a successful link")
@@ -133,7 +133,7 @@ func TestLoginRejectedStoresNothing(t *testing.T) {
 	if err := c.Link(ctx, "o@example.com", "o@example.com", "bad", true, true, 0); !errors.Is(err, ErrLoginRejected) {
 		t.Fatalf("Link = %v, want ErrLoginRejected", err)
 	}
-	if _, err := st.GetCouncilSession(ctx, "o@example.com"); err == nil {
+	if _, err := st.GetTenantSession(ctx, "o@example.com"); err == nil {
 		t.Fatal("a rejected login stored a session (and the password with it)")
 	}
 }
@@ -154,12 +154,12 @@ func TestRotatedSessionIsPersistedAndReused(t *testing.T) {
 	if err := c.Link(ctx, "o@example.com", "o@example.com", "pw", false, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := st.GetCouncilSession(ctx, "o@example.com")
+	before, _ := st.GetTenantSession(ctx, "o@example.com")
 	perm := model.Permit{CouncilPermitID: "1"}
 	if _, err := c.CurrentVehicle(ctx, "o@example.com", perm); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := st.GetCouncilSession(ctx, "o@example.com")
+	after, _ := st.GetTenantSession(ctx, "o@example.com")
 	if after.Cookie == before.Cookie {
 		t.Fatal("rotated session material was not persisted")
 	}
@@ -183,12 +183,12 @@ func TestRefreshAlwaysBumpsFreshness(t *testing.T) {
 	if err := c.Link(ctx, "o@example.com", "o@example.com", "pw", false, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := st.GetCouncilSession(ctx, "o@example.com")
+	before, _ := st.GetTenantSession(ctx, "o@example.com")
 	time.Sleep(1100 * time.Millisecond) // updated_at has second resolution
 	if err := c.Refresh(ctx, "o@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := st.GetCouncilSession(ctx, "o@example.com")
+	after, _ := st.GetTenantSession(ctx, "o@example.com")
 	if !after.UpdatedAt.After(before.UpdatedAt) {
 		t.Fatalf("Refresh did not bump updated_at (%s → %s)", before.UpdatedAt, after.UpdatedAt)
 	}
@@ -267,7 +267,7 @@ func TestProviderOutcomesFeedBackoffAndTagging(t *testing.T) {
 	p.current = func(s *provider.Session) (provider.Vehicle, error) {
 		return provider.Vehicle{}, provider.ErrSessionExpired
 	}
-	cs, _ := st.GetCouncilSession(ctx, "o@example.com")
+	cs, _ := st.GetTenantSession(ctx, "o@example.com")
 	_, err := c.CurrentVehicle(ctx, "o@example.com", perm)
 	if gen, ok := SessionGenOf(err); !ok || gen != cs.Generation {
 		t.Fatalf("expiry not tagged with the failing generation: %v (gen %d, want %d)", err, gen, cs.Generation)
@@ -332,9 +332,9 @@ func TestFailedOperationDoesNotPersistRotation(t *testing.T) {
 	}
 	c, st, _ := stubClient(t, p)
 	_ = c.Link(ctx, "o@example.com", "o@example.com", "pw", false, true, 0)
-	before, _ := st.GetCouncilSession(ctx, "o@example.com")
+	before, _ := st.GetTenantSession(ctx, "o@example.com")
 	_, err := c.CurrentVehicle(ctx, "o@example.com", model.Permit{CouncilPermitID: "1"})
-	after, _ := st.GetCouncilSession(ctx, "o@example.com")
+	after, _ := st.GetTenantSession(ctx, "o@example.com")
 	if after.Cookie != before.Cookie || after.Generation != before.Generation {
 		t.Fatal("a failed operation persisted rotated material (and bumped the generation)")
 	}
@@ -367,14 +367,14 @@ func TestRotationDuringRelinkKeepsTheNewerSession(t *testing.T) {
 	if _, err := c.CurrentVehicle(ctx, "o@example.com", perm); err != nil {
 		t.Fatalf("superseded write must not fail the operation: %v", err)
 	}
-	after, _ := st.GetCouncilSession(ctx, "o@example.com")
+	after, _ := st.GetTenantSession(ctx, "o@example.com")
 	if _, err := c.CurrentVehicle(ctx, "o@example.com", perm); err != nil {
 		t.Fatal(err)
 	}
 	if got := p.sessionIn[len(p.sessionIn)-1]; !strings.Contains(got, `"n":0`) {
 		t.Fatalf("next call ran on %q, want the re-linked session (n:0), not the superseded rotation", got)
 	}
-	if again, _ := st.GetCouncilSession(ctx, "o@example.com"); again.Generation != after.Generation+0 && again.Cookie == "" {
+	if again, _ := st.GetTenantSession(ctx, "o@example.com"); again.Generation != after.Generation+0 && again.Cookie == "" {
 		t.Fatal("re-linked session lost")
 	}
 }
@@ -384,12 +384,12 @@ func TestRotationDuringRelinkKeepsTheNewerSession(t *testing.T) {
 // called; an import that fails for another reason is NOT reported as an expiry.
 func TestLegacyRowsAcrossProviders(t *testing.T) {
 	ctx := context.Background()
-	seed := func(t *testing.T, st *store.Store, box *secretbox.Box) store.CouncilSession {
+	seed := func(t *testing.T, st *store.Store, box *secretbox.Box) store.TenantSession {
 		sealed, _ := box.Seal("Permits.IDM.Identity=abc") // un-prefixed: the old shape
-		if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "old@example.com", Cookie: sealed}); err != nil {
+		if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: "old@example.com", Cookie: sealed}); err != nil {
 			t.Fatal(err)
 		}
-		cs, _ := st.GetCouncilSession(ctx, "old@example.com")
+		cs, _ := st.GetTenantSession(ctx, "old@example.com")
 		return cs
 	}
 	t.Run("no importer", func(t *testing.T) {
@@ -421,15 +421,15 @@ func (p *importFailProvider) ImportLegacy(cookie, token string, exp time.Time) (
 	return nil, errors.New("import: unreadable")
 }
 
-// Reconnect signs in as the recorded council username, falling back to the
+// Reconnect signs in as the recorded tenant username, falling back to the
 // owner's email for rows that predate the column (every pre-branch row).
 func TestReconnectUsernameFallback(t *testing.T) {
 	ctx := context.Background()
 	p := &stubProvider{caps: provider.Capabilities{LoginKind: "password"}}
 	c, st, box := stubClient(t, p)
-	pw, _ := box.SealCtx(secretbox.CouncilPassword("o@example.com"), "pw")
+	pw, _ := box.SealCtx(secretbox.TenantPassword("o@example.com"), "pw")
 	sess, _ := c.sealSession("o@example.com", provider.Session(`{"u":"x"}`))
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "o@example.com", Cookie: sess, Password: pw}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: "o@example.com", Cookie: sess, Password: pw}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Reconnect(ctx, "o@example.com"); err != nil {
@@ -438,7 +438,7 @@ func TestReconnectUsernameFallback(t *testing.T) {
 	if got := p.calls[len(p.calls)-1]; got != "login:o@example.com" {
 		t.Fatalf("reconnect used %q, want the owner as username", got)
 	}
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "o@example.com", CouncilEmail: "other@example.com", Cookie: sess, Password: pw}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: "o@example.com", TenantEmail: "other@example.com", Cookie: sess, Password: pw}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Reconnect(ctx, "o@example.com"); err != nil {

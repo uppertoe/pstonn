@@ -249,7 +249,7 @@ WHERE (? = 0 OR EXISTS (
 
 // ErrGuestOverrideRefused means a guest-created override was not written: the link was
 // revoked/disabled between resolving it and the insert, or the permit is at its live-
-// override cap. The caller must NOT go on to change the plate at the council.
+// override cap. The caller must NOT go on to change the plate at the tenant.
 var ErrGuestOverrideRefused = errors.New("store: guest link is no longer active, or the permit has too many live bookings")
 
 // MaxLiveOverridesPerPermit caps simultaneously-active bookings on one permit so the
@@ -427,10 +427,10 @@ WHERE id = ? AND permit_id = ? AND permit_id IN (SELECT id FROM permit WHERE own
 // switch is on, and the specific capability exercised is still granted — the chosen
 // saved vehicle is still in the pass, or arbitrary plates are still allowed.
 //
-// The guarded insert proves all that at INSERT time, but the council write happens
+// The guarded insert proves all that at INSERT time, but the tenant write happens
 // seconds later, and an owner can revoke or EDIT the pass in between (removing the very
 // vehicle the guest picked). Called under the permit apply claim immediately before the
-// council write.
+// tenant write.
 func (s *Store) GuestOverrideStillAuthorised(ctx context.Context, overrideID, guestTokenID int64) (bool, error) {
 	if overrideID == 0 || guestTokenID == 0 {
 		return false, nil
@@ -452,7 +452,7 @@ WHERE o.id = ? AND o.guest_token_id = ?
 }
 
 // GuestTokenStillLive reports whether a guest link still carries any authority at all:
-// unrevoked token, enabled grant, account switch on. Used before a council write that
+// unrevoked token, enabled grant, account switch on. Used before a tenant write that
 // is not exercising a specific capability — a REVERT puts back the plate that was there
 // before the guest touched it, so it must not be gated on the vehicle/plate permissions
 // an activation needs (a pass without allow_plate can still undo itself).

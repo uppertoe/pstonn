@@ -19,13 +19,13 @@ func TestBusyWarningEscalatesOnConfirmedBlock(t *testing.T) {
 	ctx := context.Background()
 	const owner, cid = "blocked@example.com", "blk-1"
 
-	// run drives `ticks` reconcile passes against a council that keeps returning
+	// run drives `ticks` reconcile passes against a tenant that keeps returning
 	// ErrCouncilBusy, with the fleet breaker reported open or closed, and returns
 	// the user-facing outcomes that fired.
 	run := func(blocked bool, ticks int) []notify.ApplyOutcome {
 		st := newStore(t)
 		seedActivePermit(t, st, owner, cid, "WANT1", "OLD1") // a change to WANT1 is due
-		fc := &fakeCouncil{setErr: parking.ErrCouncilBusy, blocked: blocked}
+		fc := &fakeTenant{setErr: parking.ErrCouncilBusy, blocked: blocked}
 		nf := &fakeNotifier{on: true, admin: true}
 		s := New(st, fc, time.UTC, Options{Notifier: nf})
 		for i := 0; i < ticks; i++ {
@@ -65,7 +65,7 @@ func TestBusyWarningEscalatesOnConfirmedBlock(t *testing.T) {
 }
 
 // TestBusyEscalationSurvivesEarlierSoftNotice pins the common REAL ordering: the
-// council starts refusing, the household gets the soft "still updating, we'll
+// tenant starts refusing, the household gets the soft "still updating, we'll
 // keep trying" notice, and only THEN does the fleet breaker confirm the block.
 // With the old "busy|"+plate key both notices deduped to one, so the urgent
 // "change the vehicle yourself now to avoid a fine" message — the exact
@@ -77,7 +77,7 @@ func TestBusyEscalationSurvivesEarlierSoftNotice(t *testing.T) {
 	st := newStore(t)
 	seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
 
-	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy} // breaker closed: isolated hiccup
+	fc := &fakeTenant{setErr: parking.ErrCouncilBusy} // breaker closed: isolated hiccup
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 

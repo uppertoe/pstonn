@@ -148,7 +148,7 @@ func TestFindDisplaced(t *testing.T) {
 		}
 	})
 	t.Run("whitespace variant of the departing plate still matches", func(t *testing.T) {
-		// The plate we changed away from is reported by the council as "GUEST 99",
+		// The plate we changed away from is reported by the tenant as "GUEST 99",
 		// the booking stored it as "GUEST99". Same car, so the booker must still be
 		// warned — under strings.EqualFold the space made them differ and the warning
 		// was silently dropped.
@@ -230,7 +230,7 @@ func TestFindDisplaced(t *testing.T) {
 
 // TestSamePlate (F5): one rule for "is this the same car?", because the sites that
 // decide "does the council need writing to?" and "has the plate changed?" must not
-// disagree. When they did, a case-only echo from the portal drove a real council
+// disagree. When they did, a case-only echo from the portal drove a real tenant
 // write, a "your permit was updated" notification and a displaced-driver email for
 // a change that changed nothing.
 func TestSamePlate(t *testing.T) {
@@ -266,13 +266,13 @@ func TestSamePlate(t *testing.T) {
 }
 
 // TestExpiryDeadline (F7): EndDate is the INCLUSIVE last valid day, reported by the
-// council as a zoneless date we parse as UTC midnight. Anything comparing `now`
+// tenant as a zoneless date we parse as UTC midnight. Anything comparing `now`
 // against that bare instant treats the permit as finished from ~10-11am Melbourne
 // time on its final valid day, while it is still live and still needs its plate
 // kept right.
 func TestExpiryDeadline(t *testing.T) {
 	loc := time.FixedZone("AEST", 10*3600)
-	end := mustTime(t, "2026-07-20 00:00 +0000") // how the council date arrives
+	end := mustTime(t, "2026-07-20 00:00 +0000") // how the tenant date arrives
 	got := ExpiryDeadline(end, loc)
 	if want := mustTime(t, "2026-07-21 00:00 +1000"); !got.Equal(want) {
 		t.Fatalf("ExpiryDeadline = %s, want %s", got, want)

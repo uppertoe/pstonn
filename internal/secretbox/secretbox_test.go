@@ -66,7 +66,7 @@ func TestSealOpenRoundtrip(t *testing.T) {
 	}
 }
 
-// The whole point of sealing the council session is that a leaked database file
+// The whole point of sealing the tenant session is that a leaked database file
 // does not yield usable credentials, so a different key must not open it.
 func TestOpenWithWrongKeyFails(t *testing.T) {
 	sealed, err := testBox(t, 1).Seal("Permits.IDM.Identity=secret")

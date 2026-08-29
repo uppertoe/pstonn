@@ -19,7 +19,7 @@ func inviteStore(t *testing.T) *Store {
 
 // This is the regression test for the finding: adding a member used to bind an
 // arbitrary address to an account immediately, so the invited person's next sign-in
-// showed them someone else's household, blocked them from linking their own council
+// showed them someone else's household, blocked them from linking their own tenant
 // account, and filed everything they created under the inviter. An invite must grant
 // nothing at all until its subject accepts.
 func TestPendingInviteGrantsNothing(t *testing.T) {

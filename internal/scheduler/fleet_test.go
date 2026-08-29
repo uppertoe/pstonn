@@ -4,7 +4,7 @@ package scheduler
 //
 // Everything we believe about running at 500-1000 households is arithmetic on paper:
 // a per-request cost measured once by hand, multiplied out. This measures the parts
-// that were never measured — how many council requests a permit ACTUALLY costs to
+// that were never measured — how many tenant requests a permit ACTUALLY costs to
 // converge, how long the orchestration itself takes, and what the single SQLite
 // connection does to page reads while a rollover is draining.
 //
@@ -38,19 +38,19 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
-	councilpkg "github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
+	tenantpkg "github.com/uppertoe/pstonn/internal/tenant"
 )
 
-// stubCouncil is a stand-in for the council portal that behaves like the real one in
+// stubTenant is a stand-in for the tenant portal that behaves like the real one in
 // the ways that matter for cost: an apply is a POST plus a confirming read, and the
 // confirm only passes once the POST has actually changed the record.
-type stubCouncil struct {
+type stubTenant struct {
 	mu     sync.Mutex
-	plates map[string]string // owner -> the plate the council currently holds
-	byTag  map[string]string // council cookie value -> owner (the IdM leg)
+	plates map[string]string // owner -> the plate the tenant currently holds
+	byTag  map[string]string // tenant cookie value -> owner (the IdM leg)
 	byTok  map[string]string // bearer token -> owner (the API leg)
 	hits   []time.Time       // every request, for the peak-rate calculation
 	byPath map[string]int
@@ -72,9 +72,9 @@ type stubCouncil struct {
 }
 
 // killAllCookies invalidates every session cookie the fleet currently holds, the way a
-// council-side purge would. Unlike authDead it leaves the login endpoint working, so a
+// tenant-side purge would. Unlike authDead it leaves the login endpoint working, so a
 // household with a saved password can actually recover.
-func (s *stubCouncil) killAllCookies() {
+func (s *stubTenant) killAllCookies() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for tag := range s.byTag {
@@ -83,7 +83,7 @@ func (s *stubCouncil) killAllCookies() {
 }
 
 // cookieLive reports whether the presented cookie still identifies a live session.
-func (s *stubCouncil) cookieLive(r *http.Request) (tag string, ok bool) {
+func (s *stubTenant) cookieLive(r *http.Request) (tag string, ok bool) {
 	c, err := r.Cookie("Permits.IDM.Identity")
 	if err != nil {
 		return "", false
@@ -97,8 +97,8 @@ func (s *stubCouncil) cookieLive(r *http.Request) (tag string, ok bool) {
 }
 
 // injectFault applies the configured latency and, on its turn, refuses the request the
-// way the council edge does. Reports whether it already wrote the response.
-func (s *stubCouncil) injectFault(w http.ResponseWriter) bool {
+// way the tenant edge does. Reports whether it already wrote the response.
+func (s *stubTenant) injectFault(w http.ResponseWriter) bool {
 	if ms := s.latencyMS.Load(); ms > 0 {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
@@ -119,9 +119,9 @@ func (s *stubCouncil) injectFault(w http.ResponseWriter) bool {
 	return true
 }
 
-func newStubCouncil(t *testing.T) *stubCouncil {
+func newStubTenant(t *testing.T) *stubTenant {
 	t.Helper()
-	s := &stubCouncil{plates: map[string]string{}, byPath: map[string]int{}, byTag: map[string]string{}, byTok: map[string]string{}, deadTags: map[string]bool{}}
+	s := &stubTenant{plates: map[string]string{}, byPath: map[string]int{}, byTag: map[string]string{}, byTok: map[string]string{}, deadTags: map[string]bool{}}
 	mux := http.NewServeMux()
 
 	record := func(path string) {
@@ -138,7 +138,7 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 		record("authorize")
 		tag, live := s.cookieLive(r)
 		if s.authDead.Load() || !live {
-			// The council REDIRECTS a dead cookie to the login page rather than serving
+			// The tenant REDIRECTS a dead cookie to the login page rather than serving
 			// the form from authorize. The distinction is not cosmetic: the follow-up GET
 			// of that page is itself charged to the login governor, so serving the form
 			// here charged one governed request per recovery where production charges
@@ -201,7 +201,7 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// The permit grid. One permit per owner, carrying the plate the council holds.
+	// The permit grid. One permit per owner, carrying the plate the tenant holds.
 	mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
 		record("grid")
 		if s.injectFault(w) {
@@ -216,7 +216,7 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 			"PKPermitID":%s,"FKPermitTypeID":3,"PermitNumber":"VPP%s","PermitType":"Resident",
 			"PermitStatus":"Active","VehicleRego":%q,"StartDate":"2026-01-01T00:00:00",
 			"EndDate":"2027-01-01T00:00:00","PermitTypeAllowsVehicleChangeByHolder":true}]}`,
-			councilIDFor(owner), councilIDFor(owner), plate))
+			tenantIDFor(owner), tenantIDFor(owner), plate))
 	})
 	// The current-vehicle read, used both to decide drift and to CONFIRM an apply.
 	mux.HandleFunc("/ssp-svc/api/permits/managedVehicle", func(w http.ResponseWriter, r *http.Request) {
@@ -270,10 +270,10 @@ func newStubCouncil(t *testing.T) *stubCouncil {
 	return s
 }
 
-// ownerOf identifies the caller the way the council would: by the session cookie the
+// ownerOf identifies the caller the way the tenant would: by the session cookie the
 // client presents. Each seeded owner gets a distinct one, so the stub can hold real
 // per-owner state instead of pretending the fleet is one account.
-func (s *stubCouncil) ownerOf(r *http.Request) string {
+func (s *stubTenant) ownerOf(r *http.Request) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); tok != "" {
@@ -289,7 +289,7 @@ func (s *stubCouncil) ownerOf(r *http.Request) string {
 
 // peakPerMinute is the busiest 60s window the stub saw — the number that matters
 // against the governor's ceiling, since an average hides the rollover burst.
-func (s *stubCouncil) peakPerMinute() int {
+func (s *stubTenant) peakPerMinute() int {
 	s.mu.Lock()
 	hits := append([]time.Time(nil), s.hits...)
 	s.mu.Unlock()
@@ -309,13 +309,13 @@ func (s *stubCouncil) peakPerMinute() int {
 	return best
 }
 
-func (s *stubCouncil) total() int {
+func (s *stubTenant) total() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.hits)
 }
 
-func councilIDFor(owner string) string {
+func tenantIDFor(owner string) string {
 	// Stable numeric id per owner; the grid needs a positive PKPermitID.
 	n := 0
 	for _, r := range owner {
@@ -330,27 +330,27 @@ func councilIDFor(owner string) string {
 	return strconv.Itoa(n)
 }
 
-// cfgConcurrency is the harness's council concurrency. Kept as a named constant so the
+// cfgConcurrency is the harness's tenant concurrency. Kept as a named constant so the
 // wall-clock budget in the failure test is derived from it rather than guessed.
 const cfgConcurrency = 8
 
-// fleetRig is a whole synthetic deployment: a stub council, a real store, a real
+// fleetRig is a whole synthetic deployment: a stub tenant, a real store, a real
 // parking client (governor, breaker, token and session handling) and a real scheduler.
 type fleetRig struct {
-	sched   *Scheduler
-	store   *store.Store
-	council *stubCouncil
-	size    int
+	sched  *Scheduler
+	store  *store.Store
+	tenant *stubTenant
+	size   int
 }
 
 // converged counts households whose permit THE COUNCIL now holds under the new plate,
 // so a local write that never landed cannot pass for success.
 func (r *fleetRig) converged() int {
-	r.council.mu.Lock()
-	defer r.council.mu.Unlock()
+	r.tenant.mu.Lock()
+	defer r.tenant.mu.Unlock()
 	done := 0
 	for i := 0; i < r.size; i++ {
-		if r.council.plates[fmt.Sprintf("owner%04d@example.com", i)] == fmt.Sprintf("NEW%03d", i%1000) {
+		if r.tenant.plates[fmt.Sprintf("owner%04d@example.com", i)] == fmt.Sprintf("NEW%03d", i%1000) {
 			done++
 		}
 	}
@@ -401,7 +401,7 @@ func newFleetRigTokens(t *testing.T, size int, freshTokens bool) *fleetRig {
 func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *fleetRig {
 	t.Helper()
 	ctx := context.Background()
-	council := newStubCouncil(t)
+	tenant := newStubTenant(t)
 
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "fleet.db"))
 	if err != nil {
@@ -414,9 +414,9 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 	}
 
 	cfg := &config.Config{}
-	cfg.Council.Issuer = council.srv.URL + "/idm"
-	cfg.Council.APIBase = council.srv.URL + "/ssp-svc"
-	cfg.Council.RedirectURI = council.srv.URL + "/ssp/callback"
+	cfg.Council.Issuer = tenant.srv.URL + "/idm"
+	cfg.Council.APIBase = tenant.srv.URL + "/ssp-svc"
+	cfg.Council.RedirectURI = tenant.srv.URL + "/ssp/callback"
 	cfg.Council.ClientID = "fleet-client"
 	cfg.Council.Scopes = []string{"openid"}
 	// Wide open ON PURPOSE. We are measuring request COST and orchestration, not
@@ -426,9 +426,9 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 	cfg.Council.GovConcurrency = cfgConcurrency
 
 	client := parking.New(cfg, st, box)
-	sched := New(st, councilpkg.Single{Client: client}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Hour})
+	sched := New(st, tenantpkg.Single{Client: client}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Hour})
 
-	// Seed the fleet: a linked session, a permit the council already holds under an
+	// Seed the fleet: a linked session, a permit the tenant already holds under an
 	// OLD plate, a vehicle, and a rule for today naming the NEW one. That is exactly
 	// the midnight-rollover shape — every permit due to change at once.
 	desired := map[int64]string{}
@@ -436,14 +436,14 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 	// but every read logs a legacy-ciphertext migration and rewrites the row — hundreds
 	// of extra database writes that have nothing to do with the capacity being measured.
 	sealCookie := func(owner, v string) string {
-		s, err := box.SealCtx(secretbox.CouncilCookie(owner), v)
+		s, err := box.SealCtx(secretbox.TenantCookie(owner), v)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return s
 	}
 	sealToken := func(owner, v string) string {
-		s, err := box.SealCtx(secretbox.CouncilToken(owner), v)
+		s, err := box.SealCtx(secretbox.TenantToken(owner), v)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -452,39 +452,39 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 	for i := 0; i < size; i++ {
 		owner := fmt.Sprintf("owner%04d@example.com", i)
 		tag := fmt.Sprintf("fleet%04d", i)
-		council.mu.Lock()
-		council.plates[owner] = "OLD" + fmt.Sprintf("%03d", i%1000)
-		council.byTag[tag] = owner
-		council.mu.Unlock()
+		tenant.mu.Lock()
+		tenant.plates[owner] = "OLD" + fmt.Sprintf("%03d", i%1000)
+		tenant.byTag[tag] = owner
+		tenant.mu.Unlock()
 
 		sealedPass := ""
 		if savePasswords {
-			p, err := box.SealCtx(secretbox.CouncilPassword(owner), "hunter2")
+			p, err := box.SealCtx(secretbox.TenantPassword(owner), "hunter2")
 			if err != nil {
 				t.Fatal(err)
 			}
 			sealedPass = p
 		}
-		if err := st.SaveCouncilSession(ctx, store.CouncilSession{
+		if err := st.SaveTenantSession(ctx, store.TenantSession{
 			Owner: owner, Cookie: sealCookie(owner, "Permits.IDM.Identity="+tag), Password: sealedPass,
 		}); err != nil {
 			t.Fatalf("seed session %d: %v", i, err)
 		}
-		cs, err := st.GetCouncilSession(ctx, owner)
+		cs, err := st.GetTenantSession(ctx, owner)
 		if err != nil {
 			t.Fatalf("read session %d: %v", i, err)
 		}
-		council.mu.Lock()
-		council.byTok["tok-"+tag] = owner
-		council.mu.Unlock()
+		tenant.mu.Lock()
+		tenant.byTok["tok-"+tag] = owner
+		tenant.mu.Unlock()
 		tokenExpiry := time.Now().Add(-time.Minute) // expired: the realistic rollover
 		if freshTokens {
 			tokenExpiry = time.Now().Add(time.Hour)
 		}
-		if err := st.UpdateCouncilToken(ctx, owner, cs.Cookie, sealToken(owner, "tok-"+tag), tokenExpiry, cs.Generation); err != nil {
+		if err := st.UpdateTenantToken(ctx, owner, cs.Cookie, sealToken(owner, "tok-"+tag), tokenExpiry, cs.Generation); err != nil {
 			t.Fatalf("seed token %d: %v", i, err)
 		}
-		pid, err := st.UpsertPermit(ctx, owner, councilIDFor(owner), "14", "Permit")
+		pid, err := st.UpsertPermit(ctx, owner, tenantIDFor(owner), "14", "Permit")
 		if err != nil {
 			t.Fatalf("seed permit %d: %v", i, err)
 		}
@@ -499,7 +499,7 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 		desired[pid] = plate
 	}
 
-	return &fleetRig{sched: sched, store: st, council: council, size: size}
+	return &fleetRig{sched: sched, store: st, tenant: tenant, size: size}
 }
 
 func TestFleetConvergenceAndContention(t *testing.T) {
@@ -507,7 +507,7 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 	ctx := context.Background()
 	size := fleetSize(t, 100)
 	rig := newFleetRig(t, size)
-	sched, st, council := rig.sched, rig.store, rig.council
+	sched, st, tenant := rig.sched, rig.store, rig.tenant
 
 	// A background "page load" while the fleet converges. Every request in this app
 	// serialises through ONE SQLite connection (SetMaxOpenConns(1)), so this is the
@@ -546,16 +546,16 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			council.mu.Lock()
+			tenant.mu.Lock()
 			sample := map[string]string{}
-			for k, v := range council.plates {
+			for k, v := range tenant.plates {
 				sample[k] = v
 				if len(sample) >= 5 {
 					break
 				}
 			}
-			tags := len(council.byTag)
-			council.mu.Unlock()
+			tags := len(tenant.byTag)
+			tenant.mu.Unlock()
 			t.Fatalf("only %d/%d permits converged after %d passes in %s; stub holds %d plate key(s) for %d tag(s), sample=%v",
 				done, size, passes, time.Since(start).Round(time.Second), len(sample), tags, sample)
 		}
@@ -574,14 +574,14 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 	p50, p95, p99, n := p(0.50), p(0.95), p(0.99), len(samples)
 	loadMu.Unlock()
 
-	total := council.total()
+	total := tenant.total()
 	perPermit := float64(total) / float64(size)
-	council.mu.Lock()
+	tenant.mu.Lock()
 	byPath := map[string]int{}
-	for k, v := range council.byPath {
+	for k, v := range tenant.byPath {
 		byPath[k] = v
 	}
-	council.mu.Unlock()
+	tenant.mu.Unlock()
 
 	// Convergence at the REAL governor rate is arithmetic once the cost is measured.
 	const prodRate = 60.0 // COUNCIL_GOV_RATE default, requests/minute
@@ -596,7 +596,7 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 		"  IMPLIED convergence @ %.0f/min %.1f min\n"+
 		"  dashboard read under load ... p50 %s  p95 %s  p99 %s  (n=%d)\n",
 		size, elapsed.Round(time.Millisecond), passes,
-		total, perPermit, byPath, council.peakPerMinute(),
+		total, perPermit, byPath, tenant.peakPerMinute(),
 		prodRate, impliedMin, p50, p95, p99, n)
 
 	// Guard rails rather than tuning targets: these catch a REGRESSION in cost or
@@ -614,9 +614,9 @@ func TestFleetConvergenceAndContention(t *testing.T) {
 
 // probeReads runs a representative dashboard read in a loop and returns its latency
 // distribution. This is the cascade detector: every request in this app serialises
-// through ONE SQLite connection, so if any council call were made while holding it, a
-// slow or refusing council would freeze the UI for everyone rather than just delaying
-// permits. The council here is deliberately far slower than the store.
+// through ONE SQLite connection, so if any tenant call were made while holding it, a
+// slow or refusing tenant would freeze the UI for everyone rather than just delaying
+// permits. The tenant here is deliberately far slower than the store.
 func probeReads(ctx context.Context, st *store.Store, stop <-chan struct{}) func() (p50, p95, p99 time.Duration, n int) {
 	var mu sync.Mutex
 	var samples []time.Duration
@@ -655,13 +655,13 @@ func probeReads(ctx context.Context, st *store.Store, stop <-chan struct{}) func
 	}
 }
 
-// TestFleetUnderFailure asks the question a clean-path harness cannot: when the council
-// is slow, refusing, or has killed every session, does the damage stay in the council
+// TestFleetUnderFailure asks the question a clean-path harness cannot: when the tenant
+// is slow, refusing, or has killed every session, does the damage stay in the tenant
 // path, or does it cascade into the app?
 //
 // Three things would count as a cascade and are asserted against:
-//   - dashboard reads degrading with council latency (a council call under the DB lock)
-//   - failures producing MORE council traffic than the clean run (a retry storm feeding
+//   - dashboard reads degrading with tenant latency (a tenant call under the DB lock)
+//   - failures producing MORE tenant traffic than the clean run (a retry storm feeding
 //     the very block that caused it, on a shared egress IP)
 //   - the pass never terminating
 func TestFleetUnderFailure(t *testing.T) {
@@ -677,7 +677,7 @@ func TestFleetUnderFailure(t *testing.T) {
 	baseElapsed := time.Since(baseStart)
 	close(baseStop)
 	_, baseP95, _, _ := baseReads()
-	baseReqs := base.council.total()
+	baseReqs := base.tenant.total()
 	t.Logf("baseline: %d requests, %s, dashboard p95 %s", baseReqs, baseElapsed.Round(time.Millisecond), baseP95)
 
 	cases := []struct {
@@ -687,7 +687,7 @@ func TestFleetUnderFailure(t *testing.T) {
 		failCode  int64
 		retryPost int64
 		authDead  bool
-		// maxReqFactor bounds total council traffic against the clean baseline.
+		// maxReqFactor bounds total tenant traffic against the clean baseline.
 		maxReqFactor float64
 	}{
 		{name: "slow council (250ms every call)", latencyMS: 250, maxReqFactor: 1.5},
@@ -706,11 +706,11 @@ func TestFleetUnderFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			rig := newFleetRig(t, size)
-			rig.council.latencyMS.Store(tc.latencyMS)
-			rig.council.failEvery.Store(tc.failEvery)
-			rig.council.failCode.Store(tc.failCode)
-			rig.council.retryPost.Store(tc.retryPost)
-			rig.council.authDead.Store(tc.authDead)
+			rig.tenant.latencyMS.Store(tc.latencyMS)
+			rig.tenant.failEvery.Store(tc.failEvery)
+			rig.tenant.failCode.Store(tc.failCode)
+			rig.tenant.retryPost.Store(tc.retryPost)
+			rig.tenant.authDead.Store(tc.authDead)
 
 			stop := make(chan struct{})
 			reads := probeReads(ctx, rig.store, stop)
@@ -727,8 +727,8 @@ func TestFleetUnderFailure(t *testing.T) {
 			close(stop)
 			p50, p95, p99, n := reads()
 
-			reqs := rig.council.total()
-			open := rig.sched.council.(councilpkg.Single).Client.Blocked()
+			reqs := rig.tenant.total()
+			open := rig.sched.tenant.(tenantpkg.Single).Client.Blocked()
 			t.Logf("\n"+
 				"    council requests ...... %d over %d passes (baseline %d for 1)\n"+
 				"    refusals served ....... %d\n"+
@@ -736,10 +736,10 @@ func TestFleetUnderFailure(t *testing.T) {
 				"    wall-clock ............ %s\n"+
 				"    breaker open .......... %v\n"+
 				"    dashboard reads ....... p50 %s  p95 %s  p99 %s  (n=%d)\n",
-				reqs, passes, baseReqs, rig.council.failures.Load(),
+				reqs, passes, baseReqs, rig.tenant.failures.Load(),
 				rig.converged(), size, elapsed.Round(time.Millisecond), open, p50, p95, p99, n)
 
-			// CASCADE 1: the UI must not feel the council at all.
+			// CASCADE 1: the UI must not feel the tenant at all.
 			if p95 > 50*time.Millisecond {
 				t.Errorf("dashboard reads hit p95 %s while the council was degraded; the council "+
 					"path is holding the single SQLite connection, so one slow upstream freezes "+
@@ -777,8 +777,8 @@ func (s *Scheduler) reconnectQueueLen() int {
 }
 
 // TestFleetReconnectRecovery drives the path the failure suite only reaches the edge
-// of: every household's council cookie is rejected at once, each is handed to the
-// reconnect worker, and then the council recovers. What must hold is that the queue
+// of: every household's tenant cookie is rejected at once, each is handed to the
+// reconnect worker, and then the tenant recovers. What must hold is that the queue
 // actually drains, that recovery costs a bounded number of requests rather than a
 // stampede of retries against an edge that just came back, and that nothing is left
 // stuck in the queue afterwards.
@@ -789,29 +789,29 @@ func TestFleetReconnectRecovery(t *testing.T) {
 	rig := newFleetRig(t, size)
 
 	// Every cookie dead. Detection hands each owner to the reconnect worker.
-	rig.council.authDead.Store(true)
+	rig.tenant.authDead.Store(true)
 	for i := 0; i < 2; i++ {
 		rig.sched.reconcileAll(ctx)
 	}
-	detectCost := rig.council.total()
+	detectCost := rig.tenant.total()
 	queued := rig.sched.reconnectQueueLen()
 	if queued == 0 {
 		t.Fatal("a fleet-wide cookie rejection queued nobody for reconnect; the churn " +
 			"incident's whole recovery path is unreachable")
 	}
 
-	// The council comes back. Drain the queue the way the worker does, one owner at a
+	// The tenant comes back. Drain the queue the way the worker does, one owner at a
 	// time, and bound the work: a single pass per queued owner must be enough to empty
 	// it, or the queue is re-enqueueing faster than it drains.
-	rig.council.authDead.Store(false)
-	before := rig.council.total()
+	rig.tenant.authDead.Store(false)
+	before := rig.tenant.total()
 	drained := 0
 	for i := 0; i < queued*3 && rig.sched.reconnectQueueLen() > 0; i++ {
 		if rig.sched.drainOneReconnect(ctx) {
 			drained++
 		}
 	}
-	recoveryCost := rig.council.total() - before
+	recoveryCost := rig.tenant.total() - before
 
 	t.Logf("\n"+
 		"    fleet ................. %d owners\n"+
@@ -836,9 +836,9 @@ func TestFleetReconnectRecovery(t *testing.T) {
 }
 
 // TestFleetSavedPasswordRecovery is the scenario 500 simultaneous expiries would
-// actually take. Every household's council cookie is purged at once and every
+// actually take. Every household's tenant cookie is purged at once and every
 // household HAS a saved password, so the reconnect worker can log back in rather than
-// simply retiring them. The earlier recovery test measured zero council requests only
+// simply retiring them. The earlier recovery test measured zero tenant requests only
 // because it had nothing to recover with — every account was unlinked, which is a
 // correct outcome but not the expensive one.
 //
@@ -853,7 +853,7 @@ func TestFleetSavedPasswordRecovery(t *testing.T) {
 	size := fleetSize(t, 20)
 	rig := newFleetRigOpts(t, size, false, true)
 
-	rig.council.killAllCookies()
+	rig.tenant.killAllCookies()
 	for i := 0; i < 2; i++ {
 		rig.sched.reconcileAll(ctx)
 	}
@@ -862,29 +862,29 @@ func TestFleetSavedPasswordRecovery(t *testing.T) {
 		t.Fatal("a fleet-wide cookie purge queued nobody for reconnect")
 	}
 
-	before := rig.council.total()
+	before := rig.tenant.total()
 	for i := 0; i < queued*4 && rig.sched.reconnectQueueLen() > 0; i++ {
 		rig.sched.drainOneReconnect(ctx)
 	}
-	recoveryCost := rig.council.total() - before
-	rig.council.mu.Lock()
-	loginHits := rig.council.byPath["login"]
-	rig.council.mu.Unlock()
+	recoveryCost := rig.tenant.total() - before
+	rig.tenant.mu.Lock()
+	loginHits := rig.tenant.byPath["login"]
+	rig.tenant.mu.Unlock()
 
 	// A restored cookie in the database is not restored SERVICE. Drive the fleet to
 	// convergence with the recovered sessions: that is what proves each fresh cookie can
 	// complete an authorize, mint a token, read the permit API and land a change.
-	convergeStart := rig.council.total()
+	convergeStart := rig.tenant.total()
 	for i := 0; i < 10 && rig.converged() < size; i++ {
 		rig.sched.reconcileAll(ctx)
 	}
-	convergeCost := rig.council.total() - convergeStart
+	convergeCost := rig.tenant.total() - convergeStart
 
 	// Linked, not retired: the session row must survive with a fresh generation.
 	linked, retired := 0, 0
 	for i := 0; i < size; i++ {
 		owner := fmt.Sprintf("owner%04d@example.com", i)
-		if _, err := rig.store.GetCouncilSession(ctx, owner); err == nil {
+		if _, err := rig.store.GetTenantSession(ctx, owner); err == nil {
 			linked++
 		} else {
 			retired++
@@ -902,7 +902,7 @@ func TestFleetSavedPasswordRecovery(t *testing.T) {
 		"    IMPLIED full-fleet recovery: %.1f LOGIN-GOVERNED requests per household\n"+
 		"      at 12/min = ~%.0f min for 500, ~%.0f min for 1000 (before the reconcile\n"+
 		"      that follows, which is paced by the main governor)\n",
-		size, queued, rig.council.logins.Load(), recoveryCost,
+		size, queued, rig.tenant.logins.Load(), recoveryCost,
 		float64(recoveryCost)/float64(queued), linked, retired, rig.sched.reconnectQueueLen(),
 		rig.converged(), size, convergeCost,
 		float64(loginHits)/float64(queued),

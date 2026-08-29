@@ -46,7 +46,7 @@ wrong the moment a WA or QLD council is added.
   Stonnington, Bayside, Hume… are the same connector with different parameters.
 
 ```go
-// internal/council
+// internal/tenant
 type Council struct {
     ID        string   // "stonnington" — stable; appears in URLs and the database
     Name      string   // "City of Stonnington"
@@ -64,7 +64,7 @@ type Council struct {
 ```
 
 Definitions live in an embedded `councils.yaml`, overridable at runtime by
-`COUNCILS_PATH` (the `TERMS_PATH` pattern). The existing `COUNCIL_*` environment
+`TENANTS_PATH` (the `TERMS_PATH` pattern). The existing `COUNCIL_*` environment
 variables remain as overrides applied to the `stonnington` entry, so the current
 deployment config keeps working unchanged.
 
@@ -126,6 +126,20 @@ cap** is added across councils because the egress IP is shared. `breaker_state` 
 a `council_id` key.
 
 ### Naming
+
+"Council" is fine as default *copy*; the technical surface says **tenant**: routes
+(`/tenant/link`, `/tenant/select`, `/tenant/unlink`, `/tenant/forget-password`,
+`/tenant/confirm`), form fields (`tenant_id`, `portal_password`), the registry
+(`internal/tenant/tenants.json`, `TENANTS_PATH`), package/type names
+(`tenant.Tenant`, `tenant.Registry`, `tenant.Mux`, `store.TenantSession`, `TenantID`).
+Deliberately kept: database column names (`council_session`, `council_id`,
+`council_permit_id` — a rename is a migration for no functional gain), the
+`COUNCIL_*` environment variables and `config.CouncilConfig` (the deployment
+contract), the sealing-context strings (`council-cookie:` etc. — changing them
+would make existing ciphertexts unreadable), `CouncilPermitID` (it is the
+council's own id for the permit), the `/status` JSON key `council` (the watchdog
+reads it; rename together with the watchdog), and `/council/confirm` as an alias
+for links in emails already sent.
 
 An entry in the registry is a **tenant** (the technical word: an ePermits tenant
 is exactly what it is; a council, a university, a precinct). The user-facing
@@ -212,7 +226,7 @@ copy that mentions fines).
 | Contract | `internal/provider`: `Provider` (session-keyed, stateless), `Capabilities`, typed errors (`Error{Kind, Op, Detail}`, `Unavailable{RetryAfter…}`, sentinels), request `Surface` tagging |
 | Backends | `internal/provider/orikan` (the ePermits protocol, with its form/shape/identity tests and the env-gated live tools); `internal/provider/fake` (the sandbox, a real second implementation) |
 | Generic client | `internal/parking`: sealed opaque session blob (legacy rows import once), per-owner serialisation, plate cache, backoff, per-council breaker, governed surface-counted transport, a fleet-wide `ConcurrencyLimit`, expiry tagging; `NewClientFor(councilID, …)` |
-| Registry | `internal/council`: embedded `councils.json` (single source of truth; `COUNCILS_PATH` override; `COUNCIL_*` still overrides Stonnington; `COUNCIL_SANDBOX` narrows to one fake); validated on load; per-council permit policy, links, copy, terms, timezone |
+| Registry | `internal/tenant`: embedded `tenants.json` (single source of truth; `TENANTS_PATH` override; `COUNCIL_*` still overrides Stonnington; `COUNCIL_SANDBOX` narrows to one fake); validated on load; per-council permit policy, links, copy, terms, timezone |
 | Routing | `council.Mux` implements `server.Council` and `scheduler.Council`: choice → linked session → process default |
 | Schema | `council_session` keyed by `(owner, council_id)`; `council_id` on `permit` (`UNIQUE(council_id, council_permit_id)`) and `account_flags` (the current tenant); `breaker_state` per council; all via column-aware rebuilds, backfilled to `stonnington`, tested from the pre-change schema |
 | Product | one account, several tenants: sessions per (account, tenant), a switcher in the user menu, per-tenant Settings cards and unlink/forget-password, tenant labels on permit cards; timezone follows the permit; `/status` per-council breakdown |

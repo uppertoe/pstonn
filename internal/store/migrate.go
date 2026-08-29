@@ -480,7 +480,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// Whether this membership is still awaiting the invited person's own consent. A
 		// pending row grants NOTHING: adding a member used to bind an arbitrary address
 		// to an account on one person's say-so, which showed the invitee someone else's
-		// household, blocked them from linking their own council account, and filed
+		// household, blocked them from linking their own tenant account, and filed
 		// everything they then created under the inviter's ownership.
 		//
 		// The flag is "pending" rather than "accepted" deliberately, so its DEFAULT 0
@@ -506,8 +506,8 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// on existing permits, which is safe: any permit with a roster already
 		// renders the quiet button, not the pitch.
 		`ALTER TABLE permit ADD COLUMN copy_offer_done INTEGER NOT NULL DEFAULT 0`,
-		// Which council a row belongs to (docs/council-connections.md). Every row that
-		// predates the column is the City of Stonnington's — the only council the app
+		// Which tenant a row belongs to (docs/tenant-connections.md). Every row that
+		// predates the column is the City of Stonnington's — the only tenant the app
 		// has ever served — which the backfill below records.
 		`ALTER TABLE council_session ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
@@ -520,7 +520,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
 	}
-	// Backfill council_id on rows that predate multi-council support: they are all
+	// Backfill tenant_id on rows that predate multi-tenant support: they are all
 	// Stonnington's. Idempotent (only '' rows are touched).
 	for _, stmt := range []string{
 		`UPDATE council_session SET council_id = 'stonnington' WHERE council_id = ''`,
@@ -530,8 +530,8 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
 	}
-	// Rebuild `permit` if its uniqueness is still the global UNIQUE(council_permit_id):
-	// two councils' permit id spaces overlap, so the constraint must be per council.
+	// Rebuild `permit` if its uniqueness is still the global UNIQUE(tenant_permit_id):
+	// two registry' permit id spaces overlap, so the constraint must be per tenant.
 	// SQLite cannot change a constraint in place; redefine the table and copy the rows.
 	if scoped, err := s.permitUniqueIsScoped(); err != nil {
 		return err
@@ -549,7 +549,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate council_session table: %w", err)
 		}
 	}
-	// Rebuild `breaker_state` from the single-row shape to one row per council,
+	// Rebuild `breaker_state` from the single-row shape to one row per tenant,
 	// carrying the existing pause across under Stonnington.
 	if has, err := s.columnExists("breaker_state", "council_id"); err != nil {
 		return err
@@ -607,7 +607,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 	// fail on a database predating the column.
 	for _, stmt := range []string{
 		// The confirm-link lookup is by token alone, on a public unauthenticated
-		// route: without this, every probe scans council_session on the single
+		// route: without this, every probe scans tenant_session on the single
 		// connection the scheduler shares. Partial, so consumed (empty) tokens
 		// cost nothing.
 		`CREATE INDEX IF NOT EXISTS idx_council_confirm ON council_session(confirm_token) WHERE confirm_token != ''`,
@@ -682,7 +682,7 @@ func (s *Store) rebuildOverrideTable() error {
 }
 
 // permitUniqueIsScoped reports whether the permit table already carries the
-// per-council uniqueness constraint (read from its stored definition).
+// per-tenant uniqueness constraint (read from its stored definition).
 func (s *Store) permitUniqueIsScoped() (bool, error) {
 	var sqlText string
 	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'permit'`).Scan(&sqlText)
@@ -692,7 +692,7 @@ func (s *Store) permitUniqueIsScoped() (bool, error) {
 	return strings.Contains(strings.ToLower(sqlText), "unique(council_id, council_permit_id)"), nil
 }
 
-// rebuildPermitTable redefines permit with UNIQUE(council_id, council_permit_id),
+// rebuildPermitTable redefines permit with UNIQUE(tenant_id, tenant_permit_id),
 // preserving rows and ids. Tables that reference permit(id) (weekly_rule,
 // override, apply_log, permit_notify, guest_grant) keep referencing "permit" by
 // name, which the renamed table satisfies; foreign keys are toggled off around
@@ -776,7 +776,7 @@ func (s *Store) rebuildPermitTable() error {
 }
 
 // rebuildBreakerTable converts the single-row breaker_state into one row per
-// council, carrying any existing pause across as Stonnington's.
+// tenant, carrying any existing pause across as Stonnington's.
 func (s *Store) rebuildBreakerTable() error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -803,7 +803,7 @@ func (s *Store) rebuildBreakerTable() error {
 	return tx.Commit()
 }
 
-// sessionKeyIsScoped reports whether council_session is keyed by (owner, council_id).
+// sessionKeyIsScoped reports whether tenant_session is keyed by (owner, tenant_id).
 func (s *Store) sessionKeyIsScoped() (bool, error) {
 	var sqlText string
 	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'council_session'`).Scan(&sqlText)
@@ -813,7 +813,7 @@ func (s *Store) sessionKeyIsScoped() (bool, error) {
 	return strings.Contains(strings.ToLower(sqlText), "primary key (owner, council_id)"), nil
 }
 
-// rebuildSessionTable re-keys council_session by (owner, council_id), preserving
+// rebuildSessionTable re-keys tenant_session by (owner, tenant_id), preserving
 // rows and the columns the existing table has. Nothing references the table by
 // foreign key; foreign keys are toggled off around the DROP/RENAME as for the
 // other rebuilds, and the migration lock guarantees a single migrator.

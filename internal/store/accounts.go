@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-// DeleteAllForOwner erases every trace of an app user: their council session,
+// DeleteAllForOwner erases every trace of an app user: their tenant session,
 // permits (cascading rules and overrides), vehicles, and apply-log rows. Used by
 // the self-service "delete my data" action. Runs in one transaction so a partial
 // failure leaves nothing half-deleted.
 func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
-	defer s.forgetCouncil(owner)
+	defer s.forgetTenant(owner)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -174,7 +174,7 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	return tx.Commit()
 }
 
-// CountLinkedAccounts returns how many accounts currently hold a council session
+// CountLinkedAccounts returns how many accounts currently hold a tenant session
 // cookie — the number of households the service is actively managing permits for.
 // Used to enforce the signup cap.
 func (s *Store) CountLinkedAccounts(ctx context.Context) (int, error) {
@@ -236,7 +236,7 @@ func (s *Store) PendingInvite(ctx context.Context, memberEmail string) (owner st
 //
 // Returns ErrNotFound when there is no such pending invite.
 // The prerequisites are checked INSIDE the same statement, not by the caller
-// beforehand: a council link or a first vehicle landing between a caller's check and
+// beforehand: a tenant link or a first vehicle landing between a caller's check and
 // this update would accept the invite anyway, leaving a secondary whose own permits and
 // session are hidden under someone else's account. Returns ErrInviteBlocked when the
 // invitee has become a primary or acquired their own data, so the handler can say which.
@@ -255,7 +255,7 @@ WHERE member_email = ? AND owner = ? AND invite_pending = 1
 	if n, _ := res.RowsAffected(); n == 0 {
 		// Either no pending invite, or a prerequisite now fails. Distinguish them so the
 		// handler does not tell someone "no such invitation" when the real reason is that
-		// they just linked a council account.
+		// they just linked a tenant account.
 		var blocked int
 		if e := s.db.QueryRowContext(ctx, `SELECT
         EXISTS(SELECT 1 FROM account_member WHERE owner = ?)
@@ -312,10 +312,10 @@ func (s *Store) AccountEmails(ctx context.Context, owner string) ([]string, erro
 type AdminAccount struct {
 	Owner           string
 	MemberOf        string    // non-empty: this owner is a secondary on another account
-	Linked          bool      // has a stored council session cookie
+	Linked          bool      // has a stored tenant session cookie
 	LinkedAt        time.Time // last interactive link
 	LastActive      time.Time // last time anyone on the account used the app: the re-authorise clock
-	WarmedAt        time.Time // last keep-warm / refresh (council_session.updated_at)
+	WarmedAt        time.Time // last keep-warm / refresh (tenant_session.updated_at)
 	TokenExpiry     time.Time
 	EmailEnabled    bool
 	NtfyEnabled     bool
@@ -331,8 +331,8 @@ type AdminAccount struct {
 }
 
 // AdminAccounts returns an operational summary for every known account (anyone who
-// has consented, linked the council, holds a permit, or set notify prefs), newest
-// council activity aside. It is read-only and owner-agnostic — callers must gate it
+// has consented, linked the tenant, holds a permit, or set notify prefs), newest
+// tenant activity aside. It is read-only and owner-agnostic — callers must gate it
 // to admins.
 func (s *Store) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -410,7 +410,7 @@ ORDER BY o.owner`)
 type RosterEntry struct {
 	Email string `json:"email"`
 	Ntfy  string `json:"ntfy,omitempty"` // topic, only when ntfy is enabled
-	// NextChangeAt is when this account's schedule next requires a council write
+	// NextChangeAt is when this account's schedule next requires a tenant write
 	// (RFC3339 UTC), or "" when nothing is due inside the reporting horizon. The
 	// watchdog uses it to warn, during an outage, only the households whose
 	// change has actually been missed — filled by the /status handler (it needs
@@ -762,7 +762,7 @@ func (s *Store) IsPrimary(ctx context.Context, owner string) (bool, error) {
 }
 
 // HasOwnData reports whether email already runs their own p.stonn account, i.e.
-// has a linked council session, a managed permit, or a saved vehicle. Adding
+// has a linked tenant session, a managed permit, or a saved vehicle. Adding
 // such a person as a secondary would hide their own setup, so the caller blocks
 // it. A brand-new user who has only signed in (no data yet) returns false.
 func (s *Store) HasOwnData(ctx context.Context, email string) (bool, error) {
@@ -775,7 +775,7 @@ func (s *Store) HasOwnData(ctx context.Context, email string) (bool, error) {
 	return has == 1, err
 }
 
-// CountSuccessfulApplies is how many council writes p.stonn has completed for
+// CountSuccessfulApplies is how many tenant writes p.stonn has completed for
 // this owner's permits, ever. 1 means the one that just happened was the first —
 // the moment the referral line and the home-screen tip are keyed to.
 func (s *Store) CountSuccessfulApplies(ctx context.Context, owner string) (int, error) {

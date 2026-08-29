@@ -11,7 +11,7 @@ func TestHTMLDocument(t *testing.T) {
 		"Your <permit> was updated & is now active.",
 		"",
 		"Confirm and keep it running (one click):",
-		"https://p.stonn.org/council/confirm?token=abc",
+		"https://p.stonn.org/tenant/confirm?token=abc",
 		"",
 		"-- p.stonn",
 	}, "\n")
@@ -20,7 +20,7 @@ func TestHTMLDocument(t *testing.T) {
 	checks := []string{
 		`p<span style="color:#0d9488;">.</span>stonn`,          // wordmark with teal dot
 		`Your &lt;permit&gt; was updated &amp; is now active.`, // HTML-escaped content
-		`href="https://p.stonn.org/council/confirm?token=abc"`, // the URL is linked
+		`href="https://p.stonn.org/tenant/confirm?token=abc"`,  // the URL is linked
 		`Confirm and keep it running (one click)</a>`,          // label came from the "label:" line
 		`Not affiliated with the City of Stonnington`,          // footer disclaimer
 	}
@@ -34,7 +34,7 @@ func TestHTMLDocument(t *testing.T) {
 		t.Error("signature '-- p.stonn' should be stripped from the HTML body")
 	}
 	// A whole-line URL renders as a button, not a bare paragraph link.
-	if !strings.Contains(got, "background:#0d9488;\"><a href=\"https://p.stonn.org/council/confirm") {
+	if !strings.Contains(got, "background:#0d9488;\"><a href=\"https://p.stonn.org/tenant/confirm") {
 		t.Errorf("standalone URL should render as a teal button:\n%s", got)
 	}
 }

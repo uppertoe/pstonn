@@ -114,8 +114,8 @@ func TestTemplatesRender(t *testing.T) {
 		}
 	}
 
-	// At the attempt cap the card must NOT arm another poll, so a council outage or
-	// a change the council keeps refusing cannot loop the card forever.
+	// At the attempt cap the card must NOT arm another poll, so a tenant outage or
+	// a change the tenant keeps refusing cannot loop the card forever.
 	capped := samplePermitView(loc)
 	capped.Applying = true
 	capped.armPlatePoll(len(platePollDelays))
@@ -272,7 +272,7 @@ func TestOverrideEndsDefault(t *testing.T) {
 
 	// F6: the end is the day BOUNDARY (midnight starting the next day), because
 	// model.Resolve treats it as exclusive — a 23:59 end left the last minute of the
-	// day to the weekly roster, costing two council writes and two notifications
+	// day to the weekly roster, costing two tenant writes and two notifications
 	// where one was intended. So "ends the day it starts" reads as the next date at
 	// 00:00.
 	cases := []struct {
@@ -448,7 +448,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},
 		{"terms-updated", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Updated: true}}, "terms have changed"},
 		{"onboarding", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Link your council account"},
-		// An invitee with no council link of their own can reach no page but this one,
+		// An invitee with no tenant link of their own can reach no page but this one,
 		// so the invitation must be answerable here — with the owner it was rendered
 		// for carried in the form (acceptInvite checks it).
 		{"onboarding answers a pending invite", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc,
@@ -461,10 +461,10 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"picker-partial-empty", dashboardData{User: user, State: "picker", Loc: loc, PermitsUnknown: true}, "couldn't load your permit list"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, "Save my password"},
 		// On a FIRST link the box is TICKED. Without a saved password the schedule
-		// stops the first time the council ends the session — which happens whenever
+		// stops the first time the tenant ends the session — which happens whenever
 		// the resident signs in to ePermits themselves — and it stops silently, which
 		// is how a car ends up on the wrong permit. The stored value is a
-		// parking-permit login, sealed at rest and recoverable by the council's own
+		// parking-permit login, sealed at rest and recoverable by the tenant's own
 		// forgot-password email.
 		{"onboarding-savepw-default-checked", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc}, `name="save_password" value="1" checked>`},
 		{"relink-savepw-respects-optout", dashboardData{User: user, State: "onboarding", IsPrimary: true, Relink: true, AutoReconnect: false, Loc: loc}, `name="save_password" value="1">`},
@@ -476,7 +476,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			"then sign back in here with that address"},
 		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
 			"Sign out, then sign back in here with that address."},
-		// The reset deep link LEADS the rejected banner: the council can't tell a
+		// The reset deep link LEADS the rejected banner: the tenant can't tell a
 		// wrong password from an account that never had a working one, and the
 		// 2026-08 access logs showed rejected signups giving up without ever
 		// being offered the reset.
@@ -485,7 +485,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"link-rejected names the never-set-one case", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkHelp: true, Loc: loc},
 			"or never set one?"},
 		// The reset offer also sits NEXT TO the password ask itself, before the
-		// first failed attempt burns council lockout budget.
+		// first failed attempt burns tenant lockout budget.
 		{"link-form offers reset beside the password field", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc},
 			"idm/account/ForgotPassword"},
 		{"link-throttled deep-links the reset too", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
@@ -535,7 +535,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 				return pv
 			}()},
 		}, "links that people have saved keep working"},
-		{"guide page", dashboardData{State: "guide", Guide: &guidesFor(defaultCouncilView)[0], Loc: loc}, "How do I change the car on my Stonnington visitor permit?"},
+		{"guide page", dashboardData{State: "guide", Guide: &guidesFor(defaultTenantView)[0], Loc: loc}, "How do I change the car on my Stonnington visitor permit?"},
 		{"share page", dashboardData{User: user, State: "share", Loc: loc, ShareEmailAvailable: true}, `action="/share/invite"`},
 		{"share page without mail hides the form", dashboardData{User: user, State: "share", Loc: loc}, "Open the printable card"},
 		{"share card", dashboardData{User: user, State: "share-card", Loc: loc, ShareQR: "data:image/png;base64,AAAA", ShareURL: "p.stonn.org"}, `alt="QR code to p.stonn.org"`},
@@ -577,10 +577,10 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, RelinkBy: "15 Oct 2026"}, "Council connection"},
 		{"settings-quiet-hours", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
 			Notify: notifyView{EmailAvailable: true, EmailEnabled: true, QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}, "hold overnight notices"},
-		{"settings-autoreconnect-on", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "Turn off"},
-		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: false}, "Your password isn't saved"},
-		{"settings-last-reconnect", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true, LastReconnect: "14 Jul 2026, 3:04pm"}, "14 Jul 2026, 3:04pm"},
-		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, CouncilLinked: true, AutoReconnect: true}, "hasn't been needed yet"},
+		{"settings-autoreconnect-on", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, TenantLinked: true, AutoReconnect: true}, "Turn off"},
+		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, TenantLinked: true, AutoReconnect: false}, "Your password isn't saved"},
+		{"settings-last-reconnect", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, TenantLinked: true, AutoReconnect: true, LastReconnect: "14 Jul 2026, 3:04pm"}, "14 Jul 2026, 3:04pm"},
+		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, TenantLinked: true, AutoReconnect: true}, "hasn't been needed yet"},
 		{"security-data-promise", dashboardData{State: "security", Loc: loc}, "never sold"},
 		{"security-council-note", dashboardData{State: "security", Contact: true, Loc: loc}, "For the City of Stonnington"},
 		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc}, "Add person"},

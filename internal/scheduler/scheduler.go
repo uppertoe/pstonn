@@ -2,7 +2,7 @@
 // toward the desired state implied by its roster and any active override. It is
 // a desired-state loop, not a cron of one-shot events: every tick it computes
 // the target and corrects any drift, so a missed tick, a restart, or a failed
-// council call simply heals on the next pass.
+// tenant call simply heals on the next pass.
 package scheduler
 
 import (
@@ -29,24 +29,24 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// Council is the subset of the council client the scheduler needs: apply a plate
+// Tenant is the subset of the tenant client the scheduler needs: apply a plate
 // change, and force a keep-warm session renewal. Keeping it an interface lets the
 // reconcile and keep-warm logic be tested without real HTTP.
-type Council interface {
+type Tenant interface {
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
-	// Refresh keeps the owner's session with one tenant (council) alive.
-	Refresh(ctx context.Context, owner, councilID string) error
-	// CurrentVehicle reads the plate the council actually has on the permit right
-	// now (used to detect drift from changes made directly in the council portal).
+	// Refresh keeps the owner's session with one tenant (tenant) alive.
+	Refresh(ctx context.Context, owner, tenantID string) error
+	// CurrentVehicle reads the plate the tenant actually has on the permit right
+	// now (used to detect drift from changes made directly in the tenant portal).
 	CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error)
 	// Reconnect re-establishes an expired session from the user's opt-in saved
 	// password. Returns parking.ErrNoSavedPassword when none was saved.
-	Reconnect(ctx context.Context, owner, councilID string) error
-	// ListPermitsComplete reads the owner's council permits (to refresh expiry/status)
+	Reconnect(ctx context.Context, owner, tenantID string) error
+	// ListPermitsComplete reads the owner's tenant permits (to refresh expiry/status)
 	// and reports whether the list was the WHOLE account. Drift must not check an owner
 	// off for another interval on the strength of one page, so the bool is not optional
 	// here — the plain ListPermits the display paths use is not on this interface.
-	ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error)
+	ListPermitsComplete(ctx context.Context, owner, tenantID string) ([]parking.PermitInfo, bool, error)
 	// Blocked reports whether the fleet circuit breaker is open — a CONFIRMED
 	// shared-edge block affecting the whole fleet, not one owner's cooldown. Used
 	// to escalate the user-facing block warning (sooner, firmer) once we know a due
@@ -64,7 +64,7 @@ type Notifier interface {
 	// NotifyApply returns how many channels accepted the message (0 = the user was
 	// NOT reached; -1 = intentionally suppressed, e.g. failures-only success).
 	NotifyApply(ctx context.Context, o notify.ApplyOutcome) (int, error)
-	// NotifyRelinkRequired tells the user to reconnect their council account;
+	// NotifyRelinkRequired tells the user to reconnect their tenant account;
 	// returns the number of channels that accepted it (0 = not reached).
 	NotifyRelinkRequired(ctx context.Context, owner string) int
 	// NotifyReconnectStalled tells the household automatic reconnection has been
@@ -82,14 +82,14 @@ type Notifier interface {
 	// NotifyDriverDisplaced warns a reachable third-party driver that their car came
 	// off a permit mid-window: how says what happened (never who), at is when.
 	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, how string, at time.Time) error
-	// SendOnboardNudge emails a stalled signup (terms accepted, council never
+	// SendOnboardNudge emails a stalled signup (terms accepted, tenant never
 	// connected) the once-ever recovery note. Email-only, like the renewal
 	// reminder: this person configured no other channel.
 	SendOnboardNudge(ctx context.Context, to string) error
 	// EmailAvailable reports whether an SMTP sender is configured. The renewal
 	// reminder is email-only, so Enabled() (any channel) is the wrong gate for it.
 	// SendFortnightNudge is the once-ever tell-a-neighbour note, a fortnight after
-	// the household's first successful council write.
+	// the household's first successful tenant write.
 	SendFortnightNudge(ctx context.Context, to string) error
 	EmailAvailable() bool
 }
@@ -102,24 +102,24 @@ type Options struct {
 	ExpiryLead    time.Duration // how far before a permit's expiry to warn the account (0 = no reminder)
 	PublicBaseURL string        // absolute base for the email confirm link
 	// LocationFor returns the timezone an owner's permit days are reckoned in
-	// (their council's); nil, or a nil result, falls back to the scheduler's loc.
-	LocationFor  func(owner, councilID string) *time.Location
+	// (their tenant's); nil, or a nil result, falls back to the scheduler's loc.
+	LocationFor  func(owner, tenantID string) *time.Location
 	Notifier     Notifier      // nil/disabled = no emails
-	OpDrain      time.Duration // modelled time one council operation occupies the governor at its sustained rate; used ONLY to size the rollover spread (no per-call sleep — the governor paces)
+	OpDrain      time.Duration // modelled time one tenant operation occupies the governor at its sustained rate; used ONLY to size the rollover spread (no per-call sleep — the governor paces)
 	JitterFrac   float64       // ± fraction to randomise thresholds/delays (default 0.2)
 	SnapshotPath string        // where to write the daily consistent DB backup snapshot ("" disables)
 	// SpreadWindow staggers SCHEDULED plate changes across a window opening at the
 	// schedule boundary, so a midnight roster rollover shared by every household
-	// does not become one back-to-back burst of council writes. 0 disables it and
+	// does not become one back-to-back burst of tenant writes. 0 disables it and
 	// every due change is applied on the next tick. See spreadElapsed; the price is
 	// that a permit can show the previous day's plate until its slot comes up.
 	SpreadWindow time.Duration
 	// DriftInterval is how often the owner-grid drift/expiry read runs, on its OWN
 	// per-owner cadence decoupled from keep-warm. It used to piggyback on every warm
-	// (~105 min), doubling keep-warm's council traffic for a check that catches a
+	// (~105 min), doubling keep-warm's tenant traffic for a check that catches a
 	// rare event (an external portal edit). Default 6h; 0 disables drift reads.
 	DriftInterval time.Duration
-	// IdleWindow is the estimated council idle-expiry window. When >0 it anchors the
+	// IdleWindow is the estimated tenant idle-expiry window. When >0 it anchors the
 	// warm safety clamp: a session's warm threshold is never allowed within
 	// WarmSafetyMargin of it, so WarmInterval can be raised toward the window without
 	// risking a lapse before the first renew attempt. 0 disables the clamp.
@@ -129,7 +129,7 @@ type Options struct {
 	WarmSafetyMargin time.Duration
 }
 
-// Scheduler reconciles permits on an interval and keeps linked council sessions
+// Scheduler reconciles permits on an interval and keeps linked tenant sessions
 // warm (silent-renewing idle cookies) up to a fixed re-authorise bound, emailing
 // a confirm link as that bound approaches.
 type Scheduler struct {
@@ -138,11 +138,11 @@ type Scheduler struct {
 	// markDriftChecked indirects the drift checkpoint write. Production always uses the
 	// store; a test replaces it to make the write fail, which is the only way to reach
 	// the branch that decides whether a failed checkpoint may clear the backoff — and
-	// getting that wrong re-reads the council for the same owner every single tick.
-	markDriftChecked func(ctx context.Context, owner, councilID string) error
-	council          Council
+	// getting that wrong re-reads the tenant for the same owner every single tick.
+	markDriftChecked func(ctx context.Context, owner, tenantID string) error
+	tenant           Tenant
 	loc              *time.Location
-	locFor           func(owner, councilID string) *time.Location // per-tenant timezone (Options.LocationFor)
+	locFor           func(owner, tenantID string) *time.Location // per-tenant timezone (Options.LocationFor)
 	interval         time.Duration
 
 	sessionMaxAge time.Duration
@@ -160,7 +160,7 @@ type Scheduler struct {
 	nudgeLookback    time.Duration
 	spreadWindow     time.Duration
 	driftInterval    time.Duration
-	idleWindow       time.Duration // estimated council idle expiry; anchors the warm safety clamp (0 disables it)
+	idleWindow       time.Duration // estimated tenant idle expiry; anchors the warm safety clamp (0 disables it)
 	warmSafetyMargin time.Duration // minimum guaranteed gap between the warm threshold and idleWindow
 
 	// fleetSize is how many permits the last reconcile pass saw, the herd size the
@@ -190,7 +190,7 @@ type Scheduler struct {
 	alertRetry time.Duration
 
 	// applyMu guards applying, and applying holds one entry per permit that has a
-	// council plate-write in flight right now (the channel is closed on release, so
+	// tenant plate-write in flight right now (the channel is closed on release, so
 	// a waiter can block on it without polling). See AcquireApply.
 	applyMu  sync.Mutex
 	applying map[int64]chan struct{}
@@ -209,8 +209,8 @@ type Scheduler struct {
 	// cause of a primary-DB stall; this flag is just a snapshot-in-progress indicator.
 	snapshotting atomic.Bool
 
-	// retryMu guards nextTry: per-permit earliest-next-council-attempt deadlines.
-	// A persistently failing SetVehicle would otherwise issue a real council
+	// retryMu guards nextTry: per-permit earliest-next-tenant-attempt deadlines.
+	// A persistently failing SetVehicle would otherwise issue a real tenant
 	// write per permit per MINUTE forever (~1,440/day from one IP) — exactly the
 	// burst profile the jitter/rate-spacing works to avoid. In-memory only: a
 	// restart retries immediately, which is fine (the streak itself is persisted
@@ -229,7 +229,7 @@ type Scheduler struct {
 	// churnMu guards the session-lifecycle churn windows. A healthy fleet
 	// re-authenticates almost never (prod ran days of keep-warm with zero organic
 	// re-auths), so a rising expiry/reconnect rate is the fingerprint of a
-	// council-side DEFAULT change — a shortened idle window, cookie rotation, or
+	// tenant-side DEFAULT change — a shortened idle window, cookie rotation, or
 	// silent-renew disabled — none of which alter response SHAPE, so the
 	// shape/pushback detectors cannot see them. In-memory only: a restart zeroes the
 	// window, which is fine, since the canary is about a sustained rate, not history.
@@ -259,7 +259,7 @@ type Scheduler struct {
 	// drift read used to leave drift_checked_at alone and so retry on EVERY warm tick
 	// (~3 min) indefinitely; with a fleet-wide API-shape change that is 500 owners x 3
 	// requests every 3 minutes, driving the governor toward its ceiling until the
-	// council pushes back. Failures now back off per owner, and repeated SHAPE failures
+	// tenant pushes back. Failures now back off per owner, and repeated SHAPE failures
 	// across distinct owners raise one operator alert.
 	driftMu      sync.Mutex
 	driftRetryAt map[string]time.Time
@@ -285,7 +285,7 @@ type Scheduler struct {
 // must persist before the user is alarmed (rejections alarm on the first tick).
 const failNotifyThreshold = 3
 
-// busyNotifyThreshold is how many consecutive ticks the council must keep
+// busyNotifyThreshold is how many consecutive ticks the tenant must keep
 // refusing us before the user hears about it. Higher than failNotifyThreshold
 // because a short block is expected and self-healing, and these ticks are not
 // spaced by a backoff (see the ErrCouncilBusy branch), so this is ~15 minutes of
@@ -325,7 +325,7 @@ const (
 
 // reconnectStalledAlertAttempts is the backoff count at which the household is
 // told reconnection has stalled. recoverOrRetire deliberately never retires a
-// session over a transient failure or a changed council sign-in page, which
+// session over a transient failure or a changed tenant sign-in page, which
 // used to mean those states were reported to nobody but the operator — the
 // schedule silently stopped applying for as long as recovery kept deferring.
 // Five attempts is 5+10+20+40 minutes of backoff, so this fires after roughly
@@ -338,7 +338,7 @@ const reconnectStalledAlertAttempts = 5
 // to (the compare-and-swap token), and how many transient failures it has had (for
 // exponential backoff).
 // sessionKey names one session: an account's link with one tenant.
-type sessionKey struct{ owner, council string }
+type sessionKey struct{ owner, tenant string }
 
 type reconnectItem struct {
 	next     time.Time
@@ -363,7 +363,7 @@ const (
 const systemAlertRetry = 5 * time.Minute
 
 // New builds a Scheduler. loc is the timezone rosters are expressed in.
-func New(st *store.Store, council Council, loc *time.Location, opts Options) *Scheduler {
+func New(st *store.Store, tenant Tenant, loc *time.Location, opts Options) *Scheduler {
 	warm := opts.WarmInterval
 	if warm <= 0 {
 		warm = 105 * time.Minute
@@ -395,7 +395,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 	sc := &Scheduler{
 		store:            st,
 		markDriftChecked: st.MarkDriftChecked,
-		council:          council,
+		tenant:           tenant,
 		loc:              loc,
 		locFor:           opts.LocationFor,
 		interval:         time.Minute,
@@ -476,7 +476,7 @@ func (s *Scheduler) KickOwner(ctx context.Context, owner string) {
 	s.Kick()
 }
 
-// deferRetry stretches the permit's next council attempt exponentially in its
+// deferRetry stretches the permit's next tenant attempt exponentially in its
 // consecutive-failure streak (2, 4, 8, 16, 32 min from a 1-minute interval),
 // capped at 30 minutes and jittered.
 func (s *Scheduler) deferRetry(permitID int64, streak int) {
@@ -504,22 +504,22 @@ func (s *Scheduler) clearRetry(permitID int64) {
 }
 
 // AcquireApply claims the exclusive right to change ONE permit's plate at the
-// council, and returns the function that releases it. ok is false only when ctx
+// tenant, and returns the function that releases it. ok is false only when ctx
 // is cancelled while waiting, in which case the caller must not apply.
 //
-// A council write and the active_registration write that records it are one
+// A tenant write and the active_registration write that records it are one
 // decision, and two of them interleaving loses: the guest handler and the
-// reconcile loop both call SetVehicle, so the council could end up holding the
+// reconcile loop both call SetVehicle, so the tenant could end up holding the
 // roster plate while the database recorded the guest's. Every later tick then
 // compares its target against that (wrong) belief, concludes there is nothing to
 // do, and leaves a car uncovered until checkDrift re-reads the portal — up to the
 // ~105-minute keep-warm interval later, which for the driver is a fine.
 //
-// The claim is PER PERMIT, and deliberately no wider. Reconcile calls the council
+// The claim is PER PERMIT, and deliberately no wider. Reconcile calls the tenant
 // once per permit inside its own claim; a global lock would serialise the whole
 // pass behind whichever household happens to be mid-activation, and the governor
-// already paces the council calls. Nothing takes this lock while holding a
-// database transaction (both callers claim it, then talk to the council, then
+// already paces the tenant calls. Nothing takes this lock while holding a
+// database transaction (both callers claim it, then talk to the tenant, then
 // write) so it cannot deadlock against the store's single connection.
 //
 // Handlers WAIT here rather than skipping: a visitor who taps a car must not
@@ -678,10 +678,10 @@ func (s *Scheduler) progress() {
 //
 // Measured against progress, not against pass completion, so it does not have to
 // bound the duration of a whole pass: a midnight rollover on a large fleet writes
-// every permit, drained at the governor's rate and each waiting on a council round
+// every permit, drained at the governor's rate and each waiting on a tenant round
 // trip, which is legitimately many minutes of work and used to false-alarm as a stall.
 // What cannot happen legitimately is minutes of NOTHING between two permits, since
-// the council client bounds its own calls. Kept a comfortable multiple of the tick
+// the tenant client bounds its own calls. Kept a comfortable multiple of the tick
 // interval so an idle-but-healthy loop (nothing to do, one pass a minute) is never
 // mistaken for a wedged one.
 const stallThreshold = 5 * time.Minute
@@ -773,11 +773,11 @@ func (s *Scheduler) systemAlertEvery(ctx context.Context, key, subject, body str
 func (s *Scheduler) warmLoop(ctx context.Context) {
 	// Recovery cadence. A renewal itself still fires only when a session passes its
 	// (per-session, stably-jittered) warmInterval, and a success slides the clock —
-	// so healthy sessions cost no extra council calls no matter how fast we tick.
+	// so healthy sessions cost no extra tenant calls no matter how fast we tick.
 	// Ticking fast only shortens how long a FAILED or pushback-deferred renew waits
 	// before its next attempt. That is what lets warmInterval sit at ~0.7× the safe
 	// idle window instead of ~0.5× without exposing the narrower margin to a single
-	// missed pass. A renew attempted during a council-pushback cooldown is a cheap
+	// missed pass. A renew attempted during a tenant-pushback cooldown is a cheap
 	// local no-op (renewLocked short-circuits before any network call), so fast
 	// ticks never hammer a portal that is already refusing us.
 	const recoveryTick = 3 * time.Minute
@@ -904,7 +904,7 @@ const (
 )
 
 // sweepOnboardNudges emails each stalled signup (terms accepted 1–14 days ago,
-// council never connected) the once-ever recovery note, on the housekeeping
+// tenant never connected) the once-ever recovery note, on the housekeeping
 // cadence. The mark is written only after the send is settled, so a transient
 // SMTP failure retries on a later sweep rather than burning the one shot —
 // while a SUPPRESSED address (bounced, complained, unsubscribed) marks as done:
@@ -996,7 +996,7 @@ const (
 //
 // The bound is measured against lastActive — the last authenticated visit by any
 // member of the account, plus a click on the "are you still there?" email —
-// because its purpose is to stop holding a council session for a household that
+// because its purpose is to stop holding a tenant session for a household that
 // has left the service or the area. Time since a password was typed is a poor
 // proxy for that: a set-and-forget household that uses the app every week would
 // be retired on schedule, while someone who moved away a year ago would look
@@ -1106,7 +1106,7 @@ func (s *Scheduler) driftBackedOff(owner string, now time.Time) bool {
 // before the column existed — falls back to the warm clock as its baseline, so it
 // is NOT treated as instantly overdue, which would drift-read the whole fleet at
 // once right after the migrating deploy.
-func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
+func (s *Scheduler) driftDue(cs store.TenantSession, now time.Time) bool {
 	if s.driftInterval <= 0 {
 		return false
 	}
@@ -1126,7 +1126,7 @@ func (s *Scheduler) driftDue(cs store.CouncilSession, now time.Time) bool {
 // RequestDriftSoon asks for this owner's next drift read to run on the next
 // warm pass (≤3 min) instead of waiting out the ~6h cadence. Callers use it
 // when they have SEEN evidence the local plate belief diverged from the
-// council — e.g. the guest page's cached council read disagreeing with the
+// tenant — e.g. the guest page's cached tenant read disagreeing with the
 // stored active_registration — so the belief heals while the moment still
 // matters (a guest is at the kerb), through the normal drift path with all its
 // care (CAS adopt, external-change audit row, backoff, credibility checks).
@@ -1158,22 +1158,22 @@ func (s *Scheduler) clearDriftRequest(owner string) {
 	s.driftMu.Unlock()
 }
 
-// keepWarm silent-renews idle-but-valid sessions so their council cookie does not
+// keepWarm silent-renews idle-but-valid sessions so their tenant cookie does not
 // lapse, retires sessions that have reached the re-authorise bound, and emails a
 // confirm link as that bound approaches. It also runs the owner-grid drift/expiry
 // read on its OWN per-owner cadence (driftDue) — decoupled from warming, which used
-// to trigger a grid read on every renew and so doubled keep-warm's council traffic.
-// To be light on the council it jitters each session's thresholds (touches don't
+// to trigger a grid read on every renew and so doubled keep-warm's tenant traffic.
+// To be light on the tenant it jitters each session's thresholds (touches don't
 // align or look mechanical), skips owners with no permit to act on (their
-// session is left to lapse), and spaces the council calls within a pass.
+// session is left to lapse), and spaces the tenant calls within a pass.
 func (s *Scheduler) keepWarm(ctx context.Context) {
-	sessions, err := s.store.ListCouncilSessions(ctx)
+	sessions, err := s.store.ListTenantSessions(ctx)
 	if err != nil {
 		log.Printf("scheduler: list council sessions: %v", err)
 		return
 	}
 	for _, cs := range sessions {
-		// The governor paces the actual council requests this pass makes (warm and
+		// The governor paces the actual tenant requests this pass makes (warm and
 		// drift), so there is no per-call sleep here; we only need to stop promptly
 		// on shutdown rather than issue a fresh renew into a cancelled context.
 		if ctx.Err() != nil {
@@ -1189,7 +1189,7 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 // inline — an expired session is handed to the reconnect worker — so the pass is
 // always fast; the clock is read here (not once for the whole pass) so a session
 // evaluated late still uses a current time.
-func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
+func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", redact.Email(cs.Owner), r)
@@ -1209,7 +1209,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 		// people who came back mid-pass, seconds after they used the app. A no-op also
 		// means someone else (the reconnect worker's recoverOrRetire) got there first,
 		// so the alert is theirs to send, not ours to duplicate.
-		retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, cs.CouncilID, now.Add(-s.sessionMaxAge))
+		retired, err := s.store.DeleteTenantSessionIfIdle(ctx, cs.Owner, cs.TenantID, now.Add(-s.sessionMaxAge))
 		switch {
 		case err != nil:
 			log.Printf("scheduler: retire session %s: %v", redact.Email(cs.Owner), err)
@@ -1240,7 +1240,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	// it is still comfortably within its warm window — already alive.
 	alive := action == warmSkip
 	if action == warmRenew {
-		switch err := s.council.Refresh(ctx, cs.Owner, cs.CouncilID); {
+		switch err := s.tenant.Refresh(ctx, cs.Owner, cs.TenantID); {
 		case err == nil:
 			alive = true
 			log.Printf("scheduler: kept session for %s warm", redact.Email(cs.Owner))
@@ -1253,7 +1253,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			if g, ok := parking.SessionGenOf(err); ok {
 				gen = g
 			}
-			s.enqueueReconnect(ctx, cs.Owner, cs.CouncilID, gen)
+			s.enqueueReconnect(ctx, cs.Owner, cs.TenantID, gen)
 		case errors.Is(err, parking.ErrNotLinked):
 			// Raced with an unlink; nothing to do.
 		case errors.Is(err, parking.ErrCouncilBusy):
@@ -1273,8 +1273,8 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	// recovering capacity for warming endangered sessions and due writes. driftDue
 	// stays true (the timestamp is not advanced), so the read resumes the moment
 	// the block clears.
-	if alive && !s.council.Blocked() && s.driftDue(cs, now) {
-		if derr := s.checkDrift(ctx, cs.Owner, cs.CouncilID); derr != nil {
+	if alive && !s.tenant.Blocked() && s.driftDue(cs, now) {
+		if derr := s.checkDrift(ctx, cs.Owner, cs.TenantID); derr != nil {
 			// drift_checked_at is deliberately NOT advanced (the check did not happen),
 			// but the owner is backed off so a persistent failure cannot retry on every
 			// warm tick across the whole fleet.
@@ -1282,7 +1282,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 				// Truncation is a standing condition, not a blip, so enter at the normal
 				// drift cadence instead of the failure ladder. The ladder's 15m/60m/240m
 				// ramp costs three EXTRA reads per owner before it settles — 4,500 extra
-				// council requests at 500 owners, on the very day the council changed its
+				// tenant requests at 500 owners, on the very day the tenant changed its
 				// paging, and again after every restart because the ladder lives in memory
 				// while last_drift_check stays permanently stale.
 				s.noteDriftDeferred(cs.Owner)
@@ -1290,21 +1290,21 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 				s.noteDriftFailure(ctx, cs.Owner, derr)
 			}
 			log.Printf("scheduler: drift check %s: %v", redact.Email(cs.Owner), derr)
-			// A drift read is often how we learn the cookie was killed council-side just
+			// A drift read is often how we learn the cookie was killed tenant-side just
 			// AFTER a successful warm — the churn incident's signature. Without this the
 			// expiry was only logged: updated_at is fresh so keep-warm won't re-probe for
 			// a whole warm interval, leaving a dead session unqueued for hours.
 			if g, ok := parking.SessionGenOf(derr); ok {
-				s.enqueueReconnect(ctx, cs.Owner, cs.CouncilID, g)
+				s.enqueueReconnect(ctx, cs.Owner, cs.TenantID, g)
 			}
 		} else {
 			// Clear the backoff only once the checkpoint is DURABLE. last_drift_check is
 			// what stops this owner being picked again next tick; if the write fails and
 			// we have already cleared the backoff, the owner stays due forever and we
-			// re-read the council every cycle — three requests an owner, against an edge
+			// re-read the tenant every cycle — three requests an owner, against an edge
 			// we may be failing precisely because it is throttling us. Treating the failed
 			// write as a drift failure keeps the backoff on and lets it widen.
-			if err := s.markDriftChecked(ctx, cs.Owner, cs.CouncilID); err != nil {
+			if err := s.markDriftChecked(ctx, cs.Owner, cs.TenantID); err != nil {
 				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", redact.Email(cs.Owner), err)
 				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
 			} else {
@@ -1370,7 +1370,7 @@ func (s *Scheduler) noteReconnect(owner string) {
 // SessionChurn reports session-lifecycle activity over the last hour for /status:
 // expiries the scheduler observed, successful auto-reconnects, and the number of
 // DISTINCT owners among the expiries (the systemic signal). All near zero on a
-// healthy fleet — a rise is the canary for a council-side session-lifetime change.
+// healthy fleet — a rise is the canary for a tenant-side session-lifetime change.
 func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h int) {
 	s.churnMu.Lock()
 	defer s.churnMu.Unlock()
@@ -1392,9 +1392,9 @@ func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h in
 // the worker would then retire it. A stale-old gen is safe (it simply mismatches, the
 // task is discarded, and the next keep-warm pass rediscovers within ~3 min); a
 // too-new one is what destroys a valid session.
-func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, councilID string, gen int64) {
+func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, tenantID string, gen int64) {
 	now := time.Now()
-	key := sessionKey{owner, councilID}
+	key := sessionKey{owner, tenantID}
 	s.reconnectMu.Lock()
 	_, already := s.reconnectQ[key]
 	if !already {
@@ -1405,7 +1405,7 @@ func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, councilID strin
 		return
 	}
 	// Several different owners re-authing within the hour is the fingerprint of a
-	// council-side session-lifetime/idle-window/cookie change rather than user
+	// tenant-side session-lifetime/idle-window/cookie change rather than user
 	// activity, and it changes no response SHAPE, so nothing else would catch it.
 	if distinct := s.noteSessionExpiry(owner); distinct >= sessionChurnAlertOwners {
 		s.systemAlert(ctx, "session-churn",
@@ -1418,8 +1418,8 @@ func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, councilID strin
 // dead — the parking client's background reads, wired via OnSessionExpired in
 // main. The queue's own dedup makes repeated reports (a dashboard polling every
 // few seconds) free, and the generation requirement is enforced by the caller.
-func (s *Scheduler) NoteSessionExpired(owner, councilID string, gen int64) {
-	s.enqueueReconnect(context.Background(), owner, councilID, gen)
+func (s *Scheduler) NoteSessionExpired(owner, tenantID string, gen int64) {
+	s.enqueueReconnect(context.Background(), owner, tenantID, gen)
 }
 
 // CancelReconnect drops any queued reconnect for owner. Called after a manual link,
@@ -1446,7 +1446,7 @@ func (s *Scheduler) nextDueReconnect() (key sessionKey, gen int64, wait time.Dur
 	var best reconnectItem
 	found := false
 	for k, it := range s.reconnectQ {
-		if !found || it.next.Before(best.next) || (it.next.Equal(best.next) && (k.owner < key.owner || (k.owner == key.owner && k.council < key.council))) {
+		if !found || it.next.Before(best.next) || (it.next.Equal(best.next) && (k.owner < key.owner || (k.owner == key.owner && k.tenant < key.tenant))) {
 			key, best, found = k, it, true
 		}
 	}
@@ -1549,7 +1549,7 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 			s.backoffReconnect(key)
 		}
 	}()
-	switch s.recoverOrRetire(ctx, owner, key.council, gen) {
+	switch s.recoverOrRetire(ctx, owner, key.tenant, gen) {
 	case reconnectRecovered:
 		s.dequeueReconnect(key)
 		s.KickOwner(ctx, owner)
@@ -1566,14 +1566,14 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 // (reconnectRecovered). With no saved password or a rejected one it retires the
 // session — but ONLY if it is still the same generation, so a manual relink racing
 // this work is never deleted (reconnectRetired; the re-link prompt is sent only when a
-// row was actually removed). Anything transient (council busy, a network blip, a
+// row was actually removed). Anything transient (tenant busy, a network blip, a
 // systemic login-shape break, or a FAILED delete) keeps the task and retries later
 // (reconnectDeferred).
-func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, councilID string, gen int64) reconnectResult {
+func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string, gen int64) reconnectResult {
 	// Skip stale work: if the session was relinked, reconnected, renewed, or unlinked
 	// since this was queued, its generation no longer matches (or it is gone) — this
 	// recovery task is not ours to act on.
-	switch cur, err := s.store.GetCouncilSessionIn(ctx, owner, councilID); {
+	switch cur, err := s.store.GetTenantSessionIn(ctx, owner, tenantID); {
 	case errors.Is(err, store.ErrNotFound):
 		return reconnectRetired // the session is genuinely gone; nothing to recover
 	case err != nil:
@@ -1589,13 +1589,13 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, councilID string
 	// so a slow portal can't wedge the drain worker.
 	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	switch rerr := s.council.Reconnect(rctx, owner, councilID); {
+	switch rerr := s.tenant.Reconnect(rctx, owner, tenantID); {
 	case rerr == nil:
 		s.noteReconnect(owner)
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", redact.Email(owner))
 		return reconnectRecovered
 	case errors.Is(rerr, store.ErrSessionSuperseded):
-		// The login succeeded at the council but the generation-conditioned save landed
+		// The login succeeded at the tenant but the generation-conditioned save landed
 		// nowhere — the session changed under us (a relink or a password opt-out during
 		// the attempt). Discard; the current session is correct as it stands.
 		log.Printf("scheduler: reconnect for %s superseded by a concurrent session change; discarding", redact.Email(owner))
@@ -1621,7 +1621,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, councilID string
 	}
 	// Retire — but ONLY the generation we observed, so a relink during the attempt
 	// survives. A delete FAILURE keeps the task (don't lose the recovery work).
-	switch deleted, derr := s.store.DeleteCouncilSessionIfGen(ctx, owner, councilID, gen); {
+	switch deleted, derr := s.store.DeleteTenantSessionIfGen(ctx, owner, tenantID, gen); {
 	case derr != nil:
 		log.Printf("scheduler: unlink expired session %s: %v", redact.Email(owner), derr)
 		s.systemAlert(ctx, "retire-delete", "Could not retire an unrecoverable session",
@@ -1658,7 +1658,7 @@ func (s *Scheduler) releaseNotify(claim string) {
 	s.notifyMu.Unlock()
 }
 
-// alertRelink notifies a user that their council connection dropped and they
+// alertRelink notifies a user that their tenant connection dropped and they
 // must re-link, escalating to the operator if the user cannot be reached, so a
 // lapsed session never silently stops managing their permit until fine time.
 func (s *Scheduler) alertRelink(owner string) {
@@ -1689,7 +1689,7 @@ func (s *Scheduler) alertRelink(owner string) {
 
 // alertReconnectStalled tells a household that automatic reconnection has been
 // failing long enough to count as stalled (see reconnectStalledAlertAttempts)
-// while their session is deliberately retained — a council login outage or a
+// while their session is deliberately retained — a tenant login outage or a
 // changed sign-in page. Distinct from alertRelink because "re-link now" is the
 // wrong instruction here: an interactive re-link goes through the same broken
 // login, and recovery resumes on its own once it is repaired. What the
@@ -1731,7 +1731,7 @@ func (s *Scheduler) warnDisplaced(ctx context.Context, p model.Permit, d model.D
 }
 
 // warnDisplacedHow is warnDisplaced with the reason spelled out by the caller
-// (the drift path knows the plate was changed at the council, not by p.stonn).
+// (the drift path knows the plate was changed at the tenant, not by p.stonn).
 func (s *Scheduler) warnDisplacedHow(ctx context.Context, p model.Permit, d model.DisplacedBooking, prev, how string) bool {
 	if d.Contact == "" || s.notifier == nil || !s.notifier.Enabled() {
 		return false
@@ -1775,7 +1775,7 @@ func (s *Scheduler) logApply(ctx context.Context, permitID int64, reg, source, s
 // many visitors were exposed. Success keys stay undated; re-confirming an
 // identical success adds nothing.
 func (s *Scheduler) failureKeyDay(p model.Permit) string {
-	return time.Now().In(s.locOf(p.Owner, p.CouncilID)).Format("2006-01-02")
+	return time.Now().In(s.locOf(p.Owner, p.TenantID)).Format("2006-01-02")
 }
 
 // notifyUser delivers an apply outcome to the user with guaranteed-retry
@@ -1866,7 +1866,7 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 
 // handleApplyFailure records a failed apply and notifies the user, but only after
 // a transient problem has PERSISTED (so a one-tick blip that self-heals doesn't
-// alarm anyone); a council refusal, which won't fix itself, alarms on the first
+// alarm anyone); a tenant refusal, which won't fix itself, alarms on the first
 // tick. The message explains the cause, the consequence (what plate is still on
 // the permit), and what to do. It also feeds the systemic-failure detector.
 func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, wantName, source string, err error, stats *passStats) {
@@ -1885,7 +1885,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 
 	// Transient/unexpected problems get a grace period; a refusal alarms at once.
 	// Either way the next attempt is deferred exponentially in the streak, so a
-	// permit that keeps failing doesn't hit the council every minute forever.
+	// permit that keeps failing doesn't hit the tenant every minute forever.
 	n := s.bumpFailStreak(ctx, p.ID)
 	s.deferRetry(p.ID, n)
 	threshold := failNotifyThreshold
@@ -1945,59 +1945,59 @@ var opWording = map[parking.Op]string{
 // bumpFailStreak increments and returns the consecutive-failure count for a
 // permit; clearFailStreak resets it after a success. Persisted (on the permit
 // row) so a restart doesn't reset the grace before a transient failure is alerted.
-// checkDrift re-reads the council's actual current plate for the owner's permits
+// checkDrift re-reads the tenant's actual current plate for the owner's permits
 // and writes it into active_registration. Reconcile skips a permit when the
 // scheduled plate already equals the CACHED active_registration, so if someone
-// changed the vehicle directly in the council portal, reconcile would never
+// changed the vehicle directly in the tenant portal, reconcile would never
 // notice — until a dashboard visit refreshed the cache. Doing this read on the
 // slow keep-warm cadence (already rate-spaced, once a session refreshes) catches
-// that drift and re-arms reconcile, at gentle council load rather than a per-tick
+// that drift and re-arms reconcile, at gentle tenant load rather than a per-tick
 // firehose. Any correction is kicked so reconcile re-applies the schedule promptly.
 //
 // It reads ONE owner-level Index/grid call rather than one managedVehicle call per
 // managed permit. A 2026-07-31 capture confirmed the grid's VehicleRego agrees with
 // managedVehicle's RegistrationNumber, and that the same row already carries the
-// status and end date the expiry warning needs — which used to be a SECOND council
-// call right after this one. So the per-warm council cost is now one API request
+// status and end date the expiry warning needs — which used to be a SECOND tenant
+// call right after this one. So the per-warm tenant cost is now one API request
 // regardless of how many permits an owner manages, instead of managed+1.
 //
 // Only visitor permits are manageable (see server.isVisitorPermit), so that is
 // typically one or two per household rather than the full permit list — the capture
 // account held three permits but only one addable one. The win is therefore modest
 // per household; what matters is that permit count leaves the scaling term entirely.
-func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) error {
+func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) error {
 	// The caller (keepWarm) already spaced this call from the previous one, and the
 	// transport governor spaces at the request level, so no extra sleep here.
-	// Capture our belief BEFORE the council round trip. The CAS below exists to discard
+	// Capture our belief BEFORE the tenant round trip. The CAS below exists to discard
 	// a reading that an apply overtook mid-flight — reading the baseline afterwards
 	// folded that apply INTO the expected value, so the swap succeeded and regressed the
-	// record to a plate the council no longer holds.
+	// record to a plate the tenant no longer holds.
 	before, berr := s.store.ListPermitsFor(ctx, owner)
 	if berr != nil {
 		return berr
 	}
 	// Only this tenant's permits: the account may hold permits with another
-	// council, which this session cannot see and must not judge missing.
-	before = slices.DeleteFunc(before, func(p model.Permit) bool { return p.CouncilID != councilID })
+	// tenant, which this session cannot see and must not judge missing.
+	before = slices.DeleteFunc(before, func(p model.Permit) bool { return p.TenantID != tenantID })
 	wasActive := make(map[int64]string, len(before))
 	for _, p := range before {
 		wasActive[p.ID] = p.ActiveRegistration
 	}
-	live, complete, err := s.council.ListPermitsComplete(ctx, owner, councilID)
+	live, complete, err := s.tenant.ListPermitsComplete(ctx, owner, tenantID)
 	if err != nil {
 		// A read failure is not evidence of drift, and — critically — it is not a
 		// drift check either: report it so the caller does NOT advance
 		// drift_checked_at and suppress the retry for a whole interval. Worst
-		// exactly when the council is degraded and we most want to keep trying.
+		// exactly when the tenant is degraded and we most want to keep trying.
 		return err
 	}
-	byCouncilID := make(map[string]parking.PermitInfo, len(live))
+	byTenantID := make(map[string]parking.PermitInfo, len(live))
 	// A drift round is only "done" if every required write landed. Recording a partial
 	// round as complete stands the check down for the whole drift interval (hours),
 	// which is exactly when it should retry soonest.
 	var incomplete error
 	for _, pi := range live {
-		byCouncilID[pi.CouncilPermitID] = pi
+		byTenantID[pi.CouncilPermitID] = pi
 		// Refresh expiry/status/type from the same response. Owner-scoped, so it
 		// only touches rows this account manages.
 		if err := s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate); err != nil {
@@ -2007,7 +2007,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 	}
 
 	// Re-read AFTER the meta write so Inactive below is judged on the expiry the
-	// council just reported, not the one we believed a moment ago.
+	// tenant just reported, not the one we believed a moment ago.
 	permits, err := s.store.ListPermitsFor(ctx, owner)
 	if err != nil {
 		return err // couldn't compare against our own record; retry rather than mark done
@@ -2016,12 +2016,12 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 	now := time.Now()
 	for i := range permits {
 		p := permits[i]
-		if p.Inactive(now, s.locOf(p.Owner, p.CouncilID)) {
+		if p.Inactive(now, s.locOf(p.Owner, p.TenantID)) {
 			continue // don't act on permits we no longer manage
 		}
-		pi, ok := byCouncilID[p.CouncilPermitID]
+		pi, ok := byTenantID[p.CouncilPermitID]
 		if !ok {
-			continue // the council no longer lists it; syncing that is not drift's job
+			continue // the tenant no longer lists it; syncing that is not drift's job
 		}
 		actual := pi.CurrentRego
 		if actual == "" && !model.SamePlate("", p.ActiveRegistration) {
@@ -2036,7 +2036,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 			// change; discarding it (an earlier version continued on any non-empty
 			// confirmation) left a grid that persistently omits a rego unable to detect
 			// drift at all, even though the confirming call had already been paid for.
-			confirmed, cerr := s.council.CurrentVehicle(ctx, owner, p)
+			confirmed, cerr := s.tenant.CurrentVehicle(ctx, owner, p)
 			if cerr != nil {
 				// Couldn't confirm; believe nothing — but this round did NOT answer the
 				// question it was for, so it must not be recorded as a completed check.
@@ -2056,10 +2056,10 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 		// Compare-and-swap against the belief this drift round READ, not a blind write:
 		// the grid read above took seconds, and a guest or reconcile apply may have
 		// committed a newer plate meanwhile. Writing over that would regress the record
-		// to a plate the council no longer holds — a false "changed at the portal" row
+		// to a plate the tenant no longer holds — a false "changed at the portal" row
 		// and a duplicate "updated" notice on the way back. If it lost the race, the
 		// other writer's value is the fresh one; drop ours and skip the drift row.
-		// Swap against what we believed when the council read STARTED, not what the row
+		// Swap against what we believed when the tenant read STARTED, not what the row
 		// says now: an apply that landed during the read must win, not be overwritten.
 		swapped, e := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, wasActive[p.ID], actual)
 		if e != nil || !swapped {
@@ -2073,7 +2073,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 		// Whoever's car was on before the portal edit may be parked and now uncovered:
 		// same warning as any other displacement, worded for what actually happened.
 		s.warnExternallyDisplaced(ctx, p, wasActive[p.ID])
-		// Clear the delivered-notification fingerprint. The council now holds a plate we
+		// Clear the delivered-notification fingerprint. The tenant now holds a plate we
 		// did not set, and the reconcile this kicks will re-assert the schedule over it.
 		// If the external edit RESTORED the previous plate, that re-assertion is the same
 		// prev→want transition as the original apply, so the transition key alone would
@@ -2093,14 +2093,14 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 		// Everything above ran for the permits we WERE sent — that work is real and worth
 		// keeping. But the owner has not been drift-checked, and saying so is the whole
 		// point: advancing last_drift_check here would retire the permits behind the page
-		// from view entirely, and if the council settles into a stable first page their
+		// from view entirely, and if the tenant settles into a stable first page their
 		// plate drift and expiry warnings would go missing for good. Returning an error
 		// leaves the checkpoint alone and puts the owner on the ordinary drift backoff,
 		// so this cannot become a retry storm either.
 		s.alertTruncatedList(ctx)
 		// JOINED, not replaced. Whatever went wrong for the permits we DID read is still
 		// the more urgent error and its identity is load-bearing: a SessionExpiredError
-		// here is how we learn a cookie was killed council-side, and warmOne only queues
+		// here is how we learn a cookie was killed tenant-side, and warmOne only queues
 		// the reconnect if it can still find that error. Returning a bare marker instead
 		// left dead sessions unqueued, and hid FailUnexpected from the API-shape tally so
 		// the "several accounts failing the same way" alert could never fire.
@@ -2111,8 +2111,8 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) err
 }
 
 // warnExpiring sends the one-time approaching-expiry warning for any permit now
-// within expiryLead of its end date. It makes NO council call: checkDrift has
-// already written the council's own status and end date for every permit from the
+// within expiryLead of its end date. It makes NO tenant call: checkDrift has
+// already written the tenant's own status and end date for every permit from the
 // grid read it shares with drift detection, so this reads purely local state.
 func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 	if s.expiryLead <= 0 {
@@ -2131,12 +2131,12 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		}
 		// Warn once we're inside the lead window, up until the permit has expired.
 		// "Expired" has to mean the end of EndDate's local DAY (model.ExpiryDeadline),
-		// the same boundary Permit.Inactive uses: EndDate is a zoneless council date
+		// the same boundary Permit.Inactive uses: EndDate is a zoneless tenant date
 		// parsed as UTC midnight, so comparing `now` against the bare instant closed
 		// the warning window at ~10-11am local on the permit's final valid day. A
 		// notifier that was down through the lead window would then never warn at all,
 		// which is the outage this reminder exists to survive.
-		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.locOf(p.Owner, p.CouncilID))) {
+		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.locOf(p.Owner, p.TenantID))) {
 			continue
 		}
 		if s.notifier == nil || !s.notifier.Enabled() {
@@ -2146,7 +2146,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		if label == "" {
 			label = "visitor permit"
 		}
-		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.locOf(p.Owner, p.CouncilID))) > 0 {
+		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.locOf(p.Owner, p.TenantID))) > 0 {
 			if e := s.store.MarkPermitExpiryReminded(ctx, p.ID); e != nil {
 				log.Printf("scheduler: mark permit %d expiry-reminded: %v", p.ID, e)
 			}
@@ -2170,7 +2170,7 @@ func (s *Scheduler) clearFailStreak(ctx context.Context, permitID int64) {
 }
 
 // detectSystemic alerts the operator when many users' plate changes fail in one
-// pass (a council outage or API change), so a fleet-wide break is seen directly
+// pass (a tenant outage or API change), so a fleet-wide break is seen directly
 // rather than only as scattered per-user notices.
 // totalOwners is the number of distinct owners whose active permits were
 // reconciled this pass. The failN/busyN counts are owner-keyed sets, so the
@@ -2218,7 +2218,7 @@ func (s *Scheduler) warnNoReminderChannel() {
 
 // maybeRemind emails the one-click renewal-confirm link once per cycle when a
 // session is within ReminderLead of its re-authorise deadline.
-func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, now time.Time) {
+func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now time.Time) {
 	if s.notifier == nil {
 		return
 	}
@@ -2254,16 +2254,16 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		log.Printf("scheduler: reminder token for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
-	url := s.publicBaseURL + "/council/confirm?token=" + token
+	url := s.publicBaseURL + "/tenant/confirm?token=" + token
 	// RECORD THE TOKEN FIRST. Sending first meant a failed write emailed a confirm link
 	// that could never work — and, because reminder_sent_at stayed empty, sent another
 	// broken one every warm tick. Recording first makes the emailed link valid by
 	// construction; if the send then fails we roll the mark back so it can be retried.
-	if err := s.store.MarkReminderSent(ctx, cs.Owner, cs.CouncilID, token); err != nil {
+	if err := s.store.MarkReminderSent(ctx, cs.Owner, cs.TenantID, token); err != nil {
 		log.Printf("scheduler: mark reminder for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
-	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.locOf(cs.Owner, cs.CouncilID)), url); err != nil {
+	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.locOf(cs.Owner, cs.TenantID)), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the
@@ -2272,7 +2272,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		// never fires again and the session lapses silently. That is worse than the
 		// duplicate the old ordering risked.
 		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner, cs.CouncilID); cerr != nil {
+		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner, cs.TenantID); cerr != nil {
 			log.Printf("scheduler: roll back reminder mark for %s: %v", redact.Email(cs.Owner), cerr)
 		}
 		cancel()
@@ -2283,7 +2283,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
 		return
 	}
-	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner, cs.CouncilID)).Format("2006-01-02"))
+	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner, cs.TenantID)).Format("2006-01-02"))
 }
 
 // spreadElapsed reports whether a permit may act on a SCHEDULED change yet.
@@ -2372,7 +2372,7 @@ const spreadOverrideCap = 10 * time.Minute
 
 // spreadSpacingFactor sets the target pace as a multiple of the per-operation drain:
 // at 2, a shared boundary is retired at half the rate the governor would allow, so
-// the council sees a stream at half saturation instead of a saturated one.
+// the tenant sees a stream at half saturation instead of a saturated one.
 const spreadSpacingFactor = 2
 
 // effectiveSpread is how wide the rollover window actually is right now: enough to
@@ -2542,7 +2542,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	}
 	// The herd the rollover window is sized against. Total permits over-estimates
 	// how many share any one boundary, which errs toward a wider window (gentler on
-	// the council, slightly later convergence) rather than a narrower one.
+	// the tenant, slightly later convergence) rather than a narrower one.
 	s.fleetSize.Store(int64(len(permits)))
 
 	now := time.Now().In(s.loc)
@@ -2557,9 +2557,9 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	activeOwners := map[string]bool{}
 	for _, p := range permits {
 		// An expired or cancelled permit can't be changed; skip it so we don't
-		// hammer the council with doomed writes or alarm the user with failures.
+		// hammer the tenant with doomed writes or alarm the user with failures.
 		// It stays in the store as a copy-schedule source until removed.
-		if p.Inactive(now, s.locOf(p.Owner, p.CouncilID)) {
+		if p.Inactive(now, s.locOf(p.Owner, p.TenantID)) {
 			continue
 		}
 		active++
@@ -2597,12 +2597,12 @@ type ownerVehicle struct {
 }
 
 // passStats accumulates failures across one reconcile pass so a fleet-wide
-// problem (a council outage or API change) can be reported to the operator
+// problem (a tenant outage or API change) can be reported to the operator
 // directly, instead of only surfacing as per-user notifications.
 type passStats struct {
 	failOwners       map[string]bool
 	unexpectedOwners map[string]bool
-	busyOwners       map[string]bool // council pushed back (ErrCouncilBusy) this pass
+	busyOwners       map[string]bool // tenant pushed back (ErrCouncilBusy) this pass
 }
 
 // displaced resolves who should be warned that prev (the plate just removed)
@@ -2644,8 +2644,8 @@ func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []m
 	return model.FindDisplacedVehicle(own, prev, actor, members)
 }
 
-// settle ends any failure or council-block episode for a permit that needs no
-// council write this tick, whether that is because the permit already shows the
+// settle ends any failure or tenant-block episode for a permit that needs no
+// tenant write this tick, whether that is because the permit already shows the
 // target or because there is no target to apply.
 //
 // The streak previously only ever reset on a SCHEDULER apply success, and then
@@ -2663,7 +2663,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 		return
 	}
 	// A failure episode is ending: the scheduled plate is back in place, so nothing
-	// needs the council. Close out the last logged failure so the audit trail doesn't
+	// needs the tenant. Close out the last logged failure so the audit trail doesn't
 	// sit on a stale "error" — which of the two ways it ends depends on whether the
 	// plate we failed to set is now the one on the permit. Streak-gated like the
 	// original retraction notice: an episode too brief to have alarmed anyone is too
@@ -2681,7 +2681,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 					"recovered after a transient failure — the permit is confirmed on this vehicle")
 			} else {
 				// The failing target went AWAY without ever landing. A 9am–5pm booking the
-				// council blocked all day used to end exactly here at 5pm: want reverted to
+				// tenant blocked all day used to end exactly here at 5pm: want reverted to
 				// a plate already on the permit and the streak was cleared with nothing ever
 				// sent — so the household's last word was the reassuring "still updating,
 				// p.stonn will keep trying", about a visitor uncovered the whole day. Tell
@@ -2759,14 +2759,14 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 }
 
 // reconcilePermit applies any needed plate change for one permit. It returns
-// true when it actually contacted the council (so the caller can space bursts).
-func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, stats *passStats) (hitCouncil bool) {
+// true when it actually contacted the tenant (so the caller can space bursts).
+func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, stats *passStats) (hitTenant bool) {
 	// Resolve against a FRESH clock, not the one captured at the start of the pass: a
 	// governed pass over 500-1000 permits legitimately runs for minutes, and an
 	// override whose StartsAt falls inside that window must be seen as started for
 	// the permit being processed now — otherwise the previous plate is (re)applied
 	// and only corrected next pass, leaving the wrong car on a live permit meanwhile.
-	now := time.Now().In(s.locOf(p.Owner, p.CouncilID))
+	now := time.Now().In(s.locOf(p.Owner, p.TenantID))
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -2820,7 +2820,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		return false // failing lately; inside its stretched retry window
 	}
 
-	// From here the council write and the active_registration write that records it
+	// From here the tenant write and the active_registration write that records it
 	// are one decision, so take this permit's apply claim first. Skipping (rather
 	// than waiting) is deliberate: `want` was computed above, so by the time a wait
 	// returned we would be applying a target decided BEFORE the other writer's, which
@@ -2834,22 +2834,22 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// p came from the snapshot ListPermits took at the start of the pass, and a
 	// handler's inline apply may have landed since. Re-read the permit's own belief
 	// under the claim so we neither re-apply a plate that is already on (a real
-	// council write plus a "your permit was updated" notice for a no-op) nor act on a
+	// tenant write plus a "your permit was updated" notice for a no-op) nor act on a
 	// stale failure streak.
 	fresh, ferr := s.store.GetPermit(ctx, p.ID)
 	if ferr != nil {
 		// The permit may have been removed mid-pass. Falling through wrote a real plate
-		// change to the council for a permit we no longer manage, then booked it as a
+		// change to the tenant for a permit we no longer manage, then booked it as a
 		// clean success (SetPermitActive matches 0 rows and returns nil), re-creating
 		// activity and notify rows for the id DeletePermit just cleaned up and emailing
 		// "your permit was updated" for the permit they just removed.
 		log.Printf("scheduler: skipping permit %d: could not re-read it under the claim: %v", p.ID, ferr)
 		return false
 	}
-	if fresh.Inactive(now, s.locOf(p.Owner, p.CouncilID)) {
-		// checkDrift may have written a council-reported expiry earlier in THIS pass.
-		// Writing anyway earns a council refusal that alarms the household with "the
-		// council would not let p.stonn update your permit" for a permit that expired.
+	if fresh.Inactive(now, s.locOf(p.Owner, p.TenantID)) {
+		// checkDrift may have written a tenant-reported expiry earlier in THIS pass.
+		// Writing anyway earns a tenant refusal that alarms the household with "the
+		// tenant would not let p.stonn update your permit" for a permit that expired.
 		return false
 	}
 	{
@@ -2861,7 +2861,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	}
 
 	prev := p.ActiveRegistration // the plate we're changing away from
-	err = s.council.SetVehicle(ctx, p.Owner, p, want)
+	err = s.tenant.SetVehicle(ctx, p.Owner, p, want)
 	var commitErr error
 	if err == nil {
 		commitErr = s.commitActive(ctx, p.ID, want)
@@ -2873,7 +2873,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	release()
 	switch {
 	case err == nil && commitErr != nil:
-		// The council confirmed the change (SetVehicle re-reads to verify), so the car
+		// The tenant confirmed the change (SetVehicle re-reads to verify), so the car
 		// IS on the permit — this is not a failure to tell the user about. But we must
 		// not book it as a clean success either: the stale ActiveRegistration would
 		// drive a duplicate apply + "updated" notice on the next pass, and be wrong
@@ -2886,7 +2886,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// Pace it like any other failure. Without a streak/backoff this branch Kicked a
 		// fleet-wide reconcile immediately, the next pass re-read the same stale plate,
 		// applied again, failed to commit again and Kicked again — a continuous loop of
-		// council reads on the shared egress IP (SetVehicle always pre-reads), starving
+		// tenant reads on the shared egress IP (SetVehicle always pre-reads), starving
 		// keep-warm and real due changes, while progress() kept the watchdog quiet.
 		// Precondition is a read-OK/write-failing database (full disk, read-only remount).
 		s.bumpFailStreak(ctx, p.ID)
@@ -2904,7 +2904,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		d := s.displaced(ctx, p, overrides, vehByOwnerID, prev, res.By, res.Source, now)
 		// Key the notification on the TRANSITION (prev→want), not just the target.
 		// Keying on "success|want" alone would treat a re-assertion after an external
-		// change (someone edited the plate directly in the council portal, which
+		// change (someone edited the plate directly in the tenant portal, which
 		// checkDrift logs) as a duplicate of the original apply and stay silent — so
 		// the account never hears that their deliberate manual change was reverted.
 		// By names whoever created the winning one-off, so a household can tell
@@ -2939,7 +2939,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// blocked reached nobody at all.
 		//
 		// Deliberately no deferRetry here: a busy attempt is short-circuited locally
-		// (no council traffic), so retrying each tick costs nothing and means we
+		// (no tenant traffic), so retrying each tick costs nothing and means we
 		// resume the moment the block lifts, rather than waiting out a backoff.
 		// fail_streak is shared with real failures — both mean "consecutive ticks we
 		// could not apply" — and a success clears it either way.
@@ -2947,7 +2947,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// A CONFIRMED fleet block (breaker open) is not a blip: the change will not
 		// apply until it clears, so warn sooner and firmly (act now), not with the
 		// reassuring "still updating" a brief single-owner hiccup gets.
-		confirmed := s.council.Blocked()
+		confirmed := s.tenant.Blocked()
 		threshold := busyNotifyThreshold
 		reason, action := describeFailure(parking.FailTransient, provider.OpUnknown)
 		if confirmed {
@@ -2974,7 +2974,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		}
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
-		// A council write endpoint returned "not captured": the API shape may have
+		// A tenant write endpoint returned "not captured": the API shape may have
 		// changed. This is systemic (hits every user), so alert the operator — and
 		// ALSO treat it as a normal failed apply for this user: an activity row
 		// from the first tick, exponential backoff instead of a retry every
@@ -2995,12 +2995,12 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// so leave it: keep-warm re-probes a dead session every recovery tick (~3 min)
 		// and enqueues it there with a properly captured generation.
 		if g, ok := parking.SessionGenOf(err); ok {
-			s.enqueueReconnect(ctx, p.Owner, p.CouncilID, g)
+			s.enqueueReconnect(ctx, p.Owner, p.TenantID, g)
 		}
 		// Recovery usually lands within a couple of reconnect attempts, but
 		// "usually" was previously load-bearing: this branch wrote no activity
 		// row, no fail streak and no notification, so a reconnect that kept
-		// deferring (a council login outage, a changed sign-in page) left the
+		// deferring (a tenant login outage, a changed sign-in page) left the
 		// permit showing the wrong plate indefinitely with the household told
 		// nothing. Record it like every other failure and alarm once the streak
 		// says recovery has stalled. Not fed into passStats: a mass expiry is
@@ -3026,7 +3026,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	}
 }
 
-// fortnightNudgeAfter is how long after a household's first successful council
+// fortnightNudgeAfter is how long after a household's first successful tenant
 // write the tell-a-neighbour note goes out.
 const fortnightNudgeAfter = 14 * 24 * time.Hour
 
@@ -3059,14 +3059,14 @@ func (s *Scheduler) sweepFortnightNudges(ctx context.Context) {
 	}
 }
 
-// warnExternallyDisplaced warns the driver whose car a council-portal edit just
+// warnExternallyDisplaced warns the driver whose car a tenant-portal edit just
 // removed. It loads what it needs itself: the drift pass has no override or
 // vehicle context, and this is rare enough that two small reads are fine.
 func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit, prev string) {
 	if prev == "" {
 		return
 	}
-	now := time.Now().In(s.locOf(p.Owner, p.CouncilID))
+	now := time.Now().In(s.locOf(p.Owner, p.TenantID))
 	overrides, err := s.store.ListOverrides(ctx, p.ID, now)
 	if err != nil {
 		return
@@ -3092,11 +3092,11 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	}
 }
 
-// locOf is the timezone an owner's permit days are reckoned in: their council's
+// locOf is the timezone an owner's permit days are reckoned in: their tenant's
 // when known, else the scheduler's default.
-func (s *Scheduler) locOf(owner, councilID string) *time.Location {
+func (s *Scheduler) locOf(owner, tenantID string) *time.Location {
 	if s.locFor != nil {
-		if loc := s.locFor(owner, councilID); loc != nil {
+		if loc := s.locFor(owner, tenantID); loc != nil {
 			return loc
 		}
 	}

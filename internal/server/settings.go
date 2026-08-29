@@ -10,7 +10,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// settingsPage shows the council connection, re-authorise deadline, and account
+// settingsPage shows the tenant connection, re-authorise deadline, and account
 // controls.
 func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	base, ok := s.appShell(w, r, "settings")
@@ -20,8 +20,8 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	owner := base.Owner
 	user := base.User.Email // the signed-in person; notification prefs are theirs
-	if cs, err := s.store.GetCouncilSession(ctx, owner); err == nil {
-		base.CouncilLinked = true
+	if cs, err := s.store.GetTenantSession(ctx, owner); err == nil {
+		base.TenantLinked = true
 		base.AutoReconnect = cs.Password != ""
 		// The deadline is measured from the last time anyone on the account used the
 		// app, so it moves forward as the household keeps using it. Showing it from
@@ -39,13 +39,13 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Other tenants this account is linked to get a card each (the current
 	// tenant's card is the one above).
-	if sessions, err := s.store.ListCouncilSessionsFor(ctx, owner); err == nil && len(sessions) > 1 && s.councils != nil {
-		current, _ := s.store.CouncilIDFor(ctx, owner)
+	if sessions, err := s.store.ListTenantSessionsFor(ctx, owner); err == nil && len(sessions) > 1 && s.registry != nil {
+		current, _ := s.store.TenantIDFor(ctx, owner)
 		for _, cs := range sessions {
-			if cs.CouncilID == current || cs.Cookie == "" {
+			if cs.TenantID == current || cs.Cookie == "" {
 				continue
 			}
-			c, ok := s.councils.ByID(cs.CouncilID)
+			c, ok := s.registry.ByID(cs.TenantID)
 			if !ok {
 				continue
 			}
@@ -67,7 +67,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	// are written by our own redirects, but nothing stops someone handing a signed-in
 	// user a crafted /settings?... link: the value lands in the green success banner,
 	// which is the most trusted element on the page, in an app whose whole premise is
-	// holding council credentials. It is not an injection (html/template escapes it),
+	// holding tenant credentials. It is not an injection (html/template escapes it),
 	// but "phone this number to restore your permit" in our own voice is worth
 	// refusing outright. A value that is not a plausible address is dropped.
 	if removed := r.URL.Query().Get("removed"); looksLikeEmail(removed) {

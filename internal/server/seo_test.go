@@ -41,7 +41,7 @@ func TestFaviconAndManifest(t *testing.T) {
 func TestSeoForIndexability(t *testing.T) {
 	// The public content pages must be fully indexable.
 	for _, st := range []string{"landing", "how", "security", "contact", "faq"} {
-		title, desc, path := seoFor(st, defaultCouncilView)
+		title, desc, path := seoFor(st, defaultTenantView)
 		if title == "" || desc == "" || path == "" {
 			t.Errorf("seoFor(%q): want fully indexable, got title=%q desc=%q path=%q", st, title, desc, path)
 		}
@@ -49,7 +49,7 @@ func TestSeoForIndexability(t *testing.T) {
 	// Everything else (the app, guest menus, token/confirm pages) must be
 	// non-indexable — an empty canonical path is what the head turns into noindex.
 	for _, st := range []string{"app", "guest", "guest-wait", "confirm", "picker", ""} {
-		if _, _, path := seoFor(st, defaultCouncilView); path != "" {
+		if _, _, path := seoFor(st, defaultTenantView); path != "" {
 			t.Errorf("seoFor(%q): want non-indexable (empty path), got %q", st, path)
 		}
 	}
@@ -57,20 +57,20 @@ func TestSeoForIndexability(t *testing.T) {
 
 func TestJSONLD(t *testing.T) {
 	const base = "https://p.stonn.org"
-	if ld := string(jsonLDFor("landing", base, defaultCouncilView)); !strings.Contains(ld, `"@type":"WebApplication"`) ||
+	if ld := string(jsonLDFor("landing", base, defaultTenantView)); !strings.Contains(ld, `"@type":"WebApplication"`) ||
 		!strings.Contains(ld, `"url":"https://p.stonn.org/"`) || !strings.Contains(ld, `"isAccessibleForFree":true`) {
 		t.Errorf("landing JSON-LD wrong: %s", ld)
 	}
-	ld := string(jsonLDFor("faq", base, defaultCouncilView))
+	ld := string(jsonLDFor("faq", base, defaultTenantView))
 	if !strings.Contains(ld, `"@type":"FAQPage"`) {
 		t.Fatalf("faq JSON-LD not a FAQPage: %s", ld)
 	}
 	// Every FAQ item must appear as a Question in the structured data, so a search
 	// result can never show an answer that isn't on the page.
-	if got := strings.Count(ld, `"@type":"Question"`); got != len(faqFor(defaultCouncilView)) {
-		t.Errorf("faq JSON-LD has %d Questions, want %d", got, len(faqFor(defaultCouncilView)))
+	if got := strings.Count(ld, `"@type":"Question"`); got != len(faqFor(defaultTenantView)) {
+		t.Errorf("faq JSON-LD has %d Questions, want %d", got, len(faqFor(defaultTenantView)))
 	}
-	if jsonLDFor("app", base, defaultCouncilView) != "" {
+	if jsonLDFor("app", base, defaultTenantView) != "" {
 		t.Error("app pages must carry no JSON-LD")
 	}
 }
@@ -110,7 +110,7 @@ func TestRobotsAndSitemap(t *testing.T) {
 // a one-question FAQPage naming that question.
 func TestGuides(t *testing.T) {
 	seen := map[string]bool{}
-	for _, g := range guidesFor(defaultCouncilView) {
+	for _, g := range guidesFor(defaultTenantView) {
 		if g.Slug == "" || g.Title == "" || g.H1 == "" || len(g.Paras) == 0 || seen[g.Slug] {
 			t.Fatalf("guide %+v incomplete or duplicate slug", g.Slug)
 		}
@@ -118,11 +118,11 @@ func TestGuides(t *testing.T) {
 		if ld := string(guideJSONLD(&g)); !strings.Contains(ld, `"@type":"FAQPage"`) || !strings.Contains(ld, g.H1) {
 			t.Fatalf("guide %s JSON-LD wrong: %s", g.Slug, ld)
 		}
-		if guideBySlug(g.Slug, defaultCouncilView) == nil {
+		if guideBySlug(g.Slug, defaultTenantView) == nil {
 			t.Fatalf("guide %s not found by slug", g.Slug)
 		}
 	}
-	if guideBySlug("nope", defaultCouncilView) != nil {
+	if guideBySlug("nope", defaultTenantView) != nil {
 		t.Fatal("unknown slug should be nil")
 	}
 }

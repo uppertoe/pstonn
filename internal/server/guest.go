@@ -52,13 +52,13 @@ type guestActView struct {
 	OwnerEmail     string         // account holder, shown for trust
 	PermitLabel    string         // which permit this affects
 	CurrentReg     string         // what is on the permit right now ("" if unknown)
-	CheckedAgo     string         // how long ago CurrentReg was confirmed with the council; "" while fresh ("4 hr ago" turns "on now" into "last known")
+	CheckedAgo     string         // how long ago CurrentReg was confirmed with the tenant; "" while fresh ("4 hr ago" turns "on now" into "last known")
 	Cars           []vehicleView  // the cars this link may activate
 	AllowOvernight bool           // whether the overnight checkbox is offered
 	AllowPlate     bool           // whether the visitor may type an arbitrary plate
 	RequestOnly    bool           // printed QR: entering a plate only requests approval
 	RevertPlate    string         // pre-existing plate the guest may put back ("" = no revert offered)
-	PendingReg     string         // plate the schedule targets but the council doesn't show yet ("" = settled)
+	PendingReg     string         // plate the schedule targets but the tenant doesn't show yet ("" = settled)
 	Stalled        bool           // the pending change has taken suspiciously long; stop polling
 	SelectedReg    string         // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
 	UntilText      string         // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
@@ -70,7 +70,7 @@ type guestActView struct {
 // guestWaitView drives the visitor's "waiting for approval" page (State
 // "guest-wait"), which polls the status endpoint.
 type guestWaitView struct {
-	council    *councilView // the permit owner's council, for the referral line
+	tenant     *tenantView // the permit owner's tenant, for the referral line
 	OwnerEmail string
 	Plate      string
 	ReqID      int64
@@ -116,12 +116,12 @@ type qrShowView struct {
 
 // doorQRView drives the styled, printable door-QR poster (State "doorqr"). It is a
 // durable artifact: the same code reprints because the token is kept sealed.
-// Council is the council a wait fragment speaks for (the default when unknown).
-func (v guestWaitView) Council() councilView {
-	if v.council != nil {
-		return *v.council
+// Tenant is the tenant a wait fragment speaks for (the default when unknown).
+func (v guestWaitView) Tenant() tenantView {
+	if v.tenant != nil {
+		return *v.tenant
 	}
-	return defaultCouncilView
+	return defaultTenantView
 }
 
 type doorQRView struct {
@@ -176,7 +176,7 @@ type guestRecipientView struct {
 type permitOpt struct {
 	ID    int64
 	Label string
-	Dead  bool // no longer active at the council; copying FROM it moves its guest passes
+	Dead  bool // no longer active at the tenant; copying FROM it moves its guest passes
 }
 
 // guestLinkView is a freshly-minted link shown once, right after grant creation
@@ -218,13 +218,13 @@ func permitLabel(p model.Permit) string {
 	return "Permit " + p.CouncilPermitID
 }
 
-// errApplyBusy stands in for a council write this process deliberately did NOT
+// errApplyBusy stands in for a tenant write this process deliberately did NOT
 // make, because another plate change for the same permit was still in flight when
 // the apply budget ran out (see the AcquireApply calls below). Classified
 // transient: the booking is already saved, so the scheduler converges on it — the
 // page must show the honest "still applying" state rather than telling the
-// household their council login needs reconnecting.
-var errApplyBusy = &parking.CouncilError{
+// household their tenant login needs reconnecting.
+var errApplyBusy = &parking.TenantError{
 	Kind: parking.FailTransient,
 	Op:   provider.OpSetVehicle,
 	Err:  errors.New("another plate change for this permit is still in flight"),
@@ -297,11 +297,11 @@ type stallKey struct {
 }
 
 // stallClock remembers when this process FIRST saw a permit's target plate go
-// unconfirmed on the council record.
+// unconfirmed on the tenant record.
 //
 // The pending banner used the winning override's creation time, which only exists
 // for a booked change: a roster-driven target had no clock at all, so `stalled`
-// could never become true and a visitor whose household had a broken council
+// could never become true and a visitor whose household had a broken tenant
 // session watched "Changing to X…" poll every 2.5 seconds for as long as the tab
 // stayed open, while the honest message telling them to check with the resident
 // was unreachable. Observation time is the clock that works for both: it starts
@@ -360,18 +360,18 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
 }
 
-// guestCurrentPlate is the plate to show as "on the permit now": the council's
+// guestCurrentPlate is the plate to show as "on the permit now": the tenant's
 // own (cached) record when reachable, else our stored belief. Never an error —
-// a council hiccup must not fail the page.
+// a tenant hiccup must not fail the page.
 func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit model.Permit) string {
 	if gc.Grant.RequestOnly {
 		return "" // a printed door QR must not disclose the current plate
 	}
 	current := permit.ActiveRegistration
-	if s.council != nil { // a council hiccup (or, in tests, no client at all) must not fail the page
-		if actual, _, _, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+	if s.tenant != nil { // a tenant hiccup (or, in tests, no client at all) must not fail the page
+		if actual, _, _, err := s.tenant.CurrentVehicleCached(ctx, permit.Owner,
 			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
-			// This read just showed the council holding a different plate than our
+			// This read just showed the tenant holding a different plate than our
 			// stored belief — the one state where the scheduler could wrongly skip a
 			// due change as "already correct". Don't wait out the ~6h drift cadence
 			// with a guest at the kerb: ask for the owner's drift read on the next
@@ -388,16 +388,16 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 }
 
 // guestPlateCheckedAgo reports how long ago the plate shown to a guest was
-// actually confirmed with the council, as display text — "" while the reading is
+// actually confirmed with the tenant, as display text — "" while the reading is
 // fresh (or unknown). The guest page's "On the permit now" line is the single
 // most load-bearing sentence in the app for a visitor about to walk away from
 // their car, and it used to state a cached value as present-tense fact with no
-// age bound: during a council outage "now" could be days old.
+// age bound: during a tenant outage "now" could be days old.
 func (s *Server) guestPlateCheckedAgo(ctx context.Context, permit model.Permit) string {
-	if s.council == nil {
+	if s.tenant == nil {
 		return ""
 	}
-	_, age, fresh, err := s.council.CurrentVehicleCached(ctx, permit.Owner,
+	_, age, fresh, err := s.tenant.CurrentVehicleCached(ctx, permit.Owner,
 		model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute)
 	if err != nil || fresh {
 		return ""
@@ -506,7 +506,7 @@ func revertPinEnd(now, baselineUntil time.Time) time.Time {
 	return baselineUntil
 }
 
-// pendingState reports whether the council record has caught up to the
+// pendingState reports whether the tenant record has caught up to the
 // schedule's target: a non-empty pendingReg means "still applying"; stalled
 // means it has been outstanding past guestApplyTimeout and polling should stop.
 //
@@ -537,7 +537,7 @@ func stallSince(permitID int64, current, want string, decidedAt, now time.Time) 
 }
 
 // buildGuestView assembles the activation-menu view model from actual state:
-// the council-side current plate, the revert offer, and the pending/stalled
+// the tenant-side current plate, the revert offer, and the pending/stalled
 // status against the schedule's resolved target.
 func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permit, current string) guestActView {
 	ctx := r.Context()
@@ -547,7 +547,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
 		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
 	}
-	// The label is the owner's own free text (or, failing that, the council permit
+	// The label is the owner's own free text (or, failing that, the tenant permit
 	// id) and it headlines the page. On a printed door QR — left on a wall for
 	// anyone to scan — that leaks whatever the owner typed, typically an address
 	// or apartment number, so use a generic heading there. Completes the same
@@ -589,7 +589,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 			view.UntilText = untilText(now, until.In(s.locForPermit(r.Context(), permit)))
 		}
 		// The highlight follows the guest's choice the moment it is saved; the
-		// "on now" pill follows the council's actual record as it catches up.
+		// "on now" pill follows the tenant's actual record as it catches up.
 		view.SelectedReg = current
 		if view.PendingReg != "" {
 			view.SelectedReg = view.PendingReg
@@ -613,7 +613,7 @@ func guestFP(v guestActView) string {
 // renderGuestMenu renders the activation menu with optional feedback. An htmx
 // request gets just the live-updating body fragment (no navigation); anything
 // else gets the full page. While a change is still applying, the fragment
-// carries a poller so the page keeps showing the council's ACTUAL record until
+// carries a poller so the page keeps showing the tenant's ACTUAL record until
 // it matches the schedule's target — never just the intended result.
 func (s *Server) renderGuestMenu(w http.ResponseWriter, r *http.Request, gc guestCtx, permit model.Permit, current, flash, warn string) {
 	s.renderGuestMenuOpts(w, r, gc, permit, current, flash, warn, false)
@@ -647,7 +647,7 @@ func (s *Server) renderGuestMenuOpts(w http.ResponseWriter, r *http.Request, gc 
 // page only repaints — and only replays banner animations — on a REAL change.
 // Only pages that rendered a pending banner poll here, so a settled answer
 // means the awaited change (or a superseding one) has landed — announce the
-// ACTUAL plate now on the council record.
+// ACTUAL plate now on the tenant record.
 func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
@@ -688,7 +688,7 @@ func isHX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 func isBoosted(r *http.Request) bool { return r.Header.Get("HX-Boosted") == "true" }
 
 // guestActivate performs an activation: it creates a fresh override for the chosen
-// car (end of today, or tomorrow if overnight) and applies it to the council for
+// car (end of today, or tomorrow if overnight) and applies it to the tenant for
 // instant feedback, leaving the scheduler to guarantee eventual consistency. The
 // response is the same menu with the result inlined (htmx swaps it in place), so
 // a guest can tap one car, then another, then revert, without navigating.
@@ -708,7 +708,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r)
 		return
 	}
-	// A link outlives its permit: a poster stays on the door after the council
+	// A link outlives its permit: a poster stays on the door after the tenant
 	// cancels or expires the permit behind it. Without this gate the activation
 	// below would put a real plate on the dead permit and tell the visitor they
 	// are covered — the exact fine this app exists to prevent. (The scheduler
@@ -794,7 +794,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// Best-effort synchronous apply so the visitor gets a real result; the
 	// scheduler (kicked below) owns retries and eventual consistency regardless.
 	// Detached from the request context: a closed tab mid-apply must not cancel
-	// the council write halfway, nor silently drop the audit row and the
+	// the tenant write halfway, nor silently drop the audit row and the
 	// displaced-driver notice after the change has already landed. Capped below
 	// the server's 20s WriteTimeout so a slow apply still leaves room to write
 	// the response.
@@ -803,20 +803,20 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// Serialise with the reconcile loop for the duration of the write AND the
 	// active_registration write that records it. Without this the loop could be
-	// mid-apply of the roster plate, and whichever of us reached the council last
+	// mid-apply of the roster plate, and whichever of us reached the tenant last
 	// would decide the plate while whichever wrote the database last decided our
-	// belief about it — leaving the council holding one car and the row naming
+	// belief about it — leaving the tenant holding one car and the row naming
 	// another. Every later tick then compares its target against that wrong belief,
 	// finds nothing to do, and leaves a car uncovered until the next drift check.
 	// Bounded by applyCtx, so a stuck claim cannot hold the request open. Held over
-	// the council write and the row that records it — those two are the one decision
+	// the tenant write and the row that records it — those two are the one decision
 	// — and released immediately after, so the audit row, the notices and rendering
 	// the page never hold up a reconcile pass.
 	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
 	err := error(errApplyBusy)
 	if claimed {
 		// Re-check authorisation HERE, under the claim and immediately before the
-		// council write. The guarded insert proved the link was live at insert time,
+		// tenant write. The guarded insert proved the link was live at insert time,
 		// but a revocation landing in the gap since then deletes the override and tells
 		// the owner the pass has stopped working — this stops us then putting the
 		// revoked guest's plate on the real permit anyway.
@@ -826,17 +826,17 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
 			return
 		}
-		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
+		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, reg); err == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, reg); e != nil {
-				// Council confirmed the change; only the local record failed. The Kick
+				// Tenant confirmed the change; only the local record failed. The Kick
 				// below drives a reconcile that re-records it (and alerts if it persists).
 				log.Printf("guest: applied %q at council for permit %d but local commit failed: %v", reg, permit.ID, e)
 			}
 		}
 	}
 	release()
-	// Plain Kick, deliberately: this handler already attempted the council write
-	// itself, so clearing the permit's failure backoff would add council pressure
+	// Plain Kick, deliberately: this handler already attempted the tenant write
+	// itself, so clearing the permit's failure backoff would add tenant pressure
 	// without adding a chance of success — and this path is unauthenticated.
 	s.sched.Kick()
 	if err == nil {
@@ -847,7 +847,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The activity log is user-facing: record a plain-English detail and keep the
-	// raw council error in the server log only.
+	// raw tenant error in the server log only.
 	log.Printf("guest activate %s on permit %d: %v", reg, permit.ID, err)
 	_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "error", guestApplyDetail(err))
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
@@ -940,7 +940,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
 	err := error(errApplyBusy)
 	if claimed {
-		// The same gate activation uses. A revert is still a council write on a guest's
+		// The same gate activation uses. A revert is still a tenant write on a guest's
 		// authority: if the link was revoked while we were deciding the target, it must
 		// not reach the portal (overrideID 0 — a revert restores the pre-guest plate
 		// rather than exercising a vehicle/plate capability).
@@ -950,7 +950,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
 			return
 		}
-		if err = s.council.SetVehicle(applyCtx, permit.Owner, permit, target); err == nil {
+		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, target); err == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, target); e != nil {
 				log.Printf("guest: reverted permit %d to %q at council but local commit failed: %v", permit.ID, target, e)
 			}
@@ -1050,7 +1050,7 @@ func undeliverableText(reason string) string {
 
 // guestApplyDetail is the user-facing activity-log detail for a failed guest
 // apply: the Activity page renders it verbatim, so it must be a plain sentence,
-// not a raw council error (which goes to the server log instead).
+// not a raw tenant error (which goes to the server log instead).
 func guestApplyDetail(err error) string {
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		return "Couldn't reach the council; p.stonn will keep trying."
@@ -1188,7 +1188,7 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Success feedback after deciding a printed-QR request. These values land in the
 	// green success banner — the most trusted element on a page whose whole premise is
-	// custody of a council password — and although our own redirects write them, nothing
+	// custody of a tenant password — and although our own redirects write them, nothing
 	// stops someone handing a signed-in user a crafted /guests?resent=… link. So each is
 	// VALIDATED on the read path (not just the write path, which the old comment here
 	// described): a plate must parse as a rego, a recipient as an email, or it is dropped.
@@ -1388,7 +1388,7 @@ func agoText(now, t time.Time) string {
 		return fmt.Sprintf("%d hr ago", int(d.Hours()))
 	default:
 		// The stale-plate caption can be days old (a cached reading has no upper
-		// age bound during a council outage); "78 hr ago" hides that.
+		// age bound during a tenant outage); "78 hr ago" hides that.
 		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
 	}
 }
@@ -1899,7 +1899,7 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 	// invents an event, and the dedup key only suppresses identical repeats.
 	// Take the permit's apply claim BEFORE revoking, so an in-flight guest activation
 	// either completes first (and its override is then swept) or cannot start — a
-	// revocation must not be overtaken by a council write on the authority it removed.
+	// revocation must not be overtaken by a tenant write on the authority it removed.
 	pid, _ := s.store.GuestGrantPermit(r.Context(), owner, pathInt(r, "id"))
 	releaseClaims := s.claimPermitApplies(r.Context(), []int64{pid})
 	err := s.store.DeleteGuestGrant(r.Context(), owner, pathInt(r, "id"))
@@ -2077,9 +2077,9 @@ func randNonce() string {
 //	ended      — approved, but the granted window has since lapsed
 //	superseded — approved, but the schedule now resolves to a different plate
 //	             (or to nothing): the pass was overridden, not merely slow
-//	applied    — approved AND the council's own record shows the plate
+//	applied    — approved AND the tenant's own record shows the plate
 //	stalled    — approved but unconfirmed past guestApplyTimeout
-//	approved   — approved, council catching up (keep polling)
+//	approved   — approved, tenant catching up (keep polling)
 //
 // replacedBy is the plate now steering the permit, only for "superseded" ("" =
 // nothing scheduled). Owner-facing surfaces may show it; the PUBLIC door-QR
@@ -2257,11 +2257,11 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		// own message, distinct from an actual "denied".
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
 		if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil {
-			cv := s.councilViewFor(r.Context(), permit.Owner)
-			v.council = &cv
+			cv := s.tenantViewFor(r.Context(), permit.Owner)
+			v.tenant = &cv
 		}
 		// "approved" means the resident said yes; requestLiveState only reports it
-		// as ON the permit once the council's own record actually shows the plate
+		// as ON the permit once the tenant's own record actually shows the plate
 		// ("applied"), flags a long-unconfirmed apply ("stalled"), and — the states
 		// this endpoint couldn't see before — notices when the pass has since been
 		// overridden ("superseded") or its window has lapsed ("ended"), instead of
@@ -2293,7 +2293,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // guestApplyTimeout is how long an approved printed-QR request may sit unconfirmed
-// on the council before the visitor's page stops spinning and suggests checking
+// on the tenant before the visitor's page stops spinning and suggests checking
 // with the resident (the scheduler keeps retrying regardless).
 const guestApplyTimeout = 8 * time.Minute
 
@@ -2428,7 +2428,7 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	}
 	// Claim the permit first, exactly as deleteGuestGrant/revokeGuestToken/toggleGuests
 	// do. Without it an in-flight door-QR approval could write the visitor's plate to
-	// the council AFTER the household was told the code had stopped working.
+	// the tenant AFTER the household was told the code had stopped working.
 	if pid, perr := s.store.GuestGrantPermit(r.Context(), owner, atoi64(r.PathValue("id"))); perr == nil {
 		defer s.claimPermitApplies(r.Context(), []int64{pid})()
 	}
@@ -2475,7 +2475,7 @@ const (
 	decideCapFull        // permit at its guest-booking sub-cap
 	decidePermitInactive // approve: the permit itself is cancelled or expired
 	decideRevoked        // door QR revoked between approval and apply
-	decideApplied        // approved and the council confirmed the plate
+	decideApplied        // approved and the tenant confirmed the plate
 	decideApproving
 )
 
@@ -2483,7 +2483,7 @@ const (
 // sub-cap; shared by both front doors so the wording can never drift.
 const decideCapFullMessage = "This permit already has the maximum number of active guest bookings. Remove one before approving another."
 
-// decidePermitInactiveMessage: approving a request against a permit the council
+// decidePermitInactiveMessage: approving a request against a permit the tenant
 // has since cancelled (or that has expired) must refuse loudly. Silently
 // "approving" would strand the visitor on a permit that protects nobody.
 const decidePermitInactiveMessage = "This permit is no longer active (cancelled or expired), so nothing can go on it. The visitor has not been approved — let them know."
@@ -2635,7 +2635,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 		return decideOutcome{kind: decideErr, err: err}
 	}
 	// Best-effort synchronous apply for instant feedback; the scheduler converges
-	// otherwise. SetVehicle returns nil only once the council confirms the plate.
+	// otherwise. SetVehicle returns nil only once the tenant confirms the plate.
 	confirmed := false
 	prev := permit.ActiveRegistration
 	// Detached from the request (see guestActivate): a disconnect mid-apply must
@@ -2643,7 +2643,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	bg := context.WithoutCancel(r.Context())
 	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
 	// Exclusive for this permit while we write (see guestActivate): an approval
-	// racing the reconcile loop could otherwise leave the council holding the roster
+	// racing the reconcile loop could otherwise leave the tenant holding the roster
 	// plate while the row claims the visitor's, and the visitor is standing at the
 	// door believing they are covered. A claim we cannot get means we simply don't
 	// apply here — the override is saved, so the scheduler applies it, and both
@@ -2652,7 +2652,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	applyErr := error(errApplyBusy)
 	if claimed {
 		// The same gate guestActivate and guestRevert use. This was the one guest path
-		// that wrote to the council without re-checking authorisation under the claim:
+		// that wrote to the tenant without re-checking authorisation under the claim:
 		// a door QR revoked between the approval and here would otherwise still have its
 		// visitor's plate applied, after the household was told the code had stopped.
 		if d := s.authoriseGuestApply(applyCtx, doorToken, ovID); d != guestApplyAllowed {
@@ -2662,7 +2662,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 			s.kickScheduler()
 			return decideOutcome{kind: decideRevoked}
 		}
-		if applyErr = s.council.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
+		if applyErr = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, req.Plate); applyErr == nil {
 			if e := s.store.SetPermitActive(bg, permit.ID, req.Plate); e != nil {
 				log.Printf("guest: approved plate %q for permit %d at council but local commit failed: %v", req.Plate, permit.ID, e)
 			}
@@ -2708,7 +2708,7 @@ func guestCreateMessage(err error, fallback string) string {
 	return fallback
 }
 
-// guestApplyDenial says why a guest council write must not proceed: revoked (the
+// guestApplyDenial says why a guest tenant write must not proceed: revoked (the
 // owner withdrew the authority) or unverifiable (we could not check). They are
 // different things to tell a visitor — calling a database blip "the owner turned your
 // link off" starts an argument at the kerb over something that did not happen.
@@ -2721,11 +2721,11 @@ const (
 )
 
 // authoriseGuestApply is the single gate EVERY public guest path must pass immediately
-// before writing to the council, while holding that permit's apply claim.
+// before writing to the tenant, while holding that permit's apply claim.
 //
 // It exists as one helper on purpose: activation was fixed first and revert was left
 // behind, which is the recurring shape of bugs here — a capability check added to one
-// path and not its sibling. Anything that writes to the council on a guest's behalf
+// path and not its sibling. Anything that writes to the tenant on a guest's behalf
 // goes through this.
 //
 // overrideID != 0 checks the FULL capability of that specific override (token, grant,
@@ -2763,7 +2763,7 @@ func (d guestApplyDenial) message() string {
 // Holding the claim is what gives revocation a real linearization point: an activation
 // that already holds it completes (it WAS authorised), and the sweep then removes its
 // override; an activation that has not started yet blocks, and its re-check afterwards
-// fails. Without this, "revoked" could still be overtaken by a council write. ids are
+// fails. Without this, "revoked" could still be overtaken by a tenant write. ids are
 // claimed in a stable order so two multi-permit revocations cannot deadlock, and a
 // claim we cannot get is logged and skipped — a revocation must never fail to revoke.
 func (s *Server) claimPermitApplies(ctx context.Context, ids []int64) func() {

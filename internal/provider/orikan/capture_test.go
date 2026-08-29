@@ -34,7 +34,7 @@ import (
 //
 // WARNING: setting PSTONN_CAPTURE_REGO performs a REAL edit on a REAL permit.
 // Pass the plate you actually want on the permit right now, so the write is one
-// you wanted anyway and the capture costs the council nothing extra. The plate
+// you wanted anyway and the capture costs the tenant nothing extra. The plate
 // in place beforehand is logged prominently either way.
 
 // ANSWERS (captured 2026-07-31 against permit 14576 / VPP24714):
@@ -48,7 +48,7 @@ import (
 //	Q4 YES  the grid row carries rego, status and end date, so one owner-level call
 //	        serves both drift detection and expiry (see scheduler.checkDrift).
 //
-// Also established: the council rejects a lower-case plate with 400 "Vehicle
+// Also established: the tenant rejects a lower-case plate with 400 "Vehicle
 // Registration has invalid pattern", and accepts the same plate upper-cased even
 // while it sits on ANOTHER of the account's permits. Production normalises at every
 // entry point (server.normalizeReg), so only a harness can send the rejected form.
@@ -176,8 +176,8 @@ func TestLiveCaptureShapes(t *testing.T) {
 		return
 	}
 	// Normalise exactly as the server layer does before any plate reaches the
-	// council (server.normalizeReg). Skipping this sent a lower-case plate on the
-	// first run and the council answered 400 "Vehicle Registration has invalid
+	// tenant (server.normalizeReg). Skipping this sent a lower-case plate on the
+	// first run and the tenant answered 400 "Vehicle Registration has invalid
 	// pattern" — a harness artefact that looked like an API finding. Every
 	// production path normalises; a capture that does not is not testing the
 	// production request.
@@ -245,7 +245,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 
 	// Q3: if the POST already returns the resulting permit state, the confirm read
 	// can be dropped without weakening the "confirmed by the council" guarantee —
-	// the response IS the council's own record.
+	// the response IS the tenant's own record.
 	switch {
 	case len(strings.TrimSpace(string(postBody))) == 0:
 		findings[captureQ3] = "NO — empty body; the confirm read must stay"
@@ -294,7 +294,7 @@ func TestLiveCaptureShapes(t *testing.T) {
 }
 
 // rawGet issues one authenticated GET and returns the undecoded body, so the
-// capture reports what the council actually sent rather than what this client's
+// capture reports what the tenant actually sent rather than what this client's
 // structs happen to keep.
 func rawGet(t *testing.T, c *Client, ctx context.Context, ss *session, path string, q url.Values) []byte {
 	t.Helper()

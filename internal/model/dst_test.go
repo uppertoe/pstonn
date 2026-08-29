@@ -60,7 +60,7 @@ func TestExpiryDeadlineAcrossTransitions(t *testing.T) {
 		wantLen time.Duration // length of the permit's final local day
 	}{
 		{
-			// The council sends a bare date, which the store parses as UTC midnight.
+			// The tenant sends a bare date, which the store parses as UTC midnight.
 			name:    "final day is the 23-hour spring-forward day",
 			endDate: time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC),
 			want:    time.Date(2026, 10, 5, 0, 0, 0, 0, loc),

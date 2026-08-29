@@ -26,10 +26,10 @@ func consentAt(t *testing.T, s *Store, owner string, at time.Time) {
 }
 
 // TestOnboardNudgeCandidates pins the audience of the once-ever recovery email:
-// signed up inside the window, and stalled before ever connecting the council —
+// signed up inside the window, and stalled before ever connecting the tenant —
 // with each exclusion representing a person who is NOT stalled at that step.
 // Mailing any of them "you're one step away" would range from confusing (a
-// secondary, who has no council account to link) to false (a linked household).
+// secondary, who has no tenant account to link) to false (a linked household).
 func TestOnboardNudgeCandidates(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -40,7 +40,7 @@ func TestOnboardNudgeCandidates(t *testing.T) {
 	// The one genuine candidate: consented two days ago, nothing else on file.
 	consentAt(t, s, "stalled@example.com", twoDaysAgo)
 
-	// Saved vehicles must NOT exclude — adding cars then failing at the council
+	// Saved vehicles must NOT exclude — adding cars then failing at the tenant
 	// password is exactly the stall the email unsticks.
 	consentAt(t, s, "cars-only@example.com", twoDaysAgo)
 	if _, err := s.CreateVehicle(ctx, "cars-only@example.com", "AAA111", "car"); err != nil {
@@ -53,7 +53,7 @@ func TestOnboardNudgeCandidates(t *testing.T) {
 	// Too old: predates the lookback; "almost there!" months later reads as spam.
 	consentAt(t, s, "ancient@example.com", now.Add(-30*24*time.Hour))
 
-	// Currently linked: a council_session row is a working connection.
+	// Currently linked: a tenant_session row is a working connection.
 	consentAt(t, s, "linked@example.com", twoDaysAgo)
 	if _, err := s.db.Exec(`INSERT INTO council_session (owner) VALUES (?)`, "linked@example.com"); err != nil {
 		t.Fatal(err)

@@ -13,7 +13,7 @@ import (
 
 // TestCurrentVehicleCachedNeverBlocks locks in the stale-while-revalidate
 // contract: the call must answer from cache (fresh or stale) or report a miss —
-// never a synchronous council round trip, which would let a slow portal stall a
+// never a synchronous tenant round trip, which would let a slow portal stall a
 // page render past the HTTP server's WriteTimeout (a 502 at the proxy).
 func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "t.db"))
@@ -46,8 +46,8 @@ func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
 	}
 }
 
-// C9: a council permit can change hands — a household permit is visible to two
-// council logins, and "stop managing" plus "manage" from the other account is the
+// C9: a tenant permit can change hands — a household permit is visible to two
+// tenant logins, and "stop managing" plus "manage" from the other account is the
 // ordinary way that happens. A plate cached under the previous holder must never
 // be served to the new one, and stopping must clear the entry.
 func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
@@ -63,7 +63,7 @@ func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
 
 	c.regCache.Store(regKey{first, p.CouncilPermitID}, cachedReg{reg: "OLD111", at: time.Now()})
 
-	// The new holder of the same council permit gets a cache MISS, not the previous
+	// The new holder of the same tenant permit gets a cache MISS, not the previous
 	// household's plate.
 	if got, _, fresh, err := c.CurrentVehicleCached(ctx, second, p, 5*time.Minute); !errors.Is(err, ErrNoCachedPlate) || got != "" || fresh {
 		t.Fatalf("second owner read the first owner's cached plate: %q fresh=%v, %v", got, fresh, err)
@@ -173,7 +173,7 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 func TestNoteExpiredReportsOnlyTaggedExpiries(t *testing.T) {
 	c := NewClient(nil, nil, nil, nil)
 	var got []int64
-	c.OnSessionExpired = func(owner, councilID string, gen int64) {
+	c.OnSessionExpired = func(owner, tenantID string, gen int64) {
 		if owner != "o@example.com" {
 			t.Fatalf("hook got owner %q", owner)
 		}

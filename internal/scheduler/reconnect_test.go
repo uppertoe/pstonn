@@ -21,7 +21,7 @@ func TestKeepWarmEnqueuesReconnectsWithoutBlocking(t *testing.T) {
 		seedSession(t, st, owner)
 		seedSchedule(t, st, owner)
 	}
-	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired}
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: &fakeNotifier{on: true, admin: true}})
 	time.Sleep(2 * time.Millisecond)
 
@@ -51,7 +51,7 @@ func TestReconnectLoopDrainsQueue(t *testing.T) {
 	const owner = "drain@example.com"
 	seedSession(t, st, owner)
 	seedSchedule(t, st, owner)
-	fc := &fakeCouncil{reconnectSet: true} // reconnect succeeds
+	fc := &fakeTenant{reconnectSet: true} // reconnect succeeds
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 	ctx := context.Background()
 
@@ -96,8 +96,8 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	st := newStore(t)
 	const owner = "relink@example.com"
 	seedSession(t, st, owner)
-	cur, _ := st.GetCouncilSession(ctx, owner)
-	fc := &fakeCouncil{reconnectSet: true} // would "succeed" if it ever ran
+	cur, _ := st.GetTenantSession(ctx, owner)
+	fc := &fakeTenant{reconnectSet: true} // would "succeed" if it ever ran
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
 	stale := cur.Generation + 1 // a generation that no longer matches (a session change happened)
@@ -107,7 +107,7 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	if len(fc.reconnected) != 0 {
 		t.Fatal("a stale reconnect must not attempt a login on the fresh session")
 	}
-	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
+	if _, err := st.GetTenantSession(ctx, owner); err != nil {
 		t.Fatalf("the fresh session must survive a stale reconnect task: %v", err)
 	}
 }
@@ -116,7 +116,7 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 // have captured at the moment of failure.
 func genOf(t *testing.T, st *store.Store, owner string) int64 {
 	t.Helper()
-	cs, err := st.GetCouncilSession(context.Background(), owner)
+	cs, err := st.GetTenantSession(context.Background(), owner)
 	if err != nil {
 		t.Fatalf("read session generation for %s: %v", owner, err)
 	}

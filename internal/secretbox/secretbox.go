@@ -1,5 +1,5 @@
 // Package secretbox provides authenticated encryption for data at rest
-// (AES-256-GCM). It is used to seal the council session cookie (and cached
+// (AES-256-GCM). It is used to seal the tenant session cookie (and cached
 // access token) before they are written to SQLite, so a leaked database file
 // does not expose usable credentials.
 package secretbox
@@ -39,8 +39,8 @@ func New(key []byte) (*Box, error) {
 // string of nonce||ciphertext. Only OpenCtx with the SAME context can open it.
 //
 // The context is what makes a ciphertext mean something. One key seals four
-// different secrets here — the council session cookie, its access token, the
-// council PASSWORD, and guest-pass tokens — and with no binding they are freely
+// different secrets here — the tenant session cookie, its access token, the
+// tenant PASSWORD, and guest-pass tokens — and with no binding they are freely
 // interchangeable: a blob is just "something this key encrypted". Anyone able to
 // write a row could move one household's password ciphertext into another's
 // guest_token.token_sealed, and the door-QR page would then decrypt and DISPLAY it,
@@ -67,7 +67,7 @@ func (b *Box) SealCtx(context, plaintext string) (string, error) {
 // builds, and refusing them outright would unlink every household at once — a
 // self-inflicted outage far worse than the (write-primitive-gated) weakness it
 // closes. Those blobs remain movable until re-sealed, so this is a migration
-// window, not the end state: council cookies and tokens re-seal on every keep-warm
+// window, not the end state: tenant cookies and tokens re-seal on every keep-warm
 // pass, and the rest re-seal on their next write.
 func (b *Box) OpenCtx(context, encoded string) (plaintext string, legacy bool, err error) {
 	raw, err := base64.StdEncoding.DecodeString(encoded)

@@ -1,10 +1,10 @@
 // Package i18n holds every sentence the app says to a person, keyed, in
-// per-locale catalogs, resolved against a council's terminology. Two things vary
+// per-locale catalogs, resolved against a tenant's terminology. Two things vary
 // that plain string literals cannot express: the reader's language, and what the
-// council calls things — "visitor permit", "guest permit", "digital permit";
+// tenant calls things — "visitor permit", "guest permit", "digital permit";
 // "ePermits" or something else. A message is a small template over the data it is
-// rendered with (which always carries the Council view), so wording, links and
-// vocabulary are one lookup, and a second council or a second language is a
+// rendered with (which always carries the Tenant view), so wording, links and
+// vocabulary are one lookup, and a second tenant or a second language is a
 // catalog entry rather than another sweep of the code.
 //
 // Catalogs are embedded JSON (catalog/<locale>.json): a "terms" table of default
@@ -274,8 +274,8 @@ func (c *Catalog) Keys() []string {
 	return out
 }
 
-// Terms returns the vocabulary for a council: the catalog's defaults with the
-// council's own words laid over them.
+// Terms returns the vocabulary for a tenant: the catalog's defaults with the
+// tenant's own words laid over them.
 func (c *Catalog) Terms(overrides map[string]string) map[string]string {
 	out := make(map[string]string, len(c.terms)+len(overrides))
 	for k, v := range c.terms {

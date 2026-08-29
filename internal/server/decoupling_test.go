@@ -10,20 +10,20 @@ import (
 	"testing"
 )
 
-// The decoupling guard: a council's name, portal host or phone number may appear
-// only where a council is DESCRIBED — the registry — never in code, templates or
-// catalogs, which must speak through the Council view. Without this the
-// coupling creeps back one string at a time (docs/council-connections.md).
-func TestNoCouncilLiteralsOutsideTheRegistry(t *testing.T) {
+// The decoupling guard: a tenant's name, portal host or phone number may appear
+// only where a tenant is DESCRIBED — the registry — never in code, templates or
+// catalogs, which must speak through the Tenant view. Without this the
+// coupling creeps back one string at a time (docs/tenant-connections.md).
+func TestNoTenantLiteralsOutsideTheRegistry(t *testing.T) {
 	root := filepath.Join("..", "..")
 	literal := regexp.MustCompile(`(?i)stonnington|8290 1333`)
 	allowed := map[string]bool{
-		"internal/council/councils.json": true, // the registry: where a council is described
-		"internal/council/council.go":    true, // the registry package: the named accessor and env-override mapping
-		"internal/council/registry.go":   true,
-		"internal/config/config.go":      true, // COUNCIL_* defaults: the single-council override path
-		"internal/store/migrate.go":      true, // backfill of pre-multi-council rows, which were all this council's
-		"internal/server/terms.md":       true, // terms copy: wording changes need approval (re-consent)
+		"internal/tenant/tenants.json": true, // the registry: where a tenant is described
+		"internal/tenant/tenant.go":    true, // the registry package: the named accessor and env-override mapping
+		"internal/tenant/registry.go":  true,
+		"internal/config/config.go":    true, // COUNCIL_* defaults: the single-tenant override path
+		"internal/store/migrate.go":    true, // backfill of pre-multi-tenant rows, which were all this tenant's
+		"internal/server/terms.md":     true, // terms copy: wording changes need approval (re-consent)
 	}
 	var offenders []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -58,7 +58,7 @@ func TestNoCouncilLiteralsOutsideTheRegistry(t *testing.T) {
 		for sc.Scan() {
 			n++
 			line := sc.Text()
-			// Comments may name the council (history, captures); output may not.
+			// Comments may name the tenant (history, captures); output may not.
 			if strings.HasPrefix(strings.TrimSpace(line), "//") || strings.HasPrefix(strings.TrimSpace(line), "{{/*") {
 				continue
 			}

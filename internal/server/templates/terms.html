@@ -25,7 +25,7 @@
          while there is still time to fix it — the council password ask on the
          following page is where signups stall, and by then they are one page
          deeper and mid-form. */}}
-    <p class="empty-note" style="text-align:center;margin-top:16px">{{T "terms.next_step" . (slots "b" (strong) "reset" (link .Council.Links.ResetPassword `target="_blank"` `rel="noopener"`))}}</p>
+    <p class="empty-note" style="text-align:center;margin-top:16px">{{T "terms.next_step" . (slots "b" (strong) "reset" (link .Tenant.Links.ResetPassword `target="_blank"` `rel="noopener"`))}}</p>
     {{end}}
     <p class="empty-note" style="text-align:center;margin-top:16px">Terms version {{.Terms.Version}}.{{if .LogoutURL}} Prefer not to? <a href="{{.LogoutURL}}">Sign out</a>.{{end}}</p>
     {{end}}

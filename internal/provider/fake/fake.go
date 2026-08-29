@@ -21,7 +21,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/provider"
 )
 
-// ID is the connector name a council descriptor refers to.
+// ID is the connector name a tenant descriptor refers to.
 const ID = "fake"
 
 // DefaultApplyDelay is how long a plate change takes to "land" — long enough to

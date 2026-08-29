@@ -22,7 +22,7 @@ import (
 
 // newAuthzServer builds a Server in forward-auth mode (auth == nil), so a request
 // can present its identity via the Remote-Email header the way Caddy injects it.
-// council/sched/etc. are nil: every case below asserts a guard that returns
+// tenant/sched/etc. are nil: every case below asserts a guard that returns
 // before those are ever touched (401/403/redirect), or a store-only path.
 func newAuthzServer(t *testing.T) *Server {
 	t.Helper()
@@ -141,7 +141,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	})
 
 	t.Run("secondary is blocked from owner-only actions", func(t *testing.T) {
-		for _, path := range []string{"/council/link", "/account/members", "/account/members/remove", "/council/unlink", "/council/forget-password", "/account/delete"} {
+		for _, path := range []string{"/tenant/link", "/account/members", "/account/members/remove", "/tenant/unlink", "/tenant/forget-password", "/account/delete"} {
 			w := s.doReq("POST", path, secondary, goodOrigin, url.Values{"email": {other}, "confirm": {"DELETE"}})
 			if w.Code != http.StatusForbidden {
 				t.Fatalf("secondary POST %s = %d, want 403", path, w.Code)
@@ -150,7 +150,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	})
 
 	// Retiring a permit is owner-only: it is irreversible (roster, bookings and
-	// history go with it) and a council permit can only be claimed by one account,
+	// history go with it) and a tenant permit can only be claimed by one account,
 	// so a secondary who deleted it could immediately re-add it under their own
 	// account and leave the primary with no self-service recovery.
 	t.Run("secondary cannot stop managing a permit", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		gid := strconv.FormatInt(grantID, 10)
 
 		// The permit-card fragment must not disclose another account's permit.
-		// (Pages that go through appShell need a live council client, so they are
+		// (Pages that go through appShell need a live tenant client, so they are
 		// covered by the store-level owner scoping instead of here.)
 		if w := s.doReq("GET", "/permits/"+pid+"/card", other, goodOrigin, nil); w.Code == http.StatusOK &&
 			strings.Contains(w.Body.String(), "Owner permit") {
@@ -316,26 +316,26 @@ func TestAuthorizationMatrix(t *testing.T) {
 	})
 }
 
-// TestCouncilLinkThrottleRedirectsToGuidance: once the per-user attempt budget is
-// spent, councilLink lands back on the onboarding page (where the throttled
+// TestTenantLinkThrottleRedirectsToGuidance: once the per-user attempt budget is
+// spent, tenantLink lands back on the onboarding page (where the throttled
 // banner pairs the wait with the likely fixes) instead of a dead-end 429 message
 // page — which was the last thing a real early sign-up saw before leaving. The
-// council client stays nil: the throttle must refuse before any credential is
+// tenant client stays nil: the throttle must refuse before any credential is
 // forwarded.
-func TestCouncilLinkThrottleRedirectsToGuidance(t *testing.T) {
+func TestTenantLinkThrottleRedirectsToGuidance(t *testing.T) {
 	ctx := context.Background()
 	s := newAuthzServer(t)
-	s.councilTry = newRateLimiter(4, 15*time.Minute)
+	s.tenantTry = newRateLimiter(4, 15*time.Minute)
 	const owner = "owner@example.com"
 	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 4; i++ {
-		if !s.councilTry.allow(owner) {
+		if !s.tenantTry.allow(owner) {
 			t.Fatalf("attempt %d throttled, want the full budget available", i+1)
 		}
 	}
-	w := s.doReq("POST", "/council/link", owner, "http://app.example.com", url.Values{"council_password": {"pw"}})
+	w := s.doReq("POST", "/tenant/link", owner, "http://app.example.com", url.Values{"portal_password": {"pw"}})
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("throttled POST /council/link = %d, want 303", w.Code)
 	}
@@ -471,7 +471,7 @@ func TestStatusRosterSealed(t *testing.T) {
 	const token = "status-token-long-enough-to-pass"
 	s.cfg.StatusToken = token
 	// The status payload reports scheduler health, so it needs a scheduler (a real
-	// one with no council client: LastReconcile only reads an atomic).
+	// one with no tenant client: LastReconcile only reads an atomic).
 	s.sched = scheduler.New(s.store, nil, time.UTC, scheduler.Options{})
 	s.cfg.RosterKey = bytes.Repeat([]byte{9}, 32)
 	if err := s.store.RecordConsent(ctx, "roster@example.com", "v1", "h1"); err != nil {
@@ -497,7 +497,7 @@ func TestStatusRosterSealed(t *testing.T) {
 	if strings.Contains(body, "roster@example.com") || strings.Contains(body, "roster_sealed") {
 		t.Fatalf("the plain health poll should carry no roster: %s", body)
 	}
-	// ...but it DOES carry the council-health section the watchdog alerts on.
+	// ...but it DOES carry the tenant-health section the watchdog alerts on.
 	for _, key := range []string{`"council"`, `"requests_1m"`, `"breaker_open"`, `"breaker_persist_ok"`, `"overdue_warm"`, `"near_expiry"`, `"expiries_1h"`, `"reconnects_1h"`, `"expired_owners_1h"`, `"reconnect_queued"`, `"reconnect_due"`} {
 		if !strings.Contains(body, key) {
 			t.Fatalf("status payload missing watchdog key %s: %s", key, body)
@@ -573,7 +573,7 @@ func TestVisitorQRReusesLiveCode(t *testing.T) {
 	}
 
 	// The permit-card button posts via htmx, which returns the bare qr-card
-	// fragment for the modal (the full-page branch needs a live council client).
+	// fragment for the modal (the full-page branch needs a live tenant client).
 	show := func() string {
 		t.Helper()
 		r := httptest.NewRequest("POST", "/guests/qr",

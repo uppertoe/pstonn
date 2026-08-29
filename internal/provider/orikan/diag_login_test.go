@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// TestDiagLoginProbe performs ONE deliberate council login with (by default)
+// TestDiagLoginProbe performs ONE deliberate tenant login with (by default)
 // credentials for an account that does not exist, and captures everything the
 // production flow discards: the credential POST's status, final URL, response
 // headers, cookie names, and full body. Its purpose is to characterise what the
-// council actually says on a rejected login, and — run from two different
+// tenant actually says on a rejected login, and — run from two different
 // networks — to distinguish "invalid credentials" from an edge/bot challenge
 // that would make every VPS-originated signup fail while blaming the password
 // (raised 2026-08-11 after two signups failed identically from the box's IP

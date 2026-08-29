@@ -3,17 +3,17 @@ package server
 import (
 	"testing"
 
-	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/tenant"
 )
 
 // pol is the Stonnington permit policy these cases were written against.
-var pol = council.Stonnington().Policy
+var pol = tenant.Stonnington().Policy
 
-// TestVisitorNameFallback: the council owns the permit-type display text, and a
+// TestVisitorNameFallback: the tenant owns the permit-type display text, and a
 // rename used to make every permit unaddable overnight, with the picker flatly
 // asserting nothing on the account can be scheduled. The fallback engages only
-// when NO permit matches the name and the council itself says a vehicle can be
+// when NO permit matches the name and the tenant itself says a vehicle can be
 // changed — and never loosens the normal path while the name still works.
 func TestVisitorNameFallback(t *testing.T) {
 	visitor := parking.PermitInfo{PermitType: "(A) 1st Visitor Permit", CanChangeVehicle: true}

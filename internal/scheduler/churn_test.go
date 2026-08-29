@@ -44,7 +44,7 @@ func TestChurnWindowArithmetic(t *testing.T) {
 func TestSessionChurnAlertsOnDistinctOwners(t *testing.T) {
 	st := newStore(t)
 	fn := &fakeNotifier{on: true, admin: true}
-	fc := &fakeCouncil{reconnectSet: true, reconnectErr: errors.New("503 busy")}
+	fc := &fakeTenant{reconnectSet: true, reconnectErr: errors.New("503 busy")}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 	ctx := context.Background()
 	for _, o := range []string{"flap@example.com", "a@example.com", "b@example.com", "c@example.com"} {
@@ -89,14 +89,14 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, owner)
 	fn := &fakeNotifier{on: true, admin: true}
-	fc := &fakeCouncil{reconnectSet: true, reconnectErr: parking.ErrLoginFormUnrecognised}
+	fc := &fakeTenant{reconnectSet: true, reconnectErr: parking.ErrLoginFormUnrecognised}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
-	cs, _ := st.GetCouncilSession(ctx, owner)
+	cs, _ := st.GetTenantSession(ctx, owner)
 	if got := s.recoverOrRetire(ctx, owner, "", cs.Generation); got != reconnectDeferred {
 		t.Fatalf("a login-shape failure should defer (keep the session), got %v", got)
 	}
-	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
+	if _, err := st.GetTenantSession(ctx, owner); err != nil {
 		t.Fatalf("session was retired on a login-shape change (recovery could not resume): %v", err)
 	}
 	time.Sleep(60 * time.Millisecond)
@@ -110,7 +110,7 @@ func TestReconnectCounted(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	seedSession(t, st, "ok@example.com")
-	fc := &fakeCouncil{reconnectSet: true} // reconnectErr nil = success
+	fc := &fakeTenant{reconnectSet: true} // reconnectErr nil = success
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
 	s.enqueueReconnect(ctx, "ok@example.com", "", genOf(t, st, "ok@example.com")) // discovery notes the expiry

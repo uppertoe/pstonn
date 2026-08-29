@@ -28,11 +28,11 @@ func TestMergeSetCookieHonoursDeletion(t *testing.T) {
 	}
 }
 
-// The council reports a refusal as a JSON ARRAY of message objects. Captured live
+// The tenant reports a refusal as a JSON ARRAY of message objects. Captured live
 // on 2026-07-31 from a manageVehicle POST that was rejected. Before this was
 // parsed the body was discarded and the user saw only "council returned 400",
 // which says nothing they can act on.
-func TestCouncilErrorMessage(t *testing.T) {
+func TestTenantErrorMessage(t *testing.T) {
 	const live = `[{"Level":0,"Message":"Vehicle Registration has invalid pattern","ID":null,"LinkURL":null,"Title":null,"CustomMessage":null,"LinkLabel":null}]`
 	if got := refusalMessage([]byte(live)); got != "Vehicle Registration has invalid pattern" {
 		t.Errorf("live refusal body parsed to %q", got)
@@ -61,8 +61,8 @@ func TestCouncilErrorMessage(t *testing.T) {
 }
 
 // The vehicle-state id written on an add or a state-less edit comes from the
-// council descriptor; a bare Client (tests, or an unset descriptor) falls back to
-// VIC so today's single-council behaviour is unchanged.
+// tenant descriptor; a bare Client (tests, or an unset descriptor) falls back to
+// VIC so today's single-tenant behaviour is unchanged.
 func TestVehicleStateDefault(t *testing.T) {
 	if got := New(Config{}, nil).vehicleState; got != "1" {
 		t.Fatalf("default vehicleState = %q, want VIC (1)", got)

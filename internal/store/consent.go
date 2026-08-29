@@ -45,7 +45,7 @@ func (s *Store) LatestConsent(ctx context.Context, owner string) (Consent, error
 // ---- Onboarding nudge ----
 
 // OnboardNudgeCandidates lists people who signed up (accepted terms) inside the
-// [oldest, newest] window and then stalled before ever connecting a council
+// [oldest, newest] window and then stalled before ever connecting a tenant
 // account — the once-ever recovery email's audience.
 //
 // The window has two jobs. The newest bound gives a fresh signup a day to finish
@@ -55,17 +55,17 @@ func (s *Store) LatestConsent(ctx context.Context, owner string) (Consent, error
 //
 // "Never connected" is deliberately strict — each exclusion is a different way
 // the person turns out not to be stalled at the link step:
-//   - a council_session row: they are connected right now;
+//   - a tenant_session row: they are connected right now;
 //   - a permit row: they connected once and picked a permit (a lapsed session
 //     here is the RELINK flow, which has its own reminders);
-//   - a council.link entry in account_log: they connected at least once, even
+//   - a tenant.link entry in account_log: they connected at least once, even
 //     if they since disconnected and removed everything;
 //   - an accepted membership: a secondary shares the primary's connection and
-//     has no council account of their own to link (a still-pending invite does
+//     has no tenant account of their own to link (a still-pending invite does
 //     not count — that person may well be a stalled signup of their own);
 //   - a recorded nudge: this email is once ever, not once per sweep.
 //
-// Saved vehicles do NOT exclude: adding cars and then failing at the council
+// Saved vehicles do NOT exclude: adding cars and then failing at the tenant
 // password is precisely the stall this email exists to unstick.
 func (s *Store) OnboardNudgeCandidates(ctx context.Context, oldest, newest time.Time) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -105,7 +105,7 @@ ON CONFLICT(owner) DO UPDATE SET onboard_nudge_sent = excluded.onboard_nudge_sen
 	return err
 }
 
-// FortnightNudgeCandidates lists owners whose FIRST successful council write is
+// FortnightNudgeCandidates lists owners whose FIRST successful tenant write is
 // at least `after` old and who have not had the once-ever "tell a neighbour"
 // note. Keyed to the first success, not signup: the note only makes sense once
 // the product has actually done something for them.

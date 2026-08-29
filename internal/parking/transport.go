@@ -19,12 +19,12 @@ type Transport struct {
 	base    http.RoundTripper
 	gov     *governor
 	traffic *trafficCounters
-	shared  *ConcurrencyLimit // optional cap across every council (one egress IP)
+	shared  *ConcurrencyLimit // optional cap across every tenant (one egress IP)
 }
 
 // ConcurrencyLimit bounds simultaneous requests across SEVERAL transports: every
-// council shares one egress address, so per-council governors alone would let N
-// councils put N times the intended concurrency on it.
+// tenant shares one egress address, so per-tenant governors alone would let N
+// registry put N times the intended concurrency on it.
 type ConcurrencyLimit struct{ slots chan struct{} }
 
 // NewConcurrencyLimit builds a limit of n simultaneous requests (n < 1 → default).

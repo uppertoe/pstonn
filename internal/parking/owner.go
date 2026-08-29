@@ -48,7 +48,7 @@ func (c *Client) clearPenalty(owner string) {
 	c.cooldownUntil.Delete(owner)
 }
 
-func (c *Client) noteCouncilSuccess(owner string, permit breakerPermit) {
+func (c *Client) noteTenantSuccess(owner string, permit breakerPermit) {
 	if c.breaker.onSuccess(time.Now(), owner, permit) {
 		log.Printf("parking: fleet circuit closed — the council edge is serving us again; council traffic resumed")
 		c.persistBreaker() // clear the persisted pause so a restart doesn't re-pause

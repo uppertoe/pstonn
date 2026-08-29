@@ -8,7 +8,7 @@
     {{if .RelinkBy}}
     <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, it would stop around <strong>{{.RelinkBy}}</strong> &mdash; we'd email a one-click link first.</p>
     {{end}}
-    {{if .CouncilLinked}}
+    {{if .TenantLinked}}
     <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">
       <div style="max-width:60ch">
         <strong>Auto-reconnect</strong>
@@ -20,7 +20,7 @@
         {{end}}
       </div>
       {{if .AutoReconnect}}
-      <form method="post" action="/council/forget-password"
+      <form method="post" action="/tenant/forget-password"
             data-confirm="Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires." data-confirm-ok="Stop saving">
         <button type="submit" class="ghost">Turn off</button>
       </form>
@@ -28,7 +28,7 @@
     </div>
     {{end}}
     <div class="row" style="margin-top:14px" x-data="{del:false}">
-      <form method="post" action="/council/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
         <button type="submit" class="ghost">{{template "ic-x"}} Unlink account</button>
       </form>
       <button type="button" class="danger" @click="del=!del">{{template "ic-trash"}} Delete all my data</button>
@@ -48,11 +48,11 @@
     {{if .RelinkBy}}<p class="empty-note" style="margin-top:-8px">If nobody visits, this connection would stop around <strong>{{.RelinkBy}}</strong>.</p>{{end}}
     <div class="row" style="margin-top:14px">
       <strong>Auto-reconnect</strong> {{if .AutoReconnect}}<span class="pill ok">On</span>
-      <form method="post" action="/council/forget-password"><input type="hidden" name="council_id" value="{{.ID}}"><button type="submit" class="ghost">Turn off</button></form>
+      <form method="post" action="/tenant/forget-password"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">Turn off</button></form>
       {{else}}<span class="pill">Off</span>{{end}}
     </div>
     <div class="row" style="margin-top:14px">
-      <form method="post" action="/council/unlink" data-confirm="Unlink this connection? Its schedule is kept and resumes when you re-link." data-confirm-ok="Unlink"><input type="hidden" name="council_id" value="{{.ID}}"><button type="submit" class="ghost">{{template "ic-x"}} Unlink</button></form>
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink this connection? Its schedule is kept and resumes when you re-link." data-confirm-ok="Unlink"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">{{template "ic-x"}} Unlink</button></form>
     </div>
   </section>
   {{- end}}

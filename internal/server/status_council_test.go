@@ -8,12 +8,12 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// The /status council section is what the watchdog alerts on, so the mapping from
+// The /status tenant section is what the watchdog alerts on, so the mapping from
 // the client's Stats must be exact: rate windows, pushback diagnostics, breaker
 // state (remaining pause in whole seconds), and persistence health.
-func TestCouncilStatusFrom(t *testing.T) {
+func TestTenantStatusFrom(t *testing.T) {
 	at := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
-	cs := councilStatusFrom(parking.Stats{
+	cs := tenantStatusFrom(parking.Stats{
 		LastMinute: 5, Last5Min: 20, Pushback: 3,
 		BreakerOpen: true, BreakerFor: 90 * time.Second,
 		LastPushbackAt: at, LastPushbackStatus: 429, LastPushbackRef: "AZ-REF-1",
@@ -47,7 +47,7 @@ func TestCouncilStatusFrom(t *testing.T) {
 	}
 
 	// Healthy defaults: no pushback seen, persistence intact, breaker closed.
-	clean := councilStatusFrom(parking.Stats{PersistOK: true})
+	clean := tenantStatusFrom(parking.Stats{PersistOK: true})
 	if clean.BreakerOpen || clean.LastPushbackAt != "" || !clean.PersistOK {
 		t.Errorf("clean snapshot should be quiet: %+v", clean)
 	}
@@ -60,13 +60,13 @@ func TestCouncilStatusFrom(t *testing.T) {
 // forming before sessions lapse. estimated margin = idleWindow - age; near_expiry
 // uses a dedicated danger margin (NOT the warm interval); warm and overdue_warm
 // split the fleet at the warm interval with no overlap.
-func TestCouncilSessionCounts(t *testing.T) {
+func TestTenantSessionCounts(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	const warmInterval, idleWindow, warnMargin = 105 * time.Minute, 10 * time.Hour, 2 * time.Hour
-	mk := func(owner string, age time.Duration) store.CouncilSession {
-		return store.CouncilSession{Owner: owner, Cookie: "c", UpdatedAt: now.Add(-age)}
+	mk := func(owner string, age time.Duration) store.TenantSession {
+		return store.TenantSession{Owner: owner, Cookie: "c", UpdatedAt: now.Add(-age)}
 	}
-	sessions := []store.CouncilSession{
+	sessions := []store.TenantSession{
 		mk("fresh", 10*time.Minute),                                         // freshly warmed: within the interval
 		mk("stale", 2*time.Hour),                                            // past the 105m interval: overdue, margin 8h — not near
 		mk("cliff", 9*time.Hour+30*time.Minute),                             // margin 30m: overdue AND near the cliff (worst)
@@ -74,7 +74,7 @@ func TestCouncilSessionCounts(t *testing.T) {
 		{Cookie: ""}, // unlinked: ignored entirely
 	}
 	scheduled := map[string]struct{}{"fresh": {}, "stale": {}, "cliff": {}}
-	sc := councilSessionCounts(sessions, now, warmInterval, idleWindow, warnMargin, scheduled)
+	sc := tenantSessionCounts(sessions, now, warmInterval, idleWindow, warnMargin, scheduled)
 	if sc.Linked != 4 { // every cookie'd session, including the unscheduled one
 		t.Errorf("linked = %d, want 4", sc.Linked)
 	}
@@ -93,21 +93,21 @@ func TestCouncilSessionCounts(t *testing.T) {
 
 	// A longer warm interval must NOT drag near_expiry up: the danger margin is
 	// independent, so a healthy session whose renew simply isn't due yet is not "near".
-	scLong := councilSessionCounts(sessions, now, 6*time.Hour, idleWindow, warnMargin, scheduled)
+	scLong := tenantSessionCounts(sessions, now, 6*time.Hour, idleWindow, warnMargin, scheduled)
 	if scLong.NearExpiry != 1 {
 		t.Errorf("near_expiry = %d with a 6h warm interval, want 1 (still only the cliff session)", scLong.NearExpiry)
 	}
 
 	// An intentionally un-warmed session (no schedule) must not raise an alarm even
 	// when it is well past the danger margin — its lapse is expected.
-	cold := []store.CouncilSession{{Owner: "cold", Cookie: "c", UpdatedAt: now.Add(-9*time.Hour - 45*time.Minute)}}
-	scCold := councilSessionCounts(cold, now, warmInterval, idleWindow, warnMargin, map[string]struct{}{})
+	cold := []store.TenantSession{{Owner: "cold", Cookie: "c", UpdatedAt: now.Add(-9*time.Hour - 45*time.Minute)}}
+	scCold := tenantSessionCounts(cold, now, warmInterval, idleWindow, warnMargin, map[string]struct{}{})
 	if scCold.Linked != 1 || scCold.NearExpiry != 0 || scCold.OverdueWarm != 0 || scCold.MinMarginSeconds != nil {
 		t.Errorf("an unscheduled session must not drive warm-risk metrics: %+v", scCold)
 	}
 
 	// No linked sessions: no margin reported at all.
-	empty := councilSessionCounts([]store.CouncilSession{{Cookie: ""}}, now, warmInterval, idleWindow, warnMargin, scheduled)
+	empty := tenantSessionCounts([]store.TenantSession{{Cookie: ""}}, now, warmInterval, idleWindow, warnMargin, scheduled)
 	if empty.Linked != 0 || empty.MinMarginSeconds != nil {
 		t.Errorf("empty fleet should report nothing: %+v", empty)
 	}

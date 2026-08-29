@@ -8,7 +8,7 @@ import (
 
 type HTML = htmltemplate.HTML
 
-type councilStub struct {
+type tenantStub struct {
 	Name, Short string
 	Terms       map[string]string
 }
@@ -22,7 +22,7 @@ func TestCatalogsLoadAndRender(t *testing.T) {
 		t.Fatal("unknown locale must fall back to the default")
 	}
 	c := b.For(DefaultLocale)
-	data := map[string]any{"Council": councilStub{Name: "City of Stonnington", Short: "Stonnington", Terms: c.Terms(nil)}}
+	data := map[string]any{"Tenant": tenantStub{Name: "City of Stonnington", Short: "Stonnington", Terms: c.Terms(nil)}}
 	got, err := c.HTML("onboarding.intro", data, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestCatalogsLoadAndRender(t *testing.T) {
 		t.Fatalf("text: %q %v", s, err)
 	}
 	// Interpolated data is escaped in HTML context, message markup is not.
-	hostile := map[string]any{"Council": councilStub{Name: "<b>x</b>", Terms: c.Terms(nil)}}
+	hostile := map[string]any{"Tenant": tenantStub{Name: "<b>x</b>", Terms: c.Terms(nil)}}
 	if out, _ := c.HTML("guest.credit", hostile, Slots{"home": Link("/")}); strings.Contains(string(out), "<b>x</b>") || !strings.Contains(string(out), "<a href=") {
 		t.Fatalf("escaping wrong: %q", out)
 	}
@@ -54,7 +54,7 @@ func TestTermsOverride(t *testing.T) {
 		t.Fatalf("blank override must keep the default: %v", terms)
 	}
 	// Messages composed from terms follow the override.
-	data := map[string]any{"Council": councilStub{Name: "Othertown", Short: "Othertown", Terms: terms}}
+	data := map[string]any{"Tenant": tenantStub{Name: "Othertown", Short: "Othertown", Terms: terms}}
 	if out, _ := c.HTML("onboarding.email_pinned", data, nil); !strings.Contains(string(out), "ParkPortal account") {
 		t.Fatalf("terminology not applied: %q", out)
 	}
@@ -63,7 +63,7 @@ func TestTermsOverride(t *testing.T) {
 // A message may include another with T; the included key must exist too.
 func TestNestedInclude(t *testing.T) {
 	c := MustLoad().For(DefaultLocale)
-	data := map[string]any{"Council": map[string]any{"Name": "N", "Links": map[string]string{"ApplyVisitor": "https://a", "FAQ": "https://f"}, "Terms": c.Terms(nil)}}
+	data := map[string]any{"Tenant": map[string]any{"Name": "N", "Links": map[string]string{"ApplyVisitor": "https://a", "FAQ": "https://f"}, "Terms": c.Terms(nil)}}
 	slots := Slots{"apply": Link("https://a"), "faq": Link("https://f"), "how": Link("/how"), "faq_page": Link("/faq")}
 	out, err := c.HTML("public.faq_more", data, slots)
 	if err != nil || !strings.Contains(string(out), `href="https://a"`) || !strings.Contains(string(out), `<a href="/how">how p.stonn works</a>`) {
@@ -84,7 +84,7 @@ func TestNestedInclude(t *testing.T) {
 // value (an email) is escaped too.
 func TestSlotsEscape(t *testing.T) {
 	c := MustLoad().For(DefaultLocale)
-	data := map[string]any{"User": map[string]string{"Email": "<x@y>"}, "Council": councilStub{Terms: c.Terms(nil)}}
+	data := map[string]any{"User": map[string]string{"Email": "<x@y>"}, "Tenant": tenantStub{Terms: c.Terms(nil)}}
 	out, err := c.HTML("onboarding.rejected_lead", data, Slots{"b": Strong()})
 	if err != nil || !strings.Contains(string(out), "<strong>&lt;x@y&gt;</strong>") {
 		t.Fatalf("%q %v", out, err)

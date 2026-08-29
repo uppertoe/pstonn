@@ -23,9 +23,9 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// fakeCouncil is an httptest server standing in for both the IDM and the permit
+// fakeTenant is an httptest server standing in for both the IDM and the permit
 // API, so the request/renew classification logic runs offline.
-type fakeCouncil struct {
+type fakeTenant struct {
 	srv *httptest.Server
 	mux *http.ServeMux
 
@@ -44,9 +44,9 @@ type fakeCouncil struct {
 	plate atomic.Value // current plate string; "" = empty permit
 }
 
-func newFakeCouncil(t *testing.T) *fakeCouncil {
+func newFakeTenant(t *testing.T) *fakeTenant {
 	t.Helper()
-	f := &fakeCouncil{mux: http.NewServeMux()}
+	f := &fakeTenant{mux: http.NewServeMux()}
 	f.apiCT.Store("text/html")
 	f.apiBody.Store("")
 	f.authHTML.Store("")
@@ -124,16 +124,16 @@ func newFakeCouncil(t *testing.T) *fakeCouncil {
 		} else {
 			f.plate.Store(req.Vehicle.RegistrationNumber)
 		}
-		w.WriteHeader(http.StatusOK) // 200, empty body — matches the real council
+		w.WriteHeader(http.StatusOK) // 200, empty body — matches the real tenant
 	})
 	f.srv = httptest.NewServer(f.mux)
 	t.Cleanup(f.srv.Close)
 	return f
 }
 
-// testClient wires a Client at the fake council with a real store + box and a
+// testClient wires a Client at the fake tenant with a real store + box and a
 // linked owner whose cached access token is "stale-token" (unexpired).
-func testClient(t *testing.T, f *fakeCouncil) (*Client, *store.Store, *secretbox.Box) {
+func testClient(t *testing.T, f *fakeTenant) (*Client, *store.Store, *secretbox.Box) {
 	t.Helper()
 	return clientAt(t, f.srv.URL)
 }
@@ -165,9 +165,9 @@ func clientAtIssuer(t *testing.T, base, issuer string) (*Client, *store.Store, *
 	return c, st, box
 }
 
-// councilSessionCookie is the IdentityServer session cookie the Orikan provider
+// tenantSessionCookie is the IdentityServer session cookie the Orikan provider
 // requires a login to have established.
-const councilSessionCookie = "Permits.IDM.Identity"
+const tenantSessionCookie = "Permits.IDM.Identity"
 
 // linkOwner seeds a linked owner in the PRE-PROVIDER storage shape (a raw sealed
 // cookie header plus a sealed token in its own column), so every test below also
@@ -179,15 +179,15 @@ func linkOwner(t *testing.T, c *Client, st *store.Store, box *secretbox.Box, own
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealedCookie}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: owner, Cookie: sealedCookie}); err != nil {
 		t.Fatal(err)
 	}
 	sealedAT, err := box.Seal("stale-token")
 	if err != nil {
 		t.Fatal(err)
 	}
-	genCS, _ := st.GetCouncilSession(ctx, owner)
-	if err := st.UpdateCouncilToken(ctx, owner, sealedCookie, sealedAT, time.Now().Add(time.Hour), genCS.Generation); err != nil {
+	genCS, _ := st.GetTenantSession(ctx, owner)
+	if err := st.UpdateTenantToken(ctx, owner, sealedCookie, sealedAT, time.Now().Add(time.Hour), genCS.Generation); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -195,7 +195,7 @@ func linkOwner(t *testing.T, c *Client, st *store.Store, box *secretbox.Box, own
 // A 401 on a cached-but-kicked token must trigger one silent renew and a retry,
 // not surface a FailRejected "act now" alarm while the dead token stays cached.
 func TestAPIRequest401RenewsAndRetries(t *testing.T) {
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, "kicked@example.com")
 	f.apiCode.Store(http.StatusUnauthorized)
@@ -214,7 +214,7 @@ func TestAPIRequest401RenewsAndRetries(t *testing.T) {
 
 // An HTML 403 is Azure Front Door push-back: transient, penalized, ErrCouncilBusy.
 func TestAPIRequest403HTMLIsBusy(t *testing.T) {
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, "blocked@example.com")
 	f.apiCode.Store(http.StatusForbidden)
@@ -233,7 +233,7 @@ func TestAPIRequest403HTMLIsBusy(t *testing.T) {
 // FailRejected, and NO cooldown — otherwise a permanent condition is retried
 // forever under a soothing "temporarily unavailable" label.
 func TestAPIRequest403JSONIsRejected(t *testing.T) {
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, "revoked@example.com")
 	f.apiCode.Store(http.StatusForbidden)
@@ -254,7 +254,7 @@ func TestAPIRequest403JSONIsRejected(t *testing.T) {
 // A push-back status from the IDM authorize endpoint must penalize the owner
 // and short-circuit subsequent renews, exactly like the API path.
 func TestSilentRenewPushbackPenalizes(t *testing.T) {
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	// Point the OIDC issuer at a 503 authorize endpoint.
 	f.mux.HandleFunc("/idm503/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -278,14 +278,14 @@ func TestSilentRenewPushbackPenalizes(t *testing.T) {
 // A sealed-password decrypt failure is deterministic (key rotated): Reconnect
 // must retire to the manual re-link path, not loop as a transient error.
 func TestReconnectDecryptFailureMapsToNoSavedPassword(t *testing.T) {
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	ctx := context.Background()
 	sealedCookie, _ := box.Seal("Permits.IDM.Identity=abc")
 	// A password sealed under a DIFFERENT key: Open fails forever.
 	otherBox, _ := secretbox.New([]byte("ffffffffffffffffffffffffffffffff"))
 	badPass, _ := otherBox.Seal("hunter2")
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: "rot@example.com", Cookie: sealedCookie, Password: badPass}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: "rot@example.com", Cookie: sealedCookie, Password: badPass}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Reconnect(ctx, "rot@example.com"); !errors.Is(err, ErrNoSavedPassword) {
@@ -293,9 +293,9 @@ func TestReconnectDecryptFailureMapsToNoSavedPassword(t *testing.T) {
 	}
 }
 
-// ---- C1: the credential POST is pinned to the council's own hosts ----
+// ---- C1: the credential POST is pinned to the tenant's own hosts ----
 
-// linkFake is a fake council for the headless-login flow: an authorize endpoint
+// linkFake is a fake tenant for the headless-login flow: an authorize endpoint
 // that bounces to a sign-in page, and a sign-in page whose form action and
 // response cookies the test controls.
 type linkFake struct {
@@ -313,7 +313,7 @@ func newLinkFake(t *testing.T) *linkFake {
 	t.Helper()
 	f := &linkFake{cookies: []*http.Cookie{
 		{Name: "idsrv.session", Value: "S1", Path: "/"},
-		{Name: councilSessionCookie, Value: "ID1", Path: "/"},
+		{Name: tenantSessionCookie, Value: "ID1", Path: "/"},
 	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/idm/connect/authorize", func(w http.ResponseWriter, r *http.Request) {
@@ -372,7 +372,7 @@ func exfilServer(t *testing.T) (*httptest.Server, func() string) {
 
 // The baseline: an ordinary login on the configured host still works end to end,
 // so the host pinning below is refusing the right thing and not everything.
-func TestLinkPostsCredentialsToCouncilHost(t *testing.T) {
+func TestLinkPostsCredentialsToTenantHost(t *testing.T) {
 	f := newLinkFake(t)
 	c, st, _ := clientAt(t, f.srv.URL)
 
@@ -386,12 +386,12 @@ func TestLinkPostsCredentialsToCouncilHost(t *testing.T) {
 	if form.Get("__RequestVerificationToken") != "CfDJ8-tok" {
 		t.Fatalf("antiforgery token not replayed: %v", form)
 	}
-	if cs, err := st.GetCouncilSession(context.Background(), "ok@example.com"); err != nil || cs.Cookie == "" {
+	if cs, err := st.GetTenantSession(context.Background(), "ok@example.com"); err != nil || cs.Cookie == "" {
 		t.Fatalf("session not stored: %+v, %v", cs, err)
 	}
 }
 
-// C1: an absolute form action on a host the council configuration never named is
+// C1: an absolute form action on a host the tenant configuration never named is
 // the plaintext-password exfiltration path. Nothing may be sent, and the failure
 // must not read as a rejected password.
 func TestLinkRefusesOffHostFormAction(t *testing.T) {
@@ -414,7 +414,7 @@ func TestLinkRefusesOffHostFormAction(t *testing.T) {
 	if errors.Is(err, ErrLoginRejected) {
 		t.Fatal("an off-host action must not be reported as a rejected login")
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "v@example.com"); err == nil {
+	if _, err := st.GetTenantSession(context.Background(), "v@example.com"); err == nil {
 		t.Fatal("a refused login stored a session")
 	}
 }
@@ -441,12 +441,12 @@ func TestLinkRefusesOffHostRedirect(t *testing.T) {
 
 // C6: the IDM sets siblings whose names all begin with the session cookie's name,
 // so a failed login can leave one behind. Reporting that as success sealed a
-// useless cookie AND stored the user's council password.
+// useless cookie AND stored the user's tenant password.
 func TestLinkRejectsPrefixedSiblingCookieOnly(t *testing.T) {
 	f := newLinkFake(t)
 	f.cookies = []*http.Cookie{
-		{Name: councilSessionCookie + ".External", Value: "EXT", Path: "/"},
-		{Name: councilSessionCookie + ".Nonce", Value: "N1", Path: "/"},
+		{Name: tenantSessionCookie + ".External", Value: "EXT", Path: "/"},
+		{Name: tenantSessionCookie + ".Nonce", Value: "N1", Path: "/"},
 		{Name: ".AspNetCore.Antiforgery.X", Value: "AF1", Path: "/"},
 	}
 	c, st, _ := clientAt(t, f.srv.URL)
@@ -455,7 +455,7 @@ func TestLinkRejectsPrefixedSiblingCookieOnly(t *testing.T) {
 	if !errors.Is(err, ErrLoginRejected) {
 		t.Fatalf("Link = %v, want ErrLoginRejected", err)
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "sib@example.com"); err == nil {
+	if _, err := st.GetTenantSession(context.Background(), "sib@example.com"); err == nil {
 		t.Fatal("a login that established no session stored one anyway (and with it the password)")
 	}
 }
@@ -492,7 +492,7 @@ func TestLinkRefusesEmptyAntiforgeryToken(t *testing.T) {
 // (5xx, push-back) must NOT be swept into that, or a healthy session gets retired.
 func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 	const owner = "html@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	var status atomic.Int64
 	var ct atomic.Value
 	var body atomic.Value
@@ -553,10 +553,10 @@ func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 
 // "No vehicle" and "we did not understand the response" decode identically, and
 // believing the second writes an empty active registration plus an activity row
-// claiming the user changed their plate at the council portal themselves.
+// claiming the user changed their plate at the tenant portal themselves.
 func TestCurrentVehicleEmptyListNeedsCorroboration(t *testing.T) {
 	const owner = "shape@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -593,7 +593,7 @@ func TestCurrentVehicleEmptyListNeedsCorroboration(t *testing.T) {
 // retries.
 func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 	const owner = "set@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -615,7 +615,7 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 		t.Fatalf("kind = %v (%v), want FailUnexpected for empty-without-canAddVehicle", kind, err)
 	}
 
-	// A corroborated empty permit the council says can't take a vehicle IS a
+	// A corroborated empty permit the tenant says can't take a vehicle IS a
 	// durable refusal (but no longer the misleading "no vehicle to change").
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":0,"canAddVehicle":false,"permitVehicles":[]}`)
 	err = c.SetVehicle(context.Background(), owner, p, "ABC123")
@@ -628,12 +628,12 @@ func TestSetVehicleShapeMismatchIsNotADurableRefusal(t *testing.T) {
 }
 
 // SetVehicle on a credibly-empty permit that CAN take a vehicle must ADD one (the
-// council's "add" action), not refuse — this is the normal state of a freshly
+// tenant's "add" action), not refuse — this is the normal state of a freshly
 // granted permit, and the old durable refusal locked new households out of their
 // first apply. Verified against the live add shape 2026-08-23.
 func TestSetVehicleAddsToEmptyPermit(t *testing.T) {
 	const owner = "add@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -653,7 +653,7 @@ func TestSetVehicleAddsToEmptyPermit(t *testing.T) {
 // empty permit. Verified against the live delete shape 2026-08-23.
 func TestClearVehicle(t *testing.T) {
 	const owner = "clear@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -687,12 +687,12 @@ func TestClearVehicle(t *testing.T) {
 // post-write confirm declared a durable mismatch for the correct car.
 func TestSetVehicleAcceptsWhitespaceVariantAsAlreadySet(t *testing.T) {
 	const owner = "space@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
 
-	// The council's own record shows the plate with a space; the target has none.
+	// The tenant's own record shows the plate with a space; the target has none.
 	f.apiBody.Store(`{"permitNumber":"VPP1","permitVehicleCount":1,"maxVehicles":1,"canEditOrDeleteVehicle":true,"permitVehicles":[{"PKPermitVehicleDetailID":1,"RegistrationNumber":"ABC 123","FKVehicleStateID":"1"}]}`)
 	if err := c.SetVehicle(context.Background(), owner, p, "ABC123"); err != nil {
 		t.Fatalf("a whitespace-only variant should be treated as already set, got %v", err)
@@ -708,7 +708,7 @@ func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
 	const owner = "html@example.com"
 
 	t.Run("real login form is an expiry", func(t *testing.T) {
-		f := newFakeCouncil(t)
+		f := newFakeTenant(t)
 		c, st, box := testClient(t, f)
 		linkOwner(t, c, st, box, owner)
 		f.authHTML.Store(`<html><body><form><input name="__RequestVerificationToken" value="x"></form></body></html>`)
@@ -718,7 +718,7 @@ func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
 	})
 
 	t.Run("edge challenge is transient, not an expiry", func(t *testing.T) {
-		f := newFakeCouncil(t)
+		f := newFakeTenant(t)
 		c, st, box := testClient(t, f)
 		linkOwner(t, c, st, box, owner)
 		f.authHTML.Store(`<html><body>Checking your browser… <script>challenge()</script></body></html>`)

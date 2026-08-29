@@ -12,7 +12,7 @@ import (
 // ---- Permits ----
 
 // ListPermits returns every permit across all owners (used by the scheduler,
-// which reconciles each permit using its owner's council session).
+// which reconciles each permit using its owner's tenant session).
 func (s *Store) ListPermits(ctx context.Context) ([]model.Permit, error) {
 	return s.queryPermits(ctx,
 		`SELECT `+permitCols+` FROM permit ORDER BY label, council_permit_id`)
@@ -32,7 +32,7 @@ func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 	var p model.Permit
 	var endDate, reminded string
 	var copyDone int
-	err := sc.Scan(&p.ID, &p.Owner, &p.CouncilID, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
+	err := sc.Scan(&p.ID, &p.Owner, &p.TenantID, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
 		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType,
 		&p.FailStreak, &copyDone)
 	if err != nil {
@@ -72,11 +72,11 @@ func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
 	return p, err
 }
 
-// PermitInCouncil looks a permit up by the council's own id WITHIN one council —
-// the lookup a handler must use, since two councils' id spaces overlap.
-func (s *Store) PermitInCouncil(ctx context.Context, councilID, councilPermitID string) (model.Permit, error) {
+// PermitInTenant looks a permit up by the tenant's own id WITHIN one tenant —
+// the lookup a handler must use, since two registry' id spaces overlap.
+func (s *Store) PermitInTenant(ctx context.Context, tenantID, tenantPermitID string) (model.Permit, error) {
 	p, err := scanPermit(s.db.QueryRowContext(ctx,
-		`SELECT `+permitCols+` FROM permit WHERE council_id = ? AND council_permit_id = ?`, councilID, councilPermitID))
+		`SELECT `+permitCols+` FROM permit WHERE council_id = ? AND council_permit_id = ?`, tenantID, tenantPermitID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -86,15 +86,15 @@ func (s *Store) PermitInCouncil(ctx context.Context, councilID, councilPermitID 
 // UpsertPermit inserts a permit, or refreshes the type of one the SAME owner
 // already holds. It never reassigns ownership: the ON CONFLICT update is guarded
 // by owner, so one user can never take over another user's permit row by
-// re-submitting its council permit id. Callers must confirm the permit belongs
-// to the owner's council account first (see addPermit); this is the last line of
+// re-submitting its tenant permit id. Callers must confirm the permit belongs
+// to the owner's tenant account first (see addPermit); this is the last line of
 // defence. The label is only set on first insert — re-adding a permit keeps any
 // name the user has since chosen (see SetPermitLabel). Returns the row id.
-func (s *Store) UpsertPermit(ctx context.Context, owner, councilPermitID, permitTypeID, label string) (int64, error) {
-	// The permit is filed under the owner's council: an account belongs to exactly
-	// one, so the council is a property of the owner, not an input a caller can get
+func (s *Store) UpsertPermit(ctx context.Context, owner, tenantPermitID, permitTypeID, label string) (int64, error) {
+	// The permit is filed under the owner's tenant: an account belongs to exactly
+	// one, so the tenant is a property of the owner, not an input a caller can get
 	// wrong.
-	councilID, err := s.CouncilIDFor(ctx, owner)
+	tenantID, err := s.TenantIDFor(ctx, owner)
 	if err != nil {
 		return 0, err
 	}
@@ -105,28 +105,28 @@ ON CONFLICT(council_id, council_permit_id) DO UPDATE SET
     permit_type_id = excluded.permit_type_id,
     updated_at     = excluded.updated_at
 WHERE permit.owner = excluded.owner`,
-		owner, councilID, councilPermitID, permitTypeID, label, nowUTC())
+		owner, tenantID, tenantPermitID, permitTypeID, label, nowUTC())
 	if err != nil {
 		return 0, err
 	}
 	// Owner-scoped follow-up: when the guarded upsert no-ops because ANOTHER
-	// account holds this council permit, the unscoped select would hand back the
+	// account holds this tenant permit, the unscoped select would hand back the
 	// foreign row id as a success — a landmine for any caller that then writes
 	// through it (the handler pre-checks, but a check/upsert race gets here).
 	var id int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id FROM permit WHERE council_id = ? AND council_permit_id = ? AND owner = ?`, councilID, councilPermitID, owner).Scan(&id)
+		`SELECT id FROM permit WHERE council_id = ? AND council_permit_id = ? AND owner = ?`, tenantID, tenantPermitID, owner).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrDuplicate // held by another account
 	}
 	return id, err
 }
 
-// UpdatePermitMeta writes the expiry and status pulled from the council record.
+// UpdatePermitMeta writes the expiry and status pulled from the tenant record.
 // If the expiry date changes (a renewal, or a first read), the expiry-reminded
 // flag is cleared so the approaching-expiry reminder re-arms for the new date.
 // Owner-scoped and a no-op if the permit isn't the owner's.
-func (s *Store) UpdatePermitMeta(ctx context.Context, owner, councilPermitID, status, permitNumber, permitType string, endDate time.Time) error {
+func (s *Store) UpdatePermitMeta(ctx context.Context, owner, tenantPermitID, status, permitNumber, permitType string, endDate time.Time) error {
 	var ed string
 	if !endDate.IsZero() {
 		ed = endDate.UTC().Format(time.RFC3339)
@@ -137,7 +137,7 @@ SET status = ?, end_date = ?, permit_number = ?, permit_type = ?,
     expiry_reminded = CASE WHEN end_date = ? THEN expiry_reminded ELSE '' END,
     updated_at = ?
 WHERE council_permit_id = ? AND owner = ?`,
-		status, ed, permitNumber, permitType, ed, nowUTC(), councilPermitID, owner)
+		status, ed, permitNumber, permitType, ed, nowUTC(), tenantPermitID, owner)
 	return err
 }
 
@@ -200,7 +200,7 @@ func (s *Store) SetPermitActive(ctx context.Context, id int64, registration stri
 // weekly_rule + override schedule cascade via ON DELETE CASCADE) plus the
 // apply-log history and notify bookkeeping, neither of which has an FK cascade.
 // Scoped to owner, and returns ErrNotFound if no such permit belongs to them, so
-// a member can only remove a permit their own account manages. The council
+// a member can only remove a permit their own account manages. The tenant
 // permit itself is untouched — p.stonn simply stops changing its plate.
 func (s *Store) DeletePermit(ctx context.Context, id int64, owner string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -240,8 +240,8 @@ func (s *Store) CountPermits(ctx context.Context) (int, error) {
 // For adopting a COUNCIL READING (drift, the dashboard's cached plate): those reads
 // take seconds and run outside the per-permit apply claim, so a guest or reconcile
 // apply can commit a newer plate while one is in flight. A blind write then regresses
-// the local belief to a value the council no longer holds — costing a spurious
-// "changed at the portal" row, a duplicate "updated" notice, and a needless council
+// the local belief to a value the tenant no longer holds — costing a spurious
+// "changed at the portal" row, a duplicate "updated" notice, and a needless tenant
 // round trip before it heals. A compare-and-swap discards the stale read instead, and
 // unlike taking the apply claim it holds no lock across the network call.
 func (s *Store) SetPermitActiveIfUnchanged(ctx context.Context, id int64, from, to string) (bool, error) {

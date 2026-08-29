@@ -29,7 +29,7 @@ func (s *Server) formError(w http.ResponseWriter, r *http.Request, msg string) {
 }
 
 // message renders the branded notice page: the terminal answer for most
-// guards and failures (a refused council link, a throttle, an invalid signed
+// guards and failures (a refused tenant link, a throttle, an invalid signed
 // link). It styles through the normal template set so errors stop looking
 // like a different, broken product — with the old dependency-free bare page
 // kept underneath as the fallback, because this sink is also where render()
@@ -144,14 +144,14 @@ func normalizeReg(s string) string { return model.NormPlate(s) }
 // plateFormatMsg is the shared validation error for a plate that is not 2–8
 // alphanumerics after normalisation. It nudges the reader toward the trap that
 // actually produces fines — visually confusable characters — because the
-// council will store whatever well-formed string it is given (see validRego).
+// tenant will store whatever well-formed string it is given (see validRego).
 const plateFormatMsg = "Enter a valid number plate: 2–8 letters and numbers, e.g. ABC123. " +
 	"Check it against the plate itself — letter O vs zero 0 and letter I vs one 1 are easy to mix up."
 
 // validRego reports whether s (already normalised: upper-case, no spaces) is a
 // plausible number plate: 2–8 alphanumeric characters. It is a sanity gate to
 // catch junk, not a strict format check — Australian plates vary by state and
-// custom plates differ, so we stay lenient. Note what the council does NOT
+// custom plates differ, so we stay lenient. Note what the tenant does NOT
 // check: a live capture showed it stores any well-formed string, existing car
 // or not, so a typo that stays alphanumeric ("ABC1230" for "ABCI23O") passes
 // here, passes there, and is confirmed as success. The read-back confirmation

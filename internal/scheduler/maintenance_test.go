@@ -15,7 +15,7 @@ func TestSystemAlertRetriesAfterFailedDelivery(t *testing.T) {
 	st := newStore(t)
 	fn := &fakeNotifier{on: true, admin: true}
 	fn.setAdminErr(errors.New("smtp down"))
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 	s.alertRetry = time.Millisecond // shrink the retry window for the test
 
 	// First attempt fails.
@@ -46,7 +46,7 @@ func TestSystemAlertRetriesAfterFailedDelivery(t *testing.T) {
 // can't launch while the first is still queued/running, so a fleet-wide event doesn't
 // re-amplify each pass before the durable key is written.
 func TestNotifyInFlightClaimDedups(t *testing.T) {
-	s := New(newStore(t), &fakeCouncil{}, time.UTC, Options{})
+	s := New(newStore(t), &fakeTenant{}, time.UTC, Options{})
 	const claim = "1|success|A>B"
 	if !s.claimNotify(claim) {
 		t.Fatal("first claim should succeed")

@@ -26,7 +26,7 @@ import (
 // (Go's ClientHello differs from Chrome's), rotate identities, or route through
 // proxies. Those are evasion, and on an unauthorised integration they are what
 // turns a recoverable soft-block into a deliberate ban. Reducing load and
-// identifying honestly help the council too; hiding harder does not.
+// identifying honestly help the tenant too; hiding harder does not.
 const (
 	// honestUA identifies the permit-API traffic as p.stonn, with a URL an operator
 	// who sees the traffic can follow to find out what it is — the single biggest

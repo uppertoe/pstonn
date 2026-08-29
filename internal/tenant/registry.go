@@ -1,4 +1,4 @@
-package council
+package tenant
 
 import (
 	_ "embed"
@@ -12,41 +12,41 @@ import (
 	"github.com/uppertoe/pstonn/internal/config"
 )
 
-// councilsJSON is the built-in registry: every council p.stonn knows how to talk
+// tenantsJSON is the built-in registry: every tenant p.stonn knows how to talk
 // to, whether or not it is enabled. Operators may replace it at runtime with
 // COUNCILS_PATH (a file of the same shape), the TERMS_PATH pattern.
 //
-//go:embed councils.json
-var councilsJSON []byte
+//go:embed tenants.json
+var tenantsJSON []byte
 
-// Registry is the set of councils this process serves.
+// Registry is the set of registry this process serves.
 type Registry struct {
-	list []*Council
-	byID map[string]*Council
-	// Default is the council an account belongs to when it has made no choice:
-	// the only enabled council, or the first enabled one.
-	Default *Council
+	list []*Tenant
+	byID map[string]*Tenant
+	// Default is the tenant an account belongs to when it has made no choice:
+	// the only enabled tenant, or the first enabled one.
+	Default *Tenant
 }
 
 type registryFile struct {
-	Councils []*Council `json:"councils"`
+	Tenants []*Tenant `json:"tenants"`
 }
 
 // LoadEmbedded parses the built-in registry with no overrides.
 func LoadEmbedded() (*Registry, error) {
-	return parse(councilsJSON)
+	return parse(tenantsJSON)
 }
 
 // Load builds the registry the process runs with: the file at path if given,
 // else the embedded one; then the COUNCIL_* configuration laid over the
-// stonnington entry (so a single-council deployment's overrides keep working),
-// and sandbox mode narrowing the registry to one fake council.
+// stonnington entry (so a single-tenant deployment's overrides keep working),
+// and sandbox mode narrowing the registry to one fake tenant.
 func Load(cfg config.CouncilConfig, path string) (*Registry, error) {
-	raw := councilsJSON
+	raw := tenantsJSON
 	if path != "" {
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("councils: read %s: %w", path, err)
+			return nil, fmt.Errorf("tenants: read %s: %w", path, err)
 		}
 		raw = b
 	}
@@ -58,14 +58,14 @@ func Load(cfg config.CouncilConfig, path string) (*Registry, error) {
 		applyConfig(c, cfg)
 	}
 	if cfg.Sandbox {
-		// The sandbox fakes ONE council in memory; it is what dev/demo runs against.
+		// The sandbox fakes ONE tenant in memory; it is what dev/demo runs against.
 		c, ok := reg.byID["stonnington"]
 		if !ok {
 			c = reg.list[0]
 		}
 		c.Connector = "fake"
 		c.Enabled = true
-		reg = &Registry{list: []*Council{c}, byID: map[string]*Council{c.ID: c}}
+		reg = &Registry{list: []*Tenant{c}, byID: map[string]*Tenant{c.ID: c}}
 	}
 	reg.Default = nil
 	for _, c := range reg.list {
@@ -75,7 +75,7 @@ func Load(cfg config.CouncilConfig, path string) (*Registry, error) {
 		}
 	}
 	if reg.Default == nil {
-		return nil, fmt.Errorf("councils: no council is enabled")
+		return nil, fmt.Errorf("tenants: no council is enabled")
 	}
 	return reg, nil
 }
@@ -83,18 +83,18 @@ func Load(cfg config.CouncilConfig, path string) (*Registry, error) {
 func parse(raw []byte) (*Registry, error) {
 	var f registryFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("councils: %w", err)
+		return nil, fmt.Errorf("tenants: %w", err)
 	}
-	if len(f.Councils) == 0 {
-		return nil, fmt.Errorf("councils: the registry is empty")
+	if len(f.Tenants) == 0 {
+		return nil, fmt.Errorf("tenants: the registry is empty")
 	}
-	reg := &Registry{byID: map[string]*Council{}}
-	for _, c := range f.Councils {
+	reg := &Registry{byID: map[string]*Tenant{}}
+	for _, c := range f.Tenants {
 		if err := validate(c); err != nil {
-			return nil, fmt.Errorf("councils: %s: %w", c.ID, err)
+			return nil, fmt.Errorf("tenants: %s: %w", c.ID, err)
 		}
 		if _, dup := reg.byID[c.ID]; dup {
-			return nil, fmt.Errorf("councils: duplicate id %q", c.ID)
+			return nil, fmt.Errorf("tenants: duplicate id %q", c.ID)
 		}
 		c.Policy = c.Policy.compiled()
 		reg.byID[c.ID] = c
@@ -106,7 +106,7 @@ func parse(raw []byte) (*Registry, error) {
 // validate rejects a descriptor the app could not run safely: an id that would
 // not survive a URL or a database key, an unknown connector, a real connector
 // with no endpoints, a timezone Go cannot load, or a policy that matches nothing.
-func validate(c *Council) error {
+func validate(c *Tenant) error {
 	if c.ID == "" || strings.ToLower(c.ID) != c.ID || strings.ContainsAny(c.ID, " /\\?#") {
 		return fmt.Errorf("invalid id %q (lower-case, no spaces or URL characters)", c.ID)
 	}
@@ -119,7 +119,7 @@ func validate(c *Council) error {
 		if e.Issuer == "" || e.APIBase == "" || e.ClientID == "" || e.RedirectURI == "" || len(e.Scopes) == 0 {
 			return fmt.Errorf("orikan-ssp needs issuer, api_base, client_id, redirect_uri and scopes")
 		}
-		// The login flow carries a resident's plaintext council password; the
+		// The login flow carries a resident's plaintext tenant password; the
 		// scheme it may travel over is decided here and nowhere else.
 		for name, raw := range map[string]string{"issuer": e.Issuer, "api_base": e.APIBase, "redirect_uri": e.RedirectURI} {
 			u, err := url.Parse(raw)
@@ -153,18 +153,18 @@ func validate(c *Council) error {
 	return nil
 }
 
-// ByID looks a council up.
-func (r *Registry) ByID(id string) (*Council, bool) {
+// ByID looks a tenant up.
+func (r *Registry) ByID(id string) (*Tenant, bool) {
 	c, ok := r.byID[id]
 	return c, ok
 }
 
-// All returns every council in registry order.
-func (r *Registry) All() []*Council { return append([]*Council(nil), r.list...) }
+// All returns every tenant in registry order.
+func (r *Registry) All() []*Tenant { return append([]*Tenant(nil), r.list...) }
 
-// Enabled returns the councils residents may sign up with.
-func (r *Registry) Enabled() []*Council {
-	var out []*Council
+// Enabled returns the registry residents may sign up with.
+func (r *Registry) Enabled() []*Tenant {
+	var out []*Tenant
 	for _, c := range r.list {
 		if c.Enabled {
 			out = append(out, c)
@@ -173,8 +173,8 @@ func (r *Registry) Enabled() []*Council {
 	return out
 }
 
-// Location returns the council's timezone (validated at load).
-func (c *Council) Location() *time.Location {
+// Location returns the tenant's timezone (validated at load).
+func (c *Tenant) Location() *time.Location {
 	loc, err := time.LoadLocation(c.Timezone)
 	if err != nil {
 		return time.UTC

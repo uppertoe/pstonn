@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Two councils' transports sharing one ConcurrencyLimit never put more than its
+// Two registry' transports sharing one ConcurrencyLimit never put more than its
 // slots on the wire at once, however generous their own governors are.
 func TestSharedConcurrencyLimitSpansTransports(t *testing.T) {
 	var inflight, peak atomic.Int32

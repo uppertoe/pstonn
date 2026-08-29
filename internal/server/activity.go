@@ -43,7 +43,7 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 
 	// Who changed the setup, alongside what p.stonn did to the permit. These are
 	// different questions and the second one used to have no answer at all: a
-	// configuration change produces no council apply, so it was invisible.
+	// configuration change produces no tenant apply, so it was invisible.
 	changes, err := s.store.ListChanges(r.Context(), base.Owner, limit+1)
 	if err != nil {
 		// Best-effort: the apply log is the more important half, so don't fail the

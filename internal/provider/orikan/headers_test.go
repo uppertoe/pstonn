@@ -78,7 +78,7 @@ func TestBrowserTransportIdentityBySurface(t *testing.T) {
 // An unrecognised path must default to the honest identity, never the browser
 // costume: the disguise is granted only to paths positively identified as the
 // SPA's own login flow.
-func TestCouncilIdentityDefaultsHonest(t *testing.T) {
+func TestTenantIdentityDefaultsHonest(t *testing.T) {
 	for path, wantBrowser := range map[string]bool{
 		"/idm/Account/Login":                 true,
 		"/connect/token":                     true,

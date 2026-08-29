@@ -28,7 +28,7 @@ func TestFailureOfClassifies(t *testing.T) {
 	}
 }
 
-func TestDetailCarriesCouncilText(t *testing.T) {
+func TestDetailCarriesTenantText(t *testing.T) {
 	err := FailDetail(FailRejected, OpSetVehicle, "Vehicle Registration has invalid pattern", errors.New("400"))
 	if DetailOf(err) != "Vehicle Registration has invalid pattern" {
 		t.Fatalf("DetailOf = %q", DetailOf(err))

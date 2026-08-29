@@ -11,7 +11,7 @@ We haven't seen you in p.stonn for a while, so this is a check that you still wa
 (Opening p.stonn and signing in does the same thing as clicking below — either way the clock resets.)
 
 Confirm and keep it running (one click):
-https://p.stonn.org/council/confirm?token=abc
+https://p.stonn.org/tenant/confirm?token=abc
 
 If you no longer want the service, just ignore this email and it will stop on its own.
 

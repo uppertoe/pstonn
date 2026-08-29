@@ -1,6 +1,6 @@
 // Package orikan is the provider for Orikan's ePermits self-service portal (the
 // `/ssp` SPA, its Duende IdentityServer at `/idm`, and the `/ssp-svc` permit API)
-// as run by the City of Stonnington and a dozen other councils.
+// as run by the City of Stonnington and a dozen other registry.
 //
 // The portal issues NO refresh tokens: its public SPA client is not granted
 // offline_access. So the provider mirrors the SPA's own mechanism — it holds the
@@ -37,7 +37,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/provider"
 )
 
-// ID is the connector name a council descriptor refers to.
+// ID is the connector name a tenant descriptor refers to.
 const ID = "orikan-ssp"
 
 // Config parameterises one tenant of the portal.
@@ -48,7 +48,7 @@ type Config struct {
 	RedirectURI string   // that client's REGISTERED callback; the code is read off the 302
 	Scopes      []string // no offline_access — the client rejects it
 	// DefaultVehicleState is the portal's vehicle-state id written when a plate is
-	// added without a prior state to copy (the council's own state: VIC=1). Empty
+	// added without a prior state to copy (the tenant's own state: VIC=1). Empty
 	// falls back to VIC.
 	DefaultVehicleState string
 }
@@ -1276,8 +1276,8 @@ func (c *Client) permitPage(ctx context.Context, ss *session, page int) (_ []pro
 			return nil, 0, provider.Fail(provider.FailUnexpected, op,
 				fmt.Errorf("permit %d is missing %s: API shape change? Treating an absent field as empty would blank the stored permit and clear its plate", r.PKPermitID, strings.Join(missing, ", ")))
 		}
-		start, serr := councilDate(*r.StartDate)
-		end, eerr := councilDate(*r.EndDate)
+		start, serr := tenantDate(*r.StartDate)
+		end, eerr := tenantDate(*r.EndDate)
 		if serr != nil || eerr != nil {
 			return nil, 0, provider.Fail(provider.FailUnexpected, op,
 				fmt.Errorf("permit %d has an unparseable date (start=%q end=%q): API shape change?", r.PKPermitID, safeExcerpt(*r.StartDate), safeExcerpt(*r.EndDate)))
@@ -1305,9 +1305,9 @@ func strOrEmpty(s *string) string {
 	return *s
 }
 
-// councilDate parses a portal date, reporting a malformed one instead of
+// tenantDate parses a portal date, reporting a malformed one instead of
 // swallowing it. Empty means "not set" and is not an error.
-func councilDate(s string) (time.Time, error) {
+func tenantDate(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}

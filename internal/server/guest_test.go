@@ -207,7 +207,7 @@ func TestRequestLiveState(t *testing.T) {
 		t.Errorf("no-override = %q/%q, want superseded/\"\"", got, repl)
 	}
 
-	// With the approval's own override live, the state tracks the council record:
+	// With the approval's own override live, the state tracks the tenant record:
 	// applying until it shows the plate, applied once it does.
 	if _, err := s.store.CreatePlateOverride(ctx, pid, "GUEST1", now, &end, "visitor (printed QR)"); err != nil {
 		t.Fatal(err)

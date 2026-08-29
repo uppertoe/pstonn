@@ -1,7 +1,7 @@
 // Command pstonn schedules which vehicle registration is allocated to a City of
 // Stonnington visitor parking permit. It runs an always-on desired-state loop
-// plus a small web UI, and drives the council API from a stored, encrypted
-// council session cookie. User login is via forward_auth headers (or its own
+// plus a small web UI, and drives the tenant API from a stored, encrypted
+// tenant session cookie. User login is via forward_auth headers (or its own
 // OIDC relying party).
 package main
 
@@ -26,7 +26,6 @@ import (
 	"flag"
 
 	"github.com/uppertoe/pstonn/internal/config"
-	councilpkg "github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
@@ -38,6 +37,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/server"
 	"github.com/uppertoe/pstonn/internal/session"
 	"github.com/uppertoe/pstonn/internal/store"
+	tenantpkg "github.com/uppertoe/pstonn/internal/tenant"
 	"github.com/uppertoe/pstonn/internal/webauth"
 )
 
@@ -52,7 +52,7 @@ func main() {
 	}
 }
 
-// councilOpDrain models how long one scheduled plate change occupies the transport
+// tenantOpDrain models how long one scheduled plate change occupies the transport
 // governor at its sustained rate, to size the rollover spread window off the SAME
 // throughput knob as everything else — raising COUNCIL_GOV_RATE for a larger fleet
 // shrinks the window with no separate tuning. There is no per-operation sleep; the
@@ -64,7 +64,7 @@ func main() {
 // (read current, write, confirm), but an operation that also renews a stale access
 // token (authorize + token) costs ~5, so 4 keeps the convergence estimate honest
 // under a token-renewal-heavy rollover rather than optimistic.
-func councilOpDrain(govRatePerMin int) time.Duration {
+func tenantOpDrain(govRatePerMin int) time.Duration {
 	const modelReqsPerOp = 4
 	if govRatePerMin <= 0 {
 		govRatePerMin = 60 // mirror the governor's built-in default (see parking.govOr)
@@ -125,17 +125,17 @@ func run() error {
 		log.Print("APP_OIDC_ISSUER not set: OIDC login disabled; relying on forward_auth headers or DEV_IDENTITY_EMAIL")
 	}
 
-	// The councils this process serves (docs/council-connections.md): one provider
-	// and one governed client per enabled council, behind a mux that routes each
-	// account's calls to its own council. COUNCIL_* still overrides Stonnington's
+	// The registry this process serves (docs/tenant-connections.md): one provider
+	// and one governed client per enabled tenant, behind a mux that routes each
+	// account's calls to its own tenant. COUNCIL_* still overrides Stonnington's
 	// endpoints; COUNCIL_SANDBOX narrows the registry to one in-memory fake.
-	registry, err := councilpkg.Load(cfg.Council, cfg.CouncilsPath)
+	registry, err := tenantpkg.Load(cfg.Council, cfg.TenantsPath)
 	if err != nil {
 		return err
 	}
-	st.DefaultCouncil = registry.Default.ID
+	st.DefaultTenant = registry.Default.ID
 	clients := map[string]*parking.Client{}
-	// One concurrency cap across every council: they all leave through one address.
+	// One concurrency cap across every tenant: they all leave through one address.
 	shared := parking.NewConcurrencyLimit(cfg.Council.GovConcurrency)
 	for _, tenant := range registry.Enabled() {
 		transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council)).Share(shared)
@@ -151,7 +151,7 @@ func run() error {
 		}
 		clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)
 	}
-	council := councilpkg.NewMux(st, clients)
+	tenant := tenantpkg.NewMux(st, clients)
 	if cfg.Council.Sandbox {
 		log.Print("WARNING: COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
 	}
@@ -175,17 +175,17 @@ func run() error {
 		log.Print("NOTE: SES_SNS_TOPIC_ARN not set, so bounce/complaint feedback is not wired up. " +
 			"Hard SMTP rejections are still learned at send time, but provider-reported bounces are not. See deploy/aws-ses-hook-setup.py")
 	}
-	sched := scheduler.New(st, council, cfg.DisplayLocation, scheduler.Options{
-		// Each account's permit days are reckoned in ITS council's timezone.
-		LocationFor: func(owner, councilID string) *time.Location {
-			if councilID == "" {
-				id, err := st.CouncilIDFor(context.Background(), owner)
+	sched := scheduler.New(st, tenant, cfg.DisplayLocation, scheduler.Options{
+		// Each account's permit days are reckoned in ITS tenant's timezone.
+		LocationFor: func(owner, tenantID string) *time.Location {
+			if tenantID == "" {
+				id, err := st.TenantIDFor(context.Background(), owner)
 				if err != nil {
 					return nil
 				}
-				councilID = id
+				tenantID = id
 			}
-			if c, ok := registry.ByID(councilID); ok {
+			if c, ok := registry.ByID(tenantID); ok {
 				return c.Location()
 			}
 			return nil
@@ -196,7 +196,7 @@ func run() error {
 		ExpiryLead:       cfg.Council.ExpiryLead,
 		PublicBaseURL:    cfg.PublicBaseURL,
 		Notifier:         notifier,
-		OpDrain:          councilOpDrain(cfg.Council.GovRatePerMin),
+		OpDrain:          tenantOpDrain(cfg.Council.GovRatePerMin),
 		SpreadWindow:     cfg.Council.RolloverWindow,
 		DriftInterval:    cfg.Council.DriftInterval,
 		IdleWindow:       cfg.Council.IdleWindow,
@@ -213,8 +213,8 @@ func run() error {
 	for _, c := range clients {
 		c.OnSessionExpired = sched.NoteSessionExpired
 	}
-	notifier.CouncilFor = func(ctx context.Context, owner string) *councilpkg.Council {
-		id, err := st.CouncilIDFor(ctx, owner)
+	notifier.TenantFor = func(ctx context.Context, owner string) *tenantpkg.Tenant {
+		id, err := st.TenantIDFor(ctx, owner)
 		if err != nil {
 			return nil
 		}
@@ -240,18 +240,18 @@ func run() error {
 		}
 	}
 
-	srv := server.New(cfg, st, sessions, auth, council, registry, sched, notifier, mail, box)
+	srv := server.New(cfg, st, sessions, auth, tenant, registry, sched, notifier, mail, box)
 
 	// Track the worker loops so shutdown can join them: st.Close() runs on
 	// return from this function, and closing the store under a loop that is
-	// mid-DB-call (or mid-council-write) could truncate an in-flight apply.
+	// mid-DB-call (or mid-tenant-write) could truncate an in-flight apply.
 	loopsDone := make(chan struct{}, 2)
 	go func() { sched.Run(ctx); loopsDone <- struct{}{} }()
 	go func() { notifier.RunOutbox(ctx); loopsDone <- struct{}{} }() // drain the durable notification queue with retry/backoff
 
-	// Hourly council-traffic summary so the operator can see how often the app
+	// Hourly tenant-traffic summary so the operator can see how often the app
 	// actually touches the portal (renews, applies, background plate refreshes —
-	// page renders never call the council synchronously). Quiet hours log nothing.
+	// page renders never call the tenant synchronously). Quiet hours log nothing.
 	go func() {
 		tick := time.NewTicker(time.Hour)
 		defer tick.Stop()
@@ -261,7 +261,7 @@ func run() error {
 			case <-ctx.Done():
 				return
 			case <-tick.C:
-				st := council.Stats()
+				st := tenant.Stats()
 				l, a, api, o := st.Login, st.Auth, st.API, st.Other
 				if d := (l - pl) + (a - pa) + (api - pi) + (o - po); d > 0 {
 					// Rolling now/5m windows show the instantaneous rate (the number
@@ -297,7 +297,7 @@ func run() error {
 	}()
 
 	// joinLoops waits for the worker loops to return so the deferred st.Close() does
-	// not land under an in-flight DB call or a half-applied council write. It takes
+	// not land under an in-flight DB call or a half-applied tenant write. It takes
 	// its OWN deadline rather than sharing the HTTP drain's: a slow drain used to
 	// consume nearly all of a single budget and leave the loops a fraction of a
 	// second, which tripped the "did not stop in time" path during entirely normal
@@ -319,7 +319,7 @@ func run() error {
 	case err := <-errCh:
 		// The listener failed (a port clash after a config edit is the usual cause).
 		// This path used to return immediately, running the deferred st.Close() while
-		// the startup reconcile could still be mid-council-write. Stop the loops first,
+		// the startup reconcile could still be mid-tenant-write. Stop the loops first,
 		// then let the deferred close run.
 		stop()
 		joinLoops()
@@ -338,13 +338,13 @@ func run() error {
 //
 // A dedicated key is REQUIRED in production. Without one we would otherwise fall
 // back to an ephemeral key that changes every restart, silently making every
-// stored council session undecryptable (users appear linked but nothing applies).
+// stored tenant session undecryptable (users appear linked but nothing applies).
 // So a missing key is fatal unless the app is in local/dev mode — either
-// DEV_IDENTITY_EMAIL (local auth bypass) or COUNCIL_SANDBOX (faked council). Both
+// DEV_IDENTITY_EMAIL (local auth bypass) or COUNCIL_SANDBOX (faked tenant). Both
 // are local-only signals that refuse to start beside any production signal, and
 // DATA_ENCRYPTION_KEY is itself a production signal — so this can never weaken a
-// real deployment. Sandbox in particular fakes the council, so the only thing the
-// cipher protects (council sessions and saved passwords) is itself fake; an
+// real deployment. Sandbox in particular fakes the tenant, so the only thing the
+// cipher protects (tenant sessions and saved passwords) is itself fake; an
 // ephemeral key loses nothing real. Treating only DEV_IDENTITY_EMAIL as dev left
 // a catch-22: a sandbox run with no DEV_IDENTITY_EMAIL (to preview the signed-out
 // experience) demanded a key it was then forbidden to hold.

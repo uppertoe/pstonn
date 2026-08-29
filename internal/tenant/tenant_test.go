@@ -1,4 +1,4 @@
-package council
+package tenant
 
 import (
 	"testing"

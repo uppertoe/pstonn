@@ -8,12 +8,12 @@ import (
 	"github.com/uppertoe/pstonn/internal/provider"
 )
 
-// PushbackEvent is a privacy-safe diagnostic snapshot of the last time the council
+// PushbackEvent is a privacy-safe diagnostic snapshot of the last time the tenant
 // edge refused us (a 403 HTML challenge, 429, or 503). If we are ever blocked, this
 // is what tells us WHICH control fired — a rate limit, a bot rule, a managed WAF
 // rule, or platform throttling — since the client cannot see the edge's config.
 // The X-Azure-Ref correlation id is the single most useful field: it is what the
-// council (or Microsoft) would look the incident up by.
+// tenant (or Microsoft) would look the incident up by.
 type PushbackEvent struct {
 	At          time.Time
 	Surface     string // login / auth / api
@@ -25,7 +25,7 @@ type PushbackEvent struct {
 
 // recordPushback captures the diagnostic fields of an edge refusal (as the
 // provider classified it) and logs them, so an operator can quote the edge's own
-// correlation id back to the council.
+// correlation id back to the tenant.
 func (c *Client) recordPushback(u *provider.Unavailable) {
 	ev := PushbackEvent{
 		At:          time.Now(),
@@ -94,7 +94,7 @@ func (r *rollingCounter) window(now time.Time, minutes int) int {
 	return sum
 }
 
-// Stats is a point-in-time snapshot of council load for the operator log / status.
+// Stats is a point-in-time snapshot of tenant load for the operator log / status.
 type Stats struct {
 	Login, Auth, API, Other uint64 // cumulative requests by surface, since start
 	Pushback                uint64 // cumulative 403(HTML)/429/503 across all owners
@@ -112,7 +112,7 @@ type Stats struct {
 	PersistError string
 
 	// TruncatedGridAt is the last time a permit list arrived short of the count the
-	// council reported: the council has started paging and we are acting on partial
+	// tenant reported: the tenant has started paging and we are acting on partial
 	// lists until pagination is implemented. Zero means it has never happened.
 	TruncatedGridAt   time.Time
 	TruncatedGridGot  int
@@ -129,7 +129,7 @@ func (c *Client) Blocked() bool {
 	return open
 }
 
-// Stats snapshots current council load and breaker state.
+// Stats snapshots current tenant load and breaker state.
 func (c *Client) Stats() Stats {
 	now := time.Now()
 	open, wait := c.breaker.state(now)

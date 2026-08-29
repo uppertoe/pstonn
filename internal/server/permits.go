@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/i18n"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
+	"github.com/uppertoe/pstonn/internal/tenant"
 )
 
 // pickerPage renders the permit picker on its own route (for "manage another
 // permit" from the dashboard). It goes through appShell so it gets the same
-// gating (terms, council link) and chrome (sign-out, contact) as every other
+// gating (terms, tenant link) and chrome (sign-out, contact) as every other
 // signed-in page; appShell already renders the picker itself for a user with
 // no managed permits, so this handler only adds the "manage another" case.
 func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
@@ -32,54 +32,54 @@ func (s *Server) pickerPage(w http.ResponseWriter, r *http.Request) {
 	s.renderPicker(w, r, base)
 }
 
-// renderPicker lists the user's council permits (excluding already-managed ones)
+// renderPicker lists the user's tenant permits (excluding already-managed ones)
 // for them to nominate. A dead session cookie routes back to onboarding.
-// The live council read is inherent to this page, so it gets a deadline well
+// The live tenant read is inherent to this page, so it gets a deadline well
 // inside the server's 20s WriteTimeout: a slow portal yields the error branch
 // (a rendered page), not a dropped connection.
 //
 // The throttle lives HERE rather than in the /permits/picker handler because
 // appShell renders this page directly for any linked account with no managed
 // permits yet — the normal onboarding state. Gating only the named route left
-// every page load by such a user as one uncached council request, which is
+// every page load by such a user as one uncached tenant request, which is
 // exactly the one-for-one hole the throttle was introduced to close.
 func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashboardData) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	owner := base.Owner
-	// This page makes an uncached, synchronous council read, so one HTTP request
-	// is one council request. Throttled per account: opening the picker a few
-	// times is normal, hammering it is not, and the council's opinion of us is
+	// This page makes an uncached, synchronous tenant read, so one HTTP request
+	// is one tenant request. Throttled per account: opening the picker a few
+	// times is normal, hammering it is not, and the tenant's opinion of us is
 	// the scarcest resource the app has.
-	if !s.councilRead.allow("cr:" + owner) {
+	if !s.tenantRead.allow("cr:" + owner) {
 		s.message(w, http.StatusTooManyRequests,
 			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again. p.stonn deliberately limits how often it contacts the council.")
 		return
 	}
 	// The picker lists the CURRENT tenant's permits; an account linked elsewhere
 	// but not here (a second home, just selected) is offered the link form.
-	if !s.council.Linked(ctx, owner, "") {
+	if !s.tenant.Linked(ctx, owner, "") {
 		base.State = "onboarding"
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
-		if enabled := s.councils.Enabled(); s.councils != nil && len(enabled) > 1 {
-			current := s.councilFor(ctx, owner)
+		if enabled := s.registry.Enabled(); s.registry != nil && len(enabled) > 1 {
+			current := s.tenantFor(ctx, owner)
 			for _, c := range enabled {
-				base.Councils = append(base.Councils, councilChoice{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
+				base.TenantOptions = append(base.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
 			}
 			base.Flash = s.say(ctx, owner, "picker.connect_first")
 		}
 		s.render(w, base)
 		return
 	}
-	permits, complete, err := s.council.ListPermitsComplete(ctx, owner, "")
+	permits, complete, err := s.tenant.ListPermitsComplete(ctx, owner, "")
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) {
 			// A dead session on THIS page is diagnostic, never routine ageing: only a
 			// linked account reaches the picker, and in the ?linked=1 case the session
 			// was established seconds ago. This branch used to be fully silent, which
 			// hid a whole failure mode (observed live 2026-08-22): a signup whose
-			// council password was accepted four times in a row was bounced back to
-			// the link form after each success — under a green "Council account
+			// tenant password was accepted four times in a row was bounced back to
+			// the link form after each success — under a green "Tenant account
 			// linked." flash — because the fresh session failed this very read, until
 			// the password throttle stopped them with advice about wrong passwords.
 			freshLink := r.URL.Query().Get("linked") == "1"
@@ -87,7 +87,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			if freshLink {
 				// The one thing this person must NOT be shown is the password form
 				// again: their password already worked, and every resubmit is a real
-				// council login. Say what actually happened and where to look.
+				// tenant login. Say what actually happened and where to look.
 				s.message(w, http.StatusBadGateway, s.say(ctx, owner, "picker.session_rejected"))
 				return
 			}
@@ -124,17 +124,17 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	}
 	fallback := s.visitorNameFallback(ctx, owner, permits)
 	if fallback && complete {
-		// The council appears to have renamed its permit types out from under the
+		// The tenant appears to have renamed its permit types out from under the
 		// name-match — systemic (hits every new signup), so the operator must
 		// hear. Once per process: a rename doesn't unhappen between requests.
 		s.renameAlertOnce.Do(func() {
 			// Name the types actually seen AND what the picker did with each:
-			// without that the alert cannot distinguish "the council renamed its
+			// without that the alert cannot distinguish "the tenant renamed its
 			// types" (systemic) from "this account just holds no visitor permit"
 			// (benign) — and an earlier wording that flatly claimed permits were
 			// being "offered with a caution" sent the operator investigating a
 			// resident-only household whose permit was never offered at all
-			// (2026-08-23). Type names are council catalog labels shared by every
+			// (2026-08-23). Type names are tenant catalog labels shared by every
 			// holder of the type, not personal data — never log permit numbers or
 			// regos here.
 			types := make([]string, 0, len(permits))
@@ -213,7 +213,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			Addable: addable, Reason: reason, Warn: warn, Dead: dead, Status: status,
 		})
 	}
-	// Live permits first, dead ones last; the council's own order within each
+	// Live permits first, dead ones last; the tenant's own order within each
 	// group. The template renders the dead group under its own heading.
 	slices.SortStableFunc(base.Pick, func(a, b pickView) int {
 		switch {
@@ -230,7 +230,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 }
 
 // claimedByAnotherAccount explains the one picker outcome the user cannot fix
-// themselves. A household permit is often visible to two council logins (an
+// themselves. A household permit is often visible to two tenant logins (an
 // ex-housemate, a previous tenant, a partner), so "already managed" needs to say
 // who can release it and how — otherwise the button just keeps failing with no
 // route forward.
@@ -239,15 +239,15 @@ const claimedByAnotherAccount = "That permit is already being scheduled through 
 	"If you think nobody else should have it, get in touch and we'll sort it out."
 
 // Which permit types may be scheduled is the COUNCIL's policy, not the server's:
-// see council.PermitPolicy (the visitor-name match, the resident exclusion, and the
+// see tenant.PermitPolicy (the visitor-name match, the resident exclusion, and the
 // rename fallback, with the reasoning for each). The helpers below are the server's
-// view of the policy for the council this account belongs to.
+// view of the policy for the tenant this account belongs to.
 
-// say renders a catalog message as plain text for the owner's council (message
+// say renders a catalog message as plain text for the owner's tenant (message
 // pages, redirect flashes). A missing key is a programming error, logged, and
 // the key itself is shown rather than nothing.
 func (s *Server) say(ctx context.Context, owner, key string) string {
-	data := map[string]any{"Council": s.councilViewFor(ctx, owner)}
+	data := map[string]any{"Tenant": s.tenantViewFor(ctx, owner)}
 	out, err := catalog.For(i18n.DefaultLocale).Text(key, data)
 	if err != nil {
 		log.Printf("i18n: %v", err)
@@ -256,38 +256,38 @@ func (s *Server) say(ctx context.Context, owner, key string) string {
 	return out
 }
 
-// councilFor returns the descriptor of the owner's council. Nil-safe for tests
+// tenantFor returns the descriptor of the owner's tenant. Nil-safe for tests
 // that build a Server without a registry (Stonnington), and falls back to the
-// registry default when the account has no resolvable council.
-func (s *Server) councilFor(ctx context.Context, owner string) *council.Council {
-	if s.councils == nil {
-		return council.Default()
+// registry default when the account has no resolvable tenant.
+func (s *Server) tenantFor(ctx context.Context, owner string) *tenant.Tenant {
+	if s.registry == nil {
+		return tenant.Default()
 	}
 	if s.store != nil && owner != "" {
-		if id, err := s.store.CouncilIDFor(ctx, owner); err == nil {
-			if c, ok := s.councils.ByID(id); ok {
+		if id, err := s.store.TenantIDFor(ctx, owner); err == nil {
+			if c, ok := s.registry.ByID(id); ok {
 				return c
 			}
 		}
 	}
-	return s.councils.Default
+	return s.registry.Default
 }
 
-// locFor is the timezone the owner's permit days are reckoned in: their council's
+// locFor is the timezone the owner's permit days are reckoned in: their tenant's
 // when the registry knows it, else the process default. Public pages with no
 // owner keep the default.
 func (s *Server) locFor(ctx context.Context, owner string) *time.Location {
-	if s.councils != nil && owner != "" {
-		if c := s.councilFor(ctx, owner); c != nil {
+	if s.registry != nil && owner != "" {
+		if c := s.tenantFor(ctx, owner); c != nil {
 			return c.Location()
 		}
 	}
 	return s.cfg.DisplayLocation
 }
 
-// policyFor returns the permit policy of the owner's council.
-func (s *Server) policyFor(ctx context.Context, owner string) council.PermitPolicy {
-	return s.councilFor(ctx, owner).Policy
+// policyFor returns the permit policy of the owner's tenant.
+func (s *Server) policyFor(ctx context.Context, owner string) tenant.PermitPolicy {
+	return s.tenantFor(ctx, owner).Policy
 }
 
 func (s *Server) isResidentPermit(ctx context.Context, owner, permitType string) bool {
@@ -309,7 +309,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Bounded well inside the server's 20s WriteTimeout: the council authorization
+	// Bounded well inside the server's 20s WriteTimeout: the tenant authorization
 	// read below must fail with a rendered error, not a dropped connection.
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
@@ -319,17 +319,17 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authorize the permit against the account's council record. The council
+	// Authorize the permit against the account's tenant record. The tenant
 	// username is pinned to the primary's verified email, so ListPermits only
-	// returns permits the account actually holds; a forged council_permit_id (not
+	// returns permits the account actually holds; a forged tenant_permit_id (not
 	// from the picker) is rejected here. We take the permit type and current plate
-	// from the authoritative council record, never from the form.
-	if !s.councilRead.allow("cr:" + owner) {
+	// from the authoritative tenant record, never from the form.
+	if !s.tenantRead.allow("cr:" + owner) {
 		s.message(w, http.StatusTooManyRequests,
 			"Too many council lookups in a short time. Please wait a moment and try again.")
 		return
 	}
-	permits, complete, err := s.council.ListPermitsComplete(ctx, owner, "")
+	permits, complete, err := s.tenant.ListPermitsComplete(ctx, owner, "")
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) || errors.Is(err, parking.ErrNotLinked) {
 			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
@@ -374,13 +374,13 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Never take over a permit another account already manages (e.g. a shared
-	// household permit both council accounts can see).
-	councilID, err := s.store.CouncilIDFor(ctx, owner)
+	// household permit both tenant accounts can see).
+	tenantID, err := s.store.TenantIDFor(ctx, owner)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	if existing, err := s.store.PermitInCouncil(ctx, councilID, cpid); err == nil && existing.Owner != owner {
+	if existing, err := s.store.PermitInTenant(ctx, tenantID, cpid); err == nil && existing.Owner != owner {
 		s.message(w, http.StatusConflict, claimedByAnotherAccount)
 		return
 	}
@@ -396,7 +396,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	// Seed "on permit now" from the plate the council record already reports, so
+	// Seed "on permit now" from the plate the tenant record already reports, so
 	// it shows immediately instead of "unknown" until the first live refresh.
 	// Seeding failures are not fatal — the scheduler refreshes both on its own cadence —
 	// but they must not be invisible: silently swallowing them meant a permit that
@@ -431,13 +431,13 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 }
 
 // deletePermit stops p.stonn administering a permit: it drops the permit and its
-// schedule (weekly rules + one-offs) and history. The council permit is left
+// schedule (weekly rules + one-offs) and history. The tenant permit is left
 // exactly as it is; we simply stop changing its plate.
 //
 // OWNER ONLY, unlike the rest of schedule management. This is the one action a
 // secondary could use to lock the primary out: the delete is irreversible (roster,
-// bookings and 90 days of history go with it) and a council permit can only be
-// claimed by one p.stonn account, so a secondary holding their own council login
+// bookings and 90 days of history go with it) and a tenant permit can only be
+// claimed by one p.stonn account, so a secondary holding their own tenant login
 // for the same address could delete it here and immediately re-add it under their
 // own account — leaving the primary with no self-service recovery. Everything a
 // household member legitimately needs (roster, one-offs, guest passes, vehicles)
@@ -460,14 +460,14 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	// Forget the council's last plate reading for this permit. The council client
+	// Forget the tenant's last plate reading for this permit. The tenant client
 	// caches it to keep the dashboard's "on permit now" honest without a live read,
-	// and a household permit is often visible to two council logins — so "stop
+	// and a household permit is often visible to two tenant logins — so "stop
 	// managing" here followed by "manage" from the other resident's account is the
 	// ordinary way a permit changes hands. Nothing else evicts the entry, and a
 	// plate shown to the wrong household is how someone parks on a permit that no
 	// longer says what they think it says.
-	s.council.ForgetPermit(owner, p.CouncilID, p.CouncilPermitID)
+	s.tenant.ForgetPermit(owner, p.TenantID, p.CouncilPermitID)
 	label := permitLabel(p)
 	s.logChange(r.Context(), owner, user, store.ActionPermitRemove, label, "")
 	s.notifyDestructive(r.Context(), owner, user,
@@ -637,7 +637,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().In(s.locForPermit(r.Context(), p))
 
-	// Detached + capped like every other council write on a request path, so a
+	// Detached + capped like every other tenant write on a request path, so a
 	// closed tab can't cancel the write half-done and a slow portal still leaves
 	// room to render inside the server's WriteTimeout.
 	bg := context.WithoutCancel(r.Context())
@@ -662,14 +662,14 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "This permit has a car scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
 		return
 	}
-	err := s.council.ClearVehicle(applyCtx, owner, p)
+	err := s.tenant.ClearVehicle(applyCtx, owner, p)
 	if err == nil {
 		if e := s.store.SetPermitActive(bg, p.ID, ""); e != nil {
 			log.Printf("clearPermit: council cleared permit %d but local commit failed: %v", p.ID, e)
 		}
 		// Reflect the cleared plate on the struct we re-render from. Without this the
 		// card shows the OLD plate: respondPermit renders from this p, and the
-		// council-cache adopt inside buildPermitView is a compare-and-swap against the
+		// tenant-cache adopt inside buildPermitView is a compare-and-swap against the
 		// STORED plate, which the line above already moved to "" — so the CAS no-ops
 		// and the stale struct value would win.
 		p.ActiveRegistration = ""
@@ -708,7 +708,7 @@ func cleanLabel(s string) string {
 
 // renamePermit gives a permit a friendly name the user chooses (e.g. "Nanny"),
 // shown everywhere it appears — schedule, guest passes, door QRs. It's purely a
-// display label; the council record is untouched.
+// display label; the tenant record is untouched.
 func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 	user, owner, _, ok := s.accountForWrite(w, r)
 	if !ok {

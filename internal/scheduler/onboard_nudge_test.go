@@ -15,7 +15,7 @@ import (
 func nudgeScheduler(t *testing.T, fn Notifier) *Scheduler {
 	t.Helper()
 	st := newStore(t)
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 	s.nudgeAfter = -time.Hour
 	if err := st.RecordConsent(context.Background(), "stalled@example.com", "v1", "hash"); err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestOnboardNudgeNeedsEmail(t *testing.T) {
 	// SMTP arrives later (config change + restart): the person is still owed
 	// their email — the wait must not have burned it.
 	fn.fakeNotifier.on = true
-	s2 := New(s.store, &fakeCouncil{}, time.UTC, Options{Notifier: &fn.fakeNotifier})
+	s2 := New(s.store, &fakeTenant{}, time.UTC, Options{Notifier: &fn.fakeNotifier})
 	s2.nudgeAfter = -time.Hour
 	s2.sweepOnboardNudges(ctx)
 	if got := fn.nudgedSnap(); len(got) != 1 {

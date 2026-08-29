@@ -20,8 +20,8 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// Golden renders: the shape lock for the multi-council decoupling
-// (docs/council-connections.md). Every page state, every htmx fragment and every
+// Golden renders: the shape lock for the multi-tenant decoupling
+// (docs/tenant-connections.md). Every page state, every htmx fragment and every
 // public HTTP response is rendered from fixed fixtures at a pinned clock and
 // compared byte-for-byte with the file under testdata/golden/. A refactor that
 // changes ANY output fails here with a diff, so "no behaviour change" is checked,
@@ -198,8 +198,8 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 		return d
 	}
 	return []renderCase{
-		{"faq", dashboardData{State: "faq", Loc: loc, Contact: true, FAQ: faqFor(defaultCouncilView)}, ""},
-		{"faq signed in", dashboardData{State: "faq", Loc: loc, SignedIn: true, FAQ: faqFor(defaultCouncilView)}, ""},
+		{"faq", dashboardData{State: "faq", Loc: loc, Contact: true, FAQ: faqFor(defaultTenantView)}, ""},
+		{"faq signed in", dashboardData{State: "faq", Loc: loc, SignedIn: true, FAQ: faqFor(defaultTenantView)}, ""},
 		{"message plain", dashboardData{State: "message", Loc: loc, Contact: true, Message: &messageView{Text: "Something happened."}}, ""},
 		{"message with link", dashboardData{State: "message", Loc: loc, Message: &messageView{Text: "Done.", LinkLabel: "Back to schedule", LinkHref: "/schedule", After: "or close this tab."}}, ""},
 		{"confirm ask", dashboardData{State: "confirm", Loc: loc, Confirm: &confirmView{Token: "tok", Until: "15 Oct 2026"}}, ""},
@@ -243,7 +243,7 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 		}), ""},
 		{"activity showing all", app("activity", func(d *dashboardData) { d.ShowingAll = true }), ""},
 		{"settings full", app("settings", func(d *dashboardData) {
-			d.CouncilLinked, d.AutoReconnect, d.RelinkBy, d.LastReconnect = true, true, "15 Oct 2026", "14 Jul 2026, 3:04pm"
+			d.TenantLinked, d.AutoReconnect, d.RelinkBy, d.LastReconnect = true, true, "15 Oct 2026", "14 Jul 2026, 3:04pm"
 			d.Notify = notifyView{EmailAvailable: true, EmailEnabled: true, NtfyAvailable: true, NtfyEnabled: true, NtfyTopic: "pstonn-abc", NtfyBase: "https://ntfy.example.com", QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}
 			d.Members = []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}
 			d.Terms = termsView{Version: "2026-07-18", Accepted: "v2026-07-18 on 18 Jul 2026"}
@@ -291,7 +291,7 @@ func TestGoldenPublicHTTP(t *testing.T) {
 	s := &Server{cfg: cfg, terms: loadTerms("")}
 	h := s.Handler()
 	paths := []string{"/", "/how", "/security", "/faq", "/contact", "/robots.txt", "/sitemap.xml", "/site.webmanifest", "/healthz", "/no-such-page"}
-	for _, gd := range guidesFor(defaultCouncilView) {
+	for _, gd := range guidesFor(defaultTenantView) {
 		paths = append(paths, "/guide/"+gd.Slug)
 	}
 	sort.Strings(paths)

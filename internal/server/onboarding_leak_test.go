@@ -76,7 +76,7 @@ func TestOnboardingCopyStaysQuietWhereItShould(t *testing.T) {
 		t.Fatal("next-step password heads-up shown on a terms re-accept")
 	}
 
-	// A secondary accepting terms next joins a household, not the council.
+	// A secondary accepting terms next joins a household, not the tenant.
 	out = render(dashboardData{User: user, State: "terms", IsPrimary: false, Loc: loc,
 		Terms: termsView{Version: tm.Version, Clauses: tm.Clauses}})
 	if strings.Contains(out, "ePermits password") {

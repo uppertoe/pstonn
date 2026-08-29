@@ -1,7 +1,7 @@
 // Package webauth implements the app's user login as an OIDC relying party
 // against the OIDC provider (Authorization Code + PKCE). On success it issues the signed
 // session cookie from internal/session. This is entirely separate from the
-// council permit-link flow in internal/parking, which is a different OAuth
+// tenant permit-link flow in internal/parking, which is a different OAuth
 // client against a different identity provider.
 package webauth
 
@@ -46,7 +46,7 @@ type Authenticator struct {
 // ?code=&state= without visiting it, and hand that URL to a victim, whose browser
 // then completes the exchange and receives a session for the ATTACKER's account.
 // The victim notices nothing — and the next thing this app asks a signed-in user
-// for is their council password, which would be typed into an account they do not
+// for is their tenant password, which would be typed into an account they do not
 // control.
 // stateCookie is the legacy (unprefixed) name, still READ during the rename. When
 // cookies are secure the state cookie is written under the __Host- name instead, which
@@ -248,7 +248,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no email claim; ensure the 'email' scope is granted", http.StatusUnauthorized)
 		return
 	}
-	// The email IS the account key here — every permit, vehicle and council session is
+	// The email IS the account key here — every permit, vehicle and tenant session is
 	// scoped by it, and invites are addressed to it. An unverified (or provider-mutable)
 	// address therefore means account takeover: sign up as someone else's address at a
 	// provider that does not verify, and you land inside their account. Accept only an

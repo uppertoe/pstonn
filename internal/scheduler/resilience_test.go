@@ -16,14 +16,14 @@ func TestPermitPanicDoesNotAbortThePass(t *testing.T) {
 	// Two permits due for a change (roster differs from active); the first panics.
 	seedActivePermit(t, st, "a@example.com", "boom", "ROSTERA", "OLDA")
 	seedActivePermit(t, st, "b@example.com", "ok", "ROSTERB", "OLDB")
-	fc := &fakeCouncil{panicOn: "boom"}
+	fc := &fakeTenant{panicOn: "boom"}
 	fn := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
 	s.reconcileAll(ctx) // must not itself panic
 	time.Sleep(40 * time.Millisecond)
 
-	// The other permit still got its council write despite the first one panicking.
+	// The other permit still got its tenant write despite the first one panicking.
 	sawOK := false
 	for _, id := range fc.callSnap() {
 		if id == "ok" {
@@ -42,7 +42,7 @@ func TestPermitPanicDoesNotAbortThePass(t *testing.T) {
 // its first database read must NOT stamp it — only the attempt clock advances.
 func TestReconcileStampsSuccessOnlyOnCleanPass(t *testing.T) {
 	st := newStore(t)
-	s := New(st, &fakeCouncil{}, time.UTC, Options{})
+	s := New(st, &fakeTenant{}, time.UTC, Options{})
 
 	// A clean (empty) pass stamps both attempt and success.
 	s.safeReconcile(context.Background())
@@ -71,8 +71,8 @@ func TestDriftFailureBacksOffAndResets(t *testing.T) {
 	st := newStore(t)
 	const owner = "driftbo@example.com"
 	seedSession(t, st, owner)
-	s := New(st, &fakeCouncil{}, time.UTC, Options{DriftInterval: 6 * time.Hour, Notifier: &fakeNotifier{on: true, admin: true}})
-	cs, _ := st.GetCouncilSession(ctx, owner)
+	s := New(st, &fakeTenant{}, time.UTC, Options{DriftInterval: 6 * time.Hour, Notifier: &fakeNotifier{on: true, admin: true}})
+	cs, _ := st.GetTenantSession(ctx, owner)
 
 	if s.driftBackedOff(owner, time.Now()) {
 		t.Fatal("a healthy owner must not start backed off")
@@ -105,7 +105,7 @@ func TestDriftFailureBacksOffAndResets(t *testing.T) {
 // gone — the two maps are only otherwise cleared on success.
 func TestCancelReconnectClearsDriftBookkeeping(t *testing.T) {
 	st := newStore(t)
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 	s.noteDriftFailure(context.Background(), "gone@example.com", errors.New("boom"))
 	s.CancelReconnect("gone@example.com")
 	s.driftMu.Lock()

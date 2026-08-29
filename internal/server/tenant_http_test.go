@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
-	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/provider"
@@ -22,23 +21,24 @@ import (
 	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
+	"github.com/uppertoe/pstonn/internal/tenant"
 )
 
-// The council-touching handlers — link, the permit picker, adding a permit,
-// clearing a plate — driven over HTTP against the REAL generic council client
+// The tenant-touching handlers — link, the permit picker, adding a permit,
+// clearing a plate — driven over HTTP against the REAL generic tenant client
 // running on the fake provider. Until the provider split these handlers had never
 // been exercised end to end (the server held a concrete client nobody could
 // stand in for). Sealing, session persistence, capability gating and the typed
 // error vocabulary are all on the path here, not stubbed.
 
-type councilRig struct {
+type tenantRig struct {
 	s    *Server
 	st   *store.Store
 	fake *fake.Provider
 	ctx  context.Context
 }
 
-func newCouncilRig(t *testing.T) *councilRig {
+func newTenantRig(t *testing.T) *tenantRig {
 	t.Helper()
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "c.db"))
 	if err != nil {
@@ -52,61 +52,61 @@ func newCouncilRig(t *testing.T) *councilRig {
 	f := fake.New()
 	f.ApplyDelay = 0
 	f.RejectPassword = "wrong"
-	reg, err := council.Load(config.CouncilConfig{}, "")
+	reg, err := tenant.Load(config.CouncilConfig{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.DefaultCouncil = reg.Default.ID
+	st.DefaultTenant = reg.Default.ID
 	client := parking.NewClientFor(reg.Default.ID, f, st, box, nil)
-	mux := council.NewMux(st, map[string]*parking.Client{reg.Default.ID: client})
+	mux := tenant.NewMux(st, map[string]*parking.Client{reg.Default.ID: client})
 	sched := scheduler.New(st, mux, time.UTC, scheduler.Options{})
 	s := &Server{
 		cfg:      &config.Config{DisplayLocation: time.UTC, PublicBaseURL: "https://p.example"},
 		store:    st,
 		box:      box,
 		terms:    loadTerms(""),
-		council:  mux,
-		councils: reg,
+		tenant:   mux,
+		registry: reg,
 		sched:    sched,
 	}
-	return &councilRig{s: s, st: st, fake: f, ctx: context.Background()}
+	return &tenantRig{s: s, st: st, fake: f, ctx: context.Background()}
 }
 
 const rigUser = "lily@example.com"
 
-// consent accepts the terms for the user, the gate every council route sits behind.
-func (r *councilRig) consent(t *testing.T, email string) {
+// consent accepts the terms for the user, the gate every tenant route sits behind.
+func (r *tenantRig) consent(t *testing.T, email string) {
 	t.Helper()
 	if err := r.st.RecordConsent(r.ctx, email, r.s.terms.Version, r.s.terms.Hash()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (r *councilRig) link(t *testing.T, email string) {
+func (r *tenantRig) link(t *testing.T, email string) {
 	t.Helper()
-	if err := r.s.council.Link(r.ctx, email, "", email, "ok", false, true, 0); err != nil {
+	if err := r.s.tenant.Link(r.ctx, email, "", email, "ok", false, true, 0); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (r *councilRig) post(path string, email string, form url.Values) *httptest.ResponseRecorder {
+func (r *tenantRig) post(path string, email string, form url.Values) *httptest.ResponseRecorder {
 	return r.s.doReq(http.MethodPost, path, email, "https://app.example.com", form)
 }
 
-func (r *councilRig) get(path string, email string) *httptest.ResponseRecorder {
+func (r *tenantRig) get(path string, email string) *httptest.ResponseRecorder {
 	return r.s.doReq(http.MethodGet, path, email, "", nil)
 }
 
-func TestCouncilLinkOverHTTP(t *testing.T) {
-	r := newCouncilRig(t)
+func TestTenantLinkOverHTTP(t *testing.T) {
+	r := newTenantRig(t)
 	r.consent(t, rigUser)
 
 	t.Run("wrong password lands on the guidance, stores nothing", func(t *testing.T) {
-		rr := r.post("/council/link", rigUser, url.Values{"council_password": {"wrong"}})
+		rr := r.post("/tenant/link", rigUser, url.Values{"portal_password": {"wrong"}})
 		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/schedule?link=rejected" {
 			t.Fatalf("code=%d location=%q", rr.Code, rr.Header().Get("Location"))
 		}
-		if r.s.council.Linked(r.ctx, rigUser, "") {
+		if r.s.tenant.Linked(r.ctx, rigUser, "") {
 			t.Fatal("a rejected password left a session behind")
 		}
 	})
@@ -114,28 +114,28 @@ func TestCouncilLinkOverHTTP(t *testing.T) {
 		r.fake.LoginErr = &provider.Unavailable{Status: 503, Surface: provider.SurfaceLogin}
 		defer func() { r.fake.LoginErr = nil }()
 		r.consent(t, "busy@example.com")
-		rr := r.post("/council/link", "busy@example.com", url.Values{"council_password": {"ok"}})
+		rr := r.post("/tenant/link", "busy@example.com", url.Values{"portal_password": {"ok"}})
 		if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), "Your password was not the problem") {
 			t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 		}
 	})
 	t.Run("empty password is refused before any login", func(t *testing.T) {
-		rr := r.post("/council/link", rigUser, url.Values{})
+		rr := r.post("/tenant/link", rigUser, url.Values{})
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("code=%d", rr.Code)
 		}
 	})
 	t.Run("good password links, saves the opted-in password, lands on the picker", func(t *testing.T) {
-		rr := r.post("/council/link", rigUser, url.Values{"council_password": {"ok"}, "save_password": {"1"}})
+		rr := r.post("/tenant/link", rigUser, url.Values{"portal_password": {"ok"}, "save_password": {"1"}})
 		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/schedule?linked=1" {
 			t.Fatalf("code=%d location=%q body=%s", rr.Code, rr.Header().Get("Location"), excerpt(rr.Body.String()))
 		}
-		cs, err := r.st.GetCouncilSession(r.ctx, rigUser)
+		cs, err := r.st.GetTenantSession(r.ctx, rigUser)
 		if err != nil || cs.Cookie == "" || cs.Password == "" {
 			t.Fatalf("session/password not stored: %+v %v", cs, err)
 		}
-		if cs.CouncilEmail != rigUser {
-			t.Fatalf("council username %q, want the verified email (the pin)", cs.CouncilEmail)
+		if cs.TenantEmail != rigUser {
+			t.Fatalf("council username %q, want the verified email (the pin)", cs.TenantEmail)
 		}
 		// The landing page after ?linked=1 is the picker with the account's permits.
 		page := r.get("/schedule?linked=1", rigUser)
@@ -146,7 +146,7 @@ func TestCouncilLinkOverHTTP(t *testing.T) {
 }
 
 func TestPickerOverHTTP(t *testing.T) {
-	r := newCouncilRig(t)
+	r := newTenantRig(t)
 	r.consent(t, rigUser)
 	r.link(t, rigUser)
 
@@ -182,7 +182,7 @@ func TestPickerOverHTTP(t *testing.T) {
 }
 
 func TestAddPermitOverHTTP(t *testing.T) {
-	r := newCouncilRig(t)
+	r := newTenantRig(t)
 	r.consent(t, rigUser)
 	r.link(t, rigUser)
 	add := func(id string) *httptest.ResponseRecorder {
@@ -240,7 +240,7 @@ func TestAddPermitOverHTTP(t *testing.T) {
 }
 
 func TestClearPermitOverHTTP(t *testing.T) {
-	r := newCouncilRig(t)
+	r := newTenantRig(t)
 	r.consent(t, rigUser)
 	r.link(t, rigUser)
 	if rr := r.post("/permits", rigUser, url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
@@ -255,7 +255,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.st.SetRule(r.ctx, pid, time.Now().In(council.Stonnington().Location()).Weekday(), vid); err != nil {
+		if err := r.st.SetRule(r.ctx, pid, time.Now().In(tenant.Stonnington().Location()).Weekday(), vid); err != nil {
 			t.Fatal(err)
 		}
 		rr := r.post(path, rigUser, nil)
@@ -295,10 +295,10 @@ func excerpt(s string) string {
 	return s
 }
 
-// Two enabled councils: the sign-up form asks which, the choice is recorded before
+// Two enabled registry: the sign-up form asks which, the choice is recorded before
 // the login, and the session and permits are filed under it — a write from that
-// account reaches that council's portal and no other.
-func TestTwoCouncilsOverHTTP(t *testing.T) {
+// account reaches that tenant's portal and no other.
+func TestTwoTenantsOverHTTP(t *testing.T) {
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "two.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -306,16 +306,16 @@ func TestTwoCouncilsOverHTTP(t *testing.T) {
 	defer st.Close()
 	box, _ := secretbox.New(bytes.Repeat([]byte{3}, 32))
 	regPath := filepath.Join(t.TempDir(), "councils.json")
-	if err := os.WriteFile(regPath, []byte(`{"councils":[
+	if err := os.WriteFile(regPath, []byte(`{"tenants":[
 	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
 	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reg, err := council.Load(config.CouncilConfig{}, regPath)
+	reg, err := tenant.Load(config.CouncilConfig{}, regPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.DefaultCouncil = reg.Default.ID
+	st.DefaultTenant = reg.Default.ID
 	fakes := map[string]*fake.Provider{}
 	clients := map[string]*parking.Client{}
 	for _, c := range reg.Enabled() {
@@ -324,10 +324,10 @@ func TestTwoCouncilsOverHTTP(t *testing.T) {
 		fakes[c.ID] = f
 		clients[c.ID] = parking.NewClientFor(c.ID, f, st, box, nil)
 	}
-	mux := council.NewMux(st, clients)
+	mux := tenant.NewMux(st, clients)
 	s := &Server{
 		cfg:   &config.Config{DisplayLocation: time.UTC, PublicBaseURL: "https://p.example"},
-		store: st, box: box, terms: loadTerms(""), council: mux, councils: reg,
+		store: st, box: box, terms: loadTerms(""), tenant: mux, registry: reg,
 		sched: scheduler.New(st, mux, time.UTC, scheduler.Options{}),
 	}
 	ctx := context.Background()
@@ -335,27 +335,27 @@ func TestTwoCouncilsOverHTTP(t *testing.T) {
 	if err := st.RecordConsent(ctx, user, s.terms.Version, s.terms.Hash()); err != nil {
 		t.Fatal(err)
 	}
-	// The onboarding page asks which council.
+	// The onboarding page asks which tenant.
 	page := s.doReq(http.MethodGet, "/schedule", user, "", nil).Body.String()
-	if !strings.Contains(page, `name="council_id"`) || !strings.Contains(page, "Othertown Council") {
+	if !strings.Contains(page, `name="tenant_id"`) || !strings.Contains(page, "Othertown Council") {
 		t.Fatalf("no council choice offered:\n%s", excerpt(page))
 	}
 	// Linking without a choice is refused; with one, recorded.
-	if rr := s.doReq(http.MethodPost, "/council/link", user, "https://app.example.com", url.Values{"council_password": {"ok"}}); rr.Code != http.StatusBadRequest {
+	if rr := s.doReq(http.MethodPost, "/tenant/link", user, "https://app.example.com", url.Values{"portal_password": {"ok"}}); rr.Code != http.StatusBadRequest {
 		t.Fatalf("link without a council: code=%d", rr.Code)
 	}
-	rr := s.doReq(http.MethodPost, "/council/link", user, "https://app.example.com", url.Values{"council_password": {"ok"}, "council_id": {"othertown"}})
+	rr := s.doReq(http.MethodPost, "/tenant/link", user, "https://app.example.com", url.Values{"portal_password": {"ok"}, "tenant_id": {"othertown"}})
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("link: code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 	}
-	if cs, _ := st.GetCouncilSession(ctx, user); cs.CouncilID != "othertown" {
-		t.Fatalf("session filed under %q", cs.CouncilID)
+	if cs, _ := st.GetTenantSession(ctx, user); cs.TenantID != "othertown" {
+		t.Fatalf("session filed under %q", cs.TenantID)
 	}
 	if rr := s.doReq(http.MethodPost, "/permits", user, "https://app.example.com", url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("add: code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 	}
 	ps, _ := st.ListPermitsFor(ctx, user)
-	if len(ps) != 1 || ps[0].CouncilID != "othertown" {
+	if len(ps) != 1 || ps[0].TenantID != "othertown" {
 		t.Fatalf("permit filed under %+v", ps)
 	}
 	// A clear from this account reaches Othertown's portal, not Stonnington's.
@@ -370,14 +370,14 @@ func TestTwoCouncilsOverHTTP(t *testing.T) {
 	}
 	// A second home: linking the other tenant too is allowed, both sessions
 	// coexist, and each permit stays filed under its own tenant.
-	if rr := s.doReq(http.MethodPost, "/council/link", user, "https://app.example.com", url.Values{"council_password": {"ok"}, "council_id": {"stonnington"}}); rr.Code != http.StatusSeeOther {
+	if rr := s.doReq(http.MethodPost, "/tenant/link", user, "https://app.example.com", url.Values{"portal_password": {"ok"}, "tenant_id": {"stonnington"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("link second tenant: code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 	}
-	sessions, _ := st.ListCouncilSessionsFor(ctx, user)
+	sessions, _ := st.ListTenantSessionsFor(ctx, user)
 	if len(sessions) != 2 {
 		t.Fatalf("sessions = %+v, want one per tenant", sessions)
 	}
-	if id, _ := st.CouncilIDFor(ctx, user); id != "stonnington" {
+	if id, _ := st.TenantIDFor(ctx, user); id != "stonnington" {
 		t.Fatalf("current tenant after linking it = %q", id)
 	}
 	if rr := s.doReq(http.MethodPost, "/permits", user, "https://app.example.com", url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
@@ -386,7 +386,7 @@ func TestTwoCouncilsOverHTTP(t *testing.T) {
 	ps, _ = st.ListPermitsFor(ctx, user)
 	tenants := map[string]int{}
 	for _, p := range ps {
-		tenants[p.CouncilID]++
+		tenants[p.TenantID]++
 	}
 	if tenants["othertown"] != 1 || tenants["stonnington"] != 1 {
 		t.Fatalf("permits by tenant = %v", tenants)
@@ -405,26 +405,26 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 	defer st.Close()
 	box, _ := secretbox.New(bytes.Repeat([]byte{5}, 32))
 	regPath := filepath.Join(t.TempDir(), "councils.json")
-	if err := os.WriteFile(regPath, []byte(`{"councils":[
+	if err := os.WriteFile(regPath, []byte(`{"tenants":[
 	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
 	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	reg, err := council.Load(config.CouncilConfig{}, regPath)
+	reg, err := tenant.Load(config.CouncilConfig{}, regPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.DefaultCouncil = reg.Default.ID
+	st.DefaultTenant = reg.Default.ID
 	clients := map[string]*parking.Client{}
 	for _, c := range reg.Enabled() {
 		f := fake.New()
 		f.ApplyDelay = 0
 		clients[c.ID] = parking.NewClientFor(c.ID, f, st, box, nil)
 	}
-	mux := council.NewMux(st, clients)
+	mux := tenant.NewMux(st, clients)
 	s := &Server{
 		cfg:   &config.Config{DisplayLocation: time.UTC, PublicBaseURL: "https://p.example"},
-		store: st, box: box, terms: loadTerms(""), council: mux, councils: reg,
+		store: st, box: box, terms: loadTerms(""), tenant: mux, registry: reg,
 		sched:  scheduler.New(st, mux, time.UTC, scheduler.Options{}),
 		notify: notify.New(st, nil, "", "", "https://p.example", "", "", time.UTC, nil, nil),
 	}
@@ -437,7 +437,7 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 		return s.doReq(http.MethodPost, path, user, "https://app.example.com", form)
 	}
 	// Link the first tenant and add a permit.
-	if rr := post("/council/link", url.Values{"council_password": {"ok"}, "council_id": {"stonnington"}}); rr.Code != http.StatusSeeOther {
+	if rr := post("/tenant/link", url.Values{"portal_password": {"ok"}, "tenant_id": {"stonnington"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("link: %d %s", rr.Code, excerpt(rr.Body.String()))
 	}
 	if rr := post("/permits", url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
@@ -445,22 +445,22 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 	}
 	// The menu offers the other tenant as "connect".
 	page := s.doReq(http.MethodGet, "/schedule", user, "", nil).Body.String()
-	if !strings.Contains(page, `name="council_id" value="othertown"`) || !strings.Contains(page, "Connect Othertown Council…") || !strings.Contains(page, "City of Stonnington") {
+	if !strings.Contains(page, `name="tenant_id" value="othertown"`) || !strings.Contains(page, "Connect Othertown Council…") || !strings.Contains(page, "City of Stonnington") {
 		t.Fatalf("switcher missing:\n%s", excerpt(page))
 	}
 	if strings.Contains(page, `class="pdetail ptenant"`) {
 		t.Fatal("a single-tenant account must not show tenant labels")
 	}
 	// Selecting an unlinked tenant lands on the picker, which offers its link form.
-	rr := post("/council/select", url.Values{"council_id": {"othertown"}})
+	rr := post("/tenant/select", url.Values{"tenant_id": {"othertown"}})
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/permits/new" {
 		t.Fatalf("select unlinked: %d → %q", rr.Code, rr.Header().Get("Location"))
 	}
 	pick := s.doReq(http.MethodGet, "/permits/new", user, "", nil).Body.String()
-	if !strings.Contains(pick, `action="/council/link"`) || !strings.Contains(pick, "Connect your Othertown Council account") || !strings.Contains(pick, `<option value="othertown" selected>`) {
+	if !strings.Contains(pick, `action="/tenant/link"`) || !strings.Contains(pick, "Connect your Othertown Council account") || !strings.Contains(pick, `<option value="othertown" selected>`) {
 		t.Fatalf("picker for an unlinked tenant should offer its link form:\n%s", excerpt(pick))
 	}
-	if rr := post("/council/link", url.Values{"council_password": {"ok"}, "council_id": {"othertown"}}); rr.Code != http.StatusSeeOther {
+	if rr := post("/tenant/link", url.Values{"portal_password": {"ok"}, "tenant_id": {"othertown"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("link second: %d", rr.Code)
 	}
 	if rr := post("/permits", url.Values{"council_permit_id": {"90002"}}); rr.Code != http.StatusSeeOther {
@@ -473,21 +473,21 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 	}
 	// Settings: the current tenant's card plus one for the other connection.
 	settings := s.doReq(http.MethodGet, "/settings", user, "", nil).Body.String()
-	if !strings.Contains(settings, "City of Stonnington connection") || !strings.Contains(settings, `name="council_id" value="stonnington"`) {
+	if !strings.Contains(settings, "City of Stonnington connection") || !strings.Contains(settings, `name="tenant_id" value="stonnington"`) {
 		t.Fatalf("other connection card missing:\n%s", excerpt(settings))
 	}
 	// Unlink the OTHER tenant by id: its session goes, the current one stays.
-	if rr := post("/council/unlink", url.Values{"council_id": {"stonnington"}}); rr.Code != http.StatusSeeOther {
+	if rr := post("/tenant/unlink", url.Values{"tenant_id": {"stonnington"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("unlink: %d", rr.Code)
 	}
 	if mux.Linked(ctx, user, "stonnington") || !mux.Linked(ctx, user, "othertown") {
 		t.Fatal("unlink touched the wrong tenant")
 	}
 	// Selecting a linked tenant goes straight to the schedule.
-	if rr := post("/council/select", url.Values{"council_id": {"othertown"}}); rr.Header().Get("Location") != "/schedule" {
+	if rr := post("/tenant/select", url.Values{"tenant_id": {"othertown"}}); rr.Header().Get("Location") != "/schedule" {
 		t.Fatalf("select linked → %q", rr.Header().Get("Location"))
 	}
-	if rr := post("/council/select", url.Values{"council_id": {"nowhere"}}); rr.Code != http.StatusBadRequest {
+	if rr := post("/tenant/select", url.Values{"tenant_id": {"nowhere"}}); rr.Code != http.StatusBadRequest {
 		t.Fatalf("unknown tenant: %d", rr.Code)
 	}
 }

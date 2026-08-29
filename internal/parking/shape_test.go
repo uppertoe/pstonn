@@ -19,7 +19,7 @@ import (
 // reporting a false clearing. An explicit count:0 + [] is a believed empty permit.
 func TestCurrentVehicleRejectsMissingCount(t *testing.T) {
 	const owner = "shape@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -40,7 +40,7 @@ func TestCurrentVehicleRejectsMissingCount(t *testing.T) {
 // shape: reading (or editing) only [0] could act on the wrong record, so refuse.
 func TestCurrentVehicleRejectsMultipleVehicles(t *testing.T) {
 	const owner = "multi@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -81,7 +81,7 @@ func TestForgetPermitInvalidatesInFlightRefresh(t *testing.T) {
 // "" would cache and display an uncorroborated clearing. It must be an unexpected shape.
 func TestCurrentVehicleRejectsBlankRegoOnPresentVehicle(t *testing.T) {
 	const owner = "blank@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -96,7 +96,7 @@ func TestCurrentVehicleRejectsBlankRegoOnPresentVehicle(t *testing.T) {
 // lets drift record a clean empty snapshot over live state.
 func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	const owner = "grid@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	f.mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	// FEWER rows than the count is tolerated: a permit missing from the grid is skipped
 	// by drift, never stripped, whereas an error aborts the pass before expiry warnings
 	// go out and breaks the picker for the whole account. But it must not pass unseen —
-	// it means the council has started paging and we owe it real pagination.
+	// it means the tenant has started paging and we owe it real pagination.
 	f.gridBody.Store(`{"TotalItems":2,"PermitGrid":[` + row(1, "") + `]}`)
 	if ps, err := c.ListPermits(context.Background(), owner); err != nil || len(ps) != 1 {
 		t.Fatalf("a partial page should degrade, not fail: %v / %d", err, len(ps))
@@ -152,7 +152,7 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	}
 	// An OMITTED field must be refused, not coerced to "": absent PermitStatus or
 	// EndDate would be written over good stored metadata. VehicleRego is exempt —
-	// asserted separately below — because the council genuinely sends null for a
+	// asserted separately below — because the tenant genuinely sends null for a
 	// permit with no vehicle assigned, and drift corroborates an empty grid rego
 	// against managedVehicle before ever acting on it.
 	for _, field := range []string{"PermitStatus", "EndDate", "PermitType", "PermitNumber",
@@ -210,7 +210,7 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
 		t.Fatal("an unparseable date must be refused, not zeroed")
 	}
-	// The council's own count contradicts the empty grid: refuse.
+	// The tenant's own count contradicts the empty grid: refuse.
 	f.gridBody.Store(`{"TotalItems":3,"PermitGrid":[]}`)
 	if _, err := c.ListPermits(context.Background(), owner); err == nil {
 		t.Fatal("an empty grid contradicting TotalItems must not read as 'no permits'")
@@ -233,7 +233,7 @@ func TestListPermitsRejectsInconsistentGrid(t *testing.T) {
 // real permit. It must fail closed.
 func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
 	const owner = "detail@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 	p := model.Permit{CouncilPermitID: "1"}
@@ -251,13 +251,13 @@ func TestSetVehicleRejectsMissingDetailID(t *testing.T) {
 }
 
 // TestListPermitsPagesUntilComplete covers the case the truncation guard only ever
-// reported. We ask for pageSize=0 ("everything") and the council has always honoured
+// reported. We ask for pageSize=0 ("everything") and the tenant has always honoured
 // it, but if it ever applies a default page size, accepting the first page is silently
 // wrong in a way households feel: the picker shows a short list, and addPermit reads
 // absence from that page as "this permit is not yours" and refuses a permit they hold.
 func TestListPermitsPagesUntilComplete(t *testing.T) {
 	const owner = "paged@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 
@@ -270,7 +270,7 @@ func TestListPermitsPagesUntilComplete(t *testing.T) {
 	f.mux.HandleFunc("/ssp-svc/api/Index/grid", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&pages, 1)
 		w.Header().Set("Content-Type", "application/json")
-		// Three permits, one per page — the council's own count stays at the unpaged total.
+		// Three permits, one per page — the tenant's own count stays at the unpaged total.
 		switch r.URL.Query().Get("pageNumber") {
 		case "0":
 			io.WriteString(w, `{"TotalItems":3,"PermitGrid":[`+row(1)+`]}`)
@@ -302,12 +302,12 @@ func TestListPermitsPagesUntilComplete(t *testing.T) {
 	}
 }
 
-// TestListPermitsStopsWhenPagingMakesNoProgress pins the guard against a council that
+// TestListPermitsStopsWhenPagingMakesNoProgress pins the guard against a tenant that
 // ignores pageNumber: repeating page 0 forever must terminate, not loop against the
 // shared egress IP.
 func TestListPermitsStopsWhenPagingMakesNoProgress(t *testing.T) {
 	const owner = "stuck@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 
@@ -348,7 +348,7 @@ func TestListPermitsStopsWhenPagingMakesNoProgress(t *testing.T) {
 // drift would check the owner off as fully seen.
 func TestListPermitsRefusesAShiftingSnapshot(t *testing.T) {
 	const owner = "shifting@example.com"
-	f := newFakeCouncil(t)
+	f := newFakeTenant(t)
 	c, st, box := testClient(t, f)
 	linkOwner(t, c, st, box, owner)
 

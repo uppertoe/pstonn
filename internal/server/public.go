@@ -25,10 +25,10 @@ func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// security is the PUBLIC page describing how the council login is held, what
+// security is the PUBLIC page describing how the tenant login is held, what
 // else is stored, and what is not promised. Named for what it contains: it is a
 // security and data page, and filing it under "about" hid the one thing a visitor
-// most wants before handing over a council password.
+// most wants before handing over a tenant password.
 func (s *Server) security(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
 	s.render(w, dashboardData{State: "security", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})

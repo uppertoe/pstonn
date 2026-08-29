@@ -18,20 +18,20 @@ type Vehicle struct {
 	Color        string // stable per-plate colour (hex), the at-a-glance cue
 }
 
-// Permit is a council visitor permit that holds one active vehicle at a time.
+// Permit is a tenant visitor permit that holds one active vehicle at a time.
 type Permit struct {
 	ID                 int64
 	Owner              string // app-user email that linked/owns this permit
-	CouncilID          string // the council this permit belongs to
+	TenantID           string // the tenant this permit belongs to
 	CouncilPermitID    string // e.g. "14423"
 	PermitTypeID       string // fkPermitTypeID, e.g. "15"
 	Label              string
 	ActiveRegistration string    // last registration we know is allocated
-	EndDate            time.Time // permit expiry from the council record (zero = unknown)
-	Status             string    // council permit status, e.g. "Granted" (empty = unknown)
+	EndDate            time.Time // permit expiry from the tenant record (zero = unknown)
+	Status             string    // tenant permit status, e.g. "Granted" (empty = unknown)
 	ExpiryReminded     bool      // an expiry reminder has been sent for the current EndDate
-	PermitNumber       string    // council permit number, e.g. "VPP24714" (empty = unknown)
-	PermitType         string    // council permit type, e.g. "(A) 1st Visitor Permit"
+	PermitNumber       string    // tenant permit number, e.g. "VPP24714" (empty = unknown)
+	PermitType         string    // tenant permit type, e.g. "(A) 1st Visitor Permit"
 	FailStreak         int       // consecutive failed/blocked reconcile attempts; 0 = healthy
 	// CopyOfferDone: the "renewed this permit? copy your schedule" pitch has been
 	// answered — dismissed, a copy ran, or a roster day was set — and must never
@@ -39,7 +39,7 @@ type Permit struct {
 	CopyOfferDone bool
 }
 
-// deadStatuses are the council PermitStatus WORDS that mean a permit is no longer
+// deadStatuses are the tenant PermitStatus WORDS that mean a permit is no longer
 // usable. Matched whole-word (case-insensitive), NOT as substrings: a substring
 // match would trip on live wording like "Expiring" or "Due to expire" and wrongly
 // retire a still-valid permit → an un-updated plate → a fine. Expiry-by-date is
@@ -63,7 +63,7 @@ func deadStatus(s string) bool {
 
 // ExpiryDeadline is the instant a permit with this end date stops being valid:
 // midnight at the START of the day after EndDate, in loc. EndDate is the
-// INCLUSIVE last valid day and the council reports it as a zoneless local date
+// INCLUSIVE last valid day and the tenant reports it as a zoneless local date
 // (which we parse as UTC midnight), so anything that compares `now` against the
 // bare instant treats the permit as finished from ~10-11am local on its final
 // valid day — while it is still usable and still needs its plate kept right.
@@ -95,7 +95,7 @@ func (p Permit) Inactive(now time.Time, loc *time.Location) bool {
 	return !now.Before(ExpiryDeadline(p.EndDate, loc))
 }
 
-// NormPlate canonicalises a registration. The council echoes plates back in
+// NormPlate canonicalises a registration. The tenant echoes plates back in
 // whatever case and spacing they were entered with, and no two real cars differ
 // only by case, by a space, or by a display separator ("ABC-123", "ABC·123"),
 // so none of those may make two spellings of one plate look like two different
@@ -121,7 +121,7 @@ func NormPlate(s string) string {
 // This is the ONLY rule for comparing a permit's active registration against
 // anything, because the sites that decide "is a council write needed?" and "has
 // the plate changed?" must not disagree: when one of them says a case-variant
-// echo from the portal is a different plate, p.stonn performs a real council
+// echo from the portal is a different plate, p.stonn performs a real tenant
 // write, tells the household their permit was updated, and emails a displaced
 // driver — all for a no-op.
 func SamePlate(a, b string) bool {
@@ -180,7 +180,7 @@ type Resolution struct {
 	//
 	// It exists so the rollover spread can delay the first kind (nobody is
 	// watching, and 500 households sharing a midnight boundary is the worst burst
-	// the council sees) without ever delaying the second.
+	// the tenant sees) without ever delaying the second.
 	Scheduled bool
 
 	// Until is when this allocation stops being the right answer: a winning override's
@@ -259,7 +259,7 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 }
 
 // NextChange reports the first instant within (now, now+horizon] at which the
-// schedule requires a council WRITE — the resolved allocation switching to a
+// schedule requires a tenant WRITE — the resolved allocation switching to a
 // different car than the one already in place — or nil when the horizon holds
 // none. It exists for the outage watchdog: an outage only hurts a household
 // whose schedule was due to act during it, and this is "due to act", computed

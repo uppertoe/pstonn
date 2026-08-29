@@ -1072,7 +1072,7 @@ window.popClamp = window.popClamp || function (el) {
         
       </div>
       
-      <form method="post" action="/council/forget-password"
+      <form method="post" action="/tenant/forget-password"
             data-confirm="Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires." data-confirm-ok="Stop saving">
         <button type="submit" class="ghost">Turn off</button>
       </form>
@@ -1080,7 +1080,7 @@ window.popClamp = window.popClamp || function (el) {
     </div>
     
     <div class="row" style="margin-top:14px" x-data="{del:false}">
-      <form method="post" action="/council/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
         <button type="submit" class="ghost"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Unlink account</button>
       </form>
       <button type="button" class="danger" @click="del=!del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Delete all my data</button>

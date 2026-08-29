@@ -10,7 +10,7 @@ import (
 // ---- OAuth PKCE state ----
 
 // OAuthState is a stored, single-use authorization request (state → PKCE
-// verifier + nonce), shared by the app-login and council-link flows.
+// verifier + nonce), shared by the app-login and tenant-link flows.
 type OAuthState struct {
 	Verifier string
 	Nonce    string

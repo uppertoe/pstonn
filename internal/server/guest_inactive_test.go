@@ -16,19 +16,19 @@ import (
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
 
 // These tests lock the inactive-permit gates on the guest surface. A guest link
-// outlives its permit — a poster stays on the door after the council cancels or
+// outlives its permit — a poster stays on the door after the tenant cancels or
 // expires the permit behind it — so every path that could put a plate on (or
 // promise one) has to check the permit is still alive, not just that the token
 // is. The scheduler already refuses to reconcile inactive permits, which makes
 // an ungated guest write doubly wrong: it would land AND never be corrected.
 
 // cancelPermit marks an existing permit Cancelled with a still-future end date,
-// so Inactive() is driven by status alone (the same shape as a council
+// so Inactive() is driven by status alone (the same shape as a tenant
 // cancel-and-reissue, which is how this arises in practice).
-func cancelPermit(t *testing.T, s *Server, owner, councilPermitID string) {
+func cancelPermit(t *testing.T, s *Server, owner, tenantPermitID string) {
 	t.Helper()
 	future := time.Now().Add(365 * 24 * time.Hour)
-	if err := s.store.UpdatePermitMeta(context.Background(), owner, councilPermitID,
+	if err := s.store.UpdatePermitMeta(context.Background(), owner, tenantPermitID,
 		"Cancelled", "VPP-DEAD", "(B) 1st Visitor Permit", future); err != nil {
 		t.Fatalf("cancel permit: %v", err)
 	}

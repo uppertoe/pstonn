@@ -107,7 +107,7 @@ func TestLoginSendsPKCEChallenge(t *testing.T) {
 // login, authenticates as themselves, and hands the victim the resulting callback
 // URL. The victim's browser has no matching state cookie, so the callback must be
 // refused before the code is ever exchanged — otherwise the victim ends up signed
-// in as the attacker and types their council password into the attacker's account.
+// in as the attacker and types their tenant password into the attacker's account.
 func TestCallbackRefusesStateFromAnotherBrowser(t *testing.T) {
 	a, st := testAuthenticator(t)
 	attackerState, _ := startLogin(t, a)

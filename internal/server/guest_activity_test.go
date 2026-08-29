@@ -23,7 +23,7 @@ func TestGuestActivityResetsIdleClock(t *testing.T) {
 	s := newAuthzServer(t)
 	const owner = "household@example.com"
 
-	if err := s.store.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner}); err != nil {
+	if err := s.store.SaveTenantSession(ctx, store.TenantSession{Owner: owner}); err != nil {
 		t.Fatal(err)
 	}
 	// The account is idle enough that the re-authorise reminder went out.
@@ -34,7 +34,7 @@ func TestGuestActivityResetsIdleClock(t *testing.T) {
 	// A guest uses the household's link: the account is demonstrably alive, so
 	// the clock resets and the outstanding reminder/token are withdrawn.
 	s.touchGuestActivity(ctx, owner)
-	cs, err := s.store.GetCouncilSession(ctx, owner)
+	cs, err := s.store.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestGuestActivityResetsIdleClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.touchGuestActivity(ctx, owner)
-	cs, err = s.store.GetCouncilSession(ctx, owner)
+	cs, err = s.store.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatal(err)
 	}

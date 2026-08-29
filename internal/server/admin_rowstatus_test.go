@@ -11,7 +11,7 @@ import (
 // safety margin 1h — so the renew deadline is 11h, and a healthy scheduled session
 // (warmed within the last 8h) must NOT read as stale in the 6–8h gap the old fixed
 // 6h constant flagged.
-func TestCouncilRowStatus(t *testing.T) {
+func TestTenantRowStatus(t *testing.T) {
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	const maxAge = 90 * 24 * time.Hour
 	const warmStaleAfter = 11 * time.Hour // idleWindow(12h) - safetyMargin(1h)
@@ -42,7 +42,7 @@ func TestCouncilRowStatus(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, _, attn := councilRowStatus(tc.acct, tc.keptWarm, now, maxAge, warmStaleAfter)
+			status, _, attn := tenantRowStatus(tc.acct, tc.keptWarm, now, maxAge, warmStaleAfter)
 			if status != tc.wantStatus || attn != tc.wantAttn {
 				t.Fatalf("got (%q, attn=%v), want (%q, attn=%v)", status, attn, tc.wantStatus, tc.wantAttn)
 			}
@@ -50,7 +50,7 @@ func TestCouncilRowStatus(t *testing.T) {
 	}
 }
 
-// A transient council failure leaves an "error" as the newest apply_log row for up to
+// A transient tenant failure leaves an "error" as the newest apply_log row for up to
 // 90 days. It must only read as a live fault while the permit is still failing (streak
 // > 0); once settled (streak 0, plate back in place) it is cleared history — this is
 // lily's case, where an old blip kept the panel showing "needs attention".

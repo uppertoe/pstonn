@@ -107,14 +107,14 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 }
 
 // declineTerms handles a user declining updated terms. A primary has their
-// council account disconnected (so the app stops acting without consent) and is
+// tenant account disconnected (so the app stops acting without consent) and is
 // notified. A secondary simply leaves the shared account (they never held the
-// council connection), leaving the primary's account untouched.
+// tenant connection), leaving the primary's account untouched.
 func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	// MUTATING handler: it must fail CLOSED. The lenient read-path resolver reports a
 	// primary as a secondary on a membership-lookup blip, which would send a real
 	// primary down the "just leave the shared account" branch — a no-op that reports
-	// success while their council session and sealed password stay connected, the exact
+	// success while their tenant session and sealed password stay connected, the exact
 	// opposite of the withdrawal they asked for. accountForWrite refuses (503) rather
 	// than guess, so an ambiguous lookup mutates nothing.
 	user, _, isPrimary, ok := s.accountForWrite(w, r)
@@ -141,9 +141,9 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := s.store.GetCouncilSession(ctx, user)
+	_, err := s.store.GetTenantSession(ctx, user)
 	wasLinked := err == nil
-	if derr := s.store.DeleteCouncilSession(ctx, user); derr != nil {
+	if derr := s.store.DeleteTenantSession(ctx, user); derr != nil {
 		s.serverError(w, derr)
 		return
 	}

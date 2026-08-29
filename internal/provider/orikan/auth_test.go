@@ -11,7 +11,7 @@ import (
 )
 
 func TestParseLoginForm(t *testing.T) {
-	// Mirrors the shape of the council's Duende login page: a form posting to a
+	// Mirrors the shape of the tenant's Duende login page: a form posting to a
 	// returnurl action, with the antiforgery token and hidden fields alongside
 	// the visible Username/Password inputs.
 	page := `
@@ -145,7 +145,7 @@ func TestParseLoginFormNoCredentialForm(t *testing.T) {
 }
 
 // S4: an https login flow must refuse a scheme-DOWNGRADE redirect even to a
-// configured council host — following it would move the credential POST onto
+// configured tenant host — following it would move the credential POST onto
 // cleartext. A flow configured on http (dev/tests) has nothing to downgrade.
 func TestRedirectSchemeOK(t *testing.T) {
 	cases := []struct {
@@ -212,10 +212,10 @@ func TestLinkShapeErrClassification(t *testing.T) {
 	}
 }
 
-// C1: this is the finding that exfiltrates plaintext council passwords. An
-// absolute form action on a host the council configuration never named must be
+// C1: this is the finding that exfiltrates plaintext tenant passwords. An
+// absolute form action on a host the tenant configuration never named must be
 // refused before the password is ever assembled into a request body.
-func TestResolveActionPinsToCouncilHosts(t *testing.T) {
+func TestResolveActionPinsToTenantHosts(t *testing.T) {
 	allowed := map[string]bool{"permits.council.example": true, "sso.council.example": true}
 	base, err := url.Parse("https://permits.council.example/idm/Account/Login?returnurl=%2Fcb")
 	if err != nil {
@@ -227,7 +227,7 @@ func TestResolveActionPinsToCouncilHosts(t *testing.T) {
 		"",
 		"/idm?returnurl=%2Fcb",
 		"https://permits.council.example/idm",
-		"https://sso.council.example/idm", // a second configured council host
+		"https://sso.council.example/idm", // a second configured tenant host
 	} {
 		got, err := resolveAction(base, action, allowed)
 		if err != nil {
@@ -290,7 +290,7 @@ func TestLoginHosts(t *testing.T) {
 
 // C6: the IDM sets several cookies whose names all START with the session
 // cookie's name. A substring test let a FAILED login report success — sealing a
-// useless cookie and storing the user's council password for a session that never
+// useless cookie and storing the user's tenant password for a session that never
 // existed.
 func TestHasCookieNamedExactMatch(t *testing.T) {
 	siblings := ".AspNetCore.Antiforgery.X=AF1; Permits.IDM.Identity.External=EXT; Permits.IDM.Identity.Nonce=N1"

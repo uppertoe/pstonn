@@ -35,7 +35,7 @@
         {{- if .Tenants}}
         <div class="menu-note">{{T "menu.area_current" .}}</div>
         {{- range .Tenants}}{{if not .Current}}
-        <form method="post" action="/council/select"><input type="hidden" name="council_id" value="{{.ID}}"><button type="submit" class="menu-item">{{if .Linked}}{{T "menu.area_switch" .}}{{else}}{{T "menu.area_connect" .}}{{end}}</button></form>
+        <form method="post" action="/tenant/select"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="menu-item">{{if .Linked}}{{T "menu.area_switch" .}}{{else}}{{T "menu.area_connect" .}}{{end}}</button></form>
         {{- end}}{{end}}
         {{- end}}
         {{if .Contact}}<a href="/contact" class="menu-item">{{template "ic-mail"}} Contact</a>{{end}}

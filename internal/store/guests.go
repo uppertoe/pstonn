@@ -1211,7 +1211,7 @@ ON CONFLICT(owner) DO UPDATE SET guests_enabled = excluded.guests_enabled`, owne
 // on-screen codes) from one of the owner's permits onto another. The grants'
 // tokens are untouched, and a token IS a link's identity — so a pass saved to a
 // guest's phone home screen and a door poster taped up months ago keep working
-// across a council cancel-and-reissue, with nothing re-sent or re-printed.
+// across a tenant cancel-and-reissue, with nothing re-sent or re-printed.
 // Both permits must belong to owner.
 //
 // Three things ride along with the grants, in one transaction:

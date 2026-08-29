@@ -1,4 +1,4 @@
-package council
+package tenant
 
 import (
 	"context"
@@ -10,28 +10,28 @@ import (
 	"github.com/uppertoe/pstonn/internal/parking"
 )
 
-// ErrCouncilUnavailable: the account belongs to a council this process is not
+// ErrTenantUnavailable: the account belongs to a tenant this process is not
 // serving (disabled, or removed from the registry). Treated like "not linked".
-var ErrCouncilUnavailable = fmt.Errorf("%w: the account's council is not available", parking.ErrNotLinked)
+var ErrTenantUnavailable = fmt.Errorf("%w: the account's council is not available", parking.ErrNotLinked)
 
-// Mux routes each per-owner council call to the client for the owner's council.
+// Mux routes each per-owner tenant call to the client for the owner's tenant.
 // The scheduler and the server keep calling one thing keyed by owner, exactly as
-// with a single council; the resolution (sign-up choice → linked session →
-// process default) is the store's. It satisfies both server.Council and
-// scheduler.Council.
+// with a single tenant; the resolution (sign-up choice → linked session →
+// process default) is the store's. It satisfies both server.Tenant and
+// scheduler.Tenant.
 type Mux struct {
-	st      councilResolver
+	st      tenantResolver
 	clients map[string]*parking.Client
 	ids     []string
 }
 
-// councilResolver is the one store method the mux needs.
-type councilResolver interface {
-	CouncilIDFor(ctx context.Context, owner string) (string, error)
+// tenantResolver is the one store method the mux needs.
+type tenantResolver interface {
+	TenantIDFor(ctx context.Context, owner string) (string, error)
 }
 
-// NewMux builds a mux over one client per council id.
-func NewMux(st councilResolver, clients map[string]*parking.Client) *Mux {
+// NewMux builds a mux over one client per tenant id.
+func NewMux(st tenantResolver, clients map[string]*parking.Client) *Mux {
 	m := &Mux{st: st, clients: clients}
 	for id := range clients {
 		m.ids = append(m.ids, id)
@@ -40,9 +40,9 @@ func NewMux(st councilResolver, clients map[string]*parking.Client) *Mux {
 	return m
 }
 
-// For returns the client for the owner's council.
+// For returns the client for the owner's tenant.
 func (m *Mux) For(ctx context.Context, owner string) (*parking.Client, error) {
-	id, err := m.st.CouncilIDFor(ctx, owner)
+	id, err := m.st.TenantIDFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -51,69 +51,69 @@ func (m *Mux) For(ctx context.Context, owner string) (*parking.Client, error) {
 	}
 	c, ok := m.clients[id]
 	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrCouncilUnavailable, id)
+		return nil, fmt.Errorf("%w: %q", ErrTenantUnavailable, id)
 	}
 	return c, nil
 }
 
-// Client returns the client for a council id (admin/status views).
+// Client returns the client for a tenant id (admin/status views).
 func (m *Mux) Client(id string) (*parking.Client, bool) {
 	c, ok := m.clients[id]
 	return c, ok
 }
 
-// IDs lists the councils served, sorted.
+// IDs lists the registry served, sorted.
 func (m *Mux) IDs() []string { return append([]string(nil), m.ids...) }
 
 // client picks the client for an explicit tenant, or the owner's current tenant
 // when none is named.
-func (m *Mux) client(ctx context.Context, owner, councilID string) (*parking.Client, error) {
-	if councilID == "" {
+func (m *Mux) client(ctx context.Context, owner, tenantID string) (*parking.Client, error) {
+	if tenantID == "" {
 		return m.For(ctx, owner)
 	}
-	c, ok := m.clients[councilID]
+	c, ok := m.clients[tenantID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrCouncilUnavailable, councilID)
+		return nil, fmt.Errorf("%w: %q", ErrTenantUnavailable, tenantID)
 	}
 	return c, nil
 }
 
 // forPermit picks the client for the tenant a permit belongs to.
 func (m *Mux) forPermit(ctx context.Context, owner string, p model.Permit) (*parking.Client, error) {
-	return m.client(ctx, owner, p.CouncilID)
+	return m.client(ctx, owner, p.TenantID)
 }
 
-func (m *Mux) Link(ctx context.Context, owner, councilID, username, password string, savePassword, interactive bool, expectedGen int64) error {
-	c, err := m.client(ctx, owner, councilID)
+func (m *Mux) Link(ctx context.Context, owner, tenantID, username, password string, savePassword, interactive bool, expectedGen int64) error {
+	c, err := m.client(ctx, owner, tenantID)
 	if err != nil {
 		return err
 	}
 	return c.Link(ctx, owner, username, password, savePassword, interactive, expectedGen)
 }
 
-func (m *Mux) Reconnect(ctx context.Context, owner, councilID string) error {
-	c, err := m.client(ctx, owner, councilID)
+func (m *Mux) Reconnect(ctx context.Context, owner, tenantID string) error {
+	c, err := m.client(ctx, owner, tenantID)
 	if err != nil {
 		return err
 	}
 	return c.Reconnect(ctx, owner)
 }
 
-func (m *Mux) Refresh(ctx context.Context, owner, councilID string) error {
-	c, err := m.client(ctx, owner, councilID)
+func (m *Mux) Refresh(ctx context.Context, owner, tenantID string) error {
+	c, err := m.client(ctx, owner, tenantID)
 	if err != nil {
 		return err
 	}
 	return c.Refresh(ctx, owner)
 }
 
-func (m *Mux) Linked(ctx context.Context, owner, councilID string) bool {
-	c, err := m.client(ctx, owner, councilID)
+func (m *Mux) Linked(ctx context.Context, owner, tenantID string) bool {
+	c, err := m.client(ctx, owner, tenantID)
 	return err == nil && c.Linked(ctx, owner)
 }
 
-func (m *Mux) ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error) {
-	c, err := m.client(ctx, owner, councilID)
+func (m *Mux) ListPermitsComplete(ctx context.Context, owner, tenantID string) ([]parking.PermitInfo, bool, error) {
+	c, err := m.client(ctx, owner, tenantID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -144,9 +144,9 @@ func (m *Mux) RefreshFailingFor(owner string, p model.Permit) time.Duration {
 	return c.RefreshFailingFor(owner, p)
 }
 
-func (m *Mux) ForgetPermit(owner, councilID, councilPermitID string) {
-	if c, err := m.client(context.Background(), owner, councilID); err == nil {
-		c.ForgetPermit(owner, councilPermitID)
+func (m *Mux) ForgetPermit(owner, tenantID, tenantPermitID string) {
+	if c, err := m.client(context.Background(), owner, tenantID); err == nil {
+		c.ForgetPermit(owner, tenantPermitID)
 	}
 }
 
@@ -166,7 +166,7 @@ func (m *Mux) ClearVehicle(ctx context.Context, owner string, p model.Permit) er
 	return c.ClearVehicle(ctx, owner, p)
 }
 
-// Blocked reports whether ANY council's fleet circuit is open: the scheduler's
+// Blocked reports whether ANY tenant's fleet circuit is open: the scheduler's
 // user-facing "confirmed block" warning is about our shared egress address.
 func (m *Mux) Blocked() bool {
 	for _, c := range m.clients {
@@ -177,8 +177,8 @@ func (m *Mux) Blocked() bool {
 	return false
 }
 
-// Stats sums traffic across councils and reports the most recent push-back; the
-// per-council breakdown is available through Client.
+// Stats sums traffic across registry and reports the most recent push-back; the
+// per-tenant breakdown is available through Client.
 func (m *Mux) Stats() parking.Stats {
 	var out parking.Stats
 	out.PersistOK = true
@@ -212,43 +212,43 @@ func (m *Mux) Stats() parking.Stats {
 }
 
 // Single adapts one client to the tenant-aware interfaces the scheduler and
-// server speak (tests, and any single-council wiring): a tenant other than the
+// server speak (tests, and any single-tenant wiring): a tenant other than the
 // client's own reads as not linked.
 type Single struct{ *parking.Client }
 
-func (s Single) mine(councilID string) bool {
-	return councilID == "" || councilID == s.Client.CouncilID
+func (s Single) mine(tenantID string) bool {
+	return tenantID == "" || tenantID == s.Client.TenantID
 }
 
-func (s Single) Link(ctx context.Context, owner, councilID, username, password string, savePassword, interactive bool, expectedGen int64) error {
-	if !s.mine(councilID) {
-		return ErrCouncilUnavailable
+func (s Single) Link(ctx context.Context, owner, tenantID, username, password string, savePassword, interactive bool, expectedGen int64) error {
+	if !s.mine(tenantID) {
+		return ErrTenantUnavailable
 	}
 	return s.Client.Link(ctx, owner, username, password, savePassword, interactive, expectedGen)
 }
-func (s Single) Reconnect(ctx context.Context, owner, councilID string) error {
-	if !s.mine(councilID) {
-		return ErrCouncilUnavailable
+func (s Single) Reconnect(ctx context.Context, owner, tenantID string) error {
+	if !s.mine(tenantID) {
+		return ErrTenantUnavailable
 	}
 	return s.Client.Reconnect(ctx, owner)
 }
-func (s Single) Refresh(ctx context.Context, owner, councilID string) error {
-	if !s.mine(councilID) {
-		return ErrCouncilUnavailable
+func (s Single) Refresh(ctx context.Context, owner, tenantID string) error {
+	if !s.mine(tenantID) {
+		return ErrTenantUnavailable
 	}
 	return s.Client.Refresh(ctx, owner)
 }
-func (s Single) Linked(ctx context.Context, owner, councilID string) bool {
-	return s.mine(councilID) && s.Client.Linked(ctx, owner)
+func (s Single) Linked(ctx context.Context, owner, tenantID string) bool {
+	return s.mine(tenantID) && s.Client.Linked(ctx, owner)
 }
-func (s Single) ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error) {
-	if !s.mine(councilID) {
-		return nil, false, ErrCouncilUnavailable
+func (s Single) ListPermitsComplete(ctx context.Context, owner, tenantID string) ([]parking.PermitInfo, bool, error) {
+	if !s.mine(tenantID) {
+		return nil, false, ErrTenantUnavailable
 	}
 	return s.Client.ListPermitsComplete(ctx, owner)
 }
-func (s Single) ForgetPermit(owner, councilID, councilPermitID string) {
-	if s.mine(councilID) {
-		s.Client.ForgetPermit(owner, councilPermitID)
+func (s Single) ForgetPermit(owner, tenantID, tenantPermitID string) {
+	if s.mine(tenantID) {
+		s.Client.ForgetPermit(owner, tenantPermitID)
 	}
 }

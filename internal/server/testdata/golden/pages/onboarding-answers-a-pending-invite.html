@@ -1078,7 +1078,7 @@ window.popClamp = window.popClamp || function (el) {
     </p>
     
     
-    <form class="stack" method="post" action="/council/link"
+    <form class="stack" method="post" action="/tenant/link"
           hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
       <label class="fld">Council email (your verified sign-in)
         <input type="email" value="a@b.com" autocomplete="username" disabled>
@@ -1091,7 +1091,7 @@ window.popClamp = window.popClamp || function (el) {
         invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
       </p>
       <label class="fld">Council password
-        <input name="council_password" type="password" autocomplete="current-password" required autofocus>
+        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
       </label>
       
       <p class="empty-note" style="margin-top:-4px">Forgot it — or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" hx-boost="false" target="_blank" rel="noopener">Reset it at the council</a>, then link here.</p>

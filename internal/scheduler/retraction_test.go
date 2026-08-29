@@ -20,7 +20,7 @@ func TestSettleRetractsANeverAppliedBooking(t *testing.T) {
 	const owner = "retract@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "ret-1", "AAA111", "OLD999")
 
-	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy}
+	fc := &fakeTenant{setErr: parking.ErrCouncilBusy}
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 
@@ -31,7 +31,7 @@ func TestSettleRetractsANeverAppliedBooking(t *testing.T) {
 
 	// The target then goes away: the roster day now points at a vehicle whose
 	// plate is what the permit already shows — the same shape as a booking window
-	// ending. Nothing needs the council, so settle() runs.
+	// ending. Nothing needs the tenant, so settle() runs.
 	veh, err := st.CreateVehicle(ctx, owner, "OLD999", "Already-on car")
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestSettleRecordsRecoveryWhenTheChangeLanded(t *testing.T) {
 	const owner = "landed@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "land-1", "AAA111", "OLD999")
 
-	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy}
+	fc := &fakeTenant{setErr: parking.ErrCouncilBusy}
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 

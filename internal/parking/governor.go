@@ -13,7 +13,7 @@ import (
 // households share this VPS's egress IP, so Azure Front Door may see one client,
 // not 500 unrelated browsers — and a rollover or a reconnect storm can put a burst
 // of requests on that IP in seconds. The governor bounds the RATE and the
-// CONCURRENCY of outbound council requests at the transport, the single chokepoint
+// CONCURRENCY of outbound tenant requests at the transport, the single chokepoint
 // every request already passes through (where traffic is counted).
 //
 // It is a CEILING, not a pacer. The steady-state floor at 500 users is ~10 req/min
@@ -38,11 +38,11 @@ import (
 // the login sub-limit admits one full credential login (~6 requests) at once but
 // caps sustained logins so a reconnect storm drains slowly.
 const (
-	defaultGovTotalPerMin = 60 // global ceiling across every council request
+	defaultGovTotalPerMin = 60 // global ceiling across every tenant request
 	defaultGovTotalBurst  = 10
 	defaultGovLoginPerMin = 12 // credential-login surface (/idm, /Account/*)
 	defaultGovLoginBurst  = 6
-	defaultGovConcurrency = 4 // max simultaneous council requests
+	defaultGovConcurrency = 4 // max simultaneous tenant requests
 )
 
 // govOr / govIntOr resolve a configured limit, falling back to the built-in default
@@ -114,7 +114,7 @@ func (tb *tokenBucket) wait(ctx context.Context) error {
 
 // governor combines per-surface rate ceilings with a global concurrency cap.
 type governor struct {
-	total *tokenBucket  // ceiling across all council requests
+	total *tokenBucket  // ceiling across all tenant requests
 	login *tokenBucket  // sub-limit for the credential-login surface
 	conc  chan struct{} // concurrency permits
 }

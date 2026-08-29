@@ -21,7 +21,7 @@ import (
 // seoFor returns the <title>, meta description, and canonical PATH for a page
 // State. An empty path marks the page NON-indexable (app, guest, confirm, token
 // pages): the head emits noindex and no canonical/OG for those.
-func seoFor(state string, c councilView) (title, desc, canonPath string) {
+func seoFor(state string, c tenantView) (title, desc, canonPath string) {
 	switch state {
 	case "landing":
 		return trText(c, "seo.landing_title"), trText(c, "seo.landing_desc"), "/"
@@ -44,8 +44,8 @@ func seoFor(state string, c councilView) (title, desc, canonPath string) {
 // structured data (Google rejects HTML it doesn't expect there).
 type faqItem struct{ Q, A string }
 
-// faqFor is the FAQ for a council.
-func faqFor(c councilView) []faqItem {
+// faqFor is the FAQ for a tenant.
+func faqFor(c tenantView) []faqItem {
 	return []faqItem{
 		{
 			"Can I set up recurring visitor parking for a carer or family member?",
@@ -78,7 +78,7 @@ func faqFor(c councilView) []faqItem {
 // JSON-encoded (json.Marshal escapes < > & so it is safe to drop into a
 // <script type="application/ld+json"> without html/template re-escaping it). Empty
 // for pages that carry no structured data.
-func jsonLDFor(state, baseURL string, c councilView) template.JS {
+func jsonLDFor(state, baseURL string, c tenantView) template.JS {
 	var v any
 	switch state {
 	case "landing":
@@ -120,7 +120,7 @@ func jsonLDFor(state, baseURL string, c councilView) template.JS {
 // FAQPage structured data so an answer can surface directly in search results.
 func (s *Server) faq(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "faq", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation, FAQ: faqFor(s.councilViewFor(r.Context(), ""))})
+	s.render(w, dashboardData{State: "faq", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation, FAQ: faqFor(s.tenantViewFor(r.Context(), ""))})
 }
 
 // robotsTxt lets crawlers index the public pages while keeping them off the app,
@@ -131,7 +131,7 @@ func (s *Server) robotsTxt(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("User-agent: *\n")
 	for _, p := range []string{
 		"/schedule", "/account", "/vehicles", "/permits", "/guests",
-		"/settings", "/notifications", "/admin", "/auth/", "/council/",
+		"/settings", "/notifications", "/admin", "/auth/", "/tenant/",
 		"/g/", "/u/", "/r/", "/status",
 	} {
 		fmt.Fprintf(&b, "Disallow: %s\n", p)
@@ -164,7 +164,7 @@ func (s *Server) faviconICO(w http.ResponseWriter, r *http.Request) {
 func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	name, _ := json.Marshal(trText(s.councilViewFor(r.Context(), ""), "seo.manifest_name"))
+	name, _ := json.Marshal(trText(s.tenantViewFor(r.Context(), ""), "seo.manifest_name"))
 	fmt.Fprint(w, `{
   "id": "/",
   "name": `+string(name)+`,
@@ -191,7 +191,7 @@ func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
 	for _, p := range []string{"/", "/how", "/security", "/contact", "/faq"} {
 		fmt.Fprintf(&b, "  <url><loc>%s%s</loc></url>\n", base, p)
 	}
-	for _, g := range guidesFor(s.councilViewFor(r.Context(), "")) {
+	for _, g := range guidesFor(s.tenantViewFor(r.Context(), "")) {
 		fmt.Fprintf(&b, "  <url><loc>%s/guide/%s</loc></url>\n", base, g.Slug)
 	}
 	b.WriteString("</urlset>\n")
@@ -202,28 +202,28 @@ func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
 
 // guidePage is one question-shaped public page: the title is the question a
 // resident types into a search box; the body answers it properly — how it is
-// done at the council (real steps, real links), then how p.stonn does it with
+// done at the tenant (real steps, real links), then how p.stonn does it with
 // the matching animated demo — and the tool comes last. Paras (plain text) are
 // the short answer and feed the structured data; Steps may carry links.
 type guidePage struct {
-	Slug           string // /guide/<slug>
-	Title          string // <title> and og:title
-	Desc           string // meta description
-	H1             string // the question, as the page heading
-	Paras          []string
-	CouncilHeading string
-	Steps          []template.HTML
-	CouncilNote    template.HTML
-	Pstonn         string
-	Demo           string // "roster" | "oneoff" | "guest" — the How page demo to embed
+	Slug          string // /guide/<slug>
+	Title         string // <title> and og:title
+	Desc          string // meta description
+	H1            string // the question, as the page heading
+	Paras         []string
+	TenantHeading string
+	Steps         []template.HTML
+	TenantNote    template.HTML
+	Pstonn        string
+	Demo          string // "roster" | "oneoff" | "guest" — the How page demo to embed
 }
 
-// The council's own instructions (its visitor-permits page, read 2026-08-29):
+// The tenant's own instructions (its visitor-permits page, read 2026-08-29):
 // allocate via the ePermit platform — "Update Vehicle" in the Current Permit
 // list, registration plus state — or by phone; a physical permit is available on
 // application under "exceptional circumstances" (disability, carer arrangements,
 // limits with online connection and capability).
-func councilSignInSteps(c councilView) []template.HTML {
+func tenantSignInSteps(c tenantView) []template.HTML {
 	return []template.HTML{
 		tr(c, "guide.signin_step", nil, i18n.Slots{
 			"portal":   i18n.Link(c.Links.Portal, `target="_blank"`, `rel="noopener"`),
@@ -235,23 +235,23 @@ func councilSignInSteps(c councilView) []template.HTML {
 	}
 }
 
-// guidesFor is the guide set for a council: the same questions, with the
-// council's name, links and vocabulary in the answers.
-func guidesFor(c councilView) []guidePage {
-	steps := councilSignInSteps(c)
+// guidesFor is the guide set for a tenant: the same questions, with the
+// tenant's name, links and vocabulary in the answers.
+func guidesFor(c tenantView) []guidePage {
+	steps := tenantSignInSteps(c)
 	return []guidePage{
 		{
-			Slug:           "change-car-on-visitor-permit",
-			Title:          trText(c, "guide.change_title"),
-			Desc:           trText(c, "guide.change_desc"),
-			H1:             trText(c, "guide.change_h1"),
-			Paras:          []string{trText(c, "guide.change_para")},
-			CouncilHeading: "At the council",
+			Slug:          "change-car-on-visitor-permit",
+			Title:         trText(c, "guide.change_title"),
+			Desc:          trText(c, "guide.change_desc"),
+			H1:            trText(c, "guide.change_h1"),
+			Paras:         []string{trText(c, "guide.change_para")},
+			TenantHeading: "At the council",
 			Steps: append(append([]template.HTML{}, steps...),
 				template.HTML(`Repeat for each new visitor, before they park.`)),
-			CouncilNote: tr(c, "guide.change_note", nil, nil),
-			Pstonn:      "Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.",
-			Demo:        "roster",
+			TenantNote: tr(c, "guide.change_note", nil, nil),
+			Pstonn:     "Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.",
+			Demo:       "roster",
 		},
 		{
 			Slug:  "visitor-parking-cleaner-nanny-carer",
@@ -261,11 +261,11 @@ func guidesFor(c councilView) []guidePage {
 			Paras: []string{
 				"A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn't, they will not be covered by the permit.",
 			},
-			CouncilHeading: "At the council, each visit",
-			Steps:          steps,
-			CouncilNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
-			Pstonn:         "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
-			Demo:           "guest",
+			TenantHeading: "At the council, each visit",
+			Steps:         steps,
+			TenantNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
+			Pstonn:        "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
+			Demo:          "guest",
 		},
 		{
 			Slug:  "paper-visitor-permits",
@@ -275,20 +275,20 @@ func guidesFor(c councilView) []guidePage {
 			Paras: []string{
 				"Not usually. Permits are digital by default: there's nothing to display, and parking officers check the plate against your permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.",
 			},
-			CouncilHeading: "To see which plate is on your permit now",
+			TenantHeading: "To see which plate is on your permit now",
 			Steps: []template.HTML{
 				steps[0],
 				template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
 				template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
 			},
-			CouncilNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
-			Pstonn:      "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
-			Demo:        "oneoff",
+			TenantNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
+			Pstonn:     "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
+			Demo:       "oneoff",
 		},
 	}
 }
 
-func guideBySlug(slug string, c councilView) *guidePage {
+func guideBySlug(slug string, c tenantView) *guidePage {
 	guides := guidesFor(c)
 	for i := range guides {
 		if guides[i].Slug == slug {
@@ -300,7 +300,7 @@ func guideBySlug(slug string, c councilView) *guidePage {
 
 // guide serves one public question page.
 func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
-	g := guideBySlug(r.PathValue("slug"), s.councilViewFor(r.Context(), ""))
+	g := guideBySlug(r.PathValue("slug"), s.tenantViewFor(r.Context(), ""))
 	if g == nil {
 		http.NotFound(w, r)
 		return

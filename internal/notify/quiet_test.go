@@ -118,7 +118,7 @@ func TestComposeApplyCopy(t *testing.T) {
 		t.Fatalf("door-QR copy missing approver/context: %q", db)
 	}
 
-	// Failure links the council portal and flags high priority for a hard refusal.
+	// Failure links the tenant portal and flags high priority for a hard refusal.
 	_, fb, pri, tag := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Name: "Van", OK: false, CurrentReg: "Y", Reason: "The council refused.", Action: "Try again."}, testPortal)
 	if !strings.Contains(fb, "Van — X") || !strings.Contains(fb, testPortal) {
 		t.Fatalf("failure copy missing car/portal: %q", fb)
@@ -172,5 +172,5 @@ func TestUrgentOutcomeIsNotHeldByQuietHours(t *testing.T) {
 	}
 }
 
-// testPortal is the council portal link the composed notices point at.
+// testPortal is the tenant portal link the composed notices point at.
 const testPortal = "https://parkingpermits.stonnington.vic.gov.au/"

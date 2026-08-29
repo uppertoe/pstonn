@@ -6,7 +6,7 @@ import (
 )
 
 // The scenarios here pin NextChange to the scheduler's actual write behaviour:
-// the watchdog warns a household during an outage IFF a council write was due,
+// the watchdog warns a household during an outage IFF a tenant write was due,
 // so a false "no change" hides a missed write (a car exposed to a fine) while a
 // false "change" wakes a household whose permit was fine all along.
 

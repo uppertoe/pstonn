@@ -19,7 +19,7 @@ func encodeB64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
 // The attack this closes, concretely. One key seals four different secrets, and with
 // no binding a ciphertext is just "something this key encrypted" — so anyone able to
-// write a row could move a household's council PASSWORD ciphertext into a
+// write a row could move a household's tenant PASSWORD ciphertext into a
 // guest_token.token_sealed row, then open the door-QR page, whose whole job is to
 // reprint the token it finds there. That turned the at-rest key into a
 // plaintext-password oracle through an ordinary authenticated page.
@@ -28,7 +28,7 @@ func TestCiphertextCannotMoveBetweenColumns(t *testing.T) {
 	const owner = "victim@example.com"
 	const password = "the-council-password"
 
-	sealed, err := b.SealCtx(CouncilPassword(owner), password)
+	sealed, err := b.SealCtx(TenantPassword(owner), password)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
@@ -38,13 +38,13 @@ func TestCiphertextCannotMoveBetweenColumns(t *testing.T) {
 		t.Fatalf("a council password opened as a guest token (legacy=%v, plaintext=%q) — the door-QR page would print it", legacy, pt)
 	}
 	// And every other purpose is equally refused.
-	for _, ctx := range []string{CouncilCookie(owner), CouncilToken(owner)} {
+	for _, ctx := range []string{TenantCookie(owner), TenantToken(owner)} {
 		if _, _, err := b.OpenCtx(ctx, sealed); err == nil {
 			t.Errorf("password ciphertext opened under context %q", ctx)
 		}
 	}
 	// Its own context still works, or the binding would just be breakage.
-	got, legacy, err := b.OpenCtx(CouncilPassword(owner), sealed)
+	got, legacy, err := b.OpenCtx(TenantPassword(owner), sealed)
 	if err != nil || got != password {
 		t.Fatalf("own context failed to open: %q %v", got, err)
 	}
@@ -54,19 +54,19 @@ func TestCiphertextCannotMoveBetweenColumns(t *testing.T) {
 }
 
 // The second half of the binding: one household's blob must not open as another's,
-// so a row swap between accounts cannot hand over a live council session.
+// so a row swap between accounts cannot hand over a live tenant session.
 func TestCiphertextCannotMoveBetweenHouseholds(t *testing.T) {
 	b := testBox(t, 1)
 	const cookie = "Permits.IDM.Identity=live-session"
 
-	sealed, err := b.SealCtx(CouncilCookie("alice@example.com"), cookie)
+	sealed, err := b.SealCtx(TenantCookie("alice@example.com"), cookie)
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	if pt, _, err := b.OpenCtx(CouncilCookie("bob@example.com"), sealed); err == nil {
+	if pt, _, err := b.OpenCtx(TenantCookie("bob@example.com"), sealed); err == nil {
 		t.Fatalf("Alice's session cookie opened as Bob's (%q) — Bob would be driving her council account", pt)
 	}
-	if got, _, err := b.OpenCtx(CouncilCookie("alice@example.com"), sealed); err != nil || got != cookie {
+	if got, _, err := b.OpenCtx(TenantCookie("alice@example.com"), sealed); err != nil || got != cookie {
 		t.Fatalf("Alice's own context failed: %q %v", got, err)
 	}
 }
@@ -82,7 +82,7 @@ func TestLegacyUnboundCiphertextStillOpensAndIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	got, legacy, err := b.OpenCtx(CouncilCookie("owner@example.com"), legacyBlob)
+	got, legacy, err := b.OpenCtx(TenantCookie("owner@example.com"), legacyBlob)
 	if err != nil {
 		t.Fatalf("a legacy ciphertext must still open: %v", err)
 	}
@@ -101,11 +101,11 @@ func TestResealingClosesTheLegacyWindow(t *testing.T) {
 	const owner = "owner@example.com"
 
 	legacyBlob, _ := b.Seal("secret")
-	plain, legacy, err := b.OpenCtx(CouncilPassword(owner), legacyBlob)
+	plain, legacy, err := b.OpenCtx(TenantPassword(owner), legacyBlob)
 	if err != nil || !legacy {
 		t.Fatalf("setup: %v legacy=%v", err, legacy)
 	}
-	rebound, err := b.SealCtx(CouncilPassword(owner), plain)
+	rebound, err := b.SealCtx(TenantPassword(owner), plain)
 	if err != nil {
 		t.Fatalf("reseal: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestResealingClosesTheLegacyWindow(t *testing.T) {
 	if _, _, err := b.OpenCtx(GuestToken(owner), rebound); err == nil {
 		t.Error("a re-sealed value is still interchangeable; the binding did not take")
 	}
-	if _, legacy, err := b.OpenCtx(CouncilPassword(owner), rebound); err != nil || legacy {
+	if _, legacy, err := b.OpenCtx(TenantPassword(owner), rebound); err != nil || legacy {
 		t.Errorf("re-sealed value should open bound and non-legacy: %v legacy=%v", err, legacy)
 	}
 }
@@ -121,11 +121,11 @@ func TestResealingClosesTheLegacyWindow(t *testing.T) {
 // A different key must not open a bound ciphertext either — the AAD is integrity, not
 // a substitute for the key.
 func TestBoundCiphertextStillNeedsTheRightKey(t *testing.T) {
-	sealed, err := testBox(t, 1).SealCtx(CouncilCookie("o@example.com"), "secret")
+	sealed, err := testBox(t, 1).SealCtx(TenantCookie("o@example.com"), "secret")
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	if _, _, err := testBox(t, 2).OpenCtx(CouncilCookie("o@example.com"), sealed); err == nil {
+	if _, _, err := testBox(t, 2).OpenCtx(TenantCookie("o@example.com"), sealed); err == nil {
 		t.Fatal("another key opened a bound ciphertext")
 	}
 }
@@ -136,8 +136,8 @@ func TestBoundCiphertextStillNeedsTheRightKey(t *testing.T) {
 func TestContextsAreDistinct(t *testing.T) {
 	const a, b = "alice@example.com", "bob@example.com"
 	all := []string{
-		CouncilCookie(a), CouncilToken(a), CouncilPassword(a), GuestToken(a),
-		CouncilCookie(b), CouncilToken(b), CouncilPassword(b), GuestToken(b),
+		TenantCookie(a), TenantToken(a), TenantPassword(a), GuestToken(a),
+		TenantCookie(b), TenantToken(b), TenantPassword(b), GuestToken(b),
 	}
 	seen := make(map[string]bool, len(all))
 	for _, c := range all {
@@ -154,7 +154,7 @@ func TestContextsAreDistinct(t *testing.T) {
 // Tamper detection must still hold with a context in play.
 func TestBoundCiphertextDetectsTamper(t *testing.T) {
 	box := testBox(t, 1)
-	ctx := CouncilPassword("o@example.com")
+	ctx := TenantPassword("o@example.com")
 	sealed, err := box.SealCtx(ctx, "the-council-password")
 	if err != nil {
 		t.Fatalf("seal: %v", err)

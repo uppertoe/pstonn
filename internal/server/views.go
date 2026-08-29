@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/i18n"
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/store"
+	"github.com/uppertoe/pstonn/internal/tenant"
 )
 
 // logoutURL returns the sign-out link: the app's own OIDC logout when enabled,
@@ -29,11 +29,11 @@ func (s *Server) logoutURL() string {
 
 func shortDay(w time.Weekday) string { return w.String()[:3] }
 
-// councilView is the council as every page and message sees it: names, links,
-// facts and vocabulary. Templates reach it through dashboardData.Council.
-type councilView struct {
+// tenantView is the tenant as every page and message sees it: names, links,
+// facts and vocabulary. Templates reach it through dashboardData.Tenant.
+type tenantView struct {
 	ID, Name, Short string
-	Links           council.Links
+	Links           tenant.Links
 	Phone           string
 	Suburbs         []string
 	SuburbList      string // "Prahran, Windsor, … and Kooyong"
@@ -41,11 +41,11 @@ type councilView struct {
 	Terms           map[string]string
 }
 
-// tr renders a catalog message with a council and extra fields, for Go-composed
+// tr renders a catalog message with a tenant and extra fields, for Go-composed
 // page text (SEO titles, FAQ entries, guides). HTML markup in the message is
 // trusted; interpolated fields are escaped.
-func tr(c councilView, key string, extra map[string]any, slots i18n.Slots) template.HTML {
-	data := map[string]any{"Council": c}
+func tr(c tenantView, key string, extra map[string]any, slots i18n.Slots) template.HTML {
+	data := map[string]any{"Tenant": c}
 	for k, v := range extra {
 		data[k] = v
 	}
@@ -58,8 +58,8 @@ func tr(c councilView, key string, extra map[string]any, slots i18n.Slots) templ
 }
 
 // trText is tr as plain text (titles, descriptions, JSON-LD).
-func trText(c councilView, key string) string {
-	out, err := catalog.For(i18n.DefaultLocale).Text(key, map[string]any{"Council": c})
+func trText(c tenantView, key string) string {
+	out, err := catalog.For(i18n.DefaultLocale).Text(key, map[string]any{"Tenant": c})
 	if err != nil {
 		log.Printf("i18n: %v", err)
 		return key
@@ -67,9 +67,9 @@ func trText(c councilView, key string) string {
 	return out
 }
 
-// councilViewOf builds the view for a descriptor.
-func councilViewOf(c *council.Council) councilView {
-	v := councilView{ID: c.ID, Name: c.Name, Short: c.Short, Links: c.Links, Phone: c.Copy.Phone,
+// tenantViewOf builds the view for a descriptor.
+func tenantViewOf(c *tenant.Tenant) tenantView {
+	v := tenantView{ID: c.ID, Name: c.Name, Short: c.Short, Links: c.Links, Phone: c.Copy.Phone,
 		Suburbs: c.Copy.Suburbs, Terms: catalog.For(i18n.DefaultLocale).Terms(c.Terms)}
 	switch n := len(c.Copy.Suburbs); {
 	case n == 0:
@@ -84,17 +84,17 @@ func councilViewOf(c *council.Council) councilView {
 	return v
 }
 
-// defaultCouncilView is Stonnington, for pages rendered outside a request (tests)
-// and as the fallback when no council can be resolved.
-var defaultCouncilView = councilViewOf(council.Default())
+// defaultTenantView is Stonnington, for pages rendered outside a request (tests)
+// and as the fallback when no tenant can be resolved.
+var defaultTenantView = tenantViewOf(tenant.Default())
 
-// councilViewFor is the view for an owner's council (the registry default, or
+// tenantViewFor is the view for an owner's tenant (the registry default, or
 // Stonnington, when none resolves).
-func (s *Server) councilViewFor(ctx context.Context, owner string) councilView {
-	if s.councils == nil {
-		return defaultCouncilView
+func (s *Server) tenantViewFor(ctx context.Context, owner string) tenantView {
+	if s.registry == nil {
+		return defaultTenantView
 	}
-	return councilViewOf(s.councilFor(ctx, owner))
+	return tenantViewOf(s.tenantFor(ctx, owner))
 }
 
 type dashboardData struct {
@@ -103,9 +103,9 @@ type dashboardData struct {
 	// header, so no handler has to remember to set it — and a page rendered with
 	// no policy in force simply gets "" (see scriptNonce).
 	Nonce string
-	// council is the resolved council for this page; Council() serves it, or the
+	// tenant is the resolved tenant for this page; Tenant() serves it, or the
 	// default when a page is rendered without one (fragments, tests).
-	council     *councilView
+	tenant      *tenantView
 	User        identity.User
 	OIDCEnabled bool
 	State       string // "landing" | "terms" | "onboarding" | "picker" | "app"
@@ -125,19 +125,19 @@ type dashboardData struct {
 	Contact       bool        // whether the public contact link/form is available
 	ContactVal    string      // contact form: the message text to redisplay after a validation error
 	ContactFrom   string      // contact form: the reply-to address to redisplay after a validation error
-	// Councils is the sign-up choice, offered only when more than one is enabled.
-	Councils []councilChoice
+	// TenantOptions is the sign-up choice, offered only when more than one is enabled.
+	TenantOptions []tenantOption
 	// Tenants drives the user menu\'s area switcher (empty when only one is enabled).
 	Tenants []tenantChoice
 	// OtherConnections are the account\'s sessions with tenants other than the current one (Settings).
 	OtherConnections []connectionView
-	Relink           bool // council session expired → prompt re-link
+	Relink           bool // tenant session expired → prompt re-link
 	// CapacityFull hides the onboarding link form from a NEW household when the
 	// deployment is at MaxAccounts, so the refusal arrives before terms are read
-	// and a third-party password is typed — not after, as a toast. councilLink
+	// and a third-party password is typed — not after, as a toast. tenantLink
 	// keeps the authoritative (locked) check; this is the courtesy copy.
 	CapacityFull bool
-	// LinkHelp renders the rejected-council-login remedy on the onboarding page:
+	// LinkHelp renders the rejected-tenant-login remedy on the onboarding page:
 	// a real sign-out button plus "sign back in with your ePermits email". The
 	// instruction existed in three places as prose; the affordance existed in
 	// none of them, and the icon-only account menu is where the remedy went to
@@ -152,7 +152,7 @@ type dashboardData struct {
 	// InAppBrowser marks a visitor inside a social app's built-in webview
 	// (Facebook, Messenger, Instagram), where password managers don't auto-fill.
 	// The onboarding page uses it to suggest opening the real browser BEFORE the
-	// council password ask becomes a dead end: nearly every stalled signup in the
+	// tenant password ask becomes a dead end: nearly every stalled signup in the
 	// 2026-08 cohort arrived exactly this way (fbclid + FBAN/FBAV user agents).
 	InAppBrowser bool
 	Flash        string // success (green)
@@ -201,7 +201,7 @@ type dashboardData struct {
 	ChangesMore   bool
 	ShowingAll    bool
 	RelinkBy      string     // human date the session must be re-authorised by ("" if unknown)
-	CouncilLinked bool       // settings: an active council session exists
+	TenantLinked  bool       // settings: an active tenant session exists
 	AutoReconnect bool       // settings: a saved password lets p.stonn auto-reconnect
 	LastReconnect string     // settings: when the saved password last signed back in ("" = never)
 	Notify        notifyView // settings: notification channels
@@ -209,12 +209,12 @@ type dashboardData struct {
 	// picker state
 	HasManaged bool // the account already manages a permit: the picker is "manage another", so it can offer a way back
 	Pick       []pickView
-	// HasPermits distinguishes the two empty-picker cases: the council account
+	// HasPermits distinguishes the two empty-picker cases: the tenant account
 	// holds permits but none is schedulable (so explain why), versus it holds no
-	// permits at all (so explain that one must be applied for with the council).
+	// permits at all (so explain that one must be applied for with the tenant).
 	HasPermits bool
 
-	// PermitsUnknown means the council gave us only part of the list, so an empty
+	// PermitsUnknown means the tenant gave us only part of the list, so an empty
 	// picker proves nothing. Without it, a partial response holding zero rows told the
 	// household flatly "your council account doesn't have any permits on it yet" —
 	// about an account that may well hold several.
@@ -284,12 +284,12 @@ type confirmView struct {
 	Stale bool // token unknown/used/expired — reassure rather than alarm
 }
 
-// Council is the council this page speaks for (see councilView).
-func (d dashboardData) Council() councilView {
-	if d.council != nil {
-		return *d.council
+// Tenant is the tenant this page speaks for (see tenantView).
+func (d dashboardData) Tenant() tenantView {
+	if d.tenant != nil {
+		return *d.tenant
 	}
-	return defaultCouncilView
+	return defaultTenantView
 }
 
 // linkedAnywhere reports whether the account holds a session with ANY tenant:
@@ -299,7 +299,7 @@ func (s *Server) linkedAnywhere(ctx context.Context, owner string) bool {
 	if s.store == nil {
 		return false
 	}
-	sessions, err := s.store.ListCouncilSessionsFor(ctx, owner)
+	sessions, err := s.store.ListTenantSessionsFor(ctx, owner)
 	if err != nil {
 		return false
 	}
@@ -311,8 +311,8 @@ func (s *Server) linkedAnywhere(ctx context.Context, owner string) bool {
 	return false
 }
 
-// councilChoice is one option in the sign-up council picker.
-type councilChoice struct {
+// tenantOption is one option in the sign-up tenant picker.
+type tenantOption struct {
 	ID       string
 	Name     string
 	Selected bool
@@ -328,21 +328,21 @@ type tenantChoice struct {
 
 // tenantsFor lists the enabled tenants for the menu, marking the current one and
 // which are linked. Empty unless more than one tenant is enabled, so a
-// single-council deployment renders no switcher.
+// single-tenant deployment renders no switcher.
 func (s *Server) tenantsFor(ctx context.Context, owner string) []tenantChoice {
-	if s.councils == nil || s.store == nil {
+	if s.registry == nil || s.store == nil {
 		return nil
 	}
-	enabled := s.councils.Enabled()
+	enabled := s.registry.Enabled()
 	if len(enabled) < 2 {
 		return nil
 	}
-	current, _ := s.store.CouncilIDFor(ctx, owner)
+	current, _ := s.store.TenantIDFor(ctx, owner)
 	linked := map[string]bool{}
-	if sessions, err := s.store.ListCouncilSessionsFor(ctx, owner); err == nil {
+	if sessions, err := s.store.ListTenantSessionsFor(ctx, owner); err == nil {
 		for _, cs := range sessions {
 			if cs.Cookie != "" {
-				linked[cs.CouncilID] = true
+				linked[cs.TenantID] = true
 			}
 		}
 	}
@@ -353,21 +353,21 @@ func (s *Server) tenantsFor(ctx context.Context, owner string) []tenantChoice {
 	return out
 }
 
-// councilOfPermit is the descriptor of the tenant a permit belongs to (the
+// tenantOfPermit is the descriptor of the tenant a permit belongs to (the
 // owner's current tenant when the permit carries none).
-func (s *Server) councilOfPermit(ctx context.Context, p model.Permit) *council.Council {
-	if s.councils != nil && p.CouncilID != "" {
-		if c, ok := s.councils.ByID(p.CouncilID); ok {
+func (s *Server) tenantOfPermit(ctx context.Context, p model.Permit) *tenant.Tenant {
+	if s.registry != nil && p.TenantID != "" {
+		if c, ok := s.registry.ByID(p.TenantID); ok {
 			return c
 		}
 	}
-	return s.councilFor(ctx, p.Owner)
+	return s.tenantFor(ctx, p.Owner)
 }
 
 // locForPermit is the timezone a permit's days are reckoned in: its tenant's.
 func (s *Server) locForPermit(ctx context.Context, p model.Permit) *time.Location {
-	if s.councils != nil {
-		return s.councilOfPermit(ctx, p).Location()
+	if s.registry != nil {
+		return s.tenantOfPermit(ctx, p).Location()
 	}
 	return s.cfg.DisplayLocation
 }
@@ -483,7 +483,7 @@ type inviteView struct {
 }
 
 type permitView struct {
-	// Tenant names the permit's council when the account holds permits with more
+	// Tenant names the permit's tenant when the account holds permits with more
 	// than one; "" otherwise (nothing to distinguish).
 	Tenant        string
 	Permit        model.Permit
@@ -505,7 +505,7 @@ type permitView struct {
 	ExpiryIn    string // "in 12 days" / "tomorrow" / "today" / "3 days ago"
 	ExpiresSoon bool   // within the UI lead window (approaching)
 	Expired     bool   // already past the end date
-	Detail      string // council identifier line: "VPP24714 · 1st Visitor Permit"
+	Detail      string // tenant identifier line: "VPP24714 · 1st Visitor Permit"
 	// Copy-schedule affordance (for a renewed/replacement permit).
 	RosterEmpty bool // no weekly rules yet — a fresh permit
 	// Notice is the outcome of an action the viewer just took on this permit
@@ -534,33 +534,33 @@ type permitView struct {
 	// htmx fragment, where the dashboard's own IsPrimary is out of scope.
 	IsPrimary bool
 	// PlateRefreshing: "on permit now" was served from a stale (or absent) cache
-	// while a background council refresh runs. Renders a subtle "checking" spinner.
+	// while a background tenant refresh runs. Renders a subtle "checking" spinner.
 	PlateRefreshing bool
 	// Applying: the schedule's desired plate for right now is not yet the plate the
-	// council confirms is on the permit — a change is in flight (a booking just made,
+	// tenant confirms is on the permit — a change is in flight (a booking just made,
 	// a roster edit affecting today). Renders an "applying" spinner. Crucially this
 	// is NOT the same as showing the new plate: "on permit now" keeps displaying the
-	// council-confirmed plate until the council itself confirms the change, so the
+	// tenant-confirmed plate until the tenant itself confirms the change, so the
 	// badge never claims a change that hasn't landed.
 	Applying bool
 	// PollNext, when > 0, is the attempt number for a bounded self-refresh: the card
 	// re-fetches itself (/permits/{id}/card?n=PollNext) to swap in the settled plate
 	// without a manual reload, while a refresh or an apply is still outstanding.
-	// Bounded (see armPlatePoll) so a council outage or a rejected change can't turn
+	// Bounded (see armPlatePoll) so a tenant outage or a rejected change can't turn
 	// the card into a permanent poll — the concern that used to force fragments to
 	// arm no follow-up at all, which is why a just-made change never refreshed.
 	PollNext int
 	// PollDelay is how many seconds to wait before that next poll. It backs off across
 	// attempts (see platePollDelays) so a quick apply swaps in fast while a slow COLD
-	// council read still gets minutes of gentle retries instead of freezing the spinner.
+	// tenant read still gets minutes of gentle retries instead of freezing the spinner.
 	PollDelay int
 	// PlateUnconfirmed is set when the self-refresh ran out of attempts with a read or
 	// apply still outstanding. The pill then shows an honest "couldn't confirm" mark
-	// (not a spinner frozen mid-check): the plate displayed is the last council-confirmed
+	// (not a spinner frozen mid-check): the plate displayed is the last tenant-confirmed
 	// value, and the scheduler goes on retrying out of band.
 	PlateUnconfirmed bool
 	// pollSeed floors the attempt number armPlatePoll works from, derived from how
-	// long the shown council reading has been stale — so a reload during an outage
+	// long the shown tenant reading has been stale — so a reload during an outage
 	// resumes the poll budget where the outage left it instead of restarting the
 	// spinner from zero. Never rendered; template access is impossible (unexported)
 	// and unneeded.
@@ -573,11 +573,11 @@ type permitView struct {
 type expiredPermitView struct {
 	ID         int64
 	Label      string
-	Detail     string // "VPP24714 · 1st Visitor Permit" (council identifiers)
+	Detail     string // "VPP24714 · 1st Visitor Permit" (tenant identifiers)
 	StatusText string // "Expired 1 Jul 2026" / "Cancelled"
 }
 
-// buildExpiredView makes the compact row for an inactive permit (no council call).
+// buildExpiredView makes the compact row for an inactive permit (no tenant call).
 func buildExpiredView(p model.Permit, now time.Time, loc *time.Location) expiredPermitView {
 	label := p.Label
 	if label == "" {
@@ -595,8 +595,8 @@ func buildExpiredView(p model.Permit, now time.Time, loc *time.Location) expired
 	return expiredPermitView{ID: p.ID, Label: label, Detail: permitDetail(p), StatusText: st}
 }
 
-// permitDetail is the council identifier line — permit number and/or type — shown
-// under a permit's name. Empty if the council hasn't reported either yet.
+// permitDetail is the tenant identifier line — permit number and/or type — shown
+// under a permit's name. Empty if the tenant hasn't reported either yet.
 func permitDetail(p model.Permit) string {
 	switch {
 	case p.PermitNumber != "" && p.PermitType != "":
@@ -630,7 +630,7 @@ type calView struct {
 	Past      bool // earlier this week; shown dimmed for context
 	// Today-only confirmation state, mirroring the status pill (see armPlatePoll).
 	// The calendar renders INTENT — for future days the only truth there is — but
-	// today's cell must not paint a plate the council hasn't confirmed with the
+	// today's cell must not paint a plate the tenant hasn't confirmed with the
 	// same solid bar as a confirmed one.
 	Applying    bool // a change is in flight; the bar's plate isn't on the permit yet
 	Unconfirmed bool // polls exhausted with the change/read still outstanding
@@ -659,13 +659,13 @@ type pickView struct {
 	// picker doesn't silently invite someone to schedule a permit that will never
 	// be reconciled. Text explains which.
 	Warn string
-	// Dead: the council says this permit is over (cancelled, expired, rejected).
+	// Dead: the tenant says this permit is over (cancelled, expired, rejected).
 	// Listed after the live ones, under their own heading, with Status as a pill
 	// and a different button — a dead permit is addable only to copy its old
 	// schedule, and residents shown an identical "Manage" card added dead permits
 	// believing they were the working one (2026-08, three households).
 	Dead   bool
-	Status string // council status label for the pill, e.g. "Cancelled"
+	Status string // tenant status label for the pill, e.g. "Cancelled"
 }
 
 // vehicleViews builds the per-user vehicle view models plus id→colour and
@@ -712,13 +712,13 @@ func (s *Server) render(w http.ResponseWriter, data dashboardData) {
 // CanonicalPath, which the head turns into a noindex.
 func (s *Server) renderBuf(w http.ResponseWriter, data dashboardData) (*bytes.Buffer, error) {
 	data.Nonce = scriptNonce(w)
-	if data.council == nil {
-		cv := s.councilViewFor(context.Background(), data.Owner)
-		data.council = &cv
+	if data.tenant == nil {
+		cv := s.tenantViewFor(context.Background(), data.Owner)
+		data.tenant = &cv
 	}
 	data.BaseURL = s.cfg.PublicBaseURL
-	data.Title, data.Description, data.CanonicalPath = seoFor(data.State, data.Council())
-	data.JSONLD = jsonLDFor(data.State, data.BaseURL, data.Council())
+	data.Title, data.Description, data.CanonicalPath = seoFor(data.State, data.Tenant())
+	data.JSONLD = jsonLDFor(data.State, data.BaseURL, data.Tenant())
 	if data.Guide != nil {
 		data.Title, data.Description, data.CanonicalPath = data.Guide.Title, data.Guide.Desc, "/guide/"+data.Guide.Slug
 		data.JSONLD = guideJSONLD(data.Guide)
@@ -749,7 +749,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 	if r.URL.Query().Get("linked") == "1" {
 		base.Flash = "Council account linked."
 	}
-	// Terms gate: before anything else (and before we ever store a council login),
+	// Terms gate: before anything else (and before we ever store a tenant login),
 	// each user must accept the current terms individually, and re-accept if they
 	// change. Consent is per person (the raw signed-in email), not per account.
 	if ok, updated := s.consentStatus(ctx, user); !ok {
@@ -759,26 +759,26 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		return dashboardData{}, false
 	}
 	if !s.linkedAnywhere(ctx, owner) {
-		// The council account belongs to the primary; a secondary can only wait
+		// The tenant account belongs to the primary; a secondary can only wait
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
-		// Several councils to choose from: the form asks. One: nothing to ask.
-		if s.councils != nil {
-			if enabled := s.councils.Enabled(); len(enabled) > 1 {
-				current := s.councilFor(ctx, owner)
+		// Several registry to choose from: the form asks. One: nothing to ask.
+		if s.registry != nil {
+			if enabled := s.registry.Enabled(); len(enabled) > 1 {
+				current := s.tenantFor(ctx, owner)
 				for _, c := range enabled {
-					base.Councils = append(base.Councils, councilChoice{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
+					base.TenantOptions = append(base.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
 				}
 			}
 		}
 		base.InAppBrowser = inAppBrowser(r.UserAgent())
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
 		// An unanswered invitation is the most likely reason a person with no
-		// council link is here at all; this page is the only one they can reach.
+		// tenant link is here at all; this page is the only one they can reach.
 		if from, ok, err := s.store.PendingInvite(ctx, user); err == nil && ok {
 			base.Invite = &inviteView{Owner: from}
 		}
-		// The landing after a REJECTED council login (see councilLink): name both
+		// The landing after a REJECTED tenant login (see tenantLink): name both
 		// causes and offer the remedy as a button. Takes precedence over the
 		// relink/capacity banners — this person is mid-attempt, and the next step
 		// matters more than account status. The banner's content lives in the
@@ -801,7 +801,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 			base.Warn = "Your permit schedule is paused: p.stonn is not connected to the council, so no plate changes are being made. Reconnect below to resume it."
 		} else if err == nil && s.cfg.MaxAccounts > 0 {
 			// A genuinely new household gets the capacity refusal HERE, before
-			// terms and a typed password — councilLink re-checks under the
+			// terms and a typed password — tenantLink re-checks under the
 			// admission lock, so this read needs no locking and may be stale.
 			if n, cerr := s.store.CountLinkedAccounts(ctx); cerr == nil && n >= s.cfg.MaxAccounts {
 				base.CapacityFull = true

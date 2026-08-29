@@ -18,7 +18,7 @@ Disallow: /settings
 Disallow: /notifications
 Disallow: /admin
 Disallow: /auth/
-Disallow: /council/
+Disallow: /tenant/
 Disallow: /g/
 Disallow: /u/
 Disallow: /r/

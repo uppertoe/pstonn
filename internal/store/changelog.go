@@ -42,7 +42,7 @@ const (
 	ActionMemberAdd    = "member.add"
 	ActionMemberRemove = "member.remove"
 	ActionMemberLeave  = "member.leave"
-	// Council connection
+	// Tenant connection
 	ActionCouncilLink   = "council.link"
 	ActionCouncilUnlink = "council.unlink"
 	ActionCouncilForget = "council.forget-password"

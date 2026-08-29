@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
-	"github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/model"
@@ -21,28 +20,29 @@ import (
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/session"
 	"github.com/uppertoe/pstonn/internal/store"
+	"github.com/uppertoe/pstonn/internal/tenant"
 	"github.com/uppertoe/pstonn/internal/webauth"
 )
 
-// Council is everything the handlers need from a council connection. It is the
-// server-side counterpart of scheduler.Council: the handlers never name the
-// concrete client, so a per-council driver (or a multiplexer over several) can be
+// Tenant is everything the handlers need from a tenant connection. It is the
+// server-side counterpart of scheduler.Tenant: the handlers never name the
+// concrete client, so a per-tenant driver (or a multiplexer over several) can be
 // substituted without touching them. *parking.Client satisfies it.
-// See docs/council-connections.md.
-type Council interface {
-	// Link performs the credential login for owner with one tenant (council) and
-	// stores the session; councilID "" means the owner's current tenant.
-	Link(ctx context.Context, owner, councilID, username, password string, savePassword, interactive bool, expectedGen int64) error
+// See docs/tenant-connections.md.
+type Tenant interface {
+	// Link performs the credential login for owner with one tenant (tenant) and
+	// stores the session; tenantID "" means the owner's current tenant.
+	Link(ctx context.Context, owner, tenantID, username, password string, savePassword, interactive bool, expectedGen int64) error
 	// Linked reports whether owner holds a session with the tenant.
-	Linked(ctx context.Context, owner, councilID string) bool
+	Linked(ctx context.Context, owner, tenantID string) bool
 	// ListPermitsComplete reads owner's permits with the tenant and reports whether the list was whole.
-	ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error)
+	ListPermitsComplete(ctx context.Context, owner, tenantID string) ([]parking.PermitInfo, bool, error)
 	// CurrentVehicleCached is the bounded-read plate lookup the pages use.
 	CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, age time.Duration, fresh bool, err error)
 	// RefreshFailingFor reports how long background plate refreshes have been failing.
 	RefreshFailingFor(owner string, p model.Permit) time.Duration
 	// ForgetPermit drops cached state for a permit the owner stopped managing.
-	ForgetPermit(owner, councilID, councilPermitID string)
+	ForgetPermit(owner, tenantID, tenantPermitID string)
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
 	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
 	// Stats is the traffic / breaker snapshot shown on /status.
@@ -52,8 +52,8 @@ type Council interface {
 // The mux (what main wires) satisfies both interfaces; a mismatch is a compile
 // error here, not a wiring failure in main.
 var (
-	_ Council           = (*council.Mux)(nil)
-	_ scheduler.Council = (*council.Mux)(nil)
+	_ Tenant           = (*tenant.Mux)(nil)
+	_ scheduler.Tenant = (*tenant.Mux)(nil)
 )
 
 // Server holds the dependencies shared by the handlers.
@@ -62,8 +62,8 @@ type Server struct {
 	store    *store.Store
 	sessions *session.Manager
 	auth     *webauth.Authenticator // nil when OIDC login is disabled
-	council  Council                // nil only in tests that never touch the council
-	councils *council.Registry      // the councils this process serves (names, links, permit policy)
+	tenant   Tenant                 // nil only in tests that never touch the tenant
+	registry *tenant.Registry       // the registry this process serves (names, links, permit policy)
 	sched    *scheduler.Scheduler
 	notify   *notify.Service
 	mail     *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
@@ -78,12 +78,12 @@ type Server struct {
 	guestRead    *rateLimiter // per-IP throttle on the public guest READ/poll endpoints
 	guestLinkOut *rateLimiter // per-owner throttle on guest-pass link emails
 	guestLinkTo  *rateLimiter // per-recipient throttle on guest-pass link emails
-	councilTry   *rateLimiter // per-user throttle on council password attempts (councilLink)
-	// admitMu serialises NEW-household admission: the capacity count and the council
+	tenantTry    *rateLimiter // per-user throttle on tenant password attempts (tenantLink)
+	// admitMu serialises NEW-household admission: the capacity count and the tenant
 	// link that consumes the slot must be one decision, or concurrent newcomers all
 	// read 499 and all save. Held across the link (already globally serialised by the
-	// council client's login flow, so this adds no contention in practice). Taken before
-	// we know whether this is a signup or a re-link, so re-links serialise too; council
+	// tenant client's login flow, so this adds no contention in practice). Taken before
+	// we know whether this is a signup or a re-link, so re-links serialise too; tenant
 	// links are rare and already serialised downstream, so that costs nothing.
 	admitMu sync.Mutex
 	// testNotifyLimit throttles the on-demand "send test" button (per user): the
@@ -107,13 +107,13 @@ type Server struct {
 	// pacing a replay of a token that never expires.
 	unsubLimit *rateLimiter
 	// confirmLimit throttles the public renewal-confirm POST, whose single-use
-	// token is the only thing gating a 90-day extension of a council session.
+	// token is the only thing gating a 90-day extension of a tenant session.
 	confirmLimit *rateLimiter
-	// councilRead throttles the two routes that make an UNCACHED, synchronous
-	// council read (the permit picker and adding a permit). Every other council
+	// tenantRead throttles the two routes that make an UNCACHED, synchronous
+	// tenant read (the permit picker and adding a permit). Every other tenant
 	// read path has a cache and in-flight dedup; these did not, so one signed-in
-	// user could turn HTTP requests into council requests one-for-one.
-	councilRead *rateLimiter
+	// user could turn HTTP requests into tenant requests one-for-one.
+	tenantRead *rateLimiter
 	// guestSlots bounds CONCURRENT public guest requests. The store runs on a
 	// single SQLite connection shared with the scheduler, so unbounded anonymous
 	// reads don't merely slow pages down — they starve the reconcile loop, and a
@@ -148,9 +148,9 @@ type Server struct {
 const maxConcurrentGuest = 24
 
 // New constructs a Server.
-func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, council Council, councils *council.Registry, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
+func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *webauth.Authenticator, tenant Tenant, registry *tenant.Registry, sched *scheduler.Scheduler, notifier *notify.Service, mail *mailer.Mailer, box *secretbox.Box) *Server {
 	return &Server{
-		cfg: cfg, store: st, sessions: sessions, auth: auth, council: council, councils: councils,
+		cfg: cfg, store: st, sessions: sessions, auth: auth, tenant: tenant, registry: registry,
 		sched: sched, notify: notifier, mail: mail, box: box, terms: loadTerms(cfg.TermsPath),
 		contact:      newRateLimiter(3, 10*time.Minute),  // 3 messages / 10 min per IP
 		inviteFanout: newRateLimiter(6, time.Hour),       // <=6 invite emails / hour per owner
@@ -163,9 +163,9 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		guestRead:    newRateLimiter(1200, 10*time.Minute),
 		guestLinkOut: newRateLimiter(20, time.Hour),   // <=20 guest-link emails / hour per owner
 		guestLinkTo:  newRateLimiter(5, 24*time.Hour), // <=5 guest-link emails / day per recipient
-		// 4, not 5. The council's actual lockout policy is UNKNOWN — nothing in
+		// 4, not 5. The tenant's actual lockout policy is UNKNOWN — nothing in
 		// the live captures shows one being tripped, and whether lockout is even
-		// enabled is the council's server-side config. What is known: ASP.NET
+		// enabled is the tenant's server-side config. What is known: ASP.NET
 		// Core Identity (which Duende sites commonly sit on) ships a default of
 		// 5 failed attempts → lockout when enabled. Four stays strictly below
 		// that default while giving one careful retry after the third rejection —
@@ -173,11 +173,11 @@ func New(cfg *config.Config, st *store.Store, sessions *session.Manager, auth *w
 		// sign-up burned all three on what looked like retypes, hit the wall and
 		// left). The backstop if the budget is ever exhausted anyway: this window
 		// (15 min) outlasts ASP.NET Identity's default 5-minute lockout, so a
-		// locked council account is unlocked again before we permit another try —
+		// locked tenant account is unlocked again before we permit another try —
 		// the throttle can never hold a lockout open.
-		councilTry:      newRateLimiter(4, 15*time.Minute), // 4 council password attempts / 15 min per user
+		tenantTry:       newRateLimiter(4, 15*time.Minute), // 4 tenant password attempts / 15 min per user
 		testNotifyLimit: newRateLimiter(5, time.Hour),      // 5 test notifications / hour per user
-		councilRead:     newRateLimiter(12, 5*time.Minute), // 12 uncached council reads / 5 min per user
+		tenantRead:      newRateLimiter(12, 5*time.Minute), // 12 uncached tenant reads / 5 min per user
 		// The watchdog polls every 10 minutes, so this is ~30x real use: it exists
 		// to stop the bearer token being brute-forced, not to pace the watchdog.
 		statusLimit: newRateLimiter(30, 10*time.Minute), // 30 status polls / 10 min per IP
@@ -268,10 +268,10 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /terms/accept", s.withUser(s.acceptTerms))
 	mux.HandleFunc("POST /terms/decline", s.withUser(s.declineTerms))
-	mux.HandleFunc("POST /council/link", s.withConsent(s.councilLink))
-	mux.HandleFunc("POST /council/select", s.withConsent(s.councilSelect))
-	mux.HandleFunc("POST /council/unlink", s.withUser(s.councilUnlink)) // allow leaving without re-consent
-	mux.HandleFunc("POST /council/forget-password", s.withUser(s.councilForgetPassword))
+	mux.HandleFunc("POST /tenant/link", s.withConsent(s.tenantLink))
+	mux.HandleFunc("POST /tenant/select", s.withConsent(s.tenantSelect))
+	mux.HandleFunc("POST /tenant/unlink", s.withUser(s.tenantUnlink)) // allow leaving without re-consent
+	mux.HandleFunc("POST /tenant/forget-password", s.withUser(s.tenantForgetPassword))
 	mux.HandleFunc("POST /account/delete", s.withUser(s.accountDelete)) // allow leaving without re-consent
 	mux.HandleFunc("POST /account/members", s.withConsent(s.addMember))
 	mux.HandleFunc("POST /account/members/remove", s.withConsent(s.removeMember))
@@ -288,8 +288,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
 	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))
 	// Public, token-only: the renewal-confirm link from the reminder email.
-	mux.HandleFunc("GET /council/confirm", s.councilConfirm)
-	mux.HandleFunc("POST /council/confirm", s.councilConfirmApply)
+	mux.HandleFunc("GET /tenant/confirm", s.tenantConfirm)
+	// The renewal-confirm link is in emails already sent under the old path; keep it answering.
+	mux.HandleFunc("GET /council/confirm", s.tenantConfirm)
+	mux.HandleFunc("POST /tenant/confirm", s.tenantConfirmApply)
+	mux.HandleFunc("POST /council/confirm", s.tenantConfirmApply)
 
 	// Public, signed-token: unsubscribe. GET confirms, POST acts (RFC 8058
 	// one-click). No login — most recipients have no account.

@@ -68,7 +68,7 @@ type Options struct {
 	// have no idea who we are or how we got their address.
 	Provenance string
 	// Footer is the affiliation line under the HTML card ("Not affiliated with
-	// the City of X."); the council is the sender's business, not the mailer's.
+	// the City of X."); the tenant is the sender's business, not the mailer's.
 	Footer string
 }
 

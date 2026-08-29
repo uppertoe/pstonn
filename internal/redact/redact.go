@@ -1,6 +1,6 @@
 // Package redact reduces personal data to a form safe to leave in a log.
 //
-// Logs are the leakiest surface the app has: unlike the sealed council session
+// Logs are the leakiest surface the app has: unlike the sealed tenant session
 // in the database, they are plaintext, read on-call, pasted into bug reports,
 // and retained by journald for weeks. So an email is reduced to its first
 // character and (lower-cased) domain here before it reaches any log line. That
@@ -9,7 +9,7 @@
 // logs. The full address is one lookup away in the database when genuinely
 // needed. Plates are deliberately NOT redacted: they are the safety-critical
 // fact for diagnosing a wrong-plate change (the failure that causes a fine), and
-// a plate alongside the council's internal permit id is far less identifying
+// a plate alongside the tenant's internal permit id is far less identifying
 // than an email.
 package redact
 

@@ -164,10 +164,10 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		if a.NtfyEnabled {
 			row.NtfyTopic = a.NtfyTopic
 		}
-		// Council / keep-warm status.
+		// Tenant / keep-warm status.
 		_, keptWarm := warmed[a.Owner]
 		var needsAttention bool
-		row.Status, row.StatusLabel, needsAttention = councilRowStatus(a, keptWarm, now, maxAge, warmStaleAfter)
+		row.Status, row.StatusLabel, needsAttention = tenantRowStatus(a, keptWarm, now, maxAge, warmStaleAfter)
 		if row.Status == "ok" {
 			v.WarmOK++
 		}
@@ -222,13 +222,13 @@ type statusResponse struct {
 	Time      string          `json:"time"`
 	Scheduler schedulerStatus `json:"scheduler"`
 	Sessions  sessionCounts   `json:"sessions"`
-	// Council reports the outbound-traffic health the watchdog needs to alert on a
+	// Tenant reports the outbound-traffic health the watchdog needs to alert on a
 	// developing edge block: the real request rate, pushback count/diagnostics, the
 	// fleet circuit state, and whether restart-protection persistence is intact.
-	Council councilStatus `json:"council"`
-	// Councils is the same health per council, and how many linked sessions each
+	Tenant tenantStatus `json:"council"` // the watchdog reads this key; rename together with it
+	// TenantOptions is the same health per tenant, and how many linked sessions each
 	// holds, for a process serving more than one (an edge block is per portal).
-	Councils map[string]councilBreakdown `json:"councils,omitempty"`
+	TenantOptions map[string]tenantBreakdown `json:"councils,omitempty"`
 	// Client reports what the app believes about the caller of this very request.
 	// It is here so the watchdog's ordinary poll doubles as an assertion about the
 	// deployment's shape: the throttles that protect every public route key on this
@@ -266,7 +266,7 @@ type sessionCounts struct {
 	// the two never overlap: warm = not yet due, overdue = past due.
 	Warm int `json:"warm"`
 	// Warm-margin health, so the watchdog can catch a reconnect-backlog forming
-	// (e.g. a council outage stalling warms near the idle cliff) BEFORE sessions
+	// (e.g. a tenant outage stalling warms near the idle cliff) BEFORE sessions
 	// lapse en masse. OverdueWarm: past their warm deadline. NearExpiry: within
 	// expiryWarningMargin of the estimated idle cliff — 0 in healthy operation.
 	// MinMargin: the worst session's remaining seconds to the cliff (negative =
@@ -278,7 +278,7 @@ type sessionCounts struct {
 	MinMarginSeconds *int `json:"min_margin_seconds,omitempty"`
 	// Session-lifecycle churn over the last hour, scheduler-observed. A healthy fleet
 	// re-authenticates almost never, so a nonzero — and especially a rising — value is
-	// the canary for a council-side DEFAULT change (a shortened idle window, cookie
+	// the canary for a tenant-side DEFAULT change (a shortened idle window, cookie
 	// rotation, or silent-renew disabled): none of those alter response shape, so no
 	// other metric would surface them. ExpiredOwners1h is the DISTINCT-owner count,
 	// the systemic signal the operator alert also fires on.
@@ -294,7 +294,7 @@ type sessionCounts struct {
 	ReconnectOldestSeconds int `json:"reconnect_oldest_seconds"`
 }
 
-// councilSessionCounts aggregates warm/expiry-margin health from the live sessions.
+// tenantSessionCounts aggregates warm/expiry-margin health from the live sessions.
 // estimated_expiry = updated_at + idleWindow, so margin = idleWindow - age. A
 // healthy fleet keeps min-margin near (idleWindow - warmInterval) and NearExpiry at
 // zero; a stalled warm loop makes margins shrink and NearExpiry climb.
@@ -305,7 +305,7 @@ type sessionCounts struct {
 // as a perpetual alarm. NearExpiry uses expiryWarningMargin,
 // kept independent of warmInterval so raising the warm interval does not flag healthy
 // sessions hours before their renew is even due.
-func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmInterval, idleWindow, expiryWarningMargin time.Duration, warmed map[string]struct{}) sessionCounts {
+func tenantSessionCounts(sessions []store.TenantSession, now time.Time, warmInterval, idleWindow, expiryWarningMargin time.Duration, warmed map[string]struct{}) sessionCounts {
 	sc := sessionCounts{}
 	haveMargin := false
 	var minMargin time.Duration
@@ -345,11 +345,11 @@ func councilSessionCounts(sessions []store.CouncilSession, now time.Time, warmIn
 	return sc
 }
 
-// councilStatus is the outbound-council health for the watchdog. The rate windows
+// tenantStatus is the outbound-tenant health for the watchdog. The rate windows
 // answer "what rate was the council seeing when it began refusing us"; the pushback
 // fields say WHICH control fired; the breaker fields say whether we are paused; and
 // persist_ok says whether a restart would still honour that pause.
-type councilStatus struct {
+type tenantStatus struct {
 	Requests1m         int    `json:"requests_1m"`
 	Requests5m         int    `json:"requests_5m"`
 	PushbacksTotal     uint64 `json:"pushbacks_total"`
@@ -363,7 +363,7 @@ type councilStatus struct {
 	// LastPushbackSurface says whether the refusal hit login, auth or API traffic —
 	// the difference between "our credentials are being throttled" and "our reads are".
 	LastPushbackSurface string `json:"last_pushback_surface,omitempty"`
-	// TruncatedGrid* report the last time the council returned fewer permits than it
+	// TruncatedGrid* report the last time the tenant returned fewer permits than it
 	// said it had. That means it has started paging and we are acting on partial lists,
 	// which the watchdog must be able to alert on: the app log alone loses the evidence
 	// on restart, and a stable first page would hide missing permits indefinitely.
@@ -417,7 +417,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		}
 		roster = s.enrichRoster(r.Context(), roster)
 	}
-	sessions, err := s.store.ListCouncilSessions(r.Context())
+	sessions, err := s.store.ListTenantSessions(r.Context())
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -428,7 +428,7 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	counts := councilSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, warmed)
+	counts := tenantSessionCounts(sessions, now, s.cfg.Council.WarmInterval, s.cfg.Council.IdleWindow, s.cfg.Council.ExpiryWarningMargin, warmed)
 	counts.Expiries1h, counts.Reconnects1h, counts.ExpiredOwners1h = s.sched.SessionChurn()
 	counts.ReconnectQueued, counts.ReconnectDue, counts.ReconnectOldestSeconds = s.sched.ReconnectBacklog()
 	last := s.sched.LastReconcile()
@@ -442,8 +442,8 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 			IP:        clientIP(r),
 			EdgeProxy: noteEdgeProxy(r),
 		},
-		Council:  s.councilSnapshot(),
-		Councils: s.councilBreakdowns(sessions),
+		Tenant:        s.tenantSnapshot(),
+		TenantOptions: s.tenantBreakdowns(sessions),
 	}
 	if wantRoster {
 		// A missing or malformed ROSTER_KEY makes this fail, which is the correct
@@ -467,30 +467,30 @@ func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// councilBreakdown is one council's slice of the status page.
-type councilBreakdown struct {
-	Linked int           `json:"linked"`
-	Health councilStatus `json:"health"`
+// tenantBreakdown is one tenant's slice of the status page.
+type tenantBreakdown struct {
+	Linked int          `json:"linked"`
+	Health tenantStatus `json:"health"`
 }
 
-// perCouncil is what a multi-council client exposes for the breakdown.
-type perCouncil interface {
+// perTenant is what a multi-tenant client exposes for the breakdown.
+type perTenant interface {
 	IDs() []string
 	Client(id string) (*parking.Client, bool)
 }
 
-// councilBreakdowns builds the per-council section when the client is a mux.
-func (s *Server) councilBreakdowns(sessions []store.CouncilSession) map[string]councilBreakdown {
-	pc, ok := s.council.(perCouncil)
+// tenantBreakdowns builds the per-tenant section when the client is a mux.
+func (s *Server) tenantBreakdowns(sessions []store.TenantSession) map[string]tenantBreakdown {
+	pc, ok := s.tenant.(perTenant)
 	if !ok {
 		return nil
 	}
-	out := map[string]councilBreakdown{}
+	out := map[string]tenantBreakdown{}
 	for _, id := range pc.IDs() {
 		c, _ := pc.Client(id)
-		b := councilBreakdown{Health: councilStatusFrom(c.Stats())}
+		b := tenantBreakdown{Health: tenantStatusFrom(c.Stats())}
 		for _, cs := range sessions {
-			if cs.CouncilID == id && cs.Cookie != "" {
+			if cs.TenantID == id && cs.Cookie != "" {
 				b.Linked++
 			}
 		}
@@ -499,20 +499,20 @@ func (s *Server) councilBreakdowns(sessions []store.CouncilSession) map[string]c
 	return out
 }
 
-// councilSnapshot returns the council-health section, nil-safe for tests that
-// construct a Server without a council client (production always has one).
-func (s *Server) councilSnapshot() councilStatus {
-	if s.council == nil {
-		return councilStatus{PersistOK: true}
+// tenantSnapshot returns the tenant-health section, nil-safe for tests that
+// construct a Server without a tenant client (production always has one).
+func (s *Server) tenantSnapshot() tenantStatus {
+	if s.tenant == nil {
+		return tenantStatus{PersistOK: true}
 	}
-	return councilStatusFrom(s.council.Stats())
+	return tenantStatusFrom(s.tenant.Stats())
 }
 
-// councilStatusFrom maps the council client's Stats snapshot onto the /status
+// tenantStatusFrom maps the tenant client's Stats snapshot onto the /status
 // shape, converting the breaker's remaining pause to whole seconds and rendering
 // timestamps as RFC3339.
-func councilStatusFrom(st parking.Stats) councilStatus {
-	cs := councilStatus{
+func tenantStatusFrom(st parking.Stats) tenantStatus {
+	cs := tenantStatus{
 		Requests1m:          st.LastMinute,
 		Requests5m:          st.Last5Min,
 		PushbacksTotal:      st.Pushback,
@@ -576,7 +576,7 @@ const rosterChangeHorizon = 48 * time.Hour
 // enrichRoster applies the model-level half of the roster policy: drop owners
 // whose permits are ALL dead (a cancelled permit is nothing an outage can
 // break), and stamp each survivor with when their schedule next requires a
-// council write, so the watchdog can warn exactly the households whose change
+// tenant write, so the watchdog can warn exactly the households whose change
 // an outage has actually cost.
 //
 // Read errors fail OPEN on membership — an entry we cannot evaluate stays in,
@@ -647,15 +647,15 @@ func sealRoster(key []byte, roster []store.RosterEntry) (string, error) {
 	return box.Seal(string(plain))
 }
 
-// councilRowStatus classifies one account's council connection for the admin table,
+// tenantRowStatus classifies one account's tenant connection for the admin table,
 // returning the status key, its label, and whether it warrants operator attention.
 // keptWarm is whether the owner manages a permit: only those sessions are kept
 // warm, so only they can be "stale" — an owner with no permit ages as expected,
-// not a fault (this mirrors what councilSessionCounts reports on /status). The re-link
+// not a fault (this mirrors what tenantSessionCounts reports on /status). The re-link
 // bound is idle-based (see idleSince); warmStaleAfter is the keep-warm renew deadline,
 // derived from the configured idle window and interval rather than a fixed constant so
 // it tracks WARM_INTERVAL instead of flagging healthy sessions between renews.
-func councilRowStatus(a store.AdminAccount, keptWarm bool, now time.Time, maxAge, warmStaleAfter time.Duration) (status, label string, attention bool) {
+func tenantRowStatus(a store.AdminAccount, keptWarm bool, now time.Time, maxAge, warmStaleAfter time.Duration) (status, label string, attention bool) {
 	switch {
 	case !a.Linked:
 		return "unlinked", "Not linked", false

@@ -74,7 +74,7 @@ func liveClient(t *testing.T) (*Client, *secretbox.Box, *store.Store) {
 	return New(cfg, st, box), box, st
 }
 
-// TestLiveMeasureIdleTimeout empirically brackets the council session cookie's
+// TestLiveMeasureIdleTimeout empirically brackets the tenant session cookie's
 // idle (sliding) timeout, the number that should drive COUNCIL_WARM_INTERVAL.
 // Keep-warm exists only to touch the cookie before it lapses from disuse, so the
 // cheapest safe interval is a large fraction of this timeout; 45m was a
@@ -88,7 +88,7 @@ func liveClient(t *testing.T) (*Client, *secretbox.Box, *store.Store) {
 // and this gap. It logs every probe with an absolute clock time so progress is
 // legible in a long unattended run.
 //
-// Preferred (isolated, survives you using the council site in a browser):
+// Preferred (isolated, survives you using the tenant site in a browser):
 //
 //	PSTONN_LIVE_USERNAME=you@example.com PSTONN_LIVE_PASSWORD=… \
 //	PSTONN_PROBE_START=1h PSTONN_PROBE_FACTOR=1.5 PSTONN_PROBE_MAX=14h \
@@ -132,7 +132,7 @@ func TestLiveMeasureIdleTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed}); err != nil {
+		if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: owner, Cookie: sealed}); err != nil {
 			t.Fatal(err)
 		}
 		if err := c.Refresh(ctx, owner); err != nil {
@@ -189,16 +189,16 @@ func envFloatTest(t *testing.T, key string, def float64) float64 {
 }
 
 // TestLiveReadFlow exercises the real, end-to-end read path against the live
-// council site THROUGH the production code: seed a session cookie, then call
+// tenant site THROUGH the production code: seed a session cookie, then call
 // ListPermits, which forces accessToken → silentRenew (prompt=none authorize
 // with the cookie → code → /connect/token) → the /ssp-svc/api call. It then
 // reads CurrentVehicle for the first permit. It is READ-ONLY; it never calls
-// SetVehicle, so nothing on the council record changes.
+// SetVehicle, so nothing on the tenant record changes.
 //
 // Runs only when PSTONN_LIVE_COOKIE is set to a current session-cookie header,
 // e.g. "idsrv.session=...; Permits.IDM.Identity=...".
 // TestLiveLinkLogin exercises the real headless onboarding against the live
-// site: it logs in with the user's council credentials (Link), which stores a
+// site: it logs in with the user's tenant credentials (Link), which stores a
 // session cookie and discards the password, then proves the stored cookie works
 // by minting a token via silent-renew and listing permits. Credentials are read
 // from the environment and never persisted.
@@ -256,7 +256,7 @@ func TestLiveLinkLogin(t *testing.T) {
 
 // TestLiveSetVehicle exercises the real WRITE path against the live site: it
 // reallocates the visitor permit (VPP24714) to PSTONN_LIVE_SET_REGO, then reads
-// back to confirm. This MUTATES a live council record, it runs only when both
+// back to confirm. This MUTATES a live tenant record, it runs only when both
 // PSTONN_LIVE_COOKIE and PSTONN_LIVE_SET_REGO are set.
 func TestLiveSetVehicle(t *testing.T) {
 	cookie := os.Getenv("PSTONN_LIVE_COOKIE")
@@ -288,7 +288,7 @@ func TestLiveSetVehicle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: owner, Cookie: sealed}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,7 +321,7 @@ func kickKey(dbPath string) []byte {
 	return sum[:]
 }
 
-// TestLiveSessionKick answers, experimentally: does logging in to the council
+// TestLiveSessionKick answers, experimentally: does logging in to the tenant
 // ePermits site directly invalidate the session p.stonn is holding? (The
 // suspected cause of the prod disconnect.) It runs in TWO phases against a
 // PERSISTENT DB so you can do a real browser login in between. Run BOTH commands
@@ -333,7 +333,7 @@ func kickKey(dbPath string) []byte {
 //	PSTONN_KICK_DB=/tmp/kick.db PSTONN_KICK_PHASE=link \
 //	  go test ./internal/parking -run TestLiveSessionKick -count=1 -v
 //
-// Then, as the SAME council user, log in at
+// Then, as the SAME tenant user, log in at
 // https://parkingpermits.stonnington.vic.gov.au in a browser and finish the login.
 //
 // Phase 2 — re-probe the SAME stored session (no credentials needed):
@@ -438,7 +438,7 @@ func TestLiveReadFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: sealed}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: owner, Cookie: sealed}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -469,7 +469,7 @@ func TestLiveReadFlow(t *testing.T) {
 // the prompt=none AUTHORIZE step alone slide the session cookie, so keep-warm can
 // drop the token exchange (halving its request count)? The mechanism is provable
 // from the code — the rotated cookie is captured from the authorize response, not
-// the token exchange — but this confirms it end to end against the live council:
+// the token exchange — but this confirms it end to end against the live tenant:
 // two authorize-only warms in a row succeed, and the slid cookie is still valid for
 // a full renew (real work). READ-ONLY: no permit is touched.
 //
@@ -545,7 +545,7 @@ func TestLiveAuthorizeOnlyWarm(t *testing.T) {
 // clock, so the idle gap grows; the first provider.ErrSessionExpired brackets the window
 // between the last success and the failing gap.
 //
-// Preferred (isolated — survives you using the council site in a browser):
+// Preferred (isolated — survives you using the tenant site in a browser):
 //
 //	PSTONN_LIVE_USERNAME=you@example.com PSTONN_LIVE_PASSWORD=… \
 //	PSTONN_PROBE_START=1h30m PSTONN_PROBE_FACTOR=1.3 PSTONN_PROBE_MAX=8h \

@@ -1,4 +1,4 @@
-// Package parking is the per-app-user council client: everything about talking
+// Package parking is the per-app-user tenant client: everything about talking
 // to a permit backend that is NOT the backend's protocol. It holds each user's
 // sealed session material, keeps it fresh, caches plate readings, backs off per
 // owner when the portal pushes back, pauses the whole fleet when the shared egress
@@ -49,10 +49,10 @@ var (
 )
 
 type (
-	FailureKind  = provider.FailureKind
-	CouncilError = provider.Error
-	PermitInfo   = provider.Permit
-	Op           = provider.Op
+	FailureKind = provider.FailureKind
+	TenantError = provider.Error
+	PermitInfo  = provider.Permit
+	Op          = provider.Op
 )
 
 const (
@@ -70,17 +70,17 @@ type Client struct {
 	p     provider.Provider
 	store *store.Store
 	box   *secretbox.Box
-	// CouncilID names the council this client serves; it keys the persisted
+	// TenantID names the tenant this client serves; it keys the persisted
 	// breaker state and is stamped on sessions this client links.
-	CouncilID string
+	TenantID string
 
-	regCache   sync.Map // regKey -> cachedReg, to bound council reads
+	regCache   sync.Map // regKey -> cachedReg, to bound tenant reads
 	regRefresh sync.Map // regKey -> struct{}, dedupes in-flight background plate refreshes
 	regFail    sync.Map // regKey -> time.Time, start of the current refresh-failure streak
 	// OnSessionExpired, when set (main wires it to the scheduler's reconnect queue),
 	// is called whenever a BACKGROUND read discovers the session is dead. Called
 	// from refresh goroutines: must be safe for concurrent use and cheap on repeats.
-	OnSessionExpired func(owner, councilID string, gen int64)
+	OnSessionExpired func(owner, tenantID string, gen int64)
 	// regGen is a per-key generation, bumped by ForgetPermit, so a plate read that
 	// was already in flight when a permit was removed cannot resurrect the cache
 	// entry afterwards. Guarded by regGenMu (writes only; reads stay lock-free).
@@ -88,7 +88,7 @@ type Client struct {
 	regGen   map[regKey]uint64
 	traffic  *trafficCounters
 
-	ownerLocks    sync.Map   // owner -> *sync.Mutex, serialises every council call per owner
+	ownerLocks    sync.Map   // owner -> *sync.Mutex, serialises every tenant call per owner
 	cooldownUntil sync.Map   // owner -> time.Time, soft-block backoff deadline
 	strikes       sync.Map   // owner -> int, consecutive soft blocks (backoff growth)
 	strikeMu      sync.Mutex // serialises the strike read-modify-write in penalize
@@ -119,17 +119,17 @@ type cachedReg struct {
 }
 
 // regKey identifies a cached plate reading. The owner is part of the key because
-// a council permit can change hands (a household permit is often visible to two
-// council logins): keyed on the permit alone, the new holder was served the
+// a tenant permit can change hands (a household permit is often visible to two
+// tenant logins): keyed on the permit alone, the new holder was served the
 // previous holder's cached plate — a wrong plate is a real parking fine.
 type regKey struct {
 	owner    string
 	permitID string
 }
 
-// New builds a Client for the council the process is configured for — the Orikan
+// New builds a Client for the tenant the process is configured for — the Orikan
 // provider from COUNCIL_* config, or the in-memory fake under COUNCIL_SANDBOX —
-// with a governed transport sized from the same config. Multi-council wiring
+// with a governed transport sized from the same config. Multi-tenant wiring
 // builds providers and clients explicitly via NewClient.
 func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
 	tr := NewTransport(LimitsFromConfig(cfg.Council))
@@ -152,13 +152,13 @@ func NewClient(p provider.Provider, st *store.Store, box *secretbox.Box, tr *Tra
 	return NewClientFor("", p, st, box, tr)
 }
 
-// NewClientFor is NewClient for a named council (see Client.CouncilID).
-func NewClientFor(councilID string, p provider.Provider, st *store.Store, box *secretbox.Box, tr *Transport) *Client {
+// NewClientFor is NewClient for a named tenant (see Client.TenantID).
+func NewClientFor(tenantID string, p provider.Provider, st *store.Store, box *secretbox.Box, tr *Transport) *Client {
 	c := &Client{
-		CouncilID: councilID,
-		p:         p,
-		store:     st,
-		box:       box,
+		TenantID: tenantID,
+		p:        p,
+		store:    st,
+		box:      box,
 		breaker: newBreaker(defaultBreakerThreshold, defaultBreakerWindow,
 			defaultBreakerCooldown, defaultBreakerProbe),
 		loginFlow: make(chan struct{}, 1),
@@ -171,7 +171,7 @@ func NewClientFor(councilID string, p provider.Provider, st *store.Store, box *s
 	// Restore a persisted breaker pause: if a block was in force when this process
 	// last stopped, resume paused rather than resuming full traffic into the block.
 	if st != nil {
-		if bs, err := st.LoadBreakerState(context.Background(), councilID); err == nil {
+		if bs, err := st.LoadBreakerState(context.Background(), tenantID); err == nil {
 			c.breaker.restore(bs.OpenUntil, bs.LastPushback, bs.Generation)
 			if bs.OpenUntil.After(time.Now()) {
 				log.Printf("parking: fleet circuit restored OPEN from persisted state (paused %s) — a block survived a restart", time.Until(bs.OpenUntil).Round(time.Second))
@@ -219,7 +219,7 @@ func (c *Client) persistBreaker() {
 	openUntil, lastPushback, gen := c.breaker.snapshot()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	err := c.store.SaveBreakerState(ctx, c.CouncilID, store.BreakerState{
+	err := c.store.SaveBreakerState(ctx, c.TenantID, store.BreakerState{
 		OpenUntil: openUntil, LastPushback: lastPushback, Generation: gen,
 	})
 	c.persistMu.Lock()
@@ -246,7 +246,7 @@ type legacyImporter interface {
 
 // Linked reports whether the app user has stored session material.
 func (c *Client) Linked(ctx context.Context, owner string) bool {
-	cs, err := c.store.GetCouncilSessionIn(ctx, owner, c.CouncilID)
+	cs, err := c.store.GetTenantSessionIn(ctx, owner, c.TenantID)
 	return err == nil && cs.Cookie != ""
 }
 
@@ -254,8 +254,8 @@ func (c *Client) Linked(ctx context.Context, owner string) bool {
 // key no longer matches the sealed data (e.g. DATA_ENCRYPTION_KEY was rotated), so
 // the material is permanently unusable: mapped to ErrSessionExpired, which retires
 // the session and prompts a re-link rather than failing silently every tick.
-func (c *Client) openSession(owner string, cs store.CouncilSession) (provider.Session, error) {
-	plain, legacy, err := c.box.OpenCtx(secretbox.CouncilCookie(owner), cs.Cookie)
+func (c *Client) openSession(owner string, cs store.TenantSession) (provider.Session, error) {
+	plain, legacy, err := c.box.OpenCtx(secretbox.TenantCookie(owner), cs.Cookie)
 	if legacy {
 		log.Printf("parking: session for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", redact.Email(owner))
 	}
@@ -274,7 +274,7 @@ func (c *Client) openSession(owner string, cs store.CouncilSession) (provider.Se
 	}
 	token := ""
 	if cs.AccessToken != "" {
-		if at, _, err := c.box.OpenCtx(secretbox.CouncilToken(owner), cs.AccessToken); err == nil {
+		if at, _, err := c.box.OpenCtx(secretbox.TenantToken(owner), cs.AccessToken); err == nil {
 			token = at
 		}
 	}
@@ -282,7 +282,7 @@ func (c *Client) openSession(owner string, cs store.CouncilSession) (provider.Se
 }
 
 func (c *Client) sealSession(owner string, s provider.Session) (string, error) {
-	return c.box.SealCtx(secretbox.CouncilCookie(owner), sessionPrefix+string(s))
+	return c.box.SealCtx(secretbox.TenantCookie(owner), sessionPrefix+string(s))
 }
 
 func (c *Client) ownerLock(owner string) *sync.Mutex {
@@ -306,14 +306,14 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 	lock.Lock()
 	defer lock.Unlock()
 
-	cs, err := c.store.GetCouncilSessionIn(ctx, owner, c.CouncilID)
+	cs, err := c.store.GetTenantSessionIn(ctx, owner, c.TenantID)
 	if err != nil || cs.Cookie == "" {
 		return ErrNotLinked
 	}
-	// This client speaks to ONE council. Session material stamped for another
+	// This client speaks to ONE tenant. Session material stamped for another
 	// must never be handed to this provider (a cookie or saved password replayed
 	// at the wrong portal), however the routing above resolved the owner.
-	if cs.CouncilID != "" && c.CouncilID != "" && cs.CouncilID != c.CouncilID {
+	if cs.TenantID != "" && c.TenantID != "" && cs.TenantID != c.TenantID {
 		return ErrNotLinked
 	}
 	if d, blocked := c.cooldownFor(owner); blocked {
@@ -348,7 +348,7 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 		// Conditioned on the generation the operation started from: a re-link that
 		// landed meanwhile holds a DIFFERENT, valid session, and writing the older
 		// material over it would silently undo the user's re-link.
-		if err := c.store.UpdateCouncilCookie(ctx, owner, c.CouncilID, sealed, cs.Generation); err != nil {
+		if err := c.store.UpdateTenantCookie(ctx, owner, c.TenantID, sealed, cs.Generation); err != nil {
 			if errors.Is(err, store.ErrSessionSuperseded) {
 				log.Printf("parking: session for %s was re-linked during an operation; keeping the newer one", redact.Email(owner))
 				return nil
@@ -366,7 +366,7 @@ func (c *Client) classify(owner string, permit breakerPermit, err error) {
 	switch {
 	case err == nil:
 		c.clearPenalty(owner)
-		c.noteCouncilSuccess(owner, permit) // closes the circuit only if this was the probe
+		c.noteTenantSuccess(owner, permit) // closes the circuit only if this was the probe
 	case errors.As(err, &u):
 		c.recordPushback(u)
 		c.penalize(owner, u.RetryAfter)
@@ -411,13 +411,13 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	}
 	var sealedPass string
 	if savePassword {
-		if sealedPass, err = c.box.SealCtx(secretbox.CouncilPassword(owner), password); err != nil {
+		if sealedPass, err = c.box.SealCtx(secretbox.TenantPassword(owner), password); err != nil {
 			return err
 		}
 	}
-	cs := store.CouncilSession{Owner: owner, CouncilID: c.CouncilID, CouncilEmail: username, Cookie: sealed, Password: sealedPass}
+	cs := store.TenantSession{Owner: owner, TenantID: c.TenantID, TenantEmail: username, Cookie: sealed, Password: sealedPass}
 	if interactive {
-		return c.store.SaveCouncilSession(ctx, cs) // stamps linked_at = now, bumps generation
+		return c.store.SaveTenantSession(ctx, cs) // stamps linked_at = now, bumps generation
 	}
 	// Auto-reconnect: persist ONLY if the session is still at expectedGen. If the user
 	// relinked or opted out of saved-password recovery during our login, the write
@@ -438,17 +438,17 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	if c.Capabilities().LoginKind != "password" {
 		return ErrUnsupported
 	}
-	cs, err := c.store.GetCouncilSessionIn(ctx, owner, c.CouncilID)
+	cs, err := c.store.GetTenantSessionIn(ctx, owner, c.TenantID)
 	if err != nil {
 		return err
 	}
 	if cs.Password == "" {
 		return ErrNoSavedPassword
 	}
-	if cs.CouncilID != "" && c.CouncilID != "" && cs.CouncilID != c.CouncilID {
-		return ErrNotLinked // never replay a saved password at another council's portal
+	if cs.TenantID != "" && c.TenantID != "" && cs.TenantID != c.TenantID {
+		return ErrNotLinked // never replay a saved password at another tenant's portal
 	}
-	password, legacy, err := c.box.OpenCtx(secretbox.CouncilPassword(owner), cs.Password)
+	password, legacy, err := c.box.OpenCtx(secretbox.TenantPassword(owner), cs.Password)
 	if legacy {
 		log.Printf("parking: saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", redact.Email(owner))
 	}
@@ -459,9 +459,9 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 		log.Printf("parking: unseal saved password for %s failed (%v); treating as no saved password (manual re-link required)", redact.Email(owner), err)
 		return ErrNoSavedPassword
 	}
-	username := cs.CouncilEmail
+	username := cs.TenantEmail
 	if username == "" {
-		username = owner // the council username is pinned to the owner's verified email
+		username = owner // the tenant username is pinned to the owner's verified email
 	}
 	return c.Link(ctx, owner, username, password, true, false, cs.Generation)
 }
@@ -484,11 +484,11 @@ func (c *Client) Refresh(ctx context.Context, owner string) error {
 
 func ref(p model.Permit) provider.PermitRef { return provider.PermitRef{ID: p.CouncilPermitID} }
 
-// permitMine refuses a permit filed under another council: the ids overlap
+// permitMine refuses a permit filed under another tenant: the ids overlap
 // between portals, so acting on it here would address a stranger's permit.
 func (c *Client) permitMine(p model.Permit) error {
-	if p.CouncilID != "" && c.CouncilID != "" && p.CouncilID != c.CouncilID {
-		return fmt.Errorf("%w: permit belongs to council %q, this client serves %q", ErrNotLinked, p.CouncilID, c.CouncilID)
+	if p.TenantID != "" && c.TenantID != "" && p.TenantID != c.TenantID {
+		return fmt.Errorf("%w: permit belongs to council %q, this client serves %q", ErrNotLinked, p.TenantID, c.TenantID)
 	}
 	return nil
 }
@@ -538,7 +538,7 @@ func (c *Client) CurrentVehicle(ctx context.Context, owner string, p model.Permi
 // SetVehicle reallocates the permit to the given registration, the core action.
 // The provider confirms the change against the portal's own record before
 // reporting success, so every state we then show or store reflects what the
-// council actually has.
+// tenant actually has.
 func (c *Client) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
 	if err := c.permitMine(p); err != nil {
 		return err
@@ -613,14 +613,14 @@ func SessionGenOf(err error) (int64, bool) {
 
 // ---- plate cache ----
 
-// ErrNoCachedPlate means no plate has been fetched from the council yet for this
+// ErrNoCachedPlate means no plate has been fetched from the tenant yet for this
 // permit; a background refresh has been started and the caller should fall back
 // to its stored belief for now.
 var ErrNoCachedPlate = errors.New("parking: no cached plate yet")
 
-// CurrentVehicleCached returns the permit's plate as last fetched from the council,
+// CurrentVehicleCached returns the permit's plate as last fetched from the tenant,
 // refreshing in the background once the value is older than maxAge. It NEVER calls
-// the council synchronously: a page render must not block on a slow portal. A stale
+// the tenant synchronously: a page render must not block on a slow portal. A stale
 // value is served while one refresh per permit runs; fresh reports whether the value
 // is within maxAge, and age is how old the reading actually is.
 func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, age time.Duration, fresh bool, err error) {
@@ -640,8 +640,8 @@ func (c *Client) CurrentVehicleCached(ctx context.Context, owner string, p model
 
 // ForgetPermit drops an owner's cached plate for a permit. Call it when the app
 // stops managing the permit: the cache is otherwise never evicted.
-func (c *Client) ForgetPermit(owner, councilPermitID string) {
-	key := regKey{owner, councilPermitID}
+func (c *Client) ForgetPermit(owner, tenantPermitID string) {
+	key := regKey{owner, tenantPermitID}
 	c.regGenMu.Lock()
 	if c.regGen == nil {
 		c.regGen = map[regKey]uint64{}
@@ -701,7 +701,7 @@ func (c *Client) noteExpired(owner string, err error) {
 		return
 	}
 	if gen, ok := SessionGenOf(err); ok {
-		c.OnSessionExpired(owner, c.CouncilID, gen)
+		c.OnSessionExpired(owner, c.TenantID, gen)
 	}
 }
 
@@ -714,7 +714,7 @@ func (c *Client) RefreshFailingFor(owner string, p model.Permit) time.Duration {
 	return 0
 }
 
-// noteTruncatedGrid records that the council returned fewer permits than it
+// noteTruncatedGrid records that the tenant returned fewer permits than it
 // claimed, for the status page. Last-one-wins: a shape signal, not a tally.
 func (c *Client) noteTruncatedGrid(got, want int) {
 	c.truncMu.Lock()

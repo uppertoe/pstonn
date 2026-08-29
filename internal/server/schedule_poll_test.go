@@ -2,8 +2,8 @@ package server
 
 import "testing"
 
-// armPlatePoll is the guard that lets a just-made change (and a slow cold council
-// read) refresh into the card without letting a council outage poll forever. All the
+// armPlatePoll is the guard that lets a just-made change (and a slow cold tenant
+// read) refresh into the card without letting a tenant outage poll forever. All the
 // halves matter, so they are pinned here.
 func TestArmPlatePoll(t *testing.T) {
 	cap := len(platePollDelays)
@@ -71,7 +71,7 @@ func TestArmPlatePoll(t *testing.T) {
 }
 
 // TestPlatePollSurvivesSlowColdRead pins the reason the backoff exists: the poll must
-// outlast a cold council read (an idle-day cache miss that silent-renews an expired
+// outlast a cold tenant read (an idle-day cache miss that silent-renews an expired
 // token, then reads — each attempt up to ~25s, occasionally slow). The old flat 5s×10
 // gave ~50s, which barely fitted two attempts; the window must now cover several
 // minutes so a slow read lands instead of freezing the spinner.

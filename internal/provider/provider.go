@@ -8,9 +8,9 @@
 // once in the generic client (internal/parking) and is shared by every provider.
 //
 // Wording is deliberately absent here. A provider never composes a sentence for a
-// person: it returns a kind, an operation and an optional council-supplied detail,
+// person: it returns a kind, an operation and an optional tenant-supplied detail,
 // and the UI/notification layer chooses words for them (see the i18n section of
-// docs/council-connections.md). That is what lets a second backend be a genuine
+// docs/tenant-connections.md). That is what lets a second backend be a genuine
 // test of the architecture rather than a fork of the application.
 package provider
 
@@ -49,7 +49,7 @@ type Permit struct {
 	CurrentRego      string // the plate currently on the permit ("" = none)
 	StartDate        time.Time
 	EndDate          time.Time
-	CanChangeVehicle bool // the holder may change the vehicle (per permit type — council config)
+	CanChangeVehicle bool // the holder may change the vehicle (per permit type — tenant config)
 	IsCoHolder       bool
 }
 
@@ -192,7 +192,7 @@ const (
 	FailUnexpected
 )
 
-// Error is a classified failure. Detail is council-supplied text (already
+// Error is a classified failure. Detail is tenant-supplied text (already
 // sanitised by the provider) that may be shown to the person because it is the
 // only thing that says what to fix ("Vehicle Registration has invalid pattern");
 // "" when there is none. Err is the cause, for logs.
@@ -216,7 +216,7 @@ func Fail(kind FailureKind, op Op, err error) error {
 	return &Error{Kind: kind, Op: op, Err: err}
 }
 
-// FailDetail builds a classified error carrying council-supplied detail.
+// FailDetail builds a classified error carrying tenant-supplied detail.
 func FailDetail(kind FailureKind, op Op, detail string, err error) error {
 	return &Error{Kind: kind, Op: op, Detail: detail, Err: err}
 }
@@ -232,7 +232,7 @@ func FailureOf(err error) (FailureKind, Op) {
 	return FailTransient, OpUnknown
 }
 
-// DetailOf returns the council-supplied detail on a classified error, or "".
+// DetailOf returns the tenant-supplied detail on a classified error, or "".
 func DetailOf(err error) string {
 	var e *Error
 	if errors.As(err, &e) {

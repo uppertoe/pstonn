@@ -6,7 +6,7 @@ import (
 )
 
 // TestAttemptForStaleness: the poll budget must resume from the reading's real
-// age, so a page reload during a council outage cannot reset the spinner — the
+// age, so a page reload during a tenant outage cannot reset the spinner — the
 // gap that made the honest "couldn't confirm" mark effectively unreachable
 // (only a tab left open for the whole ~5-minute budget ever saw it).
 func TestAttemptForStaleness(t *testing.T) {

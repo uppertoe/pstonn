@@ -1,4 +1,4 @@
-package council
+package tenant
 
 import (
 	"context"
@@ -33,13 +33,13 @@ func muxRig(t *testing.T, ids ...string) (*Mux, *store.Store, map[string]*fake.P
 	return NewMux(st, clients), st, fakes
 }
 
-func TestMuxRoutesByAccountCouncil(t *testing.T) {
+func TestMuxRoutesByAccountTenant(t *testing.T) {
 	ctx := context.Background()
 	m, st, fakes := muxRig(t, "stonnington", "othertown")
-	if err := st.SetAccountCouncil(ctx, "a@example.com", "othertown"); err != nil {
+	if err := st.SetAccountTenant(ctx, "a@example.com", "othertown"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetAccountCouncil(ctx, "b@example.com", "stonnington"); err != nil {
+	if err := st.SetAccountTenant(ctx, "b@example.com", "stonnington"); err != nil {
 		t.Fatal(err)
 	}
 	for _, o := range []string{"a@example.com", "b@example.com"} {
@@ -47,9 +47,9 @@ func TestMuxRoutesByAccountCouncil(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Sessions are stamped with the client's council.
-	if cs, _ := st.GetCouncilSession(ctx, "a@example.com"); cs.CouncilID != "othertown" {
-		t.Fatalf("a's session filed under %q", cs.CouncilID)
+	// Sessions are stamped with the client's tenant.
+	if cs, _ := st.GetTenantSession(ctx, "a@example.com"); cs.TenantID != "othertown" {
+		t.Fatalf("a's session filed under %q", cs.TenantID)
 	}
 	// A write from a goes to othertown's portal, not stonnington's.
 	perm := model.Permit{CouncilPermitID: "90001"}
@@ -67,29 +67,29 @@ func TestMuxRoutesByAccountCouncil(t *testing.T) {
 	}
 }
 
-func TestMuxUnknownCouncilIsUnavailable(t *testing.T) {
+func TestMuxUnknownTenantIsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	m, st, _ := muxRig(t, "stonnington", "othertown")
-	if err := st.SetAccountCouncil(ctx, "z@example.com", "gone"); err != nil {
+	if err := st.SetAccountTenant(ctx, "z@example.com", "gone"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Link(ctx, "z@example.com", "", "z@example.com", "pw", false, true, 0); !errors.Is(err, ErrCouncilUnavailable) {
+	if err := m.Link(ctx, "z@example.com", "", "z@example.com", "pw", false, true, 0); !errors.Is(err, ErrTenantUnavailable) {
 		t.Fatalf("err = %v, want ErrCouncilUnavailable", err)
 	}
-	// With no choice and TWO councils there is no safe default either.
-	if err := m.Refresh(ctx, "new@example.com", ""); !errors.Is(err, ErrCouncilUnavailable) {
+	// With no choice and TWO registry there is no safe default either.
+	if err := m.Refresh(ctx, "new@example.com", ""); !errors.Is(err, ErrTenantUnavailable) {
 		t.Fatalf("no choice among several = %v", err)
 	}
 }
 
-func TestMuxSingleCouncilNeedsNoChoice(t *testing.T) {
+func TestMuxSingleTenantNeedsNoChoice(t *testing.T) {
 	ctx := context.Background()
 	m, st, _ := muxRig(t, "stonnington")
 	if err := m.Link(ctx, "solo@example.com", "", "solo@example.com", "pw", false, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	if cs, _ := st.GetCouncilSession(ctx, "solo@example.com"); cs.CouncilID != "stonnington" {
-		t.Fatalf("session filed under %q", cs.CouncilID)
+	if cs, _ := st.GetTenantSession(ctx, "solo@example.com"); cs.TenantID != "stonnington" {
+		t.Fatalf("session filed under %q", cs.TenantID)
 	}
 	if s := m.Stats(); !s.PersistOK {
 		t.Fatalf("aggregate stats: %+v", s)
@@ -103,7 +103,7 @@ func TestMuxTenantIsolationAcrossASwitch(t *testing.T) {
 	ctx := context.Background()
 	m, st, fakes := muxRig(t, "stonnington", "othertown")
 	const o = "mover@example.com"
-	if err := st.SetAccountCouncil(ctx, o, "stonnington"); err != nil {
+	if err := st.SetAccountTenant(ctx, o, "stonnington"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Link(ctx, o, "", o, "pw", false, true, 0); err != nil {
@@ -115,7 +115,7 @@ func TestMuxTenantIsolationAcrossASwitch(t *testing.T) {
 	}
 	perm, _ := st.GetPermit(ctx, pid)
 	// Switch the selection and link the second tenant: both sessions coexist.
-	if err := st.SetAccountCouncil(ctx, o, "othertown"); err != nil {
+	if err := st.SetAccountTenant(ctx, o, "othertown"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Link(ctx, o, "", o, "pw", false, true, 0); err != nil {
@@ -138,13 +138,13 @@ func TestMuxTenantIsolationAcrossASwitch(t *testing.T) {
 	if err := other.SetVehicle(ctx, o, perm, "BBB222"); !errors.Is(err, parking.ErrNotLinked) {
 		t.Fatalf("other tenant's client acted on a foreign permit: %v", err)
 	}
-	_ = st.SetAccountCouncil(ctx, "ghost@example.com", "gone")
+	_ = st.SetAccountTenant(ctx, "ghost@example.com", "gone")
 	if err := m.Refresh(ctx, "ghost@example.com", ""); !errors.Is(err, parking.ErrNotLinked) {
 		t.Fatalf("unavailable tenant = %v, want ErrNotLinked", err)
 	}
 }
 
-// Stats/Blocked aggregate across councils: push-back on one council opens its
+// Stats/Blocked aggregate across registry: push-back on one tenant opens its
 // breaker (three owners in the window) and the mux reports the fleet blocked,
 // the pushback total, and the most recent event.
 func TestMuxAggregatesHealth(t *testing.T) {
@@ -152,7 +152,7 @@ func TestMuxAggregatesHealth(t *testing.T) {
 	m, st, fakes := muxRig(t, "stonnington", "othertown")
 	fakes["othertown"].LoginErr = &provider.Unavailable{Status: 429, Surface: provider.SurfaceLogin, Ref: "ref-x"}
 	for _, o := range []string{"a@x", "b@x", "c@x"} {
-		_ = st.SetAccountCouncil(ctx, o, "othertown")
+		_ = st.SetAccountTenant(ctx, o, "othertown")
 		_ = m.Link(ctx, o, "", o, "pw", false, true, 0)
 	}
 	if !m.Blocked() {

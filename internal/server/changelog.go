@@ -13,7 +13,7 @@ import (
 // logged and swallowed rather than failing a request the user's data already
 // reflects.
 //
-// This exists because notifications only fire on council apply outcomes, which
+// This exists because notifications only fire on tenant apply outcomes, which
 // makes configuration changes invisible: clearing a roster day produces no apply
 // at all, so on a shared account there was no way to answer "who changed this?".
 func (s *Server) logChange(ctx context.Context, owner, actor, action, target, detail string) {

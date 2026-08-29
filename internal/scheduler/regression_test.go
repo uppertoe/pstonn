@@ -16,10 +16,10 @@ import (
 // (the notify delivery itself is async).
 func TestCheckDriftClearsNotifiedKey(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "drift@example.com", "drift-notify"
-	// Roster wants BBB222 and we believe BBB222, but the council shows AAA111: a resident
+	const owner, tenantID = "drift@example.com", "drift-notify"
+	// Roster wants BBB222 and we believe BBB222, but the tenant shows AAA111: a resident
 	// put the previous plate back in the portal.
-	st, _, _, s, pid := driftSetup(t, owner, councilID, "BBB222", "BBB222", "AAA111")
+	st, _, _, s, pid := driftSetup(t, owner, tenantID, "BBB222", "BBB222", "AAA111")
 	// Seed the fingerprint as though we had already notified for the AAA111->BBB222 apply.
 	if err := st.SetPermitNotifiedKey(ctx, pid, "success|AAA111>BBB222"); err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestCheckDriftClearsNotifiedKey(t *testing.T) {
 func TestSnapshotBacksOffOnFailure(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: &fakeNotifier{on: true, admin: true}})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: &fakeNotifier{on: true, admin: true}})
 	// A parent directory that does not exist makes store.Snapshot fail deterministically.
 	s.snapshotPath = filepath.Join(t.TempDir(), "no-such-dir", "snap.db")
 	s.lastSnapshot = time.Now().Add(-25 * time.Hour) // due for a daily snapshot

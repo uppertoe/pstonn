@@ -66,9 +66,9 @@ var catalog = i18n.Default()
 
 var templateFuncs = template.FuncMap{
 	"asset":     asset,
-	"guidesFor": guidesFor, // the council's guide pages, for the landing list
-	// T renders a catalog message for the page's locale and council: the page's
-	// data (which carries Council) is the message's data.
+	"guidesFor": guidesFor, // the tenant's guide pages, for the landing list
+	// T renders a catalog message for the page's locale and tenant: the page's
+	// data (which carries Tenant) is the message's data.
 	"T": func(key string, data any, slots ...i18n.Slots) (template.HTML, error) {
 		locale := i18n.DefaultLocale
 		if l, ok := data.(interface{ LocaleTag() string }); ok && l.LocaleTag() != "" {
@@ -77,7 +77,7 @@ var templateFuncs = template.FuncMap{
 		return catalog.For(locale).HTML(key, data, mergeSlots(slots))
 	},
 	// slots pairs names with the markup a message may wrap words in:
-	// (slots "reset" (link .Council.Links.ResetPassword `target="_blank"`)).
+	// (slots "reset" (link .Tenant.Links.ResetPassword `target="_blank"`)).
 	"slots": func(kv ...any) (i18n.Slots, error) {
 		if len(kv)%2 != 0 {
 			return nil, fmt.Errorf("slots: want name/slot pairs, got %d values", len(kv))

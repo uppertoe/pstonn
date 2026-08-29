@@ -152,7 +152,7 @@ func TestVehicleOwnedBy(t *testing.T) {
 }
 
 // TestUpsertPermitNoOwnerTakeover guards the permit-hijack fix: re-upserting an
-// existing council_permit_id under a different owner must NOT reassign ownership.
+// existing tenant_permit_id under a different owner must NOT reassign ownership.
 func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -166,7 +166,7 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	if _, err := s.UpsertPermit(ctx, bob, "14576", "14", "Bob steal"); !errors.Is(err, ErrDuplicate) {
 		t.Fatalf("foreign upsert = %v, want ErrDuplicate", err)
 	}
-	p, err := s.PermitInCouncil(ctx, "", "14576")
+	p, err := s.PermitInTenant(ctx, "", "14576")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	if _, err := s.UpsertPermit(ctx, alice, "14576", "14", "ignored on re-add"); err != nil {
 		t.Fatal(err)
 	}
-	if p, _ := s.PermitInCouncil(ctx, "", "14576"); p.Label != "Alice permit" {
+	if p, _ := s.PermitInTenant(ctx, "", "14576"); p.Label != "Alice permit" {
 		t.Fatalf("re-add should keep the existing label, got %q", p.Label)
 	}
 	// Renaming goes through SetPermitLabel, and only the owner may do it.
@@ -191,7 +191,7 @@ func TestUpsertPermitNoOwnerTakeover(t *testing.T) {
 	if err := s.SetPermitLabel(ctx, alice, p.ID, "Nanny"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.PermitInCouncil(ctx, "", "14576"); got.Label != "Nanny" {
+	if got, _ := s.PermitInTenant(ctx, "", "14576"); got.Label != "Nanny" {
 		t.Fatalf("SetPermitLabel did not apply: %+v", got)
 	}
 }
@@ -341,7 +341,7 @@ func TestAddMemberCapped(t *testing.T) {
 }
 
 // TestHasOwnData guards the "can't invite an existing user" rule: a fresh email
-// has no data, but one with a vehicle (or permit, or council session) does.
+// has no data, but one with a vehicle (or permit, or tenant session) does.
 func TestHasOwnData(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -356,15 +356,15 @@ func TestHasOwnData(t *testing.T) {
 	}
 }
 
-// TestSaveCouncilSessionStampsLinkedAt confirms an interactive save sets the
-// re-authorise clock, and that ListCouncilSessions surfaces it.
-func TestSaveCouncilSessionStampsLinkedAt(t *testing.T) {
+// TestSaveTenantSessionStampsLinkedAt confirms an interactive save sets the
+// re-authorise clock, and that ListTenantSessions surfaces it.
+func TestSaveTenantSessionStampsLinkedAt(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: "u@example.com", Cookie: "sealed"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: "u@example.com", Cookie: "sealed"}); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := s.GetCouncilSession(ctx, "u@example.com")
+	cs, err := s.GetTenantSession(ctx, "u@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,48 +372,48 @@ func TestSaveCouncilSessionStampsLinkedAt(t *testing.T) {
 		t.Fatal("linked_at not stamped on save")
 	}
 	// A token renewal must NOT move the re-authorise clock.
-	curGen, _ := s.GetCouncilSession(ctx, "u@example.com")
-	if err := s.UpdateCouncilToken(ctx, "u@example.com", "sealed2", "at", time.Now().Add(time.Hour), curGen.Generation); err != nil {
+	curGen, _ := s.GetTenantSession(ctx, "u@example.com")
+	if err := s.UpdateTenantToken(ctx, "u@example.com", "sealed2", "at", time.Now().Add(time.Hour), curGen.Generation); err != nil {
 		t.Fatal(err)
 	}
-	cs2, _ := s.GetCouncilSession(ctx, "u@example.com")
+	cs2, _ := s.GetTenantSession(ctx, "u@example.com")
 	if !cs2.LinkedAt.Equal(cs.LinkedAt) {
 		t.Fatalf("linked_at moved on token renew: %v -> %v", cs.LinkedAt, cs2.LinkedAt)
 	}
-	all, err := s.ListCouncilSessions(ctx)
+	all, err := s.ListTenantSessions(ctx)
 	if err != nil || len(all) != 1 || all[0].Owner != "u@example.com" {
 		t.Fatalf("ListCouncilSessions = %+v, err=%v", all, err)
 	}
 }
 
-// TestCouncilPasswordRoundTrip covers the opt-in saved-password lifecycle: it
+// TestTenantPasswordRoundTrip covers the opt-in saved-password lifecycle: it
 // persists across a save, a token renewal preserves it, a re-save without it
-// clears it, and ClearCouncilPassword drops it while keeping the session.
-func TestCouncilPasswordRoundTrip(t *testing.T) {
+// clears it, and ClearTenantPassword drops it while keeping the session.
+func TestTenantPasswordRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	owner := "p@example.com"
 
 	// Saved with a sealed password.
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c", Password: "sealed-pw"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c", Password: "sealed-pw"}); err != nil {
 		t.Fatal(err)
 	}
-	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "sealed-pw" {
+	if cs, _ := s.GetTenantSession(ctx, owner); cs.Password != "sealed-pw" {
 		t.Fatalf("password not persisted, got %q", cs.Password)
 	}
 	// A token renewal must preserve the saved password.
-	pwGen, _ := s.GetCouncilSession(ctx, owner)
-	if err := s.UpdateCouncilToken(ctx, owner, "c2", "at", time.Now().Add(time.Hour), pwGen.Generation); err != nil {
+	pwGen, _ := s.GetTenantSession(ctx, owner)
+	if err := s.UpdateTenantToken(ctx, owner, "c2", "at", time.Now().Add(time.Hour), pwGen.Generation); err != nil {
 		t.Fatal(err)
 	}
-	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "sealed-pw" {
+	if cs, _ := s.GetTenantSession(ctx, owner); cs.Password != "sealed-pw" {
 		t.Fatalf("token renew wiped saved password, got %q", cs.Password)
 	}
-	// ClearCouncilPassword drops it but keeps the session.
-	if err := s.ClearCouncilPassword(ctx, owner); err != nil {
+	// ClearTenantPassword drops it but keeps the session.
+	if err := s.ClearTenantPassword(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := s.GetCouncilSession(ctx, owner)
+	cs, err := s.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatalf("session should survive clearing password: %v", err)
 	}
@@ -421,10 +421,10 @@ func TestCouncilPasswordRoundTrip(t *testing.T) {
 		t.Fatalf("password not cleared, got %q", cs.Password)
 	}
 	// Re-linking without opting in leaves it empty.
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c3"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c3"}); err != nil {
 		t.Fatal(err)
 	}
-	if cs, _ := s.GetCouncilSession(ctx, owner); cs.Password != "" {
+	if cs, _ := s.GetTenantSession(ctx, owner); cs.Password != "" {
 		t.Fatalf("re-save without password should clear it, got %q", cs.Password)
 	}
 }
@@ -518,25 +518,25 @@ func TestSaveReconnectedSessionPreservesLinkedAt(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	owner := "rc@example.com"
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c1", Password: "pw1"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c1", Password: "pw1"}); err != nil {
 		t.Fatal(err)
 	}
-	orig, _ := s.GetCouncilSession(ctx, owner)
+	orig, _ := s.GetTenantSession(ctx, owner)
 	if orig.LinkedAt.IsZero() {
 		t.Fatal("interactive link should stamp linked_at")
 	}
 	if !orig.ReconnectedAt.IsZero() {
 		t.Fatal("reconnected_at should be zero before any password reconnect")
 	}
-	if saved, err := s.SaveReconnectedSessionIfGen(ctx, CouncilSession{Owner: owner, Cookie: "c2", Password: "pw2"}, orig.Generation); err != nil || !saved {
+	if saved, err := s.SaveReconnectedSessionIfGen(ctx, TenantSession{Owner: owner, Cookie: "c2", Password: "pw2"}, orig.Generation); err != nil || !saved {
 		t.Fatalf("reconnect save at the current generation should land: saved=%v err=%v", saved, err)
 	}
 	// A save at a STALE generation must land nowhere (the compare-and-swap that stops
 	// an in-flight reconnect clobbering a session the user changed).
-	if saved, err := s.SaveReconnectedSessionIfGen(ctx, CouncilSession{Owner: owner, Cookie: "c3", Password: "pw3"}, orig.Generation); err != nil || saved {
+	if saved, err := s.SaveReconnectedSessionIfGen(ctx, TenantSession{Owner: owner, Cookie: "c3", Password: "pw3"}, orig.Generation); err != nil || saved {
 		t.Fatalf("a stale-generation reconnect save must not land: saved=%v err=%v", saved, err)
 	}
-	got, _ := s.GetCouncilSession(ctx, owner)
+	got, _ := s.GetTenantSession(ctx, owner)
 	if !got.LinkedAt.Equal(orig.LinkedAt) {
 		t.Fatalf("linked_at moved on reconnect: %v -> %v", orig.LinkedAt, got.LinkedAt)
 	}
@@ -549,7 +549,7 @@ func TestSaveReconnectedSessionPreservesLinkedAt(t *testing.T) {
 	}
 }
 
-// TestPermitMetaAndExpiryReminder covers persisting the council expiry/status and
+// TestPermitMetaAndExpiryReminder covers persisting the tenant expiry/status and
 // the reminder flag that re-arms when the expiry date changes.
 func TestPermitMetaAndExpiryReminder(t *testing.T) {
 	ctx := context.Background()
@@ -604,7 +604,7 @@ func TestReminderAndConfirm(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const owner = "u@example.com"
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c"}); err != nil {
 		t.Fatal(err)
 	}
 	// Backdate the link so a confirm visibly moves linked_at forward.
@@ -616,12 +616,12 @@ func TestReminderAndConfirm(t *testing.T) {
 	if err := s.MarkReminderSent(ctx, owner, "", "tok-123"); err != nil {
 		t.Fatal(err)
 	}
-	cs, _ := s.GetCouncilSession(ctx, owner)
+	cs, _ := s.GetTenantSession(ctx, owner)
 	if cs.ReminderSent.IsZero() {
 		t.Fatalf("reminder not marked: %+v", cs)
 	}
 	// The column holds the token's HASH, never the token. The link is a bearer
-	// capability that extends a council session, and it rides in a GET query string
+	// capability that extends a tenant session, and it rides in a GET query string
 	// as well as living here, so a read-only leak of the DB (or of a proxy access
 	// log) must not yield something replayable.
 	if cs.ConfirmToken == "tok-123" {
@@ -640,7 +640,7 @@ func TestReminderAndConfirm(t *testing.T) {
 	if err != nil || got != owner {
 		t.Fatalf("ConfirmSession = %q, %v", got, err)
 	}
-	cs2, _ := s.GetCouncilSession(ctx, owner)
+	cs2, _ := s.GetTenantSession(ctx, owner)
 	if !cs2.LinkedAt.After(cs.LinkedAt) {
 		t.Fatalf("linked_at not extended: %v -> %v", cs.LinkedAt, cs2.LinkedAt)
 	}
@@ -665,7 +665,7 @@ func TestReminderAndConfirm(t *testing.T) {
 	if _, err := s.ConfirmSession(ctx, "tok-stale", 21*24*time.Hour); err != ErrNotFound {
 		t.Fatalf("stale token should be refused: %v", err)
 	}
-	if cs3, _ := s.GetCouncilSession(ctx, owner); cs3.ConfirmToken != "" {
+	if cs3, _ := s.GetTenantSession(ctx, owner); cs3.ConfirmToken != "" {
 		t.Fatalf("stale token should be cleared, got %q", cs3.ConfirmToken)
 	}
 	// '' is the "nothing outstanding" marker both expiry paths and the partial index
@@ -695,7 +695,7 @@ func TestTouchClearsConfirmToken(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const owner = "u@example.com"
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.MarkReminderSent(ctx, owner, "", "tok-live"); err != nil {
@@ -705,7 +705,7 @@ func TestTouchClearsConfirmToken(t *testing.T) {
 	if err := s.TouchAccountActive(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	cs, _ := s.GetCouncilSession(ctx, owner)
+	cs, _ := s.GetTenantSession(ctx, owner)
 	if cs.ConfirmToken != "" {
 		t.Fatalf("confirm token survived a visit: %q — the emailed link is now immortal", cs.ConfirmToken)
 	}
@@ -804,7 +804,7 @@ func TestOwnersWithPermit(t *testing.T) {
 	}
 	// bareOwner has a linked session but NO permit — the resident-with-no-visitor-
 	// permit case; must not be kept warm.
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: bareOwner, Cookie: "c"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: bareOwner, Cookie: "c"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -830,7 +830,7 @@ func TestDeleteAllForOwner(t *testing.T) {
 	const alice, bob = "alice@example.com", "bob@example.com"
 
 	for _, owner := range []string{alice, bob} {
-		if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c"}); err != nil {
+		if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c"}); err != nil {
 			t.Fatal(err)
 		}
 		veh, err := s.CreateVehicle(ctx, owner, "REG"+owner[:1], "car")
@@ -861,7 +861,7 @@ func TestDeleteAllForOwner(t *testing.T) {
 	}
 
 	// Alice is gone everywhere.
-	if _, err := s.GetCouncilSession(ctx, alice); err != ErrNotFound {
+	if _, err := s.GetTenantSession(ctx, alice); err != ErrNotFound {
 		t.Fatalf("alice session survived: %v", err)
 	}
 	if v, _ := s.ListVehiclesFor(ctx, alice); len(v) != 0 {
@@ -878,7 +878,7 @@ func TestDeleteAllForOwner(t *testing.T) {
 		t.Fatalf("outbox after delete = %+v, want only bob's row", due)
 	}
 	// Bob is untouched.
-	if _, err := s.GetCouncilSession(ctx, bob); err != nil {
+	if _, err := s.GetTenantSession(ctx, bob); err != nil {
 		t.Fatalf("bob session removed: %v", err)
 	}
 	if p, _ := s.ListPermitsFor(ctx, bob); len(p) != 1 {
@@ -2265,14 +2265,14 @@ func TestTouchAccountActive(t *testing.T) {
 	if err := s.TouchAccountActive(ctx, owner); err != nil {
 		t.Fatalf("touch with no session: %v", err)
 	}
-	if _, err := s.GetCouncilSession(ctx, owner); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetTenantSession(ctx, owner); !errors.Is(err, ErrNotFound) {
 		t.Fatal("touching must not create a session row")
 	}
 
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "sealed"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "sealed"}); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := s.GetCouncilSession(ctx, owner)
+	cs, err := s.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2295,7 +2295,7 @@ func TestTouchAccountActive(t *testing.T) {
 	if err := s.TouchAccountActive(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	cs2, err := s.GetCouncilSession(ctx, owner)
+	cs2, err := s.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2317,7 +2317,7 @@ func TestTouchAccountActive(t *testing.T) {
 	if _, err := s.ConfirmSession(ctx, "tok-idle", 0); err != nil {
 		t.Fatal(err)
 	}
-	cs3, _ := s.GetCouncilSession(ctx, owner)
+	cs3, _ := s.GetTenantSession(ctx, owner)
 	if time.Since(cs3.LastActive) > time.Minute {
 		t.Fatalf("a confirm click should reset the idle clock: %v", cs3.LastActive)
 	}
@@ -2906,24 +2906,24 @@ func TestSessionWritesAreGenerationConditioned(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const owner = "cas@example.com"
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c1"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c1"}); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := s.GetCouncilSession(ctx, owner)
+	before, _ := s.GetTenantSession(ctx, owner)
 
 	// The user re-links: fresh cookie, generation moves on.
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "fresh"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "fresh"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Both in-flight writes, started at the pre-relink generation, must be refused.
-	if err := s.UpdateCouncilCookie(ctx, owner, "", "stale-warm", before.Generation); !errors.Is(err, ErrSessionSuperseded) {
+	if err := s.UpdateTenantCookie(ctx, owner, "", "stale-warm", before.Generation); !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("stale keep-warm write = %v, want ErrSessionSuperseded", err)
 	}
-	if err := s.UpdateCouncilToken(ctx, owner, "stale-renew", "at", time.Now().Add(time.Hour), before.Generation); !errors.Is(err, ErrSessionSuperseded) {
+	if err := s.UpdateTenantToken(ctx, owner, "stale-renew", "at", time.Now().Add(time.Hour), before.Generation); !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("stale renew write = %v, want ErrSessionSuperseded", err)
 	}
-	if got, _ := s.GetCouncilSession(ctx, owner); got.Cookie != "fresh" {
+	if got, _ := s.GetTenantSession(ctx, owner); got.Cookie != "fresh" {
 		t.Fatalf("the user's re-linked cookie was overwritten: %q", got.Cookie)
 	}
 }
@@ -2935,23 +2935,23 @@ func TestGenerationDoesNotResetAcrossRelink(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const owner = "aba@example.com"
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c1"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c1"}); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := s.GetCouncilSession(ctx, owner)
-	if err := s.DeleteCouncilSession(ctx, owner); err != nil {
+	first, _ := s.GetTenantSession(ctx, owner)
+	if err := s.DeleteTenantSession(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c2"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c2"}); err != nil {
 		t.Fatal(err)
 	}
-	second, _ := s.GetCouncilSession(ctx, owner)
+	second, _ := s.GetTenantSession(ctx, owner)
 	if second.Generation <= first.Generation {
 		t.Fatalf("generation restarted across relink (%d -> %d): stale work could match the new row",
 			first.Generation, second.Generation)
 	}
 	// And the stale generation must not delete the recreated session.
-	if deleted, err := s.DeleteCouncilSessionIfGen(ctx, owner, "", first.Generation); err != nil || deleted {
+	if deleted, err := s.DeleteTenantSessionIfGen(ctx, owner, "", first.Generation); err != nil || deleted {
 		t.Fatalf("stale-generation delete matched the recreated session (deleted=%v err=%v)", deleted, err)
 	}
 }
@@ -2979,7 +2979,7 @@ func TestGuestOverrideRefusedAfterRevoke(t *testing.T) {
 	}
 }
 
-// The guarded insert proves the link was live at insert time; the council write
+// The guarded insert proves the link was live at insert time; the tenant write
 // happens seconds later. A revocation in that gap must make the pre-write
 // re-authorisation check fail, so a revoked guest's plate never reaches the permit.
 func TestGuestOverrideAuthorisationRevokedBeforeApply(t *testing.T) {
@@ -2998,7 +2998,7 @@ func TestGuestOverrideAuthorisationRevokedBeforeApply(t *testing.T) {
 		t.Fatalf("a live link must still authorise its own override (ok=%v err=%v)", ok, err)
 	}
 
-	// The owner revokes while the activation is between its insert and the council write.
+	// The owner revokes while the activation is between its insert and the tenant write.
 	if _, err := s.db.ExecContext(ctx, `UPDATE guest_token SET revoked_at = ? WHERE id = ?`, nowUTC(), tok); err != nil {
 		t.Fatal(err)
 	}
@@ -3007,7 +3007,7 @@ func TestGuestOverrideAuthorisationRevokedBeforeApply(t *testing.T) {
 	}
 }
 
-// Adopting a council reading must not regress a newer local belief committed while
+// Adopting a tenant reading must not regress a newer local belief committed while
 // the (seconds-long) read was in flight.
 func TestSetPermitActiveIfUnchangedRejectsStaleAdoption(t *testing.T) {
 	ctx := context.Background()
@@ -3080,7 +3080,7 @@ func TestGuestOverrideAuthorisationFollowsGrantScope(t *testing.T) {
 	}
 }
 
-// Acceptance must re-test its prerequisites in the SAME statement: a council link or a
+// Acceptance must re-test its prerequisites in the SAME statement: a tenant link or a
 // first vehicle landing between a caller's check and the update would otherwise accept
 // the invite anyway, hiding the invitee's own permits under someone else's account.
 func TestAcceptInviteIsBlockedByOwnDataAtomically(t *testing.T) {
@@ -3298,12 +3298,12 @@ func TestSaveBreakerStateIsGenerationGuarded(t *testing.T) {
 	}
 }
 
-// TestCouncilLinkRefusedForAcceptedSecondary closes the inverse of the AcceptInvite
-// guard. AcceptInvite refuses to make a council-linked address into a secondary; this
+// TestTenantLinkRefusedForAcceptedSecondary closes the inverse of the AcceptInvite
+// guard. AcceptInvite refuses to make a tenant-linked address into a secondary; this
 // is the same race running the other way — the link was already in flight when the
 // invite was accepted, and lands afterwards. Both directions must hold, or the address
-// ends up sharing the primary's permits AND holding its own council session.
-func TestCouncilLinkRefusedForAcceptedSecondary(t *testing.T) {
+// ends up sharing the primary's permits AND holding its own tenant session.
+func TestTenantLinkRefusedForAcceptedSecondary(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	const primary, member = "primary@example.com", "member@example.com"
@@ -3313,23 +3313,23 @@ func TestCouncilLinkRefusedForAcceptedSecondary(t *testing.T) {
 	if err := s.AddMemberCapped(ctx, primary, member, 5); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: member, Cookie: "c1"}); err != nil {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: member, Cookie: "c1"}); err != nil {
 		t.Fatalf("a pending invite must not block linking: %v", err)
 	}
 
 	// Once accepted, it must not. (Clear the session first: AcceptInvite itself refuses
 	// while one exists, which is the guard's other half.)
-	if err := s.DeleteCouncilSession(ctx, member); err != nil {
+	if err := s.DeleteTenantSession(ctx, member); err != nil {
 		t.Fatalf("clear session: %v", err)
 	}
 	if err := s.AcceptInvite(ctx, member, primary); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: member, Cookie: "c2"}); !errors.Is(err, ErrSecondaryAccount) {
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: member, Cookie: "c2"}); !errors.Is(err, ErrSecondaryAccount) {
 		t.Fatalf("SaveCouncilSession = %v, want ErrSecondaryAccount: a link that lands after the "+
 			"invite was accepted would give a secondary its own council session", err)
 	}
-	if _, err := s.GetCouncilSession(ctx, member); !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetTenantSession(ctx, member); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a council session was written for an accepted secondary (err = %v)", err)
 	}
 }
@@ -3493,7 +3493,7 @@ func TestResendKeepsTheUndoBaseline(t *testing.T) {
 	}
 }
 
-// TestVehicleCreateRefusedForAcceptedSecondary mirrors the council-link guard on the
+// TestVehicleCreateRefusedForAcceptedSecondary mirrors the tenant-link guard on the
 // other kind of first-own-data: AcceptInvite requires the invitee to own no vehicles,
 // so a create that lands after acceptance must be refused rather than quietly building
 // data nothing in the shared account will show.

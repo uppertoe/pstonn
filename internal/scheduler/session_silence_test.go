@@ -8,7 +8,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/parking"
 )
 
-// TestSessionExpiredTellsTheUserEventually: an expired council session hit on
+// TestSessionExpiredTellsTheUserEventually: an expired tenant session hit on
 // the RECONCILE path (a wanted change that cannot apply) used to be completely
 // silent — no activity row, no fail streak, no notification, however long the
 // reconnect worker kept deferring. The keep-warm path had six tests; this path
@@ -21,7 +21,7 @@ func TestSessionExpiredTellsTheUserEventually(t *testing.T) {
 	const owner = "expired@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "sess-1", "AAA111", "OLD999")
 
-	fc := &fakeCouncil{setErr: parking.ErrSessionExpired}
+	fc := &fakeTenant{setErr: parking.ErrSessionExpired}
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, Notifier: nf})
 
@@ -65,7 +65,7 @@ func TestSessionExpiredTellsTheUserEventually(t *testing.T) {
 
 // TestStalledReconnectAlertsHouseholdOnce: recoverOrRetire deliberately keeps
 // the session (and retries forever) for transient failures and for a changed
-// council sign-in page — states that used to reach only the operator while the
+// tenant sign-in page — states that used to reach only the operator while the
 // household's schedule silently stopped applying. Once the backoff count says
 // the reconnect has stalled, the household is told exactly once per queue
 // residency.
@@ -75,7 +75,7 @@ func TestStalledReconnectAlertsHouseholdOnce(t *testing.T) {
 	const owner = "stalled@example.com"
 	seedSession(t, st, owner)
 
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, Notifier: nf})
 

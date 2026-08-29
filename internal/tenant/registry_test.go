@@ -1,4 +1,4 @@
-package council
+package tenant
 
 import (
 	"os"
@@ -56,7 +56,7 @@ func TestLoadFromFileAndValidation(t *testing.T) {
 		}
 		return p
 	}
-	good := write("good.json", `{"councils":[
+	good := write("good.json", `{"tenants":[
 	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"orikan-ssp",
 	   "endpoints":{"issuer":"https://a/idm","api_base":"https://a/ssp-svc","client_id":"x","redirect_uri":"https://a/ssp/callback","scopes":["openid"]},
 	   "timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor"},"enabled":false},
@@ -74,16 +74,16 @@ func TestLoadFromFileAndValidation(t *testing.T) {
 		t.Fatal("per-council vocabulary not applied")
 	}
 	for name, body := range map[string]string{
-		"empty":         `{"councils":[]}`,
-		"bad id":        `{"councils":[{"id":"Bad Town","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
-		"no endpoints":  `{"councils":[{"id":"a","name":"n","short":"s","connector":"orikan-ssp","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
-		"bad connector": `{"councils":[{"id":"a","name":"n","short":"s","connector":"nope","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
-		"bad timezone":  `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"Mars/Olympus","policy":{"visitor_word":"v"},"enabled":true}]}`,
-		"no visitor":    `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{},"enabled":true}]}`,
-		"duplicate":     `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true},{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
-		"http issuer":   `{"councils":[{"id":"a","name":"n","short":"s","connector":"orikan-ssp","endpoints":{"issuer":"http://a/idm","api_base":"https://a/ssp-svc","client_id":"x","redirect_uri":"https://a/ssp/callback","scopes":["openid"]},"timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
-		"js link":       `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"links":{"portal":"javascript:alert(1)"},"enabled":true}]}`,
-		"none enabled":  `{"councils":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":false}]}`,
+		"empty":         `{"tenants":[]}`,
+		"bad id":        `{"tenants":[{"id":"Bad Town","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"no endpoints":  `{"tenants":[{"id":"a","name":"n","short":"s","connector":"orikan-ssp","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"bad connector": `{"tenants":[{"id":"a","name":"n","short":"s","connector":"nope","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"bad timezone":  `{"tenants":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"Mars/Olympus","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"no visitor":    `{"tenants":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{},"enabled":true}]}`,
+		"duplicate":     `{"tenants":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true},{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"http issuer":   `{"tenants":[{"id":"a","name":"n","short":"s","connector":"orikan-ssp","endpoints":{"issuer":"http://a/idm","api_base":"https://a/ssp-svc","client_id":"x","redirect_uri":"https://a/ssp/callback","scopes":["openid"]},"timezone":"UTC","policy":{"visitor_word":"v"},"enabled":true}]}`,
+		"js link":       `{"tenants":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"links":{"portal":"javascript:alert(1)"},"enabled":true}]}`,
+		"none enabled":  `{"tenants":[{"id":"a","name":"n","short":"s","connector":"fake","timezone":"UTC","policy":{"visitor_word":"v"},"enabled":false}]}`,
 	} {
 		if _, err := Load(config.CouncilConfig{}, write(strings.ReplaceAll(name, " ", "_")+".json", body)); err == nil {
 			t.Errorf("%s: accepted", name)

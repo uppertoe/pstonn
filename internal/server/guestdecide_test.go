@@ -27,7 +27,7 @@ func decideLinkFor(t *testing.T, reqID int64, addr string) string {
 
 // seedDecideRequest builds a household with a pending printed-QR request and a
 // server able to render the decide pages and run the DECLINE path (the approve
-// path needs the scheduler+council and is exercised elsewhere; the shared core
+// path needs the scheduler+tenant and is exercised elsewhere; the shared core
 // is the same code either way).
 func seedDecideRequest(t *testing.T) (*Server, store.GuestRequest, string) {
 	t.Helper()

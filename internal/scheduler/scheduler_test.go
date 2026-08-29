@@ -17,11 +17,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// fakeCouncil records calls and returns configured errors, standing in for the
+// fakeTenant records calls and returns configured errors, standing in for the
 // real HTTP client.
-type fakeCouncil struct {
+type fakeTenant struct {
 	refreshed            []string
-	refreshedTenants     []string // owner|council per Refresh, for multi-tenant accounts
+	refreshedTenants     []string // owner|tenant per Refresh, for multi-tenant accounts
 	refreshErr           error
 	reconnected          []string
 	reconnectErr         error // defaults to ErrNoSavedPassword via reconnectSet
@@ -30,20 +30,20 @@ type fakeCouncil struct {
 	permits              []parking.PermitInfo
 	permitsErr           error
 	setErr               error
-	setDelay             time.Duration // how long a council write takes, to widen races
-	panicOn              string        // council_permit_id whose SetVehicle should panic (per-unit-recovery test)
+	setDelay             time.Duration // how long a tenant write takes, to widen races
+	panicOn              string        // tenant_permit_id whose SetVehicle should panic (per-unit-recovery test)
 	onListPermits        func()        // runs INSIDE ListPermits, to simulate an apply landing mid-read
 	partialPermits       bool          // report the permit list as a PAGE, not the whole account
 
 	// mu guards the SetVehicle bookkeeping: the apply-exclusion test drives writes
 	// from a handler-style goroutine and the reconcile loop at the same time.
 	mu       sync.Mutex
-	setCalls []string        // council_permit_id per SetVehicle call
+	setCalls []string        // tenant_permit_id per SetVehicle call
 	setRegs  []string        // registration per SetVehicle call, in order
-	inFlight map[string]bool // council permit ids with a write in flight right now
+	inFlight map[string]bool // tenant permit ids with a write in flight right now
 	overlaps int             // times two writes to the SAME permit were in flight together
 
-	// current is what the council REPORTS is on each permit, keyed by council permit
+	// current is what the tenant REPORTS is on each permit, keyed by tenant permit
 	// id, and currentErr is a read failure. This used to be hardcoded empty, which
 	// meant checkDrift — the whole external-change detection path — was never once
 	// executed by a test.
@@ -54,55 +54,55 @@ type fakeCouncil struct {
 	listCalls int  // ListPermits (owner-grid) calls, to prove drift is decoupled from warm
 }
 
-// setCurrent makes the council report reg on a permit, as if someone had changed it
+// setCurrent makes the tenant report reg on a permit, as if someone had changed it
 // in the portal directly.
 //
-// It updates BOTH views the real council exposes: the per-permit managedVehicle
+// It updates BOTH views the real tenant exposes: the per-permit managedVehicle
 // read (current) and the owner-level Index/grid row (permits). A 2026-07-31 live
 // capture confirmed the two agree, and drift detection now reads the grid, so a
-// fake that populated only one of them would no longer model the council at all.
+// fake that populated only one of them would no longer model the tenant at all.
 // Use setGridRego to drive them apart deliberately.
-func (f *fakeCouncil) setCurrent(councilPermitID, reg string) {
+func (f *fakeTenant) setCurrent(tenantPermitID, reg string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.current == nil {
 		f.current = map[string]string{}
 	}
-	f.current[councilPermitID] = reg
-	f.upsertGridLocked(councilPermitID, func(pi *parking.PermitInfo) { pi.CurrentRego = reg })
+	f.current[tenantPermitID] = reg
+	f.upsertGridLocked(tenantPermitID, func(pi *parking.PermitInfo) { pi.CurrentRego = reg })
 }
 
 // setGridRego changes ONLY the grid's view of the plate, leaving managedVehicle's
 // alone — the disagreement drift's empty-plate corroboration exists to survive.
-func (f *fakeCouncil) setGridRego(councilPermitID, reg string) {
+func (f *fakeTenant) setGridRego(tenantPermitID, reg string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.upsertGridLocked(councilPermitID, func(pi *parking.PermitInfo) { pi.CurrentRego = reg })
+	f.upsertGridLocked(tenantPermitID, func(pi *parking.PermitInfo) { pi.CurrentRego = reg })
 }
 
-// setCouncilEndDate makes the council report an expiry for the permit. The council
+// setTenantEndDate makes the tenant report an expiry for the permit. The tenant
 // is the authority on expiry, and checkDrift writes what it reports straight into
 // the permit row, so a test that wants an expired permit must expire it HERE.
-func (f *fakeCouncil) setCouncilEndDate(councilPermitID string, end time.Time) {
+func (f *fakeTenant) setTenantEndDate(tenantPermitID string, end time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.upsertGridLocked(councilPermitID, func(pi *parking.PermitInfo) { pi.EndDate = end })
+	f.upsertGridLocked(tenantPermitID, func(pi *parking.PermitInfo) { pi.EndDate = end })
 }
 
 // upsertGridLocked finds or appends the grid row for a permit and applies mutate.
 // Callers hold f.mu. New rows default to a granted permit expiring well in the
 // future, so merely reporting a plate never silently retires the fixture.
-func (f *fakeCouncil) upsertGridLocked(councilPermitID string, mutate func(*parking.PermitInfo)) {
+func (f *fakeTenant) upsertGridLocked(tenantPermitID string, mutate func(*parking.PermitInfo)) {
 	for i := range f.permits {
-		if f.permits[i].CouncilPermitID == councilPermitID {
+		if f.permits[i].CouncilPermitID == tenantPermitID {
 			mutate(&f.permits[i])
 			return
 		}
 	}
 	pi := parking.PermitInfo{
-		CouncilPermitID:  councilPermitID,
+		CouncilPermitID:  tenantPermitID,
 		PermitTypeID:     "14",
-		PermitNumber:     "VPP" + councilPermitID,
+		PermitNumber:     "VPP" + tenantPermitID,
 		PermitType:       "(A) 1st Visitor Permit",
 		Status:           "Granted",
 		EndDate:          time.Now().AddDate(1, 0, 0),
@@ -112,7 +112,7 @@ func (f *fakeCouncil) upsertGridLocked(councilPermitID string, mutate func(*park
 	f.permits = append(f.permits, pi)
 }
 
-func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, reg string) error {
+func (f *fakeTenant) SetVehicle(_ context.Context, _ string, p model.Permit, reg string) error {
 	if p.CouncilPermitID == f.panicOn {
 		panic("fakeCouncil: forced panic for " + p.CouncilPermitID)
 	}
@@ -139,14 +139,14 @@ func (f *fakeCouncil) SetVehicle(_ context.Context, _ string, p model.Permit, re
 	return err
 }
 
-func (f *fakeCouncil) callSnap() []string {
+func (f *fakeTenant) callSnap() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.setCalls...)
 }
 
-// lastReg is the registration the council was last asked to hold.
-func (f *fakeCouncil) lastReg() string {
+// lastReg is the registration the tenant was last asked to hold.
+func (f *fakeTenant) lastReg() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.setRegs) == 0 {
@@ -155,12 +155,12 @@ func (f *fakeCouncil) lastReg() string {
 	return f.setRegs[len(f.setRegs)-1]
 }
 
-func (f *fakeCouncil) overlapCount() int {
+func (f *fakeTenant) overlapCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.overlaps
 }
-func (f *fakeCouncil) CurrentVehicle(_ context.Context, _ string, p model.Permit) (string, error) {
+func (f *fakeTenant) CurrentVehicle(_ context.Context, _ string, p model.Permit) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.currentErr != nil {
@@ -168,12 +168,12 @@ func (f *fakeCouncil) CurrentVehicle(_ context.Context, _ string, p model.Permit
 	}
 	return f.current[p.CouncilPermitID], nil
 }
-func (f *fakeCouncil) Refresh(_ context.Context, owner, councilID string) error {
+func (f *fakeTenant) Refresh(_ context.Context, owner, tenantID string) error {
 	f.refreshed = append(f.refreshed, owner)
-	f.refreshedTenants = append(f.refreshedTenants, owner+"|"+councilID)
+	f.refreshedTenants = append(f.refreshedTenants, owner+"|"+tenantID)
 	return f.refreshErr
 }
-func (f *fakeCouncil) Reconnect(ctx context.Context, owner, councilID string) error {
+func (f *fakeTenant) Reconnect(ctx context.Context, owner, tenantID string) error {
 	f.reconnected = append(f.reconnected, owner)
 	_, f.reconnectHadDeadline = ctx.Deadline() // recoverOrRetire must bound this
 	if !f.reconnectSet {
@@ -184,7 +184,7 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner, councilID string) er
 
 // ListPermitsComplete reports the list as complete unless a test sets partialPermits,
 // which is how the truncated-grid path is exercised.
-func (f *fakeCouncil) ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error) {
+func (f *fakeTenant) ListPermitsComplete(ctx context.Context, owner, tenantID string) ([]parking.PermitInfo, bool, error) {
 	ps, err := f.ListPermits(ctx, owner)
 	f.mu.Lock()
 	partial := f.partialPermits
@@ -192,7 +192,7 @@ func (f *fakeCouncil) ListPermitsComplete(ctx context.Context, owner, councilID 
 	return ps, !partial, err
 }
 
-func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
+func (f *fakeTenant) ListPermits(_ context.Context, owner string) ([]parking.PermitInfo, error) {
 	if f.onListPermits != nil {
 		f.onListPermits()
 	}
@@ -202,7 +202,7 @@ func (f *fakeCouncil) ListPermits(_ context.Context, owner string) ([]parking.Pe
 	return append([]parking.PermitInfo(nil), f.permits...), f.permitsErr
 }
 
-func (f *fakeCouncil) listCallCount() int {
+func (f *fakeTenant) listCallCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.listCalls
@@ -210,7 +210,7 @@ func (f *fakeCouncil) listCallCount() int {
 
 // blocked simulates the fleet circuit breaker being open (a confirmed shared-edge
 // block), which escalates the user-facing busy warning.
-func (f *fakeCouncil) Blocked() bool {
+func (f *fakeTenant) Blocked() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.blocked
@@ -469,8 +469,8 @@ func newStore(t *testing.T) *store.Store {
 
 func seedSession(t *testing.T, s *store.Store, owner string) {
 	t.Helper()
-	// SaveCouncilSession stamps linked_at = now, so these sessions start in-bound.
-	if err := s.SaveCouncilSession(context.Background(), store.CouncilSession{Owner: owner, Cookie: "seed"}); err != nil {
+	// SaveTenantSession stamps linked_at = now, so these sessions start in-bound.
+	if err := s.SaveTenantSession(context.Background(), store.TenantSession{Owner: owner, Cookie: "seed"}); err != nil {
 		t.Fatal(err)
 	}
 	// Keep-warm gates on managing a permit (a live session is only useful to act on
@@ -486,7 +486,7 @@ func seedSession(t *testing.T, s *store.Store, owner string) {
 func TestKeepWarmRetiresPastBound(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "gone@example.com")
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	// maxAge tiny → past bound immediately; warmInterval irrelevant.
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: time.Nanosecond, WarmInterval: time.Hour})
 	time.Sleep(2 * time.Millisecond)
@@ -495,7 +495,7 @@ func TestKeepWarmRetiresPastBound(t *testing.T) {
 	if len(fc.refreshed) != 0 {
 		t.Fatalf("retired session should not be refreshed, got %v", fc.refreshed)
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "gone@example.com"); err != store.ErrNotFound {
+	if _, err := st.GetTenantSession(context.Background(), "gone@example.com"); err != store.ErrNotFound {
 		t.Fatalf("session should be retired, got err=%v", err)
 	}
 }
@@ -506,7 +506,7 @@ func TestKeepWarmRenewsStale(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "active@example.com")
 	seedSchedule(t, st, "active@example.com")
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	// Large maxAge (in bound), tiny warmInterval (stale after a moment).
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
@@ -515,7 +515,7 @@ func TestKeepWarmRenewsStale(t *testing.T) {
 	if len(fc.refreshed) != 1 || fc.refreshed[0] != "active@example.com" {
 		t.Fatalf("expected one refresh of active@example.com, got %v", fc.refreshed)
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "active@example.com"); err != nil {
+	if _, err := st.GetTenantSession(context.Background(), "active@example.com"); err != nil {
 		t.Fatalf("renewed session should still exist: %v", err)
 	}
 }
@@ -526,7 +526,7 @@ func TestKeepWarmUnlinksOnExpiry(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "expired@example.com")
 	seedSchedule(t, st, "expired@example.com")
-	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired}
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
@@ -536,12 +536,12 @@ func TestKeepWarmUnlinksOnExpiry(t *testing.T) {
 	if len(fc.refreshed) != 1 {
 		t.Fatalf("expected one refresh attempt, got %v", fc.refreshed)
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "expired@example.com"); err != store.ErrNotFound {
+	if _, err := st.GetTenantSession(context.Background(), "expired@example.com"); err != store.ErrNotFound {
 		t.Fatalf("expired session should be unlinked, got err=%v", err)
 	}
 }
 
-// TestPermitExpiryReminder: keep-warm syncs the permit's expiry from the council,
+// TestPermitExpiryReminder: keep-warm syncs the permit's expiry from the tenant,
 // warns the account once when it's within the lead window, doesn't warn again for
 // the same date, and re-arms when a renewal moves the date.
 func TestPermitExpiryReminder(t *testing.T) {
@@ -553,7 +553,7 @@ func TestPermitExpiryReminder(t *testing.T) {
 	cpid := "perm-" + owner
 
 	soon := time.Now().Add(5 * 24 * time.Hour)
-	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: soon}}}
+	fc := &fakeTenant{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: soon}}}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond,
 		DriftInterval: time.Nanosecond, ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
@@ -564,7 +564,7 @@ func TestPermitExpiryReminder(t *testing.T) {
 		t.Fatalf("expected one expiry warning, got %d (%v)", got, nf.expiries)
 	}
 	// Expiry + status were written back to the permit.
-	if p, _ := st.PermitInCouncil(ctx, "", cpid); p.Status != "Granted" || p.EndDate.IsZero() {
+	if p, _ := st.PermitInTenant(ctx, "", cpid); p.Status != "Granted" || p.EndDate.IsZero() {
 		t.Fatalf("permit meta not persisted: status=%q end=%v", p.Status, p.EndDate)
 	}
 	// A second pass must NOT re-warn for the same expiry date.
@@ -579,13 +579,13 @@ func TestPermitExpiryReminder(t *testing.T) {
 	if got := len(nf.expiries); got != 1 {
 		t.Fatalf("far-off renewal should not warn, got %d", got)
 	}
-	if p, _ := st.PermitInCouncil(ctx, "", cpid); p.ExpiryReminded {
+	if p, _ := st.PermitInTenant(ctx, "", cpid); p.ExpiryReminded {
 		t.Fatal("renewal to a new date should clear the reminded flag")
 	}
 }
 
 // TestReconcileSkipsInactivePermits: an expired permit is not written to (no
-// doomed council calls, no failure noise), while an active one still is.
+// doomed tenant calls, no failure noise), while an active one still is.
 func TestReconcileSkipsInactivePermits(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
@@ -611,7 +611,7 @@ func TestReconcileSkipsInactivePermits(t *testing.T) {
 	}
 	_ = st.UpdatePermitMeta(ctx, owner, "expired-1", "Granted", "VPP2", "1st Visitor Permit", past)
 
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour})
 	s.reconcileAll(ctx)
 
@@ -626,14 +626,14 @@ func TestReconnectTransientPreservesSession(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "blip@example.com")
 	seedSchedule(t, st, "blip@example.com")
-	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired, reconnectSet: true,
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired, reconnectSet: true,
 		reconnectErr: errors.New("council busy 503")} // transient
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
 
-	if _, err := st.GetCouncilSession(context.Background(), "blip@example.com"); err != nil {
+	if _, err := st.GetTenantSession(context.Background(), "blip@example.com"); err != nil {
 		t.Fatalf("transient reconnect failure must keep the session, got err=%v", err)
 	}
 	time.Sleep(2 * time.Millisecond)
@@ -648,7 +648,7 @@ func TestReconnectRejectedRetires(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "badpw@example.com")
 	seedSchedule(t, st, "badpw@example.com")
-	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired, reconnectSet: true,
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired, reconnectSet: true,
 		reconnectErr: parking.ErrLoginRejected}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
@@ -656,7 +656,7 @@ func TestReconnectRejectedRetires(t *testing.T) {
 	s.keepWarm(context.Background())
 	s.drainOneReconnect(context.Background()) // drain the queued reconnect
 
-	if _, err := st.GetCouncilSession(context.Background(), "badpw@example.com"); err != store.ErrNotFound {
+	if _, err := st.GetTenantSession(context.Background(), "badpw@example.com"); err != store.ErrNotFound {
 		t.Fatalf("rejected password should retire the session, got err=%v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
@@ -671,7 +671,7 @@ func TestKeepWarmAutoReconnects(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "saved@example.com")
 	seedSchedule(t, st, "saved@example.com")
-	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired, reconnectSet: true} // reconnectErr nil = success
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired, reconnectSet: true} // reconnectErr nil = success
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: nf})
 	time.Sleep(2 * time.Millisecond)
@@ -684,7 +684,7 @@ func TestKeepWarmAutoReconnects(t *testing.T) {
 	if !fc.reconnectHadDeadline {
 		t.Fatal("reconnect must run under a bounded context so a slow login can't stall the loop")
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "saved@example.com"); err != nil {
+	if _, err := st.GetTenantSession(context.Background(), "saved@example.com"); err != nil {
 		t.Fatalf("auto-reconnected session should be kept, got err=%v", err)
 	}
 	time.Sleep(2 * time.Millisecond) // let any (unexpected) alert goroutine run
@@ -694,10 +694,10 @@ func TestKeepWarmAutoReconnects(t *testing.T) {
 }
 
 func rejectedErr() error {
-	return &parking.CouncilError{Kind: parking.FailRejected, Op: provider.OpSetVehicle, Err: errors.New("no")}
+	return &parking.TenantError{Kind: parking.FailRejected, Op: provider.OpSetVehicle, Err: errors.New("no")}
 }
 func transientErr() error {
-	return &parking.CouncilError{Kind: parking.FailTransient, Op: provider.OpSetVehicle, Err: errors.New("timeout")}
+	return &parking.TenantError{Kind: parking.FailTransient, Op: provider.OpSetVehicle, Err: errors.New("timeout")}
 }
 
 // TestFailureNotifyDedupAndSuccess: a repeated identical REJECTION (alarms at
@@ -708,7 +708,7 @@ func TestFailureNotifyDedupAndSuccess(t *testing.T) {
 	pid, _ := st.UpsertPermit(ctx, "u@example.com", "14576", "14", "1st Visitor Permit")
 	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "1st Visitor Permit", ActiveRegistration: "OLD111"}
 	fn := &fakeNotifier{on: true}
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 
 	// Ticks are a minute apart in production; sleep so async delivery lands first.
 	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
@@ -747,7 +747,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 	pid, _ := st.UpsertPermit(ctx, "u@example.com", "14576", "14", "Permit")
 	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "Permit", ActiveRegistration: "OLD111"}
 	fn := &fakeNotifier{on: true}
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 
 	for i := 0; i < failNotifyThreshold-1; i++ {
 		s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
@@ -779,7 +779,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 func TestSystemicDetection(t *testing.T) {
 	st := newStore(t)
 	fn := &fakeNotifier{on: true, admin: true}
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 	stats := &passStats{
 		failOwners:       map[string]bool{"a@x": true, "b@x": true, "c@x": true},
 		unexpectedOwners: map[string]bool{},
@@ -806,7 +806,7 @@ func TestFailureEscalatesWhenUserNotReached(t *testing.T) {
 	pid, _ := st.UpsertPermit(ctx, "u@example.com", "14576", "14", "Permit")
 	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "Permit"}
 	fn := &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 0} // user not reached
-	s := New(st, &fakeCouncil{}, time.UTC, Options{Notifier: fn})
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 
 	// A rejection alarms on the first tick.
 	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
@@ -833,7 +833,7 @@ func TestSessionExpiryNotifiesRelink(t *testing.T) {
 	seedSession(t, st, "expired@example.com")
 	seedSchedule(t, st, "expired@example.com")
 	fn := &fakeNotifier{on: true, admin: true}
-	fc := &fakeCouncil{refreshErr: parking.ErrSessionExpired}
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: fn})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
@@ -850,10 +850,10 @@ func TestSessionExpiryNotifiesRelink(t *testing.T) {
 func TestKeepWarmSkipsNoPermit(t *testing.T) {
 	st := newStore(t)
 	// Bare session, NO permit (seedSession would add one).
-	if err := st.SaveCouncilSession(context.Background(), store.CouncilSession{Owner: "idle@example.com", Cookie: "seed"}); err != nil {
+	if err := st.SaveTenantSession(context.Background(), store.TenantSession{Owner: "idle@example.com", Cookie: "seed"}); err != nil {
 		t.Fatal(err)
 	}
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
@@ -861,7 +861,7 @@ func TestKeepWarmSkipsNoPermit(t *testing.T) {
 	if len(fc.refreshed) != 0 {
 		t.Fatalf("session with no permit should not be warmed, got %v", fc.refreshed)
 	}
-	if _, err := st.GetCouncilSession(context.Background(), "idle@example.com"); err != nil {
+	if _, err := st.GetTenantSession(context.Background(), "idle@example.com"); err != nil {
 		t.Fatalf("idle session should be left intact: %v", err)
 	}
 }
@@ -872,7 +872,7 @@ func TestKeepWarmSkipsNoPermit(t *testing.T) {
 func TestKeepWarmWarmsPermitWithoutSchedule(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, "qr@example.com") // adds a permit, no schedule
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())
@@ -891,7 +891,7 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	fn := &fakeNotifier{on: true}
 	// Window = [deadline-lead, deadline); with maxAge==lead==10s and a just-linked
 	// session, "now" is inside the window (few ms in), well before the deadline.
-	s := New(st, &fakeCouncil{}, time.UTC, Options{
+	s := New(st, &fakeTenant{}, time.UTC, Options{
 		SessionMaxAge: 10 * time.Second, WarmInterval: time.Hour,
 		ReminderLead: 10 * time.Second, PublicBaseURL: "https://pstonn.example", Notifier: fn,
 	})
@@ -901,10 +901,10 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("expected exactly one reminder, got %d", len(sent))
 	}
-	if sent[0].to != "soon@example.com" || !strings.Contains(sent[0].url, "/council/confirm?token=") {
+	if sent[0].to != "soon@example.com" || !strings.Contains(sent[0].url, "/tenant/confirm?token=") {
 		t.Fatalf("bad reminder: %+v", sent[0])
 	}
-	cs, _ := st.GetCouncilSession(ctx, "soon@example.com")
+	cs, _ := st.GetTenantSession(ctx, "soon@example.com")
 	if cs.ReminderSent.IsZero() || cs.ConfirmToken == "" {
 		t.Fatalf("reminder state not persisted: %+v", cs)
 	}
@@ -928,7 +928,7 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	if err != nil || owner != "soon@example.com" {
 		t.Fatalf("ConfirmSession = %q, %v", owner, err)
 	}
-	cs2, _ := st.GetCouncilSession(ctx, "soon@example.com")
+	cs2, _ := st.GetTenantSession(ctx, "soon@example.com")
 	if !cs2.ReminderSent.IsZero() || cs2.ConfirmToken != "" {
 		t.Fatalf("confirm did not reset the cycle: %+v", cs2)
 	}
@@ -944,20 +944,20 @@ func (n *ntfyOnlyNotifier) EmailAvailable() bool { return false }
 // TestNoReminderRecordedWithoutEmail pins that an undeliverable reminder is not
 // recorded as sent. reminder_sent_at is one-shot, so marking it on an ntfy-only
 // deployment burns the household's single warning against a mailer that silently
-// no-ops: their council link then lapses with nothing said, and every permit the
+// no-ops: their tenant link then lapses with nothing said, and every permit the
 // scheduler holds for them goes with it.
 func TestNoReminderRecordedWithoutEmail(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	seedSession(t, st, "soon@example.com")
 	fn := &ntfyOnlyNotifier{}
-	s := New(st, &fakeCouncil{}, time.UTC, Options{
+	s := New(st, &fakeTenant{}, time.UTC, Options{
 		SessionMaxAge: 10 * time.Second, WarmInterval: time.Hour,
 		ReminderLead: 10 * time.Second, PublicBaseURL: "https://pstonn.example", Notifier: fn,
 	})
 	s.keepWarm(ctx)
 
-	cs, err := st.GetCouncilSession(ctx, "soon@example.com")
+	cs, err := st.GetTenantSession(ctx, "soon@example.com")
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
@@ -970,7 +970,7 @@ func TestNoReminderRecordedWithoutEmail(t *testing.T) {
 // TestDriftBackoffSurvivesAFailedCheckpoint pins the ordering between clearing the
 // backoff and durably recording the check. last_drift_check is what stops an owner
 // being picked again next tick; clearing the backoff before that write lands means a
-// store error leaves the owner permanently due, and we re-read the council for them
+// store error leaves the owner permanently due, and we re-read the tenant for them
 // every minute — three requests each time, against an edge that may be refusing us
 // precisely because we are asking too often.
 func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
@@ -990,7 +990,7 @@ func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
 	if err := st.SetRule(ctx, pid, time.Monday, vid); err != nil {
 		t.Fatalf("weekly rule: %v", err)
 	}
-	s := New(st, &fakeCouncil{}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
+	s := New(st, &fakeTenant{}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
 	s.markDriftChecked = func(context.Context, string, string) error {
 		return errors.New("disk full")
 	}
@@ -1002,7 +1002,7 @@ func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
 	if driftFailCount() != 0 {
 		t.Fatal("setup: a fresh owner must not start with drift failures")
 	}
-	cs, err := st.GetCouncilSession(ctx, owner)
+	cs, err := st.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
@@ -1016,7 +1016,7 @@ func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
 func TestDisplaced(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
-	s := New(st, &fakeCouncil{}, time.UTC, Options{})
+	s := New(st, &fakeTenant{}, time.UTC, Options{})
 	const owner = "owner@example.com"
 	p := model.Permit{ID: 1, Owner: owner}
 	now := time.Now()
@@ -1084,7 +1084,7 @@ func TestDetectSystemicOwnerCounting(t *testing.T) {
 	nf := &fakeNotifier{on: true, admin: true}
 	s := &Scheduler{notifier: nf, lastAlert: make(map[string]time.Time)}
 
-	// Two owners (each may hold several permits), ALL council-busy. totalOwners=2.
+	// Two owners (each may hold several permits), ALL tenant-busy. totalOwners=2.
 	stats := &passStats{
 		failOwners:       map[string]bool{},
 		unexpectedOwners: map[string]bool{},
@@ -1117,7 +1117,7 @@ func TestDetectSystemicOwnerCounting(t *testing.T) {
 	}
 }
 
-// A persistently failing permit must not hit the council every tick: after each
+// A persistently failing permit must not hit the tenant every tick: after each
 // failure the next attempt is deferred exponentially, success clears the
 // deferral, and a user action (Kick) clears all deferrals immediately.
 func TestRetryBackoff(t *testing.T) {
@@ -1167,11 +1167,11 @@ func TestRetryBackoff(t *testing.T) {
 	}
 }
 
-// TestCouncilBusyTellsTheUserEventually: a council block used to be completely
+// TestTenantBusyTellsTheUserEventually: a tenant block used to be completely
 // silent to the user — no activity row, no notification, however long a permit
 // sat un-updatable. A brief block should still stay quiet (it self-heals), but a
 // sustained one has to reach the person whose permit is wrong.
-func TestCouncilBusyTellsTheUserEventually(t *testing.T) {
+func TestTenantBusyTellsTheUserEventually(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	const owner = "busy@example.com"
@@ -1189,7 +1189,7 @@ func TestCouncilBusyTellsTheUserEventually(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy}
+	fc := &fakeTenant{setErr: parking.ErrCouncilBusy}
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, Notifier: nf})
 
@@ -1266,9 +1266,9 @@ func countFailures(os []notify.ApplyOutcome) int {
 }
 
 // seedActivePermit gives an owner one permit rostered to one car for TODAY, with
-// the council currently holding something else — so a reconcile pass has a real
+// the tenant currently holding something else — so a reconcile pass has a real
 // change to make. Returns the permit id and the rostered plate.
-func seedActivePermit(t *testing.T, st *store.Store, owner, councilID, reg, active string) (int64, string) {
+func seedActivePermit(t *testing.T, st *store.Store, owner, tenantID, reg, active string) (int64, string) {
 	t.Helper()
 	ctx := context.Background()
 	seedSession(t, st, owner)
@@ -1276,7 +1276,7 @@ func seedActivePermit(t *testing.T, st *store.Store, owner, councilID, reg, acti
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid, err := st.UpsertPermit(ctx, owner, councilID, "14", "Permit")
+	pid, err := st.UpsertPermit(ctx, owner, tenantID, "14", "Permit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1292,14 +1292,14 @@ func seedActivePermit(t *testing.T, st *store.Store, owner, councilID, reg, acti
 }
 
 // TestApplyExclusion (F3, I8) is the anti-lost-update test. A guest tapping a car
-// runs the same three steps the reconcile loop does — claim, council write, record
-// the plate — and if the two interleave the council can end up holding one plate
+// runs the same three steps the reconcile loop does — claim, tenant write, record
+// the plate — and if the two interleave the tenant can end up holding one plate
 // while the database records another. Every later tick then compares its target
 // against that wrong belief, concludes there is nothing to do, and leaves a car
 // uncovered until the next drift check ~105 minutes later.
 //
 // Two invariants: no two writes to one permit are ever in flight together, and
-// when the dust settles the stored belief IS the plate the council was last given.
+// when the dust settles the stored belief IS the plate the tenant was last given.
 // Run under -race, which also covers the shared scheduler state both sides touch.
 func TestApplyExclusion(t *testing.T) {
 	ctx := context.Background()
@@ -1307,7 +1307,7 @@ func TestApplyExclusion(t *testing.T) {
 	const owner = "race@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "race-1", "ROSTER1", "OLD999")
 
-	fc := &fakeCouncil{setDelay: time.Millisecond}
+	fc := &fakeTenant{setDelay: time.Millisecond}
 	s := New(st, fc, time.UTC, Options{})
 	handlerPermit := model.Permit{ID: pid, Owner: owner, CouncilPermitID: "race-1"}
 
@@ -1353,14 +1353,14 @@ func TestApplyExclusion(t *testing.T) {
 // TestReconcileSkipsPermitWithApplyInFlight: the reconcile loop must not WAIT on a
 // handler's claim, because `want` was computed before that handler's decision — it
 // would apply a stale target, which is the clobber the claim exists to prevent. It
-// skips the permit (and does not count as a council hit), and the next tick heals.
+// skips the permit (and does not count as a tenant hit), and the next tick heals.
 func TestReconcileSkipsPermitWithApplyInFlight(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
 	const owner = "held@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "held-1", "ROSTER1", "OLD999")
 
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	s := New(st, fc, time.UTC, Options{})
 
 	release, ok := s.AcquireApply(ctx, pid)
@@ -1381,7 +1381,7 @@ func TestReconcileSkipsPermitWithApplyInFlight(t *testing.T) {
 
 // TestCaseVariantPlateIsNotAChange (F5, I8): the portal echoes plates back in
 // whatever case they were entered with, and a case-only difference must not look
-// like a change. It used to drive a real council write, a "your permit was updated"
+// like a change. It used to drive a real tenant write, a "your permit was updated"
 // notification and a displaced-driver email for a no-op.
 func TestCaseVariantPlateIsNotAChange(t *testing.T) {
 	ctx := context.Background()
@@ -1389,7 +1389,7 @@ func TestCaseVariantPlateIsNotAChange(t *testing.T) {
 	const owner = "case@example.com"
 	pid, reg := seedActivePermit(t, st, owner, "case-1", "ABC123", "abc123")
 
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 	s.reconcileAll(ctx)
@@ -1404,7 +1404,7 @@ func TestCaseVariantPlateIsNotAChange(t *testing.T) {
 	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
 		t.Fatalf("a case variant wrote an activity row (%d rows, err=%v)", len(logs), err)
 	}
-	// Spacing is the same class of difference, and the council echoes that back too.
+	// Spacing is the same class of difference, and the tenant echoes that back too.
 	if err := st.SetPermitActive(ctx, pid, "abc 123"); err != nil {
 		t.Fatal(err)
 	}
@@ -1426,7 +1426,7 @@ func TestFailStreakClearsWithoutATarget(t *testing.T) {
 	const owner = "streak@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "streak-1", "ROSTER1", "OLD999")
 
-	fc := &fakeCouncil{setErr: parking.ErrCouncilBusy}
+	fc := &fakeTenant{setErr: parking.ErrCouncilBusy}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 
@@ -1497,7 +1497,7 @@ func TestUnresolvableTargetIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 	s.reconcileAll(ctx)
@@ -1530,7 +1530,7 @@ func TestUnresolvableTargetIsReported(t *testing.T) {
 	}
 }
 
-// TestExpiryWarningRunsToTheEndOfTheLastDay (F7): EndDate is a zoneless council
+// TestExpiryWarningRunsToTheEndOfTheLastDay (F7): EndDate is a zoneless tenant
 // date parsed as UTC midnight and is the INCLUSIVE last valid day, so comparing
 // `now` against the bare instant closed the warning window at ~10-11am local on the
 // permit's final valid day — while the permit was still live and still needed its
@@ -1548,7 +1548,7 @@ func TestExpiryWarningRunsToTheEndOfTheLastDay(t *testing.T) {
 	seedSchedule(t, st, owner)
 	cpid := "perm-" + owner
 
-	// The permit's last valid day is TODAY in Melbourne, as the council reports it:
+	// The permit's last valid day is TODAY in Melbourne, as the tenant reports it:
 	// a zoneless date, i.e. UTC midnight — which is 10am local. "A permit whose last
 	// valid day is today still gets its warning" must hold at every hour of the day;
 	// the old bare-instant comparison broke it from 10am local onward, so this test
@@ -1556,7 +1556,7 @@ func TestExpiryWarningRunsToTheEndOfTheLastDay(t *testing.T) {
 	today := time.Now().In(loc)
 	endDate := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 
-	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: endDate}}}
+	fc := &fakeTenant{permits: []parking.PermitInfo{{CouncilPermitID: cpid, Status: "Granted", EndDate: endDate}}}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, loc, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond,
 		DriftInterval: time.Nanosecond, ExpiryLead: 14 * 24 * time.Hour, Notifier: nf})
@@ -1575,10 +1575,10 @@ func TestKeepWarmTouchesEveryTenantSession(t *testing.T) {
 	const owner = "twohomes@example.com"
 	seedSession(t, st, owner)
 	seedSchedule(t, st, owner)
-	if err := st.SaveCouncilSession(context.Background(), store.CouncilSession{Owner: owner, CouncilID: "othertown", Cookie: "sealed-2"}); err != nil {
+	if err := st.SaveTenantSession(context.Background(), store.TenantSession{Owner: owner, TenantID: "othertown", Cookie: "sealed-2"}); err != nil {
 		t.Fatal(err)
 	}
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
 	s.keepWarm(context.Background())

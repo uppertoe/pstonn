@@ -17,7 +17,7 @@
   <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
     <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
     {{T "onboarding.rejected_lead" . (slots "b" (strong))}}
-    <span style="display:block;margin-top:12px">{{T "onboarding.rejected_reset" . (slots "reset" (link .Council.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`) "b" (strong))}}</span>
+    <span style="display:block;margin-top:12px">{{T "onboarding.rejected_reset" . (slots "reset" (link .Tenant.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`) "b" (strong))}}</span>
     {{if .LogoutURL}}
     <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
       <span>&bull; <strong>Council account under a different email?</strong></span>
@@ -27,7 +27,7 @@
     {{else}}
     <span style="display:block;margin-top:10px">&bull; <strong>Council account under a different email?</strong> Sign out, then sign back in here with that address.</span>
     {{end}}
-    <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" . (slots "portal" (link .Council.Links.Portal `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</span>
+    <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" . (slots "portal" (link .Tenant.Links.Portal `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</span>
   </span></div>
   {{end}}
   {{if .LinkThrottled}}
@@ -40,8 +40,8 @@
     <strong>Paused after several sign-in tries &mdash; please wait about 15 minutes.</strong><br>
     Too many attempts in a row could lock your real council account, so p.stonn stops first.
     <span style="display:block;margin-top:10px">While you wait, two things worth checking:</span>
-    <span style="display:block;margin-top:6px">{{T "onboarding.throttled_password" . (slots "portal" (link .Council.Links.Portal `hx-boost="false"` `target="_blank"` `rel="noopener"`) "reset" (link .Council.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</span>
-    <span style="display:block;margin-top:6px">&bull; Your email &mdash; your {{.Council.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
+    <span style="display:block;margin-top:6px">{{T "onboarding.throttled_password" . (slots "portal" (link .Tenant.Links.Portal `hx-boost="false"` `target="_blank"` `rel="noopener"`) "reset" (link .Tenant.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</span>
+    <span style="display:block;margin-top:6px">&bull; Your email &mdash; your {{.Tenant.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
     {{- if .LogoutURL}} <a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}} sign out{{end}} and sign back in here with that one.</span>
   </span></div>
   {{end}}
@@ -62,7 +62,7 @@
          admission lock; this is the honest front door. */}}
     <h2>p.stonn is full at the moment</h2>
     <p>
-      It&rsquo;s run by one person for a small number of {{.Council.Short}} households, and taking on more right now
+      It&rsquo;s run by one person for a small number of {{.Tenant.Short}} households, and taking on more right now
       would make it slower and less reliable for everyone already using it.
     </p>
     <p class="empty-note" style="margin-top:10px">
@@ -92,7 +92,7 @@
          submit while one is running, and hx-disabled-elt greys the button so
          the wait reads as progress, not a dead tap (observed live 2026-08-22:
          one signup fired four logins in 18 seconds re-pressing this button). */}}
-    <form class="stack" method="post" action="/council/link"
+    <form class="stack" method="post" action="/tenant/link"
           hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
       <label class="fld">Council email (your verified sign-in)
         <input type="email" value="{{.User.Email}}" autocomplete="username" disabled>
@@ -107,22 +107,22 @@
         And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
         invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
       </p>
-      {{- if .Councils}}
+      {{- if .TenantOptions}}
       <label class="fld">Council
-        <select name="council_id" required>
-          {{range .Councils}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
+        <select name="tenant_id" required>
+          {{range .TenantOptions}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
         </select>
       </label>
       {{- end}}
       <label class="fld">Council password
-        <input name="council_password" type="password" autocomplete="current-password" required autofocus>
+        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
       </label>
       {{/* The reset offer belongs NEXT TO the ask, not only on the failure
            banner: a resident whose permit was set up by phone or paper has an
            ePermits account but has never held a working portal password, and
            for them this field is unanswerable — every guess burns one of the
            council's own lockout-budget attempts first. */}}
-      <p class="empty-note" style="margin-top:-4px">{{T "onboarding.reset_beside" . (slots "reset" (link .Council.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</p>
+      <p class="empty-note" style="margin-top:-4px">{{T "onboarding.reset_beside" . (slots "reset" (link .Tenant.Links.ResetPassword `hx-boost="false"` `target="_blank"` `rel="noopener"`))}}</p>
       <label class="optin">
         {{/* Ticked by default, deliberately. Without a saved password the schedule
              stops the first time the council ends the session — which happens

@@ -19,13 +19,13 @@ const (
 	// The edge's Retry-After floors the cooldown (so we honour a real backoff), but
 	// uncapped it is a fleet-wide, restart-surviving outage from one response header:
 	// Azure Front Door can legitimately send Retry-After: 86400 on a 429/503, which
-	// would otherwise pause all council traffic for a day. The half-open probe then
+	// would otherwise pause all tenant traffic for a day. The half-open probe then
 	// re-checks every probeInterval, so a still-live block simply re-opens.
 	maxBreakerCooldown = 30 * time.Minute
 )
 
 // The per-owner cooldown (penalize/cooldownFor) protects ONE account's session
-// from being hammered while the council is refusing it. It is the wrong tool for
+// from being hammered while the tenant is refusing it. It is the wrong tool for
 // the failure that matters at fleet scale: Azure Front Door throttles by source
 // IP, and every owner shares this one egress IP. When the edge blocks the IP,
 // each owner's request independently hits the same wall, so 500 owners would
@@ -35,11 +35,11 @@ const (
 // The breaker is the fleet-level counterpart: several DISTINCT owners pushed back
 // inside a short window is the signature of an IP-level block (as opposed to one
 // account's permit being revoked), so it opens a SHARED circuit and pauses all
-// council traffic at once. It half-opens after a cooldown and lets a single probe
+// tenant traffic at once. It half-opens after a cooldown and lets a single probe
 // test the water before resuming, so recovery doesn't stampede the edge.
 type breaker struct {
 	mu        sync.Mutex
-	openUntil time.Time            // while now < this, all council traffic is paused
+	openUntil time.Time            // while now < this, all tenant traffic is paused
 	recent    map[string]time.Time // owner -> last pushback, for the distinct-owner tally
 	// generation is bumped every time the circuit (re)opens. A permit carries the
 	// generation it was admitted under; a success can only close the circuit if its
@@ -75,7 +75,7 @@ func newBreaker(threshold int, window, cooldown, probeInterval time.Duration) *b
 	}
 }
 
-// allow reports whether a council request may proceed now, and if not, how long to
+// allow reports whether a tenant request may proceed now, and if not, how long to
 // back off. It returns a permit the caller must present to onSuccess. When the open
 // window has elapsed it admits a SINGLE request as the half-open probe (nudging
 // openUntil forward by probeInterval so concurrent callers don't all probe at
@@ -150,7 +150,7 @@ func (b *breaker) blockedLocked(now time.Time) bool {
 	return !b.openUntil.IsZero() && now.Before(b.openUntil)
 }
 
-// onSuccess is called after a clean council response, presenting the permit allow()
+// onSuccess is called after a clean tenant response, presenting the permit allow()
 // handed out. It always drops the owner from the tally (so isolated single-owner
 // blips age out instead of accumulating toward the threshold). It CLOSES an open
 // circuit only when the permit is the designated half-open probe AND still on the
@@ -186,7 +186,7 @@ func (b *breaker) onSuccess(now time.Time, owner string, permit breakerPermit) (
 	return false
 }
 
-// breakerGate is the fleet-circuit check at a council entry point. It returns the
+// breakerGate is the fleet-circuit check at a tenant entry point. It returns the
 // permit to present at the eventual success, and ErrCouncilBusy when the circuit is
 // open. Kept separate from the per-owner cooldown check so the two compose: an owner
 // passes only when neither is blocking.

@@ -11,38 +11,38 @@ import (
 )
 
 // checkDrift is how the app notices that a permit was changed OUTSIDE p.stonn —
-// someone editing it in the council portal directly. Until now no test executed it at
-// all, because the fake council always reported an empty current plate, so the drift
+// someone editing it in the tenant portal directly. Until now no test executed it at
+// all, because the fake tenant always reported an empty current plate, so the drift
 // branch could not be reached. That matters more than most untested code: drift
-// detection is the only thing that recovers the state where the DB and the council
+// detection is the only thing that recovers the state where the DB and the tenant
 // disagree, and while they disagree the car actually parked outside is not the car on
 // the permit.
 
 // driftSetup builds an owner with one active permit whose roster wants rosterReg and
-// whose recorded belief is believedReg, plus a council reporting councilReg.
-func driftSetup(t *testing.T, owner, councilID, rosterReg, believedReg, councilReg string) (*store.Store, *fakeCouncil, *fakeNotifier, *Scheduler, int64) {
+// whose recorded belief is believedReg, plus a tenant reporting tenantReg.
+func driftSetup(t *testing.T, owner, tenantID, rosterReg, believedReg, tenantReg string) (*store.Store, *fakeTenant, *fakeNotifier, *Scheduler, int64) {
 	t.Helper()
 	st := newStore(t)
-	pid, _ := seedActivePermit(t, st, owner, councilID, rosterReg, believedReg)
-	fc := &fakeCouncil{}
-	fc.setCurrent(councilID, councilReg)
+	pid, _ := seedActivePermit(t, st, owner, tenantID, rosterReg, believedReg)
+	fc := &fakeTenant{}
+	fc.setCurrent(tenantID, tenantReg)
 	nf := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: nf})
 	return st, fc, nf, s, pid
 }
 
-// The core case: the council shows a plate the app did not put there. The app must
-// record what the council actually shows (so the activity log tells the truth, and so
+// The core case: the tenant shows a plate the app did not put there. The app must
+// record what the tenant actually shows (so the activity log tells the truth, and so
 // the re-assertion is not deduped away as a no-op against the pre-drift row) and then
 // re-assert the schedule over it.
 func TestCheckDriftRecordsAndReasserts(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "drift@example.com", "drift-1"
-	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	const owner, tenantID = "drift@example.com", "drift-1"
+	st, _, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
 
 	s.checkDrift(ctx, owner, "")
 
-	// The DB now believes what the council reports, not what it wished were true.
+	// The DB now believes what the tenant reports, not what it wished were true.
 	p, err := st.GetPermit(ctx, pid)
 	if err != nil {
 		t.Fatalf("get permit: %v", err)
@@ -78,16 +78,16 @@ func TestCheckDriftRecordsAndReasserts(t *testing.T) {
 	}
 }
 
-// A case- or spacing-only difference is the SAME plate — the council echoes plates
+// A case- or spacing-only difference is the SAME plate — the tenant echoes plates
 // back in whatever form they were typed. Treating that as drift would write an
-// "changed directly at the council portal" row and a council write for nothing, which
+// "changed directly at the council portal" row and a tenant write for nothing, which
 // is both a false statement about the user's account and pointless traffic.
 func TestCheckDriftIgnoresCaseAndSpacingVariants(t *testing.T) {
 	ctx := context.Background()
 	for _, variant := range []string{"roster1", "ROSTER 1", "  ROSTER1  ", "RoStEr1"} {
 		t.Run(variant, func(t *testing.T) {
-			const owner, councilID = "same@example.com", "same-1"
-			st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", variant)
+			const owner, tenantID = "same@example.com", "same-1"
+			st, fc, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", variant)
 
 			s.checkDrift(ctx, owner, "")
 
@@ -105,13 +105,13 @@ func TestCheckDriftIgnoresCaseAndSpacingVariants(t *testing.T) {
 	}
 }
 
-// A council READ failure must be silent and harmless. It is not evidence of drift, and
+// A tenant READ failure must be silent and harmless. It is not evidence of drift, and
 // treating it as "the council shows nothing" would blank the permit's recorded plate
 // and then claim in the activity log that someone changed it in the portal.
 func TestCheckDriftIgnoresReadFailures(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "err@example.com", "err-1"
-	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
+	const owner, tenantID = "err@example.com", "err-1"
+	st, fc, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "")
 	fc.permitsErr = errors.New("council unreachable")
 
 	s.checkDrift(ctx, owner, "")
@@ -132,10 +132,10 @@ func TestCheckDriftIgnoresReadFailures(t *testing.T) {
 // writing, that someone changed it in the portal when nobody did.
 func TestCheckDriftDoesNotTrustAnEmptyGridRego(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "blank@example.com", "blank-1"
-	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "ROSTER1")
+	const owner, tenantID = "blank@example.com", "blank-1"
+	st, fc, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "ROSTER1")
 	// The grid says the permit has no plate; managedVehicle still shows ROSTER1.
-	fc.setGridRego(councilID, "")
+	fc.setGridRego(tenantID, "")
 
 	s.checkDrift(ctx, owner, "")
 
@@ -156,10 +156,10 @@ func TestCheckDriftDoesNotTrustAnEmptyGridRego(t *testing.T) {
 // drift — the confirming call was paid for and its answer thrown away.
 func TestCheckDriftAdoptsAuthoritativePlateWhenGridIsBlank(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "omit@example.com", "omit-1"
+	const owner, tenantID = "omit@example.com", "omit-1"
 	// cached OLD123; managedVehicle reports NEW456; the grid omits the rego (blank).
-	st, fc, _, s, pid := driftSetup(t, owner, councilID, "OLD123", "OLD123", "NEW456")
-	fc.setGridRego(councilID, "") // grid blank; managedVehicle still shows NEW456
+	st, fc, _, s, pid := driftSetup(t, owner, tenantID, "OLD123", "OLD123", "NEW456")
+	fc.setGridRego(tenantID, "") // grid blank; managedVehicle still shows NEW456
 
 	s.checkDrift(ctx, owner, "")
 
@@ -187,8 +187,8 @@ func TestCheckDriftAdoptsAuthoritativePlateWhenGridIsBlank(t *testing.T) {
 // from quietly disabling clearing detection altogether.
 func TestCheckDriftBelievesACorroboratedClearing(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "cleared2@example.com", "cleared-2"
-	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
+	const owner, tenantID = "cleared2@example.com", "cleared-2"
+	st, _, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "")
 
 	s.checkDrift(ctx, owner, "")
 
@@ -198,12 +198,12 @@ func TestCheckDriftBelievesACorroboratedClearing(t *testing.T) {
 	}
 }
 
-// The council reporting an EMPTY plate is real drift: somebody cleared the permit, and
+// The tenant reporting an EMPTY plate is real drift: somebody cleared the permit, and
 // the app must notice rather than keep believing its own cached value.
 func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "cleared@example.com", "cleared-1"
-	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
+	const owner, tenantID = "cleared@example.com", "cleared-1"
+	st, _, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "")
 
 	s.checkDrift(ctx, owner, "")
 
@@ -221,21 +221,21 @@ func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
 
 // An expired permit must not be ACTED on. The owner-level grid read happens either
 // way — it is one call for the whole account, which is the point of reading the grid
-// — but an expired permit must produce no drift row and no council write, because
+// — but an expired permit must produce no drift row and no tenant write, because
 // the app no longer manages it.
 //
-// The expiry is set on the COUNCIL, not just locally: the council is the authority
+// The expiry is set on the COUNCIL, not just locally: the tenant is the authority
 // on end dates and checkDrift writes what it reports into the permit row, so a
-// locally-expired permit the council still reports as current is not expired.
+// locally-expired permit the tenant still reports as current is not expired.
 func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "expired@example.com", "expired-1"
-	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	const owner, tenantID = "expired@example.com", "expired-1"
+	st, fc, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
 
 	// Retire the permit: an end date whose local day is well past.
 	past := time.Now().AddDate(0, 0, -10)
-	fc.setCouncilEndDate(councilID, past)
-	if err := st.UpdatePermitMeta(ctx, owner, councilID, "Approved", "", "", past); err != nil {
+	fc.setTenantEndDate(tenantID, past)
+	if err := st.UpdatePermitMeta(ctx, owner, tenantID, "Approved", "", "", past); err != nil {
 		t.Fatalf("set expiry: %v", err)
 	}
 	if p, err := st.GetPermit(ctx, pid); err != nil || !p.Inactive(time.Now(), time.UTC) {
@@ -255,14 +255,14 @@ func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 // Drift must run on its OWN cadence, not on every keep-warm. A session that is
 // warm-due but not yet drift-due gets warmed with NO grid read; once drift comes
 // due, a pass does the grid read. This is the decoupling that stops keep-warm from
-// doubling its own council traffic.
+// doubling its own tenant traffic.
 func TestDriftDecoupledFromWarm(t *testing.T) {
 	ctx := context.Background()
 	const owner = "decouple@example.com"
 	st := newStore(t)
 	seedSession(t, st, owner)
 	seedSchedule(t, st, owner)
-	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
+	fc := &fakeTenant{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
 	nf := &fakeNotifier{on: true}
 
 	// Warm every tick; drift every 6h (baseline is the just-seeded UpdatedAt, so not
@@ -287,7 +287,7 @@ func TestDriftDecoupledFromWarm(t *testing.T) {
 }
 
 // A FAILED grid read must NOT advance drift_checked_at. Otherwise a single failed
-// read — most likely during a council outage, exactly when we most want to keep
+// read — most likely during a tenant outage, exactly when we most want to keep
 // re-reading — stands the drift check down for a whole interval instead of retrying
 // on the next pass. The warm itself still succeeds (it uses a different call), so
 // the session is alive and drift is due: the exact path that used to mark the check
@@ -298,7 +298,7 @@ func TestFailedDriftDoesNotMarkChecked(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, owner)
 	seedSchedule(t, st, owner)
-	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
+	fc := &fakeTenant{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour,
 		WarmInterval: time.Nanosecond, DriftInterval: time.Nanosecond, Notifier: nf})
@@ -308,7 +308,7 @@ func TestFailedDriftDoesNotMarkChecked(t *testing.T) {
 	fc.permitsErr = errors.New("council unreachable")
 	s.keepWarm(ctx)
 
-	cs, err := st.GetCouncilSession(ctx, owner)
+	cs, err := st.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
@@ -319,24 +319,24 @@ func TestFailedDriftDoesNotMarkChecked(t *testing.T) {
 	// Recovery: the next pass reads the grid successfully and only now marks it done.
 	fc.permitsErr = nil
 	s.keepWarm(ctx)
-	cs, _ = st.GetCouncilSession(ctx, owner)
+	cs, _ = st.GetTenantSession(ctx, owner)
 	if cs.DriftCheckedAt.IsZero() {
 		t.Fatal("a successful drift read did not advance drift_checked_at")
 	}
 }
 
-// Drift's compare-and-swap must be judged against what we believed when the council
+// Drift's compare-and-swap must be judged against what we believed when the tenant
 // read STARTED. Reading the baseline afterwards folded a concurrent apply into the
-// expected value, so the swap succeeded and regressed the record to a plate the council
+// expected value, so the swap succeeded and regressed the record to a plate the tenant
 // no longer holds — costing a false "changed at the portal" row, a duplicate notice,
 // and (if the target flips before the next tick) a permit shown as covered when it is
 // not, until the next drift read hours later.
 func TestDriftDoesNotRegressAnApplyThatLandedDuringTheRead(t *testing.T) {
 	ctx := context.Background()
-	const owner, councilID = "raced@example.com", "raced-1"
-	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "OLD999", "OLD999")
+	const owner, tenantID = "raced@example.com", "raced-1"
+	st, fc, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "OLD999", "OLD999")
 
-	// While the council read is in flight, an apply commits a NEWER plate.
+	// While the tenant read is in flight, an apply commits a NEWER plate.
 	fc.onListPermits = func() {
 		if err := st.SetPermitActive(ctx, pid, "NEW222"); err != nil {
 			t.Errorf("simulated concurrent apply: %v", err)
@@ -357,7 +357,7 @@ func TestDriftDoesNotRegressAnApplyThatLandedDuringTheRead(t *testing.T) {
 }
 
 // TestPartialPermitListIsNotACompletedDriftCheck pins that acting on a page is not the
-// same as having checked the account. If the council starts paging and we advance
+// same as having checked the account. If the tenant starts paging and we advance
 // last_drift_check anyway, the permits behind the first page are never read again:
 // their plate drift goes undetected and their expiry warnings never fire, silently and
 // for good. The work we CAN do still happens; only the checkpoint is withheld.
@@ -367,7 +367,7 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 	const owner = "paged@example.com"
 	// Session only: this test seeds its OWN permit ("14576") below and counts exactly
 	// one, so it must not also get seedSession's generic warm-permit.
-	if err := st.SaveCouncilSession(ctx, store.CouncilSession{Owner: owner, Cookie: "seed"}); err != nil {
+	if err := st.SaveTenantSession(ctx, store.TenantSession{Owner: owner, Cookie: "seed"}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	pid, err := st.UpsertPermit(ctx, owner, "14576", "14", "Permit")
@@ -382,10 +382,10 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 		t.Fatalf("rule: %v", err)
 	}
 
-	// A permit the council DOES return, so the pass has real work to do: the meta write
+	// A permit the tenant DOES return, so the pass has real work to do: the meta write
 	// below is what proves the partial path still does everything it can before it
 	// declines to check the owner off.
-	fc := &fakeCouncil{partialPermits: true, permits: []parking.PermitInfo{{
+	fc := &fakeTenant{partialPermits: true, permits: []parking.PermitInfo{{
 		CouncilPermitID: "14576", PermitNumber: "VPP9", PermitType: "Resident",
 		Status: "Active", CurrentRego: "PAGE01",
 	}}}
@@ -407,12 +407,12 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 
 	// And the checkpoint really is withheld end-to-end, through warmOne rather than by
 	// reading checkDrift's return value.
-	cs, err := st.GetCouncilSession(ctx, owner)
+	cs, err := st.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
 	s.warmOne(ctx, cs)
-	after, err := st.GetCouncilSession(ctx, owner)
+	after, err := st.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatalf("session after: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 		t.Fatalf("a complete permit list must check the owner off: %v", err)
 	}
 	s.warmOne(ctx, cs)
-	done, err := st.GetCouncilSession(ctx, owner)
+	done, err := st.GetTenantSession(ctx, owner)
 	if err != nil {
 		t.Fatalf("session done: %v", err)
 	}

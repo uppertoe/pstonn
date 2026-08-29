@@ -194,7 +194,7 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 //   - owner is the email that scopes all shared account data: the user's own
 //     when they run their own account, or the primary they are a secondary of.
 //   - isPrimary is false when the user is a secondary (a guest on someone's
-//     account), which gates the owner-only actions (council link/unlink, account
+//     account), which gates the owner-only actions (tenant link/unlink, account
 //     delete, managing members).
 func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrimary bool) {
 	user, owner, isPrimary, err := s.resolveAccountStrict(ctx)
@@ -253,13 +253,13 @@ func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 		//
 		// Checked BEFORE touchActivity: a request we are about to reject must not
 		// have side effects, and resetting the idle clock is one — it extends how
-		// long a council session is held for a household that may have left.
+		// long a tenant session is held for a household that may have left.
 		if isStateChanging(r) && !sameOrigin(r) {
 			s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
 			return
 		}
 		// Being here resets the account's idle clock (see decideWarm): the
-		// re-authorise bound exists to stop holding a council session for a household
+		// re-authorise bound exists to stop holding a tenant session for a household
 		// that has left, and someone signed in and using the app has not left.
 		s.touchActivity(r.Context(), u.Email)
 		if isStateChanging(r) {
@@ -270,7 +270,7 @@ func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 }
 
 // withConsent is withUser plus a terms-acceptance gate, used for every action
-// that stores or changes user data (so nothing happens, and no council login is
+// that stores or changes user data (so nothing happens, and no tenant login is
 // stored, before the user has accepted the current terms).
 func (s *Server) withConsent(h http.HandlerFunc) http.HandlerFunc {
 	return s.withUser(func(w http.ResponseWriter, r *http.Request) {

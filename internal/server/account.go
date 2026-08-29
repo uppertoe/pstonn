@@ -18,53 +18,53 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// councilLink onboards the user's council account via a headless login: it takes
-// their council credentials and exchanges them for a session cookie. The password
+// tenantLink onboards the user's tenant account via a headless login: it takes
+// their tenant credentials and exchanges them for a session cookie. The password
 // is discarded unless the user opts in to auto-reconnect, in which case it is
 // sealed (DATA_ENCRYPTION_KEY) and stored so the scheduler can silently re-link if
-// the council session later expires.
-func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
+// the tenant session later expires.
+func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	user, _, isPrimary := s.resolveAccount(r.Context())
-	// Only the account owner links the council account; a secondary uses the
+	// Only the account owner links the tenant account; a secondary uses the
 	// primary's connection and cannot change it.
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can connect the council account.")
 		return
 	}
-	// The council username is FIXED to the owner's verified email (from the
+	// The tenant username is FIXED to the owner's verified email (from the
 	// forward-auth layer), so a user can only ever link the Stonnington account
 	// that matches their own verified email; they supply just the password.
-	password := r.FormValue("council_password")
+	password := r.FormValue("portal_password")
 	if password == "" {
 		s.formError(w, r, "Enter your council password.")
 		return
 	}
-	// Which tenant. With one enabled council the choice is implicit; with several
+	// Which tenant. With one enabled tenant the choice is implicit; with several
 	// the form names it (the sign-up choice, or "connect another area"), and the
 	// selection is recorded BEFORE the login so the session and permits are filed
 	// under it. A tenant the process is not serving is refused.
-	councilID := ""
-	if s.councils != nil {
-		chosen := s.councils.Default
-		if enabled := s.councils.Enabled(); len(enabled) > 1 {
-			c, ok := s.councils.ByID(r.FormValue("council_id"))
+	tenantID := ""
+	if s.registry != nil {
+		chosen := s.registry.Default
+		if enabled := s.registry.Enabled(); len(enabled) > 1 {
+			c, ok := s.registry.ByID(r.FormValue("tenant_id"))
 			if !ok || !c.Enabled {
 				s.formError(w, r, "Choose your council.")
 				return
 			}
 			chosen = c
 		}
-		if err := s.store.SetAccountCouncil(r.Context(), user, chosen.ID); err != nil {
+		if err := s.store.SetAccountTenant(r.Context(), user, chosen.ID); err != nil {
 			s.serverError(w, err)
 			return
 		}
-		councilID = chosen.ID
+		tenantID = chosen.ID
 	}
 	// Throttle password attempts per user: every submit forwards the password to
-	// the council's own login, and hammering it could trip the council's lockout
+	// the tenant's own login, and hammering it could trip the tenant's lockout
 	// on the user's real account (the username is pinned to their email, so this
 	// is no oracle against anyone else's).
-	if !s.councilTry.allow(user) {
+	if !s.tenantTry.allow(user) {
 		// Land back on the onboarding page (same pattern as link=rejected), where
 		// the banner pairs the wait with the likely fixes. The bare 429 message
 		// page was the last thing the second community sign-up saw before leaving
@@ -73,7 +73,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/schedule?link=throttled", http.StatusSeeOther)
 		return
 	}
-	// Capacity check, before we take their password anywhere near the council.
+	// Capacity check, before we take their password anywhere near the tenant.
 	// Only a NEW household counts: anyone we already serve must never be locked out
 	// of their own running service.
 	//
@@ -114,19 +114,19 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	savePassword := r.FormValue("save_password") != ""
-	// The headless council login is several round trips; cap it inside the
+	// The headless tenant login is several round trips; cap it inside the
 	// server's 20s WriteTimeout so a slow portal yields the error message below
 	// (the user can retry) instead of a dropped connection.
 	linkCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	if err := s.council.Link(linkCtx, user, councilID, user, password, savePassword, true, 0); err != nil {
+	if err := s.tenant.Link(linkCtx, user, tenantID, user, password, savePassword, true, 0); err != nil {
 		log.Printf("council link for %s: %v", redact.Email(user), err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
 			return
 		}
 		if errors.Is(err, parking.ErrLoginRejected) {
-			// The council tells us only that no session cookie came back, so we
+			// The tenant tells us only that no session cookie came back, so we
 			// genuinely cannot distinguish a wrong password from "no ePermits account
 			// exists for this email". This failure needs a NEXT STEP, not just an
 			// explanation: the likely remedy is signing out and back in with the
@@ -139,7 +139,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, store.ErrSecondaryAccount) {
-			// The council sign-in actually SUCCEEDED; we refused to keep it because this
+			// The tenant sign-in actually SUCCEEDED; we refused to keep it because this
 			// address joined another household while the sign-in was in flight. Saying
 			// "a problem at our end" here would be a lie about their password and leave
 			// them retrying something that can never work.
@@ -166,50 +166,50 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/schedule?linked=1", http.StatusSeeOther)
 }
 
-// councilSelect switches the account's current tenant (the user menu's area
+// tenantSelect switches the account's current tenant (the user menu's area
 // switcher). Linked there already → the schedule; not yet → the picker, which
 // offers the link form for that tenant.
-func (s *Server) councilSelect(w http.ResponseWriter, r *http.Request) {
+func (s *Server) tenantSelect(w http.ResponseWriter, r *http.Request) {
 	user, owner, _ := s.resolveAccount(r.Context())
-	if s.councils == nil {
+	if s.registry == nil {
 		redirectHome(w, r)
 		return
 	}
-	c, ok := s.councils.ByID(r.FormValue("council_id"))
+	c, ok := s.registry.ByID(r.FormValue("tenant_id"))
 	if !ok || !c.Enabled {
 		s.formError(w, r, "That area isn't available.")
 		return
 	}
-	if err := s.store.SetAccountCouncil(r.Context(), owner, c.ID); err != nil {
+	if err := s.store.SetAccountTenant(r.Context(), owner, c.ID); err != nil {
 		s.serverError(w, err)
 		return
 	}
 	_ = user
-	if s.council.Linked(r.Context(), owner, c.ID) {
+	if s.tenant.Linked(r.Context(), owner, c.ID) {
 		redirectHome(w, r)
 		return
 	}
 	http.Redirect(w, r, "/permits/new", http.StatusSeeOther)
 }
 
-// tenantArg resolves the tenant a settings action names (hidden council_id on the
+// tenantArg resolves the tenant a settings action names (hidden tenant_id on the
 // per-tenant cards), defaulting to the account's current tenant.
 func (s *Server) tenantArg(r *http.Request, owner string) (string, error) {
-	if id := r.FormValue("council_id"); id != "" {
-		if s.councils != nil {
-			if _, ok := s.councils.ByID(id); !ok {
+	if id := r.FormValue("tenant_id"); id != "" {
+		if s.registry != nil {
+			if _, ok := s.registry.ByID(id); !ok {
 				return "", store.ErrNotFound
 			}
 		}
 		return id, nil
 	}
-	return s.store.CouncilIDFor(r.Context(), owner)
+	return s.store.TenantIDFor(r.Context(), owner)
 }
 
-// councilUnlink removes the account's session with one tenant but keeps its
+// tenantUnlink removes the account's session with one tenant but keeps its
 // permits, vehicles and schedule, so a later re-link resumes where it left off.
 // Owner-only: a secondary cannot disconnect the shared connection.
-func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
+func (s *Server) tenantUnlink(w http.ResponseWriter, r *http.Request) {
 	user, _, isPrimary := s.resolveAccount(r.Context())
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can disconnect the council account.")
@@ -220,7 +220,7 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "That area isn't available.")
 		return
 	}
-	if err := s.store.DeleteCouncilSessionIn(r.Context(), user, tenant); err != nil {
+	if err := s.store.DeleteTenantSessionIn(r.Context(), user, tenant); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -241,19 +241,19 @@ func (s *Server) confirmTokenTTL() time.Duration {
 	return lead + 14*24*time.Hour
 }
 
-// hasSavedPassword reports whether the account currently has a saved council
+// hasSavedPassword reports whether the account currently has a saved tenant
 // password (auto-reconnect on). Used to default the link form's "save my
 // password" checkbox to the user's existing choice, so a deliberate opt-out isn't
 // silently reversed on a later re-link.
 func (s *Server) hasSavedPassword(ctx context.Context, owner string) bool {
-	cs, err := s.store.GetCouncilSession(ctx, owner)
+	cs, err := s.store.GetTenantSession(ctx, owner)
 	return err == nil && cs.Password != ""
 }
 
-// councilForgetPassword drops the saved (sealed) council password so p.stonn will
+// tenantForgetPassword drops the saved (sealed) tenant password so p.stonn will
 // no longer reconnect automatically, without disturbing the live session. Owner-
 // only. After this, a session expiry once again requires a manual re-link.
-func (s *Server) councilForgetPassword(w http.ResponseWriter, r *http.Request) {
+func (s *Server) tenantForgetPassword(w http.ResponseWriter, r *http.Request) {
 	user, _, isPrimary := s.resolveAccount(r.Context())
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can change this.")
@@ -264,12 +264,12 @@ func (s *Server) councilForgetPassword(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "That area isn't available.")
 		return
 	}
-	if err := s.store.ClearCouncilPasswordIn(r.Context(), user, tenant); err != nil {
+	if err := s.store.ClearTenantPasswordIn(r.Context(), user, tenant); err != nil {
 		s.serverError(w, err)
 		return
 	}
 	// Drop any queued reconnect: the user just opted out of saved-password recovery.
-	// ClearCouncilPassword also bumped the session generation, so an ALREADY-running
+	// ClearTenantPassword also bumped the session generation, so an ALREADY-running
 	// reconnect's generation-conditioned save lands nowhere and can't restore the
 	// password — this only cancels not-yet-started work.
 	s.sched.CancelReconnect(user)
@@ -298,7 +298,7 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	// Cancel any queued auto-reconnect: the council row is gone, and an in-flight
+	// Cancel any queued auto-reconnect: the tenant row is gone, and an in-flight
 	// attempt must not keep replaying the third-party password for a deleted account.
 	// (The generation-conditioned save also lands nowhere now the row is gone.)
 	s.sched.CancelReconnect(user)
@@ -445,7 +445,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The checks above are for a clear message; the STORE decides. Its update re-tests
-	// the same prerequisites in the statement itself, so a council link or first vehicle
+	// the same prerequisites in the statement itself, so a tenant link or first vehicle
 	// landing in between cannot slip an invite through behind them.
 	switch err := s.store.AcceptInvite(ctx, u.Email, owner); {
 	case errors.Is(err, store.ErrInviteBlocked):
@@ -562,25 +562,25 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 	redirectHome(w, r)
 }
 
-// councilConfirm renders the "keep it running" page from a renewal-reminder
+// tenantConfirm renders the "keep it running" page from a renewal-reminder
 // email. It is public and token-only (no login), so it stays one tap.
 //
 // GET only RENDERS a button; the POST below performs it. Mail scanners, corporate
 // link-checkers and mailbox previewers all follow links, so a GET that acted would
 // let a machine satisfy the very human-liveness check this flow exists to make —
-// quietly keeping a departed user's council session alive for another full cycle.
-func (s *Server) councilConfirm(w http.ResponseWriter, r *http.Request) {
+// quietly keeping a departed user's tenant session alive for another full cycle.
+func (s *Server) tenantConfirm(w http.ResponseWriter, r *http.Request) {
 	noStore(w) // the URL carries a live single-use token; keep it out of caches
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
 	s.render(w, dashboardData{State: "confirm", Loc: s.cfg.DisplayLocation,
 		Confirm: &confirmView{Token: token, Stale: token == ""}})
 }
 
-// councilConfirmApply consumes the single-use token and extends the session by
+// tenantConfirmApply consumes the single-use token and extends the session by
 // another SessionMaxAge. A used, unknown or aged-out token is reported as
 // "nothing to do" rather than an error: the first use already extended it, so the
 // user is genuinely fine either way.
-func (s *Server) councilConfirmApply(w http.ResponseWriter, r *http.Request) {
+func (s *Server) tenantConfirmApply(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	// This route is PUBLIC (the link comes from an email, so there is no session)
 	// and it mutates, which puts it outside withUser's blanket protections. Both

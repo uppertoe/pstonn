@@ -46,22 +46,22 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	// Label each card with its council only when the account's permits span
+	// Label each card with its tenant only when the account's permits span
 	// more than one — with one there is nothing to tell apart.
 	tenantLabel := func(model.Permit) string { return "" }
 	if seen := map[string]bool{}; true {
 		for _, p := range managed {
-			seen[p.CouncilID] = true
+			seen[p.TenantID] = true
 		}
 		if len(seen) > 1 {
-			tenantLabel = func(p model.Permit) string { return s.councilOfPermit(ctx, p).Name }
+			tenantLabel = func(p model.Permit) string { return s.tenantOfPermit(ctx, p).Name }
 		}
 	}
 	var pvs []permitView
 	var expired []expiredPermitView
 	for _, p := range managed {
 		// Expired/cancelled permits collapse into a compact section — no full card,
-		// no council call — but stay available as a copy-schedule source.
+		// no tenant call — but stay available as a copy-schedule source.
 		if p.Inactive(now, s.locFor(ctx, owner)) {
 			expired = append(expired, buildExpiredView(p, now, s.locFor(ctx, owner)))
 			continue
@@ -140,7 +140,7 @@ func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
 //
 // It must be the day boundary, not 23:59: model.Resolve treats a booking's end as
 // EXCLUSIVE, so a 23:59 end left the last minute of the day uncovered by the
-// booking. The weekly roster reasserted itself for that minute — a real council
+// booking. The weekly roster reasserted itself for that minute — a real tenant
 // write and a "your permit was updated" notification at 23:59, then the next day's
 // booking or roster writing again at 00:00, where one change was intended.
 func endOfDay(t time.Time, loc *time.Location) time.Time {
@@ -154,7 +154,7 @@ func endOfDay(t time.Time, loc *time.Location) time.Time {
 //
 // Read from the store rather than from the built permitViews so the htmx fragment
 // path can recompute it as cheaply as the full page — it is local SQLite only, no
-// council call. That matters because it runs on every roster tap. The day strip
+// tenant call. That matters because it runs on every roster tap. The day strip
 // adds nothing here: it resolves from those same rules and overrides, so its
 // colours are always a subset.
 func (s *Server) legendColors(ctx context.Context, owner string, vviews []vehicleView, now time.Time) (map[string]bool, error) {
@@ -198,7 +198,7 @@ func (s *Server) legendColors(ctx context.Context, owner string, vviews []vehicl
 	return used, nil
 }
 
-// normPlate canonicalises a registration for comparison: the council echoes
+// normPlate canonicalises a registration for comparison: the tenant echoes
 // plates back in whatever case and spacing they were entered with. Delegated to
 // model so that "are these the same plate?" has exactly one answer across the
 // app — the display layer's idea of it and the scheduler's must not diverge.
@@ -209,11 +209,11 @@ func normPlate(s string) string {
 // colorOfPlate finds the household's colour for a plate that is on the permit.
 //
 // Matched on the PLATE rather than a vehicle id because "what is on the permit
-// now" comes back from the council as a bare registration — it may be a saved
+// now" comes back from the tenant as a bare registration — it may be a saved
 // car, or a visitor's one-off plate that belongs to no vehicle row at all.
 // Returns "" for the latter, which renders neutral: colour means "one of your
 // cars", and its absence means "not one of yours", which is worth knowing at a
-// glance. Case- and space-insensitive, since the council echoes plates back in
+// glance. Case- and space-insensitive, since the tenant echoes plates back in
 // whatever form they were entered.
 func colorOfPlate(vs []vehicleView, plate string) string {
 	want := normPlate(plate)
@@ -229,33 +229,33 @@ func colorOfPlate(vs []vehicleView, plate string) string {
 }
 
 func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []vehicleView, colorByID, regByID, labelByID map[int64]string, now time.Time) (permitView, error) {
-	// Refresh "on permit now" from the council (cached ≤5 min, refreshed in the
-	// background — never a synchronous council call), so the display is truthful
+	// Refresh "on permit now" from the tenant (cached ≤5 min, refreshed in the
+	// background — never a synchronous tenant call), so the display is truthful
 	// and external portal changes are caught. With nothing cached yet, keep the
 	// stored belief. A non-fresh value marks the view PlateRefreshing, which
 	// renders a one-shot htmx follow-up so the refreshed plate swaps in without
 	// a manual reload.
 	plateRefreshing := false
-	if actual, _, fresh, err := s.council.CurrentVehicleCached(ctx, p.Owner,
+	if actual, _, fresh, err := s.tenant.CurrentVehicleCached(ctx, p.Owner,
 		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, plateMaxAge); err == nil {
 		plateRefreshing = !fresh
 		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
 		// case they were entered with, and overwriting our belief with a case variant
 		// makes the scheduler's next tick see a plate that differs from its target —
-		// so it performs a real council write and tells the household their permit was
+		// so it performs a real tenant write and tells the household their permit was
 		// updated (and emails a displaced driver) for a change that changes nothing.
 		//
 		// Adopt only a FRESH reading. The maxAge reasoning below assumed the reading
 		// was at most a few minutes old, but a stale entry has no upper bound (the
 		// refresh path keeps it through failures), and other writers touch the stored
-		// plate without touching this cache — so with the council down, a days-old
+		// plate without touching this cache — so with the tenant down, a days-old
 		// cached plate could win the CAS against a NEWER stored plate and rewrite the
 		// record backwards. The refresh already running will adopt on the next render.
 		if fresh && !model.SamePlate(actual, p.ActiveRegistration) {
 			// Compare-and-swap: this reading may be up to maxAge old, and an apply can
 			// commit a newer plate while a render is in flight (the card self-polls
 			// exactly while applies settle). A blind write would regress the record to a
-			// plate the council no longer holds. Only adopt our belief locally if the
+			// plate the tenant no longer holds. Only adopt our belief locally if the
 			// stored one is still what we based the comparison on.
 			ok, err := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, p.ActiveRegistration, actual)
 			if err != nil {
@@ -367,10 +367,10 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	}
 	desiredReg, _, _ := dispReg(res.VehicleID, res.Registration)
 	// A change is in flight when the schedule wants a plate right now that the
-	// council's confirmed record does not yet show. desiredReg != "" excludes an
+	// tenant's confirmed record does not yet show. desiredReg != "" excludes an
 	// unresolvable schedule (a deleted vehicle), which the scheduler reports rather
 	// than applies, so it is not "applying". SamePlate, not !=, for the same reason
-	// the drift check uses it: the council echoes case/spacing variants.
+	// the drift check uses it: the tenant echoes case/spacing variants.
 	applying := res.Source != model.SourceNone && desiredReg != "" &&
 		!model.SamePlate(desiredReg, p.ActiveRegistration)
 	// The "nothing scheduled yet" nudge is for a NEW household that hasn't set up a
@@ -420,7 +420,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		Applying:        applying,
 		// The honesty clock must survive a reload: PlateUnconfirmed used to be
 		// reachable only by leaving the tab open for the whole poll budget, because
-		// every full render restarted at attempt 0 — so during a council outage a
+		// every full render restarted at attempt 0 — so during a tenant outage a
 		// reloading user saw a spinner forever and never the "couldn't confirm"
 		// mark. Seeded from the REFRESH-FAILURE streak, not the cache entry's age:
 		// on a healthy system the first visit of the day serves an hours-old
@@ -428,7 +428,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// declared that visit unconfirmable instantly — with no polls, so the
 		// fresh answer never even swapped in (shipped 2026-08-10, caught the same
 		// evening as "couldn't check" on every cold dashboard visit).
-		pollSeed: attemptForStaleness(s.council.RefreshFailingFor(p.Owner,
+		pollSeed: attemptForStaleness(s.tenant.RefreshFailingFor(p.Owner,
 			model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID})),
 	}
 	// Default to a first-attempt poll; a fragment response refines this with the
@@ -437,7 +437,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	pv.armPlatePoll(0)
 	fillExpiry(&pv, now)
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
-	// renewal creates a fresh permit under a new council id).
+	// renewal creates a fresh permit under a new tenant id).
 	for _, sp := range siblings {
 		if sp.ID != p.ID {
 			label := sp.Label
@@ -762,22 +762,22 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 //
 // platePollDelays is the self-refresh cadence: the delay in SECONDS before each
 // successive poll, indexed by how many polls have already been served. It caps how
-// many times a card re-fetches itself to catch a plate still settling at the council
+// many times a card re-fetches itself to catch a plate still settling at the tenant
 // (its length is the bound), AND how long it waits between tries.
 //
 // It BACKS OFF on purpose. The old cadence was a flat 5s×10 (~50s), which barely
-// fitted two council attempts — so an idle-day dashboard load, which finds an empty
+// fitted two tenant attempts — so an idle-day dashboard load, which finds an empty
 // plate cache AND an expired access token and therefore must silent-renew before it
-// can even read (each attempt up to ~25s, and the council's edge occasionally makes
+// can even read (each attempt up to ~25s, and the tenant's edge occasionally makes
 // that slow), routinely outlasted the window and froze the "checking" spinner until a
 // reload. A few quick polls still swap in a normal apply fast; then it stretches to a
 // gentle ~30-60s heartbeat so a slow cold read gets several minutes of retries and
-// lands, while the bound still stops a genuine council outage from polling forever.
-// Past the cap the card keeps showing the last council-confirmed plate; the scheduler
+// lands, while the bound still stops a genuine tenant outage from polling forever.
+// Past the cap the card keeps showing the last tenant-confirmed plate; the scheduler
 // goes on retrying and notifies out of band.
 var platePollDelays = []int{5, 5, 5, 10, 10, 15, 20, 30, 45, 60, 60, 60}
 
-// plateMaxAge is how old a cached council reading may be before the dashboard
+// plateMaxAge is how old a cached tenant reading may be before the dashboard
 // treats it as stale: shows the checking spinner and declines to adopt it into
 // the stored record.
 const plateMaxAge = 5 * time.Minute
@@ -865,7 +865,7 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 	// Re-arm the self-refresh against the attempt count this fetch carried, so the
 	// card keeps swapping in the settling plate — a bounded poll (armPlatePoll caps
 	// it), which is what lets a just-made change refresh without a manual reload
-	// while still preventing a council outage from looping forever.
+	// while still preventing a tenant outage from looping forever.
 	attempt, _ := strconv.Atoi(r.URL.Query().Get("n"))
 	pv.armPlatePoll(attempt)
 	pv.Notice = notice
@@ -885,7 +885,7 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 
 // permitCard re-renders one permit's card fragment. It is the target of the
 // one-shot follow-up fetch a page render emits when it served a stale plate:
-// by the time this fires the background council refresh has usually landed, so
+// by the time this fires the background tenant refresh has usually landed, so
 // the swap shows the verified plate without a manual reload.
 func (s *Server) permitCard(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())

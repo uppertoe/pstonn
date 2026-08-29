@@ -7,11 +7,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/config"
 )
 
-// councilOpDrain ties the rollover spread window to the governor rate, so raising
+// tenantOpDrain ties the rollover spread window to the governor rate, so raising
 // COUNCIL_GOV_RATE for a larger fleet shrinks the window with no separate tuning.
 // The model is a conservative 4 requests/operation; raising the rate shortens the
 // drain proportionally.
-func TestCouncilOpDrain(t *testing.T) {
+func TestTenantOpDrain(t *testing.T) {
 	cases := []struct {
 		ratePerMin int
 		want       time.Duration
@@ -23,7 +23,7 @@ func TestCouncilOpDrain(t *testing.T) {
 		{-5, 4 * time.Second}, // nonsensical -> same fallback
 	}
 	for _, c := range cases {
-		if got := councilOpDrain(c.ratePerMin); got != c.want {
+		if got := tenantOpDrain(c.ratePerMin); got != c.want {
 			t.Errorf("councilOpDrain(%d) = %s, want %s", c.ratePerMin, got, c.want)
 		}
 	}
@@ -31,7 +31,7 @@ func TestCouncilOpDrain(t *testing.T) {
 
 // TestBuildSecretBoxDevSignals: a missing DATA_ENCRYPTION_KEY is fatal in
 // production but fine in local/dev, and BOTH local signals count — not just
-// DEV_IDENTITY_EMAIL. Sandbox fakes the council, so the cipher protects only
+// DEV_IDENTITY_EMAIL. Sandbox fakes the tenant, so the cipher protects only
 // fake secrets; treating only DEV_IDENTITY_EMAIL as dev left a catch-22 where a
 // signed-out sandbox preview demanded a key the sandbox tripwire then forbade.
 func TestBuildSecretBoxDevSignals(t *testing.T) {

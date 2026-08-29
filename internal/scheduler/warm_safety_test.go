@@ -17,7 +17,7 @@ func TestWarmThresholdJitterIsOneSidedDown(t *testing.T) {
 	st := newStore(t)
 	// No idle window → clamp disabled, so we isolate the jitter shape around a plain
 	// 105m interval.
-	s := New(st, &fakeCouncil{}, time.UTC, Options{WarmInterval: 105 * time.Minute, JitterFrac: 0.2})
+	s := New(st, &fakeTenant{}, time.UTC, Options{WarmInterval: 105 * time.Minute, JitterFrac: 0.2})
 	base := 105 * time.Minute
 	low := time.Duration(float64(base) * 0.8)
 	updated := time.Unix(1_700_000_000, 0)
@@ -42,7 +42,7 @@ func TestWarmThresholdClampedBelowIdleWindow(t *testing.T) {
 	const idle, margin = 10 * time.Hour, time.Hour
 	// Interval set ABOVE the idle window — the pathological operator mistake the
 	// clamp exists to survive.
-	s := New(st, &fakeCouncil{}, time.UTC, Options{
+	s := New(st, &fakeTenant{}, time.UTC, Options{
 		WarmInterval: 12 * time.Hour, IdleWindow: idle, WarmSafetyMargin: margin, JitterFrac: 0.2,
 	})
 	ceil := idle - margin // 9h
@@ -70,7 +70,7 @@ func TestDriftSuspendedWhileBreakerOpen(t *testing.T) {
 	st := newStore(t)
 	seedSession(t, st, owner)
 	seedSchedule(t, st, owner)
-	fc := &fakeCouncil{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
+	fc := &fakeTenant{permits: []parking.PermitInfo{{CouncilPermitID: "p1", Status: "Granted"}}}
 	nf := &fakeNotifier{on: true}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour,
 		WarmInterval: time.Nanosecond, DriftInterval: time.Nanosecond, Notifier: nf})

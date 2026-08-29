@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// A council write is confirmed (SetVehicle re-reads to verify), so on a local-commit
+// A tenant write is confirmed (SetVehicle re-reads to verify), so on a local-commit
 // failure the car IS on the permit — but the app must NOT book a clean success: the
 // stale ActiveRegistration would drive a duplicate apply + "updated" notice next pass
 // and be wrong across a restart. It must alert the operator, leave the state for a
@@ -17,11 +17,11 @@ func TestCommitAfterApplyAlertsAndHeals(t *testing.T) {
 	st := newStore(t)
 	const owner = "commit@example.com"
 	pid, _ := seedActivePermit(t, st, owner, "c-1", "ROSTER1", "OLD999") // roster wants ROSTER1
-	fc := &fakeCouncil{}
+	fc := &fakeTenant{}
 	fn := &fakeNotifier{on: true, admin: true}
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
-	// The council write succeeds but the local commit fails.
+	// The tenant write succeeds but the local commit fails.
 	s.commitActive = func(context.Context, int64, string) error { return errors.New("disk full") }
 	s.reconcileAll(ctx)
 	time.Sleep(40 * time.Millisecond) // systemAlert delivers async
