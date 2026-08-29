@@ -132,6 +132,9 @@ func TestMigrateFromPreCouncilSchema(t *testing.T) {
 	if _, err := st.UpsertPermit(ctx, "eve@example.com", "14576", "1", "Mine"); err == nil {
 		t.Fatal("a second account in the same (default) council took over 14576")
 	}
+	if got, err := st.CouncilIDFor(ctx, "bob@example.com"); err != nil || got != "othertown" {
+		t.Fatalf("bob's current tenant = %q, %v", got, err)
+	}
 	if got, err := st.PermitInCouncil(ctx, "othertown", "14576"); err != nil || got.Owner != "bob@example.com" {
 		t.Fatalf("PermitInCouncil(othertown) = %+v, %v", got, err)
 	}
@@ -162,8 +165,9 @@ func TestMigrateFromPreCouncilSchema(t *testing.T) {
 	}
 }
 
-// A choice recorded at sign-up files the first permit under that council, and a
-// linked account cannot be re-pointed at another council without disconnecting.
+// A choice recorded at sign-up files the first permit under that tenant; the
+// account may later hold a session with another tenant too, and each session,
+// permit and password stays with its own.
 func TestAccountCouncilChoice(t *testing.T) {
 	ctx := context.Background()
 	st := newTestStore(t)
@@ -184,12 +188,66 @@ func TestAccountCouncilChoice(t *testing.T) {
 	if cs.CouncilID != "bayside" {
 		t.Fatalf("session inherited council %q, want the sign-up choice", cs.CouncilID)
 	}
-	if err := st.SetAccountCouncil(ctx, "new@example.com", "hume"); err != ErrCouncilMismatch {
-		t.Fatalf("re-pointing a linked account = %v, want ErrCouncilMismatch", err)
-	}
 	id, _ := st.UpsertPermit(ctx, "new@example.com", "9", "14", "V")
 	if p, _ := st.GetPermit(ctx, id); p.CouncilID != "bayside" {
 		t.Fatalf("permit filed under %q", p.CouncilID)
+	}
+	// A second tenant: its own session row, its own password, its own permits.
+	if err := st.SaveCouncilSession(ctx, CouncilSession{Owner: "new@example.com", CouncilID: "hume", Cookie: "h", Password: "hp"}); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := st.ListCouncilSessionsFor(ctx, "new@example.com")
+	if len(all) != 2 || all[0].CouncilID != "bayside" || all[1].CouncilID != "hume" {
+		t.Fatalf("sessions = %+v", all)
+	}
+	if err := st.SetAccountCouncil(ctx, "new@example.com", "hume"); err != nil {
+		t.Fatal(err)
+	}
+	if cs, _ := st.GetCouncilSession(ctx, "new@example.com"); cs.CouncilID != "hume" || cs.Password != "hp" {
+		t.Fatalf("current tenant's session = %+v", cs)
+	}
+	id2, _ := st.UpsertPermit(ctx, "new@example.com", "9", "1", "Same id, other tenant")
+	if p, _ := st.GetPermit(ctx, id2); p.CouncilID != "hume" || id2 == id {
+		t.Fatalf("permit in the second tenant: %+v", p)
+	}
+	// Disconnecting one tenant leaves the other, and the selection follows.
+	if err := st.DeleteCouncilSessionIn(ctx, "new@example.com", "hume"); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := st.ListCouncilSessionsFor(ctx, "new@example.com"); len(all) != 1 || all[0].CouncilID != "bayside" {
+		t.Fatalf("after disconnecting hume: %+v", all)
+	}
+	if n, _ := st.CountLinkedAccounts(ctx); n != 1 {
+		t.Fatalf("linked accounts = %d, want 1 (accounts, not sessions)", n)
+	}
+}
+
+// An owner-keyed council_session migrates to (owner, council_id) with rows intact.
+func TestMigrateSessionKeyToTenant(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sess.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(preCouncilSchema); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	st, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	defer st.Close()
+	if scoped, _ := st.sessionKeyIsScoped(); !scoped {
+		t.Fatal("session table not re-keyed")
+	}
+	cs, err := st.GetCouncilSessionIn(ctx, "lily@example.com", "stonnington")
+	if err != nil || cs.Cookie != "sealed" || cs.Generation != 7 {
+		t.Fatalf("session after migrate: %+v, %v", cs, err)
+	}
+	if err := st.SaveCouncilSession(ctx, CouncilSession{Owner: "lily@example.com", CouncilID: "hume", Cookie: "h"}); err != nil {
+		t.Fatalf("second tenant for the same owner: %v", err)
 	}
 }
 

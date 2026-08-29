@@ -40,7 +40,7 @@ func TestCheckDriftRecordsAndReasserts(t *testing.T) {
 	const owner, councilID = "drift@example.com", "drift-1"
 	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "MEDDLED1")
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	// The DB now believes what the council reports, not what it wished were true.
 	p, err := st.GetPermit(ctx, pid)
@@ -89,7 +89,7 @@ func TestCheckDriftIgnoresCaseAndSpacingVariants(t *testing.T) {
 			const owner, councilID = "same@example.com", "same-1"
 			st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", variant)
 
-			s.checkDrift(ctx, owner)
+			s.checkDrift(ctx, owner, "")
 
 			if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
 				t.Errorf("a %q variant was recorded as external drift (%d rows, err=%v)", variant, len(logs), err)
@@ -114,7 +114,7 @@ func TestCheckDriftIgnoresReadFailures(t *testing.T) {
 	st, fc, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
 	fc.permitsErr = errors.New("council unreachable")
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	p, _ := st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "ROSTER1" {
@@ -137,7 +137,7 @@ func TestCheckDriftDoesNotTrustAnEmptyGridRego(t *testing.T) {
 	// The grid says the permit has no plate; managedVehicle still shows ROSTER1.
 	fc.setGridRego(councilID, "")
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	p, _ := st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "ROSTER1" {
@@ -161,7 +161,7 @@ func TestCheckDriftAdoptsAuthoritativePlateWhenGridIsBlank(t *testing.T) {
 	st, fc, _, s, pid := driftSetup(t, owner, councilID, "OLD123", "OLD123", "NEW456")
 	fc.setGridRego(councilID, "") // grid blank; managedVehicle still shows NEW456
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	p, _ := st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "NEW456" {
@@ -190,7 +190,7 @@ func TestCheckDriftBelievesACorroboratedClearing(t *testing.T) {
 	const owner, councilID = "cleared2@example.com", "cleared-2"
 	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	p, _ := st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "" {
@@ -205,7 +205,7 @@ func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
 	const owner, councilID = "cleared@example.com", "cleared-1"
 	st, _, _, s, pid := driftSetup(t, owner, councilID, "ROSTER1", "ROSTER1", "")
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	p, _ := st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "" {
@@ -242,7 +242,7 @@ func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 		t.Fatalf("fixture is not actually inactive (err=%v)", err)
 	}
 
-	s.checkDrift(ctx, owner)
+	s.checkDrift(ctx, owner, "")
 
 	if logs, err := st.ListApplyLogFor(ctx, owner, 10); err != nil || len(logs) != 0 {
 		t.Errorf("an inactive permit was drift-checked (%d rows, err=%v)", len(logs), err)
@@ -343,7 +343,7 @@ func TestDriftDoesNotRegressAnApplyThatLandedDuringTheRead(t *testing.T) {
 		}
 	}
 
-	if err := s.checkDrift(ctx, owner); err != nil {
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
 		t.Fatalf("drift: %v", err)
 	}
 
@@ -391,7 +391,7 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 	}}}
 	s := New(st, fc, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
 
-	if err := s.checkDrift(ctx, owner); !errors.Is(err, parking.ErrPermitListPartial) {
+	if err := s.checkDrift(ctx, owner, ""); !errors.Is(err, parking.ErrPermitListPartial) {
 		t.Fatalf("checkDrift = %v, want ErrPermitListPartial: a page must not be reported "+
 			"as a completed check of the whole account", err)
 	}
@@ -426,7 +426,7 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 	fc.mu.Lock()
 	fc.partialPermits = false
 	fc.mu.Unlock()
-	if err := s.checkDrift(ctx, owner); err != nil {
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
 		t.Fatalf("a complete permit list must check the owner off: %v", err)
 	}
 	s.warmOne(ctx, cs)

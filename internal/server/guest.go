@@ -353,7 +353,7 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r)
 		return
 	}
-	if permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)) {
+	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
 		s.renderGuestInactive(w, r)
 		return
 	}
@@ -428,7 +428,7 @@ func revertPlate(baseline string, until time.Time, current string, cars []model.
 // resolution the scheduler acts on, so the page's "still applying" state can
 // never disagree with what will be applied.
 func (s *Server) guestDesired(ctx context.Context, permit model.Permit) (want string, decidedAt, until time.Time) {
-	now := time.Now().In(s.locFor(ctx, permit.Owner))
+	now := time.Now().In(s.locForPermit(ctx, permit))
 	rules, err := s.store.ListRules(ctx, permit.ID)
 	if err != nil {
 		return "", time.Time{}, time.Time{}
@@ -585,8 +585,8 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		now := time.Now()
 		view.PendingReg, view.Stalled = pendingState(current, want, stallSince(permit.ID, current, want, decidedAt, now), now)
 		if !until.IsZero() {
-			now := now.In(s.locFor(r.Context(), permit.Owner))
-			view.UntilText = untilText(now, until.In(s.locFor(r.Context(), permit.Owner)))
+			now := now.In(s.locForPermit(r.Context(), permit))
+			view.UntilText = untilText(now, until.In(s.locForPermit(r.Context(), permit)))
 		}
 		// The highlight follows the guest's choice the moment it is saved; the
 		// "on now" pill follows the council's actual record as it catches up.
@@ -627,7 +627,7 @@ func (s *Server) renderGuestMenuOpts(w http.ResponseWriter, r *http.Request, gc 
 	noStore(w)
 	view := s.buildGuestView(r, gc, permit, current)
 	view.KeepForm = keepForm
-	data := dashboardData{State: "guest", Loc: s.locFor(r.Context(), permit.Owner), Guest: view, Flash: flash, Warn: warn}
+	data := dashboardData{State: "guest", Loc: s.locForPermit(r.Context(), permit), Guest: view, Flash: flash, Warn: warn}
 	// The in-page activation swaps (hx-post car/plate, the live poll) want just the
 	// #gbody fragment; a boosted link navigation wants the whole page (else it
 	// swaps the fragment into <body> and drops the card wrapper/padding).
@@ -655,7 +655,7 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r)
 		return
 	}
-	if permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)) {
+	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
 		s.renderGuestInactive(w, r)
 		return
 	}
@@ -714,7 +714,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// are covered — the exact fine this app exists to prevent. (The scheduler
 	// already refuses to reconcile inactive permits, so the override would also
 	// never be corrected.)
-	if permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)) {
+	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
 		s.renderGuestInactive(w, r)
 		return
 	}
@@ -726,7 +726,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().In(s.locFor(r.Context(), permit.Owner))
+	now := time.Now().In(s.locForPermit(r.Context(), permit))
 	overnight := gc.Grant.AllowOvernight && r.FormValue("overnight") != ""
 	end := dayEndLocal(now, 0)
 	if overnight {
@@ -879,7 +879,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r)
 		return
 	}
-	if permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)) {
+	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
 		s.renderGuestInactive(w, r)
 		return
 	}
@@ -887,7 +887,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestGone(w, r) // printed QRs never change the permit directly, so there is nothing to revert
 		return
 	}
-	now := time.Now().In(s.locFor(r.Context(), permit.Owner))
+	now := time.Now().In(s.locForPermit(r.Context(), permit))
 	baseline := normalizeReg(gc.BaselinePlate)
 	if baseline == "" || !now.Before(gc.BaselineUntil) || !validRego(baseline) {
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Nothing to put back right now.")
@@ -1852,7 +1852,7 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusForbidden, "That permit isn't one you manage.")
 		return
 	}
-	if permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)) {
+	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
 		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
 		return
 	}
@@ -1869,7 +1869,7 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 	// the permit card's button wants just the card to drop into its modal.
 	if isHX(r) && !isBoosted(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := templates.ExecuteTemplate(w, "qr-card", dashboardData{QR: qr, Loc: s.locFor(r.Context(), permit.Owner)}); err != nil {
+		if err := templates.ExecuteTemplate(w, "qr-card", dashboardData{QR: qr, Loc: s.locForPermit(r.Context(), permit)}); err != nil {
 			log.Printf("render qr-card: %v", err)
 		}
 		return
@@ -2096,12 +2096,12 @@ func (s *Server) requestLiveState(ctx context.Context, permit model.Permit, req 
 	}
 	// Approved. Ended is checked first: after the window lapses the schedule
 	// naturally resolves elsewhere, which must read as "ended", not "superseded".
-	now := time.Now().In(s.locFor(ctx, permit.Owner))
+	now := time.Now().In(s.locForPermit(ctx, permit))
 	end := req.UntilTS
 	if end.IsZero() && !req.DecidedAt.IsZero() {
 		// Rows approved before until_ts existed: reproduce the approval's window
 		// (printed-QR approvals always ran to the end of the approval's day).
-		end = dayEndLocal(req.DecidedAt.In(s.locFor(ctx, permit.Owner)), 0)
+		end = dayEndLocal(req.DecidedAt.In(s.locForPermit(ctx, permit)), 0)
 	}
 	if !end.IsZero() && !now.Before(end) {
 		return "ended", ""
@@ -2227,7 +2227,7 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		// typed and given no way to read a stranger's request.
 		if haveMine && mine.ID == reqID {
 			s.setGuestReqCookie(w, mine.ID, myNonce)
-			s.render(w, dashboardData{State: "guest-wait", Loc: s.locFor(r.Context(), permit.Owner),
+			s.render(w, dashboardData{State: "guest-wait", Loc: s.locForPermit(r.Context(), permit),
 				Wait: &guestWaitView{Plate: mine.Plate, ReqID: mine.ID, Nonce: myNonce, Status: mine.Status}})
 			return
 		}
@@ -2238,7 +2238,7 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 	// Remember the request in this browser (the one that made it), so a later
 	// re-scan of the same door code shows its fate instead of a blank form.
 	s.setGuestReqCookie(w, reqID, nonce)
-	s.render(w, dashboardData{State: "guest-wait", Loc: s.locFor(r.Context(), permit.Owner),
+	s.render(w, dashboardData{State: "guest-wait", Loc: s.locForPermit(r.Context(), permit),
 		Wait: &guestWaitView{Plate: plate, ReqID: reqID, Nonce: nonce, Status: "pending"}})
 }
 
@@ -2348,7 +2348,7 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 	case perr != nil:
 		s.serverError(w, perr)
 		return
-	case permit.Owner == owner && permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)):
+	case permit.Owner == owner && permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)):
 		s.message(w, http.StatusConflict, permitInactiveNoNewLinks)
 		return
 	}
@@ -2390,7 +2390,7 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 	case perr != nil:
 		s.serverError(w, perr)
 		return
-	case permit.Inactive(time.Now(), s.locFor(r.Context(), permit.Owner)):
+	case permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)):
 		s.message(w, http.StatusConflict, permitInactiveNoPoster)
 		return
 	}

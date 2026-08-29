@@ -96,11 +96,20 @@ type CouncilSession struct {
 // GetCouncilSession returns the linked council session for an app user, or
 // ErrNotFound.
 func (s *Store) GetCouncilSession(ctx context.Context, owner string) (CouncilSession, error) {
+	id, err := s.CouncilIDFor(ctx, owner)
+	if err != nil {
+		return CouncilSession{}, err
+	}
+	return s.GetCouncilSessionIn(ctx, owner, id)
+}
+
+// GetCouncilSessionIn reads the account's session with one tenant exactly.
+func (s *Store) GetCouncilSessionIn(ctx context.Context, owner, councilID string) (CouncilSession, error) {
 	var cs CouncilSession
 	var expiry, updated, linked, reminded, reconnected, lastActive, driftChecked string
 	err := s.db.QueryRowContext(ctx, `
 SELECT owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, reconnected_at, last_active_at, drift_checked_at, session_generation
-FROM council_session WHERE owner = ?`, owner).
+FROM council_session WHERE owner = ? AND council_id = ?`, owner, councilID).
 		Scan(&cs.Owner, &cs.CouncilID, &cs.Sub, &cs.CouncilEmail, &cs.Cookie, &cs.AccessToken, &expiry, &updated, &linked, &reminded, &cs.ConfirmToken, &cs.Password, &reconnected, &lastActive, &driftChecked, &cs.Generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return cs, ErrNotFound
@@ -122,9 +131,18 @@ FROM council_session WHERE owner = ?`, owner).
 // whether a cookie is present) for the keep-warm loop to reconcile. Sealed
 // secrets are included so callers can renew without a second lookup.
 func (s *Store) ListCouncilSessions(ctx context.Context) ([]CouncilSession, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at, session_generation
-FROM council_session`)
+	return s.listSessions(ctx, `SELECT owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at, session_generation
+FROM council_session ORDER BY owner, council_id`)
+}
+
+// ListCouncilSessionsFor returns every tenant session an account holds.
+func (s *Store) ListCouncilSessionsFor(ctx context.Context, owner string) ([]CouncilSession, error) {
+	return s.listSessions(ctx, `SELECT owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, last_active_at, drift_checked_at, session_generation
+FROM council_session WHERE owner = ? ORDER BY council_id`, owner)
+}
+
+func (s *Store) listSessions(ctx context.Context, q string, args ...any) ([]CouncilSession, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -149,17 +167,17 @@ FROM council_session`)
 
 // MarkDriftChecked records that the owner-grid drift/expiry read just ran, so its
 // own cadence (see scheduler.driftDue) can pace it independently of keep-warm.
-func (s *Store) MarkDriftChecked(ctx context.Context, owner string) error {
+func (s *Store) MarkDriftChecked(ctx context.Context, owner, councilID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE council_session SET drift_checked_at = ? WHERE owner = ?`, nowUTC(), owner)
+		`UPDATE council_session SET drift_checked_at = ? WHERE owner = ? AND council_id = ?`, nowUTC(), owner, councilID)
 	return err
 }
 
 // ClearReminderSent undoes MarkReminderSent, so a reminder whose token was recorded
 // but whose email then failed to send can be retried instead of being marked done.
-func (s *Store) ClearReminderSent(ctx context.Context, owner string) error {
+func (s *Store) ClearReminderSent(ctx context.Context, owner, councilID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE council_session SET reminder_sent_at = '', confirm_token = '' WHERE owner = ?`, owner)
+		`UPDATE council_session SET reminder_sent_at = '', confirm_token = '' WHERE owner = ? AND council_id = ?`, owner, councilID)
 	return err
 }
 
@@ -167,10 +185,10 @@ func (s *Store) ClearReminderSent(ctx context.Context, owner string) error {
 // the single-use token embedded in its confirm link — as a hash, so the row cannot
 // be read for a working link. The caller keeps the plaintext only long enough to
 // put it in the email.
-func (s *Store) MarkReminderSent(ctx context.Context, owner, token string) error {
+func (s *Store) MarkReminderSent(ctx context.Context, owner, councilID, token string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE council_session SET reminder_sent_at = ?, confirm_token = ? WHERE owner = ?`,
-		nowUTC(), hashConfirmToken(token), owner)
+		`UPDATE council_session SET reminder_sent_at = ?, confirm_token = ? WHERE owner = ? AND council_id = ?`,
+		nowUTC(), hashConfirmToken(token), owner, councilID)
 	return err
 }
 
@@ -188,12 +206,12 @@ func (s *Store) ConfirmSession(ctx context.Context, token string, maxAge time.Du
 	if token == "" {
 		return "", ErrNotFound
 	}
-	var owner, sentAt string
+	var owner, councilID, sentAt string
 	// Matched on the hash: the column stores hashConfirmToken(token), so the
 	// plaintext from the link is hashed here rather than compared directly.
 	err := s.db.QueryRowContext(ctx,
-		`SELECT owner, reminder_sent_at FROM council_session WHERE confirm_token = ?`,
-		hashConfirmToken(token)).Scan(&owner, &sentAt)
+		`SELECT owner, council_id, reminder_sent_at FROM council_session WHERE confirm_token = ?`,
+		hashConfirmToken(token)).Scan(&owner, &councilID, &sentAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -205,15 +223,15 @@ func (s *Store) ConfirmSession(ctx context.Context, token string, maxAge time.Du
 			// Aged out: clear it so the row can't be probed again, and report it as
 			// not-found (the caller's reassuring copy is correct either way).
 			_, _ = s.db.ExecContext(ctx,
-				`UPDATE council_session SET confirm_token = '' WHERE owner = ?`, owner)
+				`UPDATE council_session SET confirm_token = '' WHERE owner = ? AND council_id = ?`, owner, councilID)
 			return "", ErrNotFound
 		}
 	}
 	// A click is a person confirming they are still here, so it resets the idle
 	// clock as well as the link clock.
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE council_session SET linked_at = ?, last_active_at = ?, reminder_sent_at = '', confirm_token = '' WHERE owner = ?`,
-		nowUTC(), nowUTC(), owner)
+		`UPDATE council_session SET linked_at = ?, last_active_at = ?, reminder_sent_at = '', confirm_token = '' WHERE owner = ? AND council_id = ?`,
+		nowUTC(), nowUTC(), owner, councilID)
 	return owner, err
 }
 
@@ -318,8 +336,7 @@ func (s *Store) SaveCouncilSession(ctx context.Context, cs CouncilSession) error
 INSERT INTO council_session (owner, council_id, sub, council_email, cookie_sealed, access_token_sealed, token_expiry, updated_at, linked_at, reminder_sent_at, confirm_token, password_sealed, last_active_at, session_generation)
 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM account_member WHERE member_email = ? AND invite_pending = 0)
-ON CONFLICT(owner) DO UPDATE SET
-    council_id          = excluded.council_id,
+ON CONFLICT(owner, council_id) DO UPDATE SET
     sub                 = excluded.sub,
     council_email       = excluded.council_email,
     cookie_sealed       = excluded.cookie_sealed,
@@ -383,12 +400,19 @@ var ErrSessionSuperseded = errors.New("store: council session superseded since g
 // that replays the saved password. Returns whether a row was written.
 func (s *Store) SaveReconnectedSessionIfGen(ctx context.Context, cs CouncilSession, expectedGen int64) (bool, error) {
 	now := nowUTC()
+	if cs.CouncilID == "" {
+		id, err := s.CouncilIDFor(ctx, cs.Owner)
+		if err != nil {
+			return false, err
+		}
+		cs.CouncilID = id
+	}
 	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
 SET cookie_sealed = ?, password_sealed = ?, updated_at = ?, reconnected_at = ?,
     session_generation = session_generation + 1
-WHERE owner = ? AND session_generation = ?`,
-		cs.Cookie, cs.Password, now, now, cs.Owner, expectedGen)
+WHERE owner = ? AND council_id = ? AND session_generation = ?`,
+		cs.Cookie, cs.Password, now, now, cs.Owner, cs.CouncilID, expectedGen)
 	if err != nil {
 		return false, err
 	}
@@ -430,13 +454,13 @@ WHERE owner = ? AND session_generation = ?`,
 // Conditioned on expectedGen for the same reason as UpdateCouncilToken: a keep-warm
 // probe spans seconds, and an interactive re-link inside that window must not be
 // overwritten by the re-sealed older cookie. Returns ErrSessionSuperseded if so.
-func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, sealedCookie string, expectedGen int64) error {
+func (s *Store) UpdateCouncilCookie(ctx context.Context, owner, councilID, sealedCookie string, expectedGen int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
 SET cookie_sealed = ?, access_token_sealed = '', token_expiry = '', updated_at = ?,
     session_generation = session_generation + 1
-WHERE owner = ? AND session_generation = ?`,
-		sealedCookie, nowUTC(), owner, expectedGen)
+WHERE owner = ? AND council_id = ? AND session_generation = ?`,
+		sealedCookie, nowUTC(), owner, councilID, expectedGen)
 	if err != nil {
 		return err
 	}
@@ -452,8 +476,17 @@ WHERE owner = ? AND session_generation = ?`,
 // the session — used by the settings "stop auto-reconnecting" action. If the
 // session later expires it will require a manual re-link, as if never saved.
 func (s *Store) ClearCouncilPassword(ctx context.Context, owner string) error {
+	id, err := s.CouncilIDFor(ctx, owner)
+	if err != nil {
+		return err
+	}
+	return s.ClearCouncilPasswordIn(ctx, owner, id)
+}
+
+// ClearCouncilPasswordIn is ClearCouncilPassword for one tenant exactly.
+func (s *Store) ClearCouncilPasswordIn(ctx context.Context, owner, councilID string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE council_session SET password_sealed = '', session_generation = session_generation + 1 WHERE owner = ?`, owner)
+		`UPDATE council_session SET password_sealed = '', session_generation = session_generation + 1 WHERE owner = ? AND council_id = ?`, owner, councilID)
 	return err
 }
 
@@ -463,6 +496,14 @@ func (s *Store) ClearCouncilPassword(ctx context.Context, owner string) error {
 func (s *Store) DeleteCouncilSession(ctx context.Context, owner string) error {
 	defer s.forgetCouncil(owner)
 	_, err := s.db.ExecContext(ctx, `DELETE FROM council_session WHERE owner = ?`, owner)
+	return err
+}
+
+// DeleteCouncilSessionIn disconnects one tenant, leaving the account's other
+// tenants (and everything else) untouched.
+func (s *Store) DeleteCouncilSessionIn(ctx context.Context, owner, councilID string) error {
+	defer s.forgetCouncil(owner)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM council_session WHERE owner = ? AND council_id = ?`, owner, councilID)
 	return err
 }
 
@@ -488,13 +529,13 @@ func (s *Store) DeleteCouncilSession(ctx context.Context, owner string) error {
 // i.e. idle exactly AT the cutoff is already past the bound. Timestamps are stored
 // at second precision, so a strict `<` also disagreed with decideWarm for any
 // session inside the cutoff's own second.
-func (s *Store) DeleteCouncilSessionIfIdle(ctx context.Context, owner string, before time.Time) (bool, error) {
+func (s *Store) DeleteCouncilSessionIfIdle(ctx context.Context, owner, councilID string, before time.Time) (bool, error) {
 	defer s.forgetCouncil(owner)
 	res, err := s.db.ExecContext(ctx, `
 DELETE FROM council_session
-WHERE owner = ?
+WHERE owner = ? AND council_id = ?
   AND COALESCE(NULLIF(last_active_at, ''), linked_at) <= ?`,
-		owner, before.UTC().Format(time.RFC3339))
+		owner, councilID, before.UTC().Format(time.RFC3339))
 	if err != nil {
 		return false, err
 	}
@@ -508,11 +549,11 @@ WHERE owner = ?
 // bumped the generation, so this deletes nothing and the current session survives:
 // stale recovery work can never retire a session that has since changed. Returns
 // whether a row was actually deleted.
-func (s *Store) DeleteCouncilSessionIfGen(ctx context.Context, owner string, gen int64) (bool, error) {
+func (s *Store) DeleteCouncilSessionIfGen(ctx context.Context, owner, councilID string, gen int64) (bool, error) {
 	defer s.forgetCouncil(owner)
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM council_session WHERE owner = ? AND session_generation = ?`,
-		owner, gen)
+		`DELETE FROM council_session WHERE owner = ? AND council_id = ? AND session_generation = ?`,
+		owner, councilID, gen)
 	if err != nil {
 		return false, err
 	}
@@ -568,13 +609,14 @@ WHERE excluded.generation >= breaker_state.generation`,
 	return err
 }
 
-// CouncilIDFor resolves which council an account belongs to: the choice made at
-// sign-up (account_flags), else the council of its linked session, else the
-// process default. One council per account, by design.
+// CouncilIDFor resolves an account's CURRENT tenant: the one it selected (the
+// sign-up choice, or the menu's switcher), else the first tenant it is linked
+// to, else the process default. An account may be linked to several tenants;
+// "current" is where link, pick-a-permit and add-a-permit act.
 func (s *Store) CouncilIDFor(ctx context.Context, owner string) (string, error) {
 	// Memoised: the scheduler and the mux ask per permit per pass, on the single
 	// SQLite connection everything shares. Invalidated by every write that can
-	// change the answer (choice, link, unlink, account deletion).
+	// change the answer (selection, link, unlink, account deletion).
 	if v, ok := s.councilCache.Load(owner); ok {
 		return v.(string), nil
 	}
@@ -582,7 +624,7 @@ func (s *Store) CouncilIDFor(ctx context.Context, owner string) (string, error) 
 	err := s.db.QueryRowContext(ctx, `
 SELECT COALESCE(
     NULLIF((SELECT council_id FROM account_flags WHERE owner = ?), ''),
-    NULLIF((SELECT council_id FROM council_session WHERE owner = ?), ''),
+    NULLIF((SELECT council_id FROM council_session WHERE owner = ? ORDER BY council_id LIMIT 1), ''),
     '')`, owner, owner).Scan(&id)
 	if err != nil {
 		return "", err
@@ -594,35 +636,16 @@ SELECT COALESCE(
 	return id, nil
 }
 
-// forgetCouncil drops the memoised council for an owner.
+// forgetCouncil drops the memoised current tenant for an owner.
 func (s *Store) forgetCouncil(owner string) { s.councilCache.Delete(owner) }
 
-// SetAccountCouncil records the council an account chose at sign-up. Refused if
-// the account already holds a session OR permits with a DIFFERENT council:
-// switching means removing those first, so a permit is never scheduled at the
-// wrong portal.
+// SetAccountCouncil records the account's current tenant (chosen at sign-up or
+// switched from the menu). It is a selection, not a binding: sessions and
+// permits carry their own tenant, and a client never acts across tenants.
 func (s *Store) SetAccountCouncil(ctx context.Context, owner, councilID string) error {
 	defer s.forgetCouncil(owner)
-	cs, err := s.GetCouncilSession(ctx, owner)
-	if err == nil && cs.CouncilID != "" && cs.CouncilID != councilID {
-		return ErrCouncilMismatch
-	}
-	// Permits outlive an unlink on purpose (a re-link resumes the schedule), so
-	// they bind the account to their council just as a session does: re-pointing
-	// the account would have the scheduler push their rosters at another portal.
-	var n int
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM permit WHERE owner = ? AND council_id != '' AND council_id != ?`, owner, councilID).Scan(&n); err != nil {
-		return err
-	}
-	if n > 0 {
-		return ErrCouncilMismatch
-	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 INSERT INTO account_flags (owner, council_id) VALUES (?, ?)
 ON CONFLICT(owner) DO UPDATE SET council_id = excluded.council_id`, owner, councilID)
 	return err
 }
-
-// ErrCouncilMismatch: the account is linked to a different council than asked for.
-var ErrCouncilMismatch = errors.New("store: account is linked to a different council")

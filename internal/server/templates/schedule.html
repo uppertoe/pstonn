@@ -160,7 +160,7 @@
         <button type="button" class="ghost sm" @click="rename=false">Cancel</button>
       </form>
     </div>
-    {{if .Detail}}<span class="pdetail">{{.Detail}}</span>{{end}}
+    {{if .Detail}}<span class="pdetail">{{.Detail}}</span>{{end}}{{if .Tenant}}<span class="pdetail ptenant">{{.Tenant}}</span>{{end}}
     {{/* "Visitor at the door" lives HERE, on the permit it acts on, rather than in
          a second FAB. Two things fall out of that: the permit is implicit (a
          multi-permit account never has to pick one, which is exactly where the old

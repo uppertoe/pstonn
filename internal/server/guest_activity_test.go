@@ -27,7 +27,7 @@ func TestGuestActivityResetsIdleClock(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The account is idle enough that the re-authorise reminder went out.
-	if err := s.store.MarkReminderSent(ctx, owner, "tok-1"); err != nil {
+	if err := s.store.MarkReminderSent(ctx, owner, "", "tok-1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -47,7 +47,7 @@ func TestGuestActivityResetsIdleClock(t *testing.T) {
 
 	// Throttled: within the hour, a second touch is a no-op — a re-sent reminder
 	// stays outstanding, which is how we can SEE the skip.
-	if err := s.store.MarkReminderSent(ctx, owner, "tok-2"); err != nil {
+	if err := s.store.MarkReminderSent(ctx, owner, "", "tok-2"); err != nil {
 		t.Fatal(err)
 	}
 	s.touchGuestActivity(ctx, owner)

@@ -46,6 +46,17 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Label each card with its council only when the account's permits span
+	// more than one — with one there is nothing to tell apart.
+	tenantLabel := func(model.Permit) string { return "" }
+	if seen := map[string]bool{}; true {
+		for _, p := range managed {
+			seen[p.CouncilID] = true
+		}
+		if len(seen) > 1 {
+			tenantLabel = func(p model.Permit) string { return s.councilOfPermit(ctx, p).Name }
+		}
+	}
 	var pvs []permitView
 	var expired []expiredPermitView
 	for _, p := range managed {
@@ -61,6 +72,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		pv.IsPrimary = base.IsPrimary
+		pv.Tenant = tenantLabel(p)
 		pvs = append(pvs, pv)
 	}
 	base.Vehicles = vviews
@@ -290,7 +302,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		})
 	}
 
-	loc := s.locFor(ctx, p.Owner)
+	loc := s.locForPermit(ctx, p)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	// Align the fortnight grid to weekday columns (Sunday first) so the same
 	// weekday sits in the same column as the roster above. The grid starts on the
@@ -570,7 +582,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// "until", so choosing only a day still makes a sensible booking.
 	startsAt := time.Now()
 	if raw := combineDateTime(r.FormValue("from_date"), r.FormValue("from_time"), "00:00"); raw != "" {
-		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locFor(r.Context(), owner))
+		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locForPermit(r.Context(), p))
 		if err != nil {
 			s.formError(w, r, "Couldn't read the start time.")
 			return
@@ -599,7 +611,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 			s.formError(w, r, "Pick the date this booking should end, or choose one of the other options.")
 			return
 		}
-		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locFor(r.Context(), owner))
+		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locForPermit(r.Context(), p))
 		if err != nil {
 			s.formError(w, r, "Couldn't read the end time.")
 			return
@@ -608,14 +620,14 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		// day boundary. It used to default to 23:59, which left the last minute of the
 		// day to the weekly roster for exactly the reason endOfDay explains.
 		if strings.TrimSpace(r.FormValue("until_time")) == "" {
-			t = endOfDay(t, s.locFor(r.Context(), owner))
+			t = endOfDay(t, s.locForPermit(r.Context(), p))
 		}
 		endsAt = &t
 	case "nextday":
-		t := endOfDay(startsAt.AddDate(0, 0, 1), s.locFor(r.Context(), owner))
+		t := endOfDay(startsAt.AddDate(0, 0, 1), s.locForPermit(r.Context(), p))
 		endsAt = &t
 	default: // "day", and anything unexpected
-		t := endOfDay(startsAt, s.locFor(r.Context(), owner))
+		t := endOfDay(startsAt, s.locForPermit(r.Context(), p))
 		endsAt = &t
 	}
 	if endsAt != nil && !endsAt.After(startsAt) {
@@ -669,11 +681,11 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if reg == "" {
 		reg = s.plateOf(r.Context(), owner, vehicleID)
 	}
-	window := "from " + startsAt.In(s.locFor(r.Context(), owner)).Format("2 Jan 3:04pm")
+	window := "from " + startsAt.In(s.locForPermit(r.Context(), p)).Format("2 Jan 3:04pm")
 	if endsAt == nil {
 		window += ", open-ended"
 	} else {
-		window += " until " + windowEndText(*endsAt, s.locFor(r.Context(), owner))
+		window += " until " + windowEndText(*endsAt, s.locForPermit(r.Context(), p))
 	}
 	s.logChange(r.Context(), owner, user, store.ActionOverrideAdd, reg, window)
 	s.sched.KickPermit(p.ID)
@@ -845,7 +857,7 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 		return
 	}
 	vviews, colorByID, regByID, labelByID := vehicleViews(vehicles)
-	pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, time.Now().In(s.locFor(r.Context(), owner)))
+	pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, time.Now().In(s.locForPermit(r.Context(), p)))
 	if err != nil {
 		s.serverError(w, err)
 		return

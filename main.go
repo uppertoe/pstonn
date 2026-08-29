@@ -177,12 +177,15 @@ func run() error {
 	}
 	sched := scheduler.New(st, council, cfg.DisplayLocation, scheduler.Options{
 		// Each account's permit days are reckoned in ITS council's timezone.
-		LocationFor: func(owner string) *time.Location {
-			id, err := st.CouncilIDFor(context.Background(), owner)
-			if err != nil {
-				return nil
+		LocationFor: func(owner, councilID string) *time.Location {
+			if councilID == "" {
+				id, err := st.CouncilIDFor(context.Background(), owner)
+				if err != nil {
+					return nil
+				}
+				councilID = id
 			}
-			if c, ok := registry.ByID(id); ok {
+			if c, ok := registry.ByID(councilID); ok {
 				return c.Location()
 			}
 			return nil

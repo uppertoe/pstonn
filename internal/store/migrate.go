@@ -142,8 +142,8 @@ INSERT OR IGNORE INTO schema_migration (id, version) VALUES (1, 0);
 func (s *Store) applyMigrations() error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS council_session (
-    owner                TEXT PRIMARY KEY,        -- app-user email
-    council_id           TEXT NOT NULL DEFAULT '', -- which council this session is with (see council registry)
+    owner                TEXT NOT NULL,           -- app-user email
+    council_id           TEXT NOT NULL DEFAULT '', -- which tenant (council) this session is with — one row per tenant an account is linked to
     sub                  TEXT NOT NULL DEFAULT '',
     council_email        TEXT NOT NULL DEFAULT '',
     cookie_sealed        TEXT NOT NULL DEFAULT '',
@@ -157,7 +157,8 @@ CREATE TABLE IF NOT EXISTS council_session (
     reconnected_at       TEXT NOT NULL DEFAULT '',   -- last saved-password auto-reconnect; shown to the user in Settings
     last_active_at       TEXT NOT NULL DEFAULT '',    -- last use of the account by ANY member OR their guests (visits, guest-link use, emailed decisions); the idle clock (see decideWarm)
     drift_checked_at     TEXT NOT NULL DEFAULT '',    -- last owner-grid drift/expiry read; its own cadence, decoupled from keep-warm
-    session_generation   INTEGER NOT NULL DEFAULT 1   -- monotonic version of the session material; the async reconnect queue's compare-and-swap token
+    session_generation   INTEGER NOT NULL DEFAULT 1,   -- monotonic version of the session material; the async reconnect queue's compare-and-swap token
+    PRIMARY KEY (owner, council_id)
 );
 
 CREATE TABLE IF NOT EXISTS vehicle (
@@ -539,6 +540,15 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate permit table: %w", err)
 		}
 	}
+	// Rebuild `council_session` if it is still keyed by owner alone: an account may
+	// be linked to several tenants, one session each.
+	if scoped, err := s.sessionKeyIsScoped(); err != nil {
+		return err
+	} else if !scoped {
+		if err := s.rebuildSessionTable(); err != nil {
+			return fmt.Errorf("migrate council_session table: %w", err)
+		}
+	}
 	// Rebuild `breaker_state` from the single-row shape to one row per council,
 	// carrying the existing pause across under Stonnington.
 	if has, err := s.columnExists("breaker_state", "council_id"); err != nil {
@@ -785,6 +795,93 @@ func (s *Store) rebuildBreakerTable() error {
     SELECT 'stonnington', open_until, generation, last_pushback, updated_at FROM breaker_state WHERE id = 1`,
 		`DROP TABLE breaker_state`,
 		`ALTER TABLE breaker_state_new RENAME TO breaker_state`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// sessionKeyIsScoped reports whether council_session is keyed by (owner, council_id).
+func (s *Store) sessionKeyIsScoped() (bool, error) {
+	var sqlText string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'council_session'`).Scan(&sqlText)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(strings.ToLower(sqlText), "primary key (owner, council_id)"), nil
+}
+
+// rebuildSessionTable re-keys council_session by (owner, council_id), preserving
+// rows and the columns the existing table has. Nothing references the table by
+// foreign key; foreign keys are toggled off around the DROP/RENAME as for the
+// other rebuilds, and the migration lock guarantees a single migrator.
+func (s *Store) rebuildSessionTable() error {
+	existing := map[string]bool{}
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('council_session')`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	cols := []struct{ name, def string }{
+		{"owner", "''"}, {"council_id", "''"}, {"sub", "''"}, {"council_email", "''"}, {"cookie_sealed", "''"},
+		{"access_token_sealed", "''"}, {"token_expiry", "''"}, {"updated_at", "''"}, {"linked_at", "''"},
+		{"reminder_sent_at", "''"}, {"confirm_token", "''"}, {"password_sealed", "''"}, {"reconnected_at", "''"},
+		{"last_active_at", "''"}, {"drift_checked_at", "''"}, {"session_generation", "1"},
+	}
+	var names, selects []string
+	for _, c := range cols {
+		names = append(names, c.name)
+		if existing[c.name] {
+			selects = append(selects, c.name)
+		} else {
+			selects = append(selects, c.def)
+		}
+	}
+	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys=ON`)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`CREATE TABLE council_session_new (
+    owner                TEXT NOT NULL,
+    council_id           TEXT NOT NULL DEFAULT '',
+    sub                  TEXT NOT NULL DEFAULT '',
+    council_email        TEXT NOT NULL DEFAULT '',
+    cookie_sealed        TEXT NOT NULL DEFAULT '',
+    access_token_sealed  TEXT NOT NULL DEFAULT '',
+    token_expiry         TEXT NOT NULL DEFAULT '',
+    updated_at           TEXT NOT NULL DEFAULT '',
+    linked_at            TEXT NOT NULL DEFAULT '',
+    reminder_sent_at     TEXT NOT NULL DEFAULT '',
+    confirm_token        TEXT NOT NULL DEFAULT '',
+    password_sealed      TEXT NOT NULL DEFAULT '',
+    reconnected_at       TEXT NOT NULL DEFAULT '',
+    last_active_at       TEXT NOT NULL DEFAULT '',
+    drift_checked_at     TEXT NOT NULL DEFAULT '',
+    session_generation   INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (owner, council_id)
+)`,
+		`INSERT INTO council_session_new (` + strings.Join(names, ", ") + `) SELECT ` + strings.Join(selects, ", ") + ` FROM council_session`,
+		`DROP TABLE council_session`,
+		`ALTER TABLE council_session_new RENAME TO council_session`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return err

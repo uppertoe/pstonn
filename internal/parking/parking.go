@@ -80,7 +80,7 @@ type Client struct {
 	// OnSessionExpired, when set (main wires it to the scheduler's reconnect queue),
 	// is called whenever a BACKGROUND read discovers the session is dead. Called
 	// from refresh goroutines: must be safe for concurrent use and cheap on repeats.
-	OnSessionExpired func(owner string, gen int64)
+	OnSessionExpired func(owner, councilID string, gen int64)
 	// regGen is a per-key generation, bumped by ForgetPermit, so a plate read that
 	// was already in flight when a permit was removed cannot resurrect the cache
 	// entry afterwards. Guarded by regGenMu (writes only; reads stay lock-free).
@@ -246,7 +246,7 @@ type legacyImporter interface {
 
 // Linked reports whether the app user has stored session material.
 func (c *Client) Linked(ctx context.Context, owner string) bool {
-	cs, err := c.store.GetCouncilSession(ctx, owner)
+	cs, err := c.store.GetCouncilSessionIn(ctx, owner, c.CouncilID)
 	return err == nil && cs.Cookie != ""
 }
 
@@ -306,7 +306,7 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 	lock.Lock()
 	defer lock.Unlock()
 
-	cs, err := c.store.GetCouncilSession(ctx, owner)
+	cs, err := c.store.GetCouncilSessionIn(ctx, owner, c.CouncilID)
 	if err != nil || cs.Cookie == "" {
 		return ErrNotLinked
 	}
@@ -348,7 +348,7 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 		// Conditioned on the generation the operation started from: a re-link that
 		// landed meanwhile holds a DIFFERENT, valid session, and writing the older
 		// material over it would silently undo the user's re-link.
-		if err := c.store.UpdateCouncilCookie(ctx, owner, sealed, cs.Generation); err != nil {
+		if err := c.store.UpdateCouncilCookie(ctx, owner, c.CouncilID, sealed, cs.Generation); err != nil {
 			if errors.Is(err, store.ErrSessionSuperseded) {
 				log.Printf("parking: session for %s was re-linked during an operation; keeping the newer one", redact.Email(owner))
 				return nil
@@ -438,7 +438,7 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	if c.Capabilities().LoginKind != "password" {
 		return ErrUnsupported
 	}
-	cs, err := c.store.GetCouncilSession(ctx, owner)
+	cs, err := c.store.GetCouncilSessionIn(ctx, owner, c.CouncilID)
 	if err != nil {
 		return err
 	}
@@ -701,7 +701,7 @@ func (c *Client) noteExpired(owner string, err error) {
 		return
 	}
 	if gen, ok := SessionGenOf(err); ok {
-		c.OnSessionExpired(owner, gen)
+		c.OnSessionExpired(owner, c.CouncilID, gen)
 	}
 }
 

@@ -42,6 +42,20 @@
     <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
     {{end}}
   </section>
+  {{- range .OtherConnections}}
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic">{{template "ic-link"}}</span> {{T "settings.area_connection" .}}</h2>
+    {{if .RelinkBy}}<p class="empty-note" style="margin-top:-8px">If nobody visits, this connection would stop around <strong>{{.RelinkBy}}</strong>.</p>{{end}}
+    <div class="row" style="margin-top:14px">
+      <strong>Auto-reconnect</strong> {{if .AutoReconnect}}<span class="pill ok">On</span>
+      <form method="post" action="/council/forget-password"><input type="hidden" name="council_id" value="{{.ID}}"><button type="submit" class="ghost">Turn off</button></form>
+      {{else}}<span class="pill">Off</span>{{end}}
+    </div>
+    <div class="row" style="margin-top:14px">
+      <form method="post" action="/council/unlink" data-confirm="Unlink this connection? Its schedule is kept and resumes when you re-link." data-confirm-ok="Unlink"><input type="hidden" name="council_id" value="{{.ID}}"><button type="submit" class="ghost">{{template "ic-x"}} Unlink</button></form>
+    </div>
+  </section>
+  {{- end}}
   {{if .Invite}}{{template "invite-card" .}}{{end}}
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-user"}}</span> Shared access</h2>

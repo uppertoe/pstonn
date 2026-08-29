@@ -54,7 +54,7 @@ func TestSessionChurnAlertsOnDistinctOwners(t *testing.T) {
 	// The same owner three times must NOT alert (the queue dedups by owner, so the
 	// churn is noted once — one flapping account is not systemic).
 	for i := 0; i < 3; i++ {
-		s.enqueueReconnect(ctx, "flap@example.com", genOf(t, st, "flap@example.com"))
+		s.enqueueReconnect(ctx, "flap@example.com", "", genOf(t, st, "flap@example.com"))
 	}
 	time.Sleep(40 * time.Millisecond)
 	if hasAdmin(fn, "expiring unusually often") {
@@ -63,7 +63,7 @@ func TestSessionChurnAlertsOnDistinctOwners(t *testing.T) {
 
 	// Three DIFFERENT owners within the window → systemic.
 	for _, o := range []string{"a@example.com", "b@example.com", "c@example.com"} {
-		s.enqueueReconnect(ctx, o, genOf(t, st, o))
+		s.enqueueReconnect(ctx, o, "", genOf(t, st, o))
 	}
 	time.Sleep(60 * time.Millisecond)
 	if !hasAdmin(fn, "expiring unusually often") {
@@ -93,7 +93,7 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
 	cs, _ := st.GetCouncilSession(ctx, owner)
-	if got := s.recoverOrRetire(ctx, owner, cs.Generation); got != reconnectDeferred {
+	if got := s.recoverOrRetire(ctx, owner, "", cs.Generation); got != reconnectDeferred {
 		t.Fatalf("a login-shape failure should defer (keep the session), got %v", got)
 	}
 	if _, err := st.GetCouncilSession(ctx, owner); err != nil {
@@ -113,8 +113,8 @@ func TestReconnectCounted(t *testing.T) {
 	fc := &fakeCouncil{reconnectSet: true} // reconnectErr nil = success
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
-	s.enqueueReconnect(ctx, "ok@example.com", genOf(t, st, "ok@example.com")) // discovery notes the expiry
-	if !s.drainOneReconnect(ctx) {                                            // the worker reconnects
+	s.enqueueReconnect(ctx, "ok@example.com", "", genOf(t, st, "ok@example.com")) // discovery notes the expiry
+	if !s.drainOneReconnect(ctx) {                                                // the worker reconnects
 		t.Fatal("expected a queued reconnect to process")
 	}
 	exp, reconns, _ := s.SessionChurn()

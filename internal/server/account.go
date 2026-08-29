@@ -39,10 +39,11 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Enter your council password.")
 		return
 	}
-	// Which council. With one enabled council the choice is implicit; with
-	// several the form names it, and the choice is recorded BEFORE the login so
-	// the session and permits are filed under it. A council the process is not
-	// serving is refused, and a linked account cannot be re-pointed elsewhere.
+	// Which tenant. With one enabled council the choice is implicit; with several
+	// the form names it (the sign-up choice, or "connect another area"), and the
+	// selection is recorded BEFORE the login so the session and permits are filed
+	// under it. A tenant the process is not serving is refused.
+	councilID := ""
 	if s.councils != nil {
 		chosen := s.councils.Default
 		if enabled := s.councils.Enabled(); len(enabled) > 1 {
@@ -54,13 +55,10 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 			chosen = c
 		}
 		if err := s.store.SetAccountCouncil(r.Context(), user, chosen.ID); err != nil {
-			if errors.Is(err, store.ErrCouncilMismatch) {
-				s.message(w, http.StatusConflict, "This account is already connected to a different council. Disconnect it from Settings first.")
-				return
-			}
 			s.serverError(w, err)
 			return
 		}
+		councilID = chosen.ID
 	}
 	// Throttle password attempts per user: every submit forwards the password to
 	// the council's own login, and hammering it could trip the council's lockout
@@ -121,7 +119,7 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	// (the user can retry) instead of a dropped connection.
 	linkCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	if err := s.council.Link(linkCtx, user, user, password, savePassword, true, 0); err != nil {
+	if err := s.council.Link(linkCtx, user, councilID, user, password, savePassword, true, 0); err != nil {
 		log.Printf("council link for %s: %v", redact.Email(user), err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
@@ -168,7 +166,47 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/schedule?linked=1", http.StatusSeeOther)
 }
 
-// councilUnlink removes the account's stored council session but keeps its
+// councilSelect switches the account's current tenant (the user menu's area
+// switcher). Linked there already → the schedule; not yet → the picker, which
+// offers the link form for that tenant.
+func (s *Server) councilSelect(w http.ResponseWriter, r *http.Request) {
+	user, owner, _ := s.resolveAccount(r.Context())
+	if s.councils == nil {
+		redirectHome(w, r)
+		return
+	}
+	c, ok := s.councils.ByID(r.FormValue("council_id"))
+	if !ok || !c.Enabled {
+		s.formError(w, r, "That area isn't available.")
+		return
+	}
+	if err := s.store.SetAccountCouncil(r.Context(), owner, c.ID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	_ = user
+	if s.council.Linked(r.Context(), owner, c.ID) {
+		redirectHome(w, r)
+		return
+	}
+	http.Redirect(w, r, "/permits/new", http.StatusSeeOther)
+}
+
+// tenantArg resolves the tenant a settings action names (hidden council_id on the
+// per-tenant cards), defaulting to the account's current tenant.
+func (s *Server) tenantArg(r *http.Request, owner string) (string, error) {
+	if id := r.FormValue("council_id"); id != "" {
+		if s.councils != nil {
+			if _, ok := s.councils.ByID(id); !ok {
+				return "", store.ErrNotFound
+			}
+		}
+		return id, nil
+	}
+	return s.store.CouncilIDFor(r.Context(), owner)
+}
+
+// councilUnlink removes the account's session with one tenant but keeps its
 // permits, vehicles and schedule, so a later re-link resumes where it left off.
 // Owner-only: a secondary cannot disconnect the shared connection.
 func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +215,12 @@ func (s *Server) councilUnlink(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusForbidden, "Only the account owner can disconnect the council account.")
 		return
 	}
-	if err := s.store.DeleteCouncilSession(r.Context(), user); err != nil {
+	tenant, err := s.tenantArg(r, user)
+	if err != nil {
+		s.formError(w, r, "That area isn't available.")
+		return
+	}
+	if err := s.store.DeleteCouncilSessionIn(r.Context(), user, tenant); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -216,7 +259,12 @@ func (s *Server) councilForgetPassword(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusForbidden, "Only the account owner can change this.")
 		return
 	}
-	if err := s.store.ClearCouncilPassword(r.Context(), user); err != nil {
+	tenant, err := s.tenantArg(r, user)
+	if err != nil {
+		s.formError(w, r, "That area isn't available.")
+		return
+	}
+	if err := s.store.ClearCouncilPasswordIn(r.Context(), user, tenant); err != nil {
 		s.serverError(w, err)
 		return
 	}

@@ -7,7 +7,9 @@
     "parking_brand": "Council Parking",
     "permit": "visitor permit",
     "permits": "visitor parking permits",
-    "permit_long": "visitor parking permit"
+    "permit_long": "visitor parking permit",
+    "area": "area",
+    "areas": "areas"
   },
   "messages": {
     "onboarding.intro": "Sign in once with your {{.Council.Name}} {{.Council.Terms.portal}} details. p.stonn keeps an encrypted session so it can update your permit for you.",
@@ -86,6 +88,11 @@
     "guide.paper_title": "Do visitors need a paper permit in {{.Council.Short}}? — p.stonn",
     "guide.paper_desc": "{{.Council.Name}} visitor parking permits are digital by default: nothing to display, but the number plate has to be right before each visitor parks. What that means in practice.",
     "guide.paper_h1": "Do visitors need a paper permit in {{.Council.Short}}?",
-    "guide.paper_note": "Physical permits: see {{slot \"apply\"}}the council’s visitor-permit page{{endslot}} for the exceptional-circumstances application, or ring {{.Council.Phone}}."
+    "guide.paper_note": "Physical permits: see {{slot \"apply\"}}the council’s visitor-permit page{{endslot}} for the exceptional-circumstances application, or ring {{.Council.Phone}}.",
+    "menu.area_current": "{{.Council.Name}}",
+    "menu.area_switch": "Switch to {{.Name}}",
+    "menu.area_connect": "Connect {{.Name}}…",
+    "settings.area_connection": "{{.Name}} connection",
+    "picker.connect_first": "Connect your {{.Council.Name}} account to add a permit from there."
   }
 }

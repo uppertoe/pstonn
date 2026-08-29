@@ -56,7 +56,22 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again. p.stonn deliberately limits how often it contacts the council.")
 		return
 	}
-	permits, complete, err := s.council.ListPermitsComplete(ctx, owner)
+	// The picker lists the CURRENT tenant's permits; an account linked elsewhere
+	// but not here (a second home, just selected) is offered the link form.
+	if !s.council.Linked(ctx, owner, "") {
+		base.State = "onboarding"
+		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
+		if enabled := s.councils.Enabled(); s.councils != nil && len(enabled) > 1 {
+			current := s.councilFor(ctx, owner)
+			for _, c := range enabled {
+				base.Councils = append(base.Councils, councilChoice{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
+			}
+			base.Flash = s.say(ctx, owner, "picker.connect_first")
+		}
+		s.render(w, base)
+		return
+	}
+	permits, complete, err := s.council.ListPermitsComplete(ctx, owner, "")
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) {
 			// A dead session on THIS page is diagnostic, never routine ageing: only a
@@ -314,7 +329,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 			"Too many council lookups in a short time. Please wait a moment and try again.")
 		return
 	}
-	permits, complete, err := s.council.ListPermitsComplete(ctx, owner)
+	permits, complete, err := s.council.ListPermitsComplete(ctx, owner, "")
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) || errors.Is(err, parking.ErrNotLinked) {
 			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
@@ -452,7 +467,7 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 	// ordinary way a permit changes hands. Nothing else evicts the entry, and a
 	// plate shown to the wrong household is how someone parks on a permit that no
 	// longer says what they think it says.
-	s.council.ForgetPermit(owner, p.CouncilPermitID)
+	s.council.ForgetPermit(owner, p.CouncilID, p.CouncilPermitID)
 	label := permitLabel(p)
 	s.logChange(r.Context(), owner, user, store.ActionPermitRemove, label, "")
 	s.notifyDestructive(r.Context(), owner, user,
@@ -527,7 +542,7 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	moved, stranded := 0, false
 	var moveErr error
-	if sp.Inactive(now, s.locFor(r.Context(), owner)) && !dst.Inactive(now, s.locFor(r.Context(), owner)) {
+	if sp.Inactive(now, s.locForPermit(r.Context(), dst)) && !dst.Inactive(now, s.locForPermit(r.Context(), dst)) {
 		if moved, stranded, moveErr = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); moveErr != nil {
 			// The unmoved passes stay safely refused by the inactive-permit gate
 			// rather than half-working — but the failure must reach the user (below),
@@ -620,7 +635,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	now := time.Now().In(s.locFor(r.Context(), owner))
+	now := time.Now().In(s.locForPermit(r.Context(), p))
 
 	// Detached + capped like every other council write on a request path, so a
 	// closed tab can't cancel the write half-done and a slow portal still leaves

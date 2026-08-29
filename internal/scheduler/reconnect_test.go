@@ -56,8 +56,8 @@ func TestReconnectLoopDrainsQueue(t *testing.T) {
 	ctx := context.Background()
 
 	g := genOf(t, st, owner)
-	s.enqueueReconnect(ctx, owner, g)
-	s.enqueueReconnect(ctx, owner, g) // dedup: still one entry
+	s.enqueueReconnect(ctx, owner, "", g)
+	s.enqueueReconnect(ctx, owner, "", g) // dedup: still one entry
 	s.reconnectMu.Lock()
 	q := len(s.reconnectQ)
 	s.reconnectMu.Unlock()
@@ -101,7 +101,7 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
 	stale := cur.Generation + 1 // a generation that no longer matches (a session change happened)
-	if got := s.recoverOrRetire(ctx, owner, stale); got != reconnectRetired {
+	if got := s.recoverOrRetire(ctx, owner, "", stale); got != reconnectRetired {
 		t.Fatalf("a stale-generation task should be discarded, got %v", got)
 	}
 	if len(fc.reconnected) != 0 {

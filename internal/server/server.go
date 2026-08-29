@@ -30,27 +30,31 @@ import (
 // substituted without touching them. *parking.Client satisfies it.
 // See docs/council-connections.md.
 type Council interface {
-	// Link performs the credential login for owner and stores the session.
-	Link(ctx context.Context, owner, username, password string, savePassword, interactive bool, expectedGen int64) error
-	// Linked reports whether owner holds a stored council session.
-	Linked(ctx context.Context, owner string) bool
-	// ListPermitsComplete reads owner's permits and reports whether the list was whole.
-	ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error)
+	// Link performs the credential login for owner with one tenant (council) and
+	// stores the session; councilID "" means the owner's current tenant.
+	Link(ctx context.Context, owner, councilID, username, password string, savePassword, interactive bool, expectedGen int64) error
+	// Linked reports whether owner holds a session with the tenant.
+	Linked(ctx context.Context, owner, councilID string) bool
+	// ListPermitsComplete reads owner's permits with the tenant and reports whether the list was whole.
+	ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error)
 	// CurrentVehicleCached is the bounded-read plate lookup the pages use.
 	CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, age time.Duration, fresh bool, err error)
 	// RefreshFailingFor reports how long background plate refreshes have been failing.
 	RefreshFailingFor(owner string, p model.Permit) time.Duration
 	// ForgetPermit drops cached state for a permit the owner stopped managing.
-	ForgetPermit(owner, councilPermitID string)
+	ForgetPermit(owner, councilID, councilPermitID string)
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
 	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
 	// Stats is the traffic / breaker snapshot shown on /status.
 	Stats() parking.Stats
 }
 
-// The real client satisfies the interface; a mismatch is a compile error here, not
-// a wiring failure in main.
-var _ Council = (*parking.Client)(nil)
+// The mux (what main wires) satisfies both interfaces; a mismatch is a compile
+// error here, not a wiring failure in main.
+var (
+	_ Council           = (*council.Mux)(nil)
+	_ scheduler.Council = (*council.Mux)(nil)
+)
 
 // Server holds the dependencies shared by the handlers.
 type Server struct {
@@ -265,6 +269,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /terms/accept", s.withUser(s.acceptTerms))
 	mux.HandleFunc("POST /terms/decline", s.withUser(s.declineTerms))
 	mux.HandleFunc("POST /council/link", s.withConsent(s.councilLink))
+	mux.HandleFunc("POST /council/select", s.withConsent(s.councilSelect))
 	mux.HandleFunc("POST /council/unlink", s.withUser(s.councilUnlink)) // allow leaving without re-consent
 	mux.HandleFunc("POST /council/forget-password", s.withUser(s.councilForgetPassword))
 	mux.HandleFunc("POST /account/delete", s.withUser(s.accountDelete)) // allow leaving without re-consent

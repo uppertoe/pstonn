@@ -180,7 +180,7 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 func (s *Store) CountLinkedAccounts(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM council_session WHERE cookie_sealed != ''`).Scan(&n)
+		`SELECT COUNT(DISTINCT owner) FROM council_session WHERE cookie_sealed != ''`).Scan(&n)
 	return n, err
 }
 

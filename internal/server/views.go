@@ -127,7 +127,11 @@ type dashboardData struct {
 	ContactFrom   string      // contact form: the reply-to address to redisplay after a validation error
 	// Councils is the sign-up choice, offered only when more than one is enabled.
 	Councils []councilChoice
-	Relink   bool // council session expired → prompt re-link
+	// Tenants drives the user menu\'s area switcher (empty when only one is enabled).
+	Tenants []tenantChoice
+	// OtherConnections are the account\'s sessions with tenants other than the current one (Settings).
+	OtherConnections []connectionView
+	Relink           bool // council session expired → prompt re-link
 	// CapacityFull hides the onboarding link form from a NEW household when the
 	// deployment is at MaxAccounts, so the refusal arrives before terms are read
 	// and a third-party password is typed — not after, as a toast. councilLink
@@ -288,11 +292,84 @@ func (d dashboardData) Council() councilView {
 	return defaultCouncilView
 }
 
+// linkedAnywhere reports whether the account holds a session with ANY tenant:
+// the gate for the app pages. Tenant-specific flows (the picker, adding a
+// permit) check the current tenant themselves.
+func (s *Server) linkedAnywhere(ctx context.Context, owner string) bool {
+	if s.store == nil {
+		return false
+	}
+	sessions, err := s.store.ListCouncilSessionsFor(ctx, owner)
+	if err != nil {
+		return false
+	}
+	for _, cs := range sessions {
+		if cs.Cookie != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // councilChoice is one option in the sign-up council picker.
 type councilChoice struct {
 	ID       string
 	Name     string
 	Selected bool
+}
+
+// tenantChoice is one entry in the user menu's area switcher.
+type tenantChoice struct {
+	ID      string
+	Name    string
+	Current bool // the selected tenant
+	Linked  bool // a session exists with it
+}
+
+// tenantsFor lists the enabled tenants for the menu, marking the current one and
+// which are linked. Empty unless more than one tenant is enabled, so a
+// single-council deployment renders no switcher.
+func (s *Server) tenantsFor(ctx context.Context, owner string) []tenantChoice {
+	if s.councils == nil || s.store == nil {
+		return nil
+	}
+	enabled := s.councils.Enabled()
+	if len(enabled) < 2 {
+		return nil
+	}
+	current, _ := s.store.CouncilIDFor(ctx, owner)
+	linked := map[string]bool{}
+	if sessions, err := s.store.ListCouncilSessionsFor(ctx, owner); err == nil {
+		for _, cs := range sessions {
+			if cs.Cookie != "" {
+				linked[cs.CouncilID] = true
+			}
+		}
+	}
+	out := make([]tenantChoice, 0, len(enabled))
+	for _, c := range enabled {
+		out = append(out, tenantChoice{ID: c.ID, Name: c.Name, Current: c.ID == current, Linked: linked[c.ID]})
+	}
+	return out
+}
+
+// councilOfPermit is the descriptor of the tenant a permit belongs to (the
+// owner's current tenant when the permit carries none).
+func (s *Server) councilOfPermit(ctx context.Context, p model.Permit) *council.Council {
+	if s.councils != nil && p.CouncilID != "" {
+		if c, ok := s.councils.ByID(p.CouncilID); ok {
+			return c
+		}
+	}
+	return s.councilFor(ctx, p.Owner)
+}
+
+// locForPermit is the timezone a permit's days are reckoned in: its tenant's.
+func (s *Server) locForPermit(ctx context.Context, p model.Permit) *time.Location {
+	if s.councils != nil {
+		return s.councilOfPermit(ctx, p).Location()
+	}
+	return s.cfg.DisplayLocation
 }
 
 // changeView is one row of the account change log, rendered on Activity.
@@ -406,6 +483,9 @@ type inviteView struct {
 }
 
 type permitView struct {
+	// Tenant names the permit's council when the account holds permits with more
+	// than one; "" otherwise (nothing to distinguish).
+	Tenant        string
 	Permit        model.Permit
 	DesiredReg    string
 	DesiredSource string
@@ -661,7 +741,8 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 	}
 	ctx := r.Context()
 	user, owner, isPrimary := s.resolveAccount(ctx)
-	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.locFor(ctx, owner), Page: page, Contact: s.cfg.ContactEnabled()}
+	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.locFor(ctx, owner), Page: page, Contact: s.cfg.ContactEnabled(),
+		Tenants: s.tenantsFor(ctx, owner)}
 	if !isPrimary {
 		base.SharedWith = owner
 	}
@@ -677,7 +758,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		s.render(w, base)
 		return dashboardData{}, false
 	}
-	if !s.council.Linked(ctx, owner) {
+	if !s.linkedAnywhere(ctx, owner) {
 		// The council account belongs to the primary; a secondary can only wait
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"

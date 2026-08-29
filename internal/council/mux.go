@@ -65,37 +65,55 @@ func (m *Mux) Client(id string) (*parking.Client, bool) {
 // IDs lists the councils served, sorted.
 func (m *Mux) IDs() []string { return append([]string(nil), m.ids...) }
 
-func (m *Mux) Link(ctx context.Context, owner, username, password string, savePassword, interactive bool, expectedGen int64) error {
-	c, err := m.For(ctx, owner)
+// client picks the client for an explicit tenant, or the owner's current tenant
+// when none is named.
+func (m *Mux) client(ctx context.Context, owner, councilID string) (*parking.Client, error) {
+	if councilID == "" {
+		return m.For(ctx, owner)
+	}
+	c, ok := m.clients[councilID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrCouncilUnavailable, councilID)
+	}
+	return c, nil
+}
+
+// forPermit picks the client for the tenant a permit belongs to.
+func (m *Mux) forPermit(ctx context.Context, owner string, p model.Permit) (*parking.Client, error) {
+	return m.client(ctx, owner, p.CouncilID)
+}
+
+func (m *Mux) Link(ctx context.Context, owner, councilID, username, password string, savePassword, interactive bool, expectedGen int64) error {
+	c, err := m.client(ctx, owner, councilID)
 	if err != nil {
 		return err
 	}
 	return c.Link(ctx, owner, username, password, savePassword, interactive, expectedGen)
 }
 
-func (m *Mux) Reconnect(ctx context.Context, owner string) error {
-	c, err := m.For(ctx, owner)
+func (m *Mux) Reconnect(ctx context.Context, owner, councilID string) error {
+	c, err := m.client(ctx, owner, councilID)
 	if err != nil {
 		return err
 	}
 	return c.Reconnect(ctx, owner)
 }
 
-func (m *Mux) Refresh(ctx context.Context, owner string) error {
-	c, err := m.For(ctx, owner)
+func (m *Mux) Refresh(ctx context.Context, owner, councilID string) error {
+	c, err := m.client(ctx, owner, councilID)
 	if err != nil {
 		return err
 	}
 	return c.Refresh(ctx, owner)
 }
 
-func (m *Mux) Linked(ctx context.Context, owner string) bool {
-	c, err := m.For(ctx, owner)
+func (m *Mux) Linked(ctx context.Context, owner, councilID string) bool {
+	c, err := m.client(ctx, owner, councilID)
 	return err == nil && c.Linked(ctx, owner)
 }
 
-func (m *Mux) ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error) {
-	c, err := m.For(ctx, owner)
+func (m *Mux) ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error) {
+	c, err := m.client(ctx, owner, councilID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -103,7 +121,7 @@ func (m *Mux) ListPermitsComplete(ctx context.Context, owner string) ([]parking.
 }
 
 func (m *Mux) CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error) {
-	c, err := m.For(ctx, owner)
+	c, err := m.forPermit(ctx, owner, p)
 	if err != nil {
 		return "", err
 	}
@@ -111,7 +129,7 @@ func (m *Mux) CurrentVehicle(ctx context.Context, owner string, p model.Permit) 
 }
 
 func (m *Mux) CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (string, time.Duration, bool, error) {
-	c, err := m.For(ctx, owner)
+	c, err := m.forPermit(ctx, owner, p)
 	if err != nil {
 		return "", 0, false, err
 	}
@@ -119,21 +137,21 @@ func (m *Mux) CurrentVehicleCached(ctx context.Context, owner string, p model.Pe
 }
 
 func (m *Mux) RefreshFailingFor(owner string, p model.Permit) time.Duration {
-	c, err := m.For(context.Background(), owner)
+	c, err := m.forPermit(context.Background(), owner, p)
 	if err != nil {
 		return 0
 	}
 	return c.RefreshFailingFor(owner, p)
 }
 
-func (m *Mux) ForgetPermit(owner, councilPermitID string) {
-	if c, err := m.For(context.Background(), owner); err == nil {
+func (m *Mux) ForgetPermit(owner, councilID, councilPermitID string) {
+	if c, err := m.client(context.Background(), owner, councilID); err == nil {
 		c.ForgetPermit(owner, councilPermitID)
 	}
 }
 
 func (m *Mux) SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error {
-	c, err := m.For(ctx, owner)
+	c, err := m.forPermit(ctx, owner, p)
 	if err != nil {
 		return err
 	}
@@ -141,7 +159,7 @@ func (m *Mux) SetVehicle(ctx context.Context, owner string, p model.Permit, regi
 }
 
 func (m *Mux) ClearVehicle(ctx context.Context, owner string, p model.Permit) error {
-	c, err := m.For(ctx, owner)
+	c, err := m.forPermit(ctx, owner, p)
 	if err != nil {
 		return err
 	}
@@ -191,4 +209,46 @@ func (m *Mux) Stats() parking.Stats {
 		}
 	}
 	return out
+}
+
+// Single adapts one client to the tenant-aware interfaces the scheduler and
+// server speak (tests, and any single-council wiring): a tenant other than the
+// client's own reads as not linked.
+type Single struct{ *parking.Client }
+
+func (s Single) mine(councilID string) bool {
+	return councilID == "" || councilID == s.Client.CouncilID
+}
+
+func (s Single) Link(ctx context.Context, owner, councilID, username, password string, savePassword, interactive bool, expectedGen int64) error {
+	if !s.mine(councilID) {
+		return ErrCouncilUnavailable
+	}
+	return s.Client.Link(ctx, owner, username, password, savePassword, interactive, expectedGen)
+}
+func (s Single) Reconnect(ctx context.Context, owner, councilID string) error {
+	if !s.mine(councilID) {
+		return ErrCouncilUnavailable
+	}
+	return s.Client.Reconnect(ctx, owner)
+}
+func (s Single) Refresh(ctx context.Context, owner, councilID string) error {
+	if !s.mine(councilID) {
+		return ErrCouncilUnavailable
+	}
+	return s.Client.Refresh(ctx, owner)
+}
+func (s Single) Linked(ctx context.Context, owner, councilID string) bool {
+	return s.mine(councilID) && s.Client.Linked(ctx, owner)
+}
+func (s Single) ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error) {
+	if !s.mine(councilID) {
+		return nil, false, ErrCouncilUnavailable
+	}
+	return s.Client.ListPermitsComplete(ctx, owner)
+}
+func (s Single) ForgetPermit(owner, councilID, councilPermitID string) {
+	if s.mine(councilID) {
+		s.Client.ForgetPermit(owner, councilPermitID)
+	}
 }

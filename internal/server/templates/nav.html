@@ -32,6 +32,12 @@
       <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu">{{template "ic-user"}}</button>
       <div class="menu" x-show="open" x-cloak>
         <div class="menu-email">{{.User.Email}}</div>
+        {{- if .Tenants}}
+        <div class="menu-note">{{T "menu.area_current" .}}</div>
+        {{- range .Tenants}}{{if not .Current}}
+        <form method="post" action="/council/select"><input type="hidden" name="council_id" value="{{.ID}}"><button type="submit" class="menu-item">{{if .Linked}}{{T "menu.area_switch" .}}{{else}}{{T "menu.area_connect" .}}{{end}}</button></form>
+        {{- end}}{{end}}
+        {{- end}}
         {{if .Contact}}<a href="/contact" class="menu-item">{{template "ic-mail"}} Contact</a>{{end}}
         {{/* The Share page: share sheet, invite-by-email, printable card. */}}
         <a href="/share" class="menu-item">{{template "ic-link"}} Share p.stonn</a>

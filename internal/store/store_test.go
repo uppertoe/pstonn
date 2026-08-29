@@ -613,7 +613,7 @@ func TestReminderAndConfirm(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.MarkReminderSent(ctx, owner, "tok-123"); err != nil {
+	if err := s.MarkReminderSent(ctx, owner, "", "tok-123"); err != nil {
 		t.Fatal(err)
 	}
 	cs, _ := s.GetCouncilSession(ctx, owner)
@@ -654,7 +654,7 @@ func TestReminderAndConfirm(t *testing.T) {
 
 	// A token older than maxAge is refused (and cleared), so an unclicked confirm
 	// link can't sit in a mailbox as a permanent "keep managing my permit" grant.
-	if err := s.MarkReminderSent(ctx, owner, "tok-stale"); err != nil {
+	if err := s.MarkReminderSent(ctx, owner, "", "tok-stale"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.ExecContext(ctx,
@@ -674,7 +674,7 @@ func TestReminderAndConfirm(t *testing.T) {
 		t.Fatal("an absent token must hash to the empty marker, not to a hash of nothing")
 	}
 	// Within maxAge it still works.
-	if err := s.MarkReminderSent(ctx, owner, "tok-fresh"); err != nil {
+	if err := s.MarkReminderSent(ctx, owner, "", "tok-fresh"); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.ConfirmSession(ctx, "tok-fresh", 21*24*time.Hour); err != nil || got != owner {
@@ -698,7 +698,7 @@ func TestTouchClearsConfirmToken(t *testing.T) {
 	if err := s.SaveCouncilSession(ctx, CouncilSession{Owner: owner, Cookie: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkReminderSent(ctx, owner, "tok-live"); err != nil {
+	if err := s.MarkReminderSent(ctx, owner, "", "tok-live"); err != nil {
 		t.Fatal(err)
 	}
 	// Someone on the account opens the app after the reminder goes out.
@@ -2307,7 +2307,7 @@ func TestTouchAccountActive(t *testing.T) {
 	}
 
 	// Confirming by email link also counts as being present.
-	if err := s.MarkReminderSent(ctx, owner, "tok-idle"); err != nil {
+	if err := s.MarkReminderSent(ctx, owner, "", "tok-idle"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.ExecContext(ctx,
@@ -2917,7 +2917,7 @@ func TestSessionWritesAreGenerationConditioned(t *testing.T) {
 	}
 
 	// Both in-flight writes, started at the pre-relink generation, must be refused.
-	if err := s.UpdateCouncilCookie(ctx, owner, "stale-warm", before.Generation); !errors.Is(err, ErrSessionSuperseded) {
+	if err := s.UpdateCouncilCookie(ctx, owner, "", "stale-warm", before.Generation); !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("stale keep-warm write = %v, want ErrSessionSuperseded", err)
 	}
 	if err := s.UpdateCouncilToken(ctx, owner, "stale-renew", "at", time.Now().Add(time.Hour), before.Generation); !errors.Is(err, ErrSessionSuperseded) {
@@ -2951,7 +2951,7 @@ func TestGenerationDoesNotResetAcrossRelink(t *testing.T) {
 			first.Generation, second.Generation)
 	}
 	// And the stale generation must not delete the recreated session.
-	if deleted, err := s.DeleteCouncilSessionIfGen(ctx, owner, first.Generation); err != nil || deleted {
+	if deleted, err := s.DeleteCouncilSessionIfGen(ctx, owner, "", first.Generation); err != nil || deleted {
 		t.Fatalf("stale-generation delete matched the recreated session (deleted=%v err=%v)", deleted, err)
 	}
 }

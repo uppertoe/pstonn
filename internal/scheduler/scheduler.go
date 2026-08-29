@@ -15,6 +15,7 @@ import (
 	"hash/fnv"
 	"log"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,26 +34,25 @@ import (
 // reconcile and keep-warm logic be tested without real HTTP.
 type Council interface {
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration string) error
-	Refresh(ctx context.Context, owner string) error
+	// Refresh keeps the owner's session with one tenant (council) alive.
+	Refresh(ctx context.Context, owner, councilID string) error
 	// CurrentVehicle reads the plate the council actually has on the permit right
 	// now (used to detect drift from changes made directly in the council portal).
 	CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error)
 	// Reconnect re-establishes an expired session from the user's opt-in saved
 	// password. Returns parking.ErrNoSavedPassword when none was saved.
-	Reconnect(ctx context.Context, owner string) error
+	Reconnect(ctx context.Context, owner, councilID string) error
 	// ListPermitsComplete reads the owner's council permits (to refresh expiry/status)
 	// and reports whether the list was the WHOLE account. Drift must not check an owner
 	// off for another interval on the strength of one page, so the bool is not optional
 	// here — the plain ListPermits the display paths use is not on this interface.
-	ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error)
+	ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error)
 	// Blocked reports whether the fleet circuit breaker is open — a CONFIRMED
 	// shared-edge block affecting the whole fleet, not one owner's cooldown. Used
 	// to escalate the user-facing block warning (sooner, firmer) once we know a due
 	// change genuinely will not apply until the block clears.
 	Blocked() bool
 }
-
-var _ Council = (*parking.Client)(nil)
 
 // Notifier sends user-facing notifications (the re-authorise reminder, each
 // applied plate change / failure, and a re-link prompt) plus operator alerts for
@@ -103,7 +103,7 @@ type Options struct {
 	PublicBaseURL string        // absolute base for the email confirm link
 	// LocationFor returns the timezone an owner's permit days are reckoned in
 	// (their council's); nil, or a nil result, falls back to the scheduler's loc.
-	LocationFor  func(owner string) *time.Location
+	LocationFor  func(owner, councilID string) *time.Location
 	Notifier     Notifier      // nil/disabled = no emails
 	OpDrain      time.Duration // modelled time one council operation occupies the governor at its sustained rate; used ONLY to size the rollover spread (no per-call sleep — the governor paces)
 	JitterFrac   float64       // ± fraction to randomise thresholds/delays (default 0.2)
@@ -139,10 +139,10 @@ type Scheduler struct {
 	// store; a test replaces it to make the write fail, which is the only way to reach
 	// the branch that decides whether a failed checkpoint may clear the backoff — and
 	// getting that wrong re-reads the council for the same owner every single tick.
-	markDriftChecked func(ctx context.Context, owner string) error
+	markDriftChecked func(ctx context.Context, owner, councilID string) error
 	council          Council
 	loc              *time.Location
-	locFor           func(owner string) *time.Location // per-owner timezone (Options.LocationFor)
+	locFor           func(owner, councilID string) *time.Location // per-tenant timezone (Options.LocationFor)
 	interval         time.Duration
 
 	sessionMaxAge time.Duration
@@ -253,7 +253,7 @@ type Scheduler struct {
 	// enqueue supersedes stale work rather than clobbering the fresh session. Guarded
 	// by reconnectMu.
 	reconnectMu sync.Mutex
-	reconnectQ  map[string]reconnectItem
+	reconnectQ  map[sessionKey]reconnectItem
 
 	// driftMu guards the per-owner drift backoff and the shape-failure tally. A failed
 	// drift read used to leave drift_checked_at alone and so retry on EVERY warm tick
@@ -337,6 +337,9 @@ const reconnectStalledAlertAttempts = 5
 // entered the queue (for the backlog-age metric), the session generation it belongs
 // to (the compare-and-swap token), and how many transient failures it has had (for
 // exponential backoff).
+// sessionKey names one session: an account's link with one tenant.
+type sessionKey struct{ owner, council string }
+
 type reconnectItem struct {
 	next     time.Time
 	queuedAt time.Time
@@ -410,7 +413,7 @@ func New(st *store.Store, council Council, loc *time.Location, opts Options) *Sc
 		warmSafetyMargin: wsm,
 		trigger:          make(chan struct{}, 1),
 		notifyConc:       make(chan struct{}, maxNotifyConcurrency),
-		reconnectQ:       make(map[string]reconnectItem),
+		reconnectQ:       make(map[sessionKey]reconnectItem),
 		driftRetryAt:     make(map[string]time.Time),
 		driftFails:       make(map[string]int),
 		notifyInFlight:   make(map[string]struct{}),
@@ -1206,7 +1209,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 		// people who came back mid-pass, seconds after they used the app. A no-op also
 		// means someone else (the reconnect worker's recoverOrRetire) got there first,
 		// so the alert is theirs to send, not ours to duplicate.
-		retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, now.Add(-s.sessionMaxAge))
+		retired, err := s.store.DeleteCouncilSessionIfIdle(ctx, cs.Owner, cs.CouncilID, now.Add(-s.sessionMaxAge))
 		switch {
 		case err != nil:
 			log.Printf("scheduler: retire session %s: %v", redact.Email(cs.Owner), err)
@@ -1237,7 +1240,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	// it is still comfortably within its warm window — already alive.
 	alive := action == warmSkip
 	if action == warmRenew {
-		switch err := s.council.Refresh(ctx, cs.Owner); {
+		switch err := s.council.Refresh(ctx, cs.Owner, cs.CouncilID); {
 		case err == nil:
 			alive = true
 			log.Printf("scheduler: kept session for %s warm", redact.Email(cs.Owner))
@@ -1250,7 +1253,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			if g, ok := parking.SessionGenOf(err); ok {
 				gen = g
 			}
-			s.enqueueReconnect(ctx, cs.Owner, gen)
+			s.enqueueReconnect(ctx, cs.Owner, cs.CouncilID, gen)
 		case errors.Is(err, parking.ErrNotLinked):
 			// Raced with an unlink; nothing to do.
 		case errors.Is(err, parking.ErrCouncilBusy):
@@ -1271,7 +1274,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 	// stays true (the timestamp is not advanced), so the read resumes the moment
 	// the block clears.
 	if alive && !s.council.Blocked() && s.driftDue(cs, now) {
-		if derr := s.checkDrift(ctx, cs.Owner); derr != nil {
+		if derr := s.checkDrift(ctx, cs.Owner, cs.CouncilID); derr != nil {
 			// drift_checked_at is deliberately NOT advanced (the check did not happen),
 			// but the owner is backed off so a persistent failure cannot retry on every
 			// warm tick across the whole fleet.
@@ -1292,7 +1295,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			// expiry was only logged: updated_at is fresh so keep-warm won't re-probe for
 			// a whole warm interval, leaving a dead session unqueued for hours.
 			if g, ok := parking.SessionGenOf(derr); ok {
-				s.enqueueReconnect(ctx, cs.Owner, g)
+				s.enqueueReconnect(ctx, cs.Owner, cs.CouncilID, g)
 			}
 		} else {
 			// Clear the backoff only once the checkpoint is DURABLE. last_drift_check is
@@ -1301,7 +1304,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.CouncilSession) {
 			// re-read the council every cycle — three requests an owner, against an edge
 			// we may be failing precisely because it is throttling us. Treating the failed
 			// write as a drift failure keeps the backoff on and lets it widen.
-			if err := s.markDriftChecked(ctx, cs.Owner); err != nil {
+			if err := s.markDriftChecked(ctx, cs.Owner, cs.CouncilID); err != nil {
 				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", redact.Email(cs.Owner), err)
 				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
 			} else {
@@ -1389,12 +1392,13 @@ func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h in
 // the worker would then retire it. A stale-old gen is safe (it simply mismatches, the
 // task is discarded, and the next keep-warm pass rediscovers within ~3 min); a
 // too-new one is what destroys a valid session.
-func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string, gen int64) {
+func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, councilID string, gen int64) {
 	now := time.Now()
+	key := sessionKey{owner, councilID}
 	s.reconnectMu.Lock()
-	_, already := s.reconnectQ[owner]
+	_, already := s.reconnectQ[key]
 	if !already {
-		s.reconnectQ[owner] = reconnectItem{next: now, queuedAt: now, gen: gen}
+		s.reconnectQ[key] = reconnectItem{next: now, queuedAt: now, gen: gen}
 	}
 	s.reconnectMu.Unlock()
 	if already {
@@ -1414,8 +1418,8 @@ func (s *Scheduler) enqueueReconnect(ctx context.Context, owner string, gen int6
 // dead — the parking client's background reads, wired via OnSessionExpired in
 // main. The queue's own dedup makes repeated reports (a dashboard polling every
 // few seconds) free, and the generation requirement is enforced by the caller.
-func (s *Scheduler) NoteSessionExpired(owner string, gen int64) {
-	s.enqueueReconnect(context.Background(), owner, gen)
+func (s *Scheduler) NoteSessionExpired(owner, councilID string, gen int64) {
+	s.enqueueReconnect(context.Background(), owner, councilID, gen)
 }
 
 // CancelReconnect drops any queued reconnect for owner. Called after a manual link,
@@ -1423,7 +1427,11 @@ func (s *Scheduler) NoteSessionExpired(owner string, gen int64) {
 // generation check is the hard safety; this is the fast path).
 func (s *Scheduler) CancelReconnect(owner string) {
 	s.reconnectMu.Lock()
-	delete(s.reconnectQ, owner)
+	for k := range s.reconnectQ {
+		if k.owner == owner {
+			delete(s.reconnectQ, k)
+		}
+	}
 	s.reconnectMu.Unlock()
 	// Drop drift bookkeeping too: without this the two maps keep an entry per
 	// unlinked/retired owner until the process restarts.
@@ -1432,27 +1440,28 @@ func (s *Scheduler) CancelReconnect(owner string) {
 
 // nextDueReconnect returns the queued owner with the earliest next-attempt time (ties
 // broken by owner for determinism), its generation, and how long until it is due.
-func (s *Scheduler) nextDueReconnect() (owner string, gen int64, wait time.Duration, ok bool) {
+func (s *Scheduler) nextDueReconnect() (key sessionKey, gen int64, wait time.Duration, ok bool) {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
 	var best reconnectItem
-	for o, it := range s.reconnectQ {
-		if owner == "" || it.next.Before(best.next) || (it.next.Equal(best.next) && o < owner) {
-			owner, best = o, it
+	found := false
+	for k, it := range s.reconnectQ {
+		if !found || it.next.Before(best.next) || (it.next.Equal(best.next) && (k.owner < key.owner || (k.owner == key.owner && k.council < key.council))) {
+			key, best, found = k, it, true
 		}
 	}
-	if owner == "" {
-		return "", 0, 0, false
+	if !found {
+		return sessionKey{}, 0, 0, false
 	}
 	if now := time.Now(); best.next.After(now) {
-		return owner, best.gen, best.next.Sub(now), true
+		return key, best.gen, best.next.Sub(now), true
 	}
-	return owner, best.gen, 0, true
+	return key, best.gen, 0, true
 }
 
-func (s *Scheduler) dequeueReconnect(owner string) {
+func (s *Scheduler) dequeueReconnect(key sessionKey) {
 	s.reconnectMu.Lock()
-	delete(s.reconnectQ, owner)
+	delete(s.reconnectQ, key)
 	s.reconnectMu.Unlock()
 }
 
@@ -1461,9 +1470,9 @@ func (s *Scheduler) dequeueReconnect(owner string) {
 // household is told — exactly once per queue residency — because every path
 // that lands here retains the session and would otherwise retry forever with
 // only the operator aware the schedule has stopped applying.
-func (s *Scheduler) backoffReconnect(owner string) {
+func (s *Scheduler) backoffReconnect(key sessionKey) {
 	s.reconnectMu.Lock()
-	it, ok := s.reconnectQ[owner]
+	it, ok := s.reconnectQ[key]
 	if !ok {
 		s.reconnectMu.Unlock()
 		return
@@ -1474,11 +1483,11 @@ func (s *Scheduler) backoffReconnect(owner string) {
 		backoff = reconnectBackoffMax
 	}
 	it.next = time.Now().Add(backoff)
-	s.reconnectQ[owner] = it
+	s.reconnectQ[key] = it
 	attempts := it.attempts
 	s.reconnectMu.Unlock()
 	if attempts == reconnectStalledAlertAttempts {
-		s.alertReconnectStalled(owner)
+		s.alertReconnectStalled(key.owner)
 	}
 }
 
@@ -1526,27 +1535,28 @@ func (s *Scheduler) reconnectLoop(ctx context.Context) {
 // returning false if none is due (so the caller idles). Shared by reconnectLoop and
 // tests. A recovered owner is kicked so any due change applies at once.
 func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
-	owner, gen, wait, ok := s.nextDueReconnect()
+	key, gen, wait, ok := s.nextDueReconnect()
 	if !ok || wait > 0 {
 		return false
 	}
+	owner := key.owner
 	processed = true // we have an item; a panic below is still "processed" (it gets a backoff)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("scheduler: reconnect worker panicked on %s (recovered): %v", redact.Email(owner), r)
 			s.systemAlert(ctx, "panic-reconnect", "Reconnect worker panicked",
 				fmt.Sprintf("Recovering the session for %s panicked and was recovered; it will be retried. %v", owner, r))
-			s.backoffReconnect(owner)
+			s.backoffReconnect(key)
 		}
 	}()
-	switch s.recoverOrRetire(ctx, owner, gen) {
+	switch s.recoverOrRetire(ctx, owner, key.council, gen) {
 	case reconnectRecovered:
-		s.dequeueReconnect(owner)
+		s.dequeueReconnect(key)
 		s.KickOwner(ctx, owner)
 	case reconnectRetired:
-		s.dequeueReconnect(owner)
+		s.dequeueReconnect(key)
 	case reconnectDeferred:
-		s.backoffReconnect(owner)
+		s.backoffReconnect(key)
 	}
 	return true
 }
@@ -1559,11 +1569,11 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 // row was actually removed). Anything transient (council busy, a network blip, a
 // systemic login-shape break, or a FAILED delete) keeps the task and retries later
 // (reconnectDeferred).
-func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64) reconnectResult {
+func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, councilID string, gen int64) reconnectResult {
 	// Skip stale work: if the session was relinked, reconnected, renewed, or unlinked
 	// since this was queued, its generation no longer matches (or it is gone) — this
 	// recovery task is not ours to act on.
-	switch cur, err := s.store.GetCouncilSession(ctx, owner); {
+	switch cur, err := s.store.GetCouncilSessionIn(ctx, owner, councilID); {
 	case errors.Is(err, store.ErrNotFound):
 		return reconnectRetired // the session is genuinely gone; nothing to recover
 	case err != nil:
@@ -1579,7 +1589,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 	// so a slow portal can't wedge the drain worker.
 	rctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	switch rerr := s.council.Reconnect(rctx, owner); {
+	switch rerr := s.council.Reconnect(rctx, owner, councilID); {
 	case rerr == nil:
 		s.noteReconnect(owner)
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", redact.Email(owner))
@@ -1611,7 +1621,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner string, gen int64
 	}
 	// Retire — but ONLY the generation we observed, so a relink during the attempt
 	// survives. A delete FAILURE keeps the task (don't lose the recovery work).
-	switch deleted, derr := s.store.DeleteCouncilSessionIfGen(ctx, owner, gen); {
+	switch deleted, derr := s.store.DeleteCouncilSessionIfGen(ctx, owner, councilID, gen); {
 	case derr != nil:
 		log.Printf("scheduler: unlink expired session %s: %v", redact.Email(owner), derr)
 		s.systemAlert(ctx, "retire-delete", "Could not retire an unrecoverable session",
@@ -1764,8 +1774,8 @@ func (s *Scheduler) logApply(ctx context.Context, permitID int64, reg, source, s
 // Wednesday's identical failures, so the household heard exactly once however
 // many visitors were exposed. Success keys stay undated; re-confirming an
 // identical success adds nothing.
-func (s *Scheduler) failureKeyDay(owner string) string {
-	return time.Now().In(s.locOf(owner)).Format("2006-01-02")
+func (s *Scheduler) failureKeyDay(p model.Permit) string {
+	return time.Now().In(s.locOf(p.Owner, p.CouncilID)).Format("2006-01-02")
 }
 
 // notifyUser delivers an apply outcome to the user with guaranteed-retry
@@ -1896,7 +1906,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Reason:      reason,
 		Action:      action,
 		Transient:   kind != parking.FailRejected,
-	}, "error|"+want+"|"+reason+"|"+s.failureKeyDay(p.Owner))
+	}, "error|"+want+"|"+reason+"|"+s.failureKeyDay(p))
 }
 
 // describeFailure turns a failure classification into a plain-English reason and
@@ -1955,7 +1965,7 @@ var opWording = map[parking.Op]string{
 // typically one or two per household rather than the full permit list — the capture
 // account held three permits but only one addable one. The win is therefore modest
 // per household; what matters is that permit count leaves the scaling term entirely.
-func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
+func (s *Scheduler) checkDrift(ctx context.Context, owner, councilID string) error {
 	// The caller (keepWarm) already spaced this call from the previous one, and the
 	// transport governor spaces at the request level, so no extra sleep here.
 	// Capture our belief BEFORE the council round trip. The CAS below exists to discard
@@ -1966,11 +1976,14 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 	if berr != nil {
 		return berr
 	}
+	// Only this tenant's permits: the account may hold permits with another
+	// council, which this session cannot see and must not judge missing.
+	before = slices.DeleteFunc(before, func(p model.Permit) bool { return p.CouncilID != councilID })
 	wasActive := make(map[int64]string, len(before))
 	for _, p := range before {
 		wasActive[p.ID] = p.ActiveRegistration
 	}
-	live, complete, err := s.council.ListPermitsComplete(ctx, owner)
+	live, complete, err := s.council.ListPermitsComplete(ctx, owner, councilID)
 	if err != nil {
 		// A read failure is not evidence of drift, and — critically — it is not a
 		// drift check either: report it so the caller does NOT advance
@@ -2003,7 +2016,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner string) error {
 	now := time.Now()
 	for i := range permits {
 		p := permits[i]
-		if p.Inactive(now, s.locOf(p.Owner)) {
+		if p.Inactive(now, s.locOf(p.Owner, p.CouncilID)) {
 			continue // don't act on permits we no longer manage
 		}
 		pi, ok := byCouncilID[p.CouncilPermitID]
@@ -2123,7 +2136,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		// the warning window at ~10-11am local on the permit's final valid day. A
 		// notifier that was down through the lead window would then never warn at all,
 		// which is the outage this reminder exists to survive.
-		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.locOf(owner))) {
+		if now.Before(p.EndDate.Add(-s.expiryLead)) || !now.Before(model.ExpiryDeadline(p.EndDate, s.locOf(p.Owner, p.CouncilID))) {
 			continue
 		}
 		if s.notifier == nil || !s.notifier.Enabled() {
@@ -2133,7 +2146,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		if label == "" {
 			label = "visitor permit"
 		}
-		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.locOf(owner))) > 0 {
+		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.locOf(p.Owner, p.CouncilID))) > 0 {
 			if e := s.store.MarkPermitExpiryReminded(ctx, p.ID); e != nil {
 				log.Printf("scheduler: mark permit %d expiry-reminded: %v", p.ID, e)
 			}
@@ -2246,11 +2259,11 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 	// that could never work — and, because reminder_sent_at stayed empty, sent another
 	// broken one every warm tick. Recording first makes the emailed link valid by
 	// construction; if the send then fails we roll the mark back so it can be retried.
-	if err := s.store.MarkReminderSent(ctx, cs.Owner, token); err != nil {
+	if err := s.store.MarkReminderSent(ctx, cs.Owner, cs.CouncilID, token); err != nil {
 		log.Printf("scheduler: mark reminder for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
-	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.locOf(cs.Owner)), url); err != nil {
+	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.locOf(cs.Owner, cs.CouncilID)), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the
@@ -2259,7 +2272,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 		// never fires again and the session lapses silently. That is worse than the
 		// duplicate the old ordering risked.
 		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner); cerr != nil {
+		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner, cs.CouncilID); cerr != nil {
 			log.Printf("scheduler: roll back reminder mark for %s: %v", redact.Email(cs.Owner), cerr)
 		}
 		cancel()
@@ -2270,7 +2283,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.CouncilSession, no
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
 		return
 	}
-	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner)).Format("2006-01-02"))
+	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner, cs.CouncilID)).Format("2006-01-02"))
 }
 
 // spreadElapsed reports whether a permit may act on a SCHEDULED change yet.
@@ -2546,7 +2559,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 		// An expired or cancelled permit can't be changed; skip it so we don't
 		// hammer the council with doomed writes or alarm the user with failures.
 		// It stays in the store as a copy-schedule source until removed.
-		if p.Inactive(now, s.locOf(p.Owner)) {
+		if p.Inactive(now, s.locOf(p.Owner, p.CouncilID)) {
 			continue
 		}
 		active++
@@ -2686,7 +2699,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 						"If " + last.Registration + " parked there during the booking, it was not covered.",
 					// Not transient: this must not sit behind a quiet-hours hold and
 					// arrive as a stale correction long after the next booking started.
-				}, "unapplied|"+last.Registration+"|"+s.failureKeyDay(p.Owner))
+				}, "unapplied|"+last.Registration+"|"+s.failureKeyDay(p))
 			}
 		}
 	}
@@ -2753,7 +2766,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// override whose StartsAt falls inside that window must be seen as started for
 	// the permit being processed now — otherwise the previous plate is (re)applied
 	// and only corrected next pass, leaving the wrong car on a live permit meanwhile.
-	now := time.Now().In(s.locOf(p.Owner))
+	now := time.Now().In(s.locOf(p.Owner, p.CouncilID))
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -2833,7 +2846,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		log.Printf("scheduler: skipping permit %d: could not re-read it under the claim: %v", p.ID, ferr)
 		return false
 	}
-	if fresh.Inactive(now, s.locOf(p.Owner)) {
+	if fresh.Inactive(now, s.locOf(p.Owner, p.CouncilID)) {
 		// checkDrift may have written a council-reported expiry earlier in THIS pass.
 		// Writing anyway earns a council refusal that alarms the household with "the
 		// council would not let p.stonn update your permit" for a permit that expired.
@@ -2949,9 +2962,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			// after — left the urgent "act now to avoid a fine" escalation deduped
 			// by the reassuring notice it was supposed to override, so the one
 			// message blockNotifyThreshold exists for was unreachable.
-			key := "busy|" + want + "|" + s.failureKeyDay(p.Owner)
+			key := "busy|" + want + "|" + s.failureKeyDay(p)
 			if confirmed {
-				key = "busy-blocked|" + want + "|" + s.failureKeyDay(p.Owner)
+				key = "busy-blocked|" + want + "|" + s.failureKeyDay(p)
 			}
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
@@ -2982,7 +2995,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// so leave it: keep-warm re-probes a dead session every recovery tick (~3 min)
 		// and enqueues it there with a properly captured generation.
 		if g, ok := parking.SessionGenOf(err); ok {
-			s.enqueueReconnect(ctx, p.Owner, g)
+			s.enqueueReconnect(ctx, p.Owner, p.CouncilID, g)
 		}
 		// Recovery usually lands within a couple of reconnect attempts, but
 		// "usually" was previously load-bearing: this branch wrote no activity
@@ -3002,7 +3015,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 				Reason:    reason,
 				Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
 				Transient: true, Urgent: true,
-			}, "session|"+want+"|"+s.failureKeyDay(p.Owner))
+			}, "session|"+want+"|"+s.failureKeyDay(p))
 		}
 		s.deferRetry(p.ID, 3)
 		return true
@@ -3053,7 +3066,7 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	if prev == "" {
 		return
 	}
-	now := time.Now().In(s.locOf(p.Owner))
+	now := time.Now().In(s.locOf(p.Owner, p.CouncilID))
 	overrides, err := s.store.ListOverrides(ctx, p.ID, now)
 	if err != nil {
 		return
@@ -3081,9 +3094,9 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 
 // locOf is the timezone an owner's permit days are reckoned in: their council's
 // when known, else the scheduler's default.
-func (s *Scheduler) locOf(owner string) *time.Location {
+func (s *Scheduler) locOf(owner, councilID string) *time.Location {
 	if s.locFor != nil {
-		if loc := s.locFor(owner); loc != nil {
+		if loc := s.locFor(owner, councilID); loc != nil {
 			return loc
 		}
 	}

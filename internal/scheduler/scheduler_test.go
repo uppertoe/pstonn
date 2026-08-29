@@ -21,6 +21,7 @@ import (
 // real HTTP client.
 type fakeCouncil struct {
 	refreshed            []string
+	refreshedTenants     []string // owner|council per Refresh, for multi-tenant accounts
 	refreshErr           error
 	reconnected          []string
 	reconnectErr         error // defaults to ErrNoSavedPassword via reconnectSet
@@ -167,11 +168,12 @@ func (f *fakeCouncil) CurrentVehicle(_ context.Context, _ string, p model.Permit
 	}
 	return f.current[p.CouncilPermitID], nil
 }
-func (f *fakeCouncil) Refresh(_ context.Context, owner string) error {
+func (f *fakeCouncil) Refresh(_ context.Context, owner, councilID string) error {
 	f.refreshed = append(f.refreshed, owner)
+	f.refreshedTenants = append(f.refreshedTenants, owner+"|"+councilID)
 	return f.refreshErr
 }
-func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
+func (f *fakeCouncil) Reconnect(ctx context.Context, owner, councilID string) error {
 	f.reconnected = append(f.reconnected, owner)
 	_, f.reconnectHadDeadline = ctx.Deadline() // recoverOrRetire must bound this
 	if !f.reconnectSet {
@@ -182,7 +184,7 @@ func (f *fakeCouncil) Reconnect(ctx context.Context, owner string) error {
 
 // ListPermitsComplete reports the list as complete unless a test sets partialPermits,
 // which is how the truncated-grid path is exercised.
-func (f *fakeCouncil) ListPermitsComplete(ctx context.Context, owner string) ([]parking.PermitInfo, bool, error) {
+func (f *fakeCouncil) ListPermitsComplete(ctx context.Context, owner, councilID string) ([]parking.PermitInfo, bool, error) {
 	ps, err := f.ListPermits(ctx, owner)
 	f.mu.Lock()
 	partial := f.partialPermits
@@ -989,7 +991,7 @@ func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
 		t.Fatalf("weekly rule: %v", err)
 	}
 	s := New(st, &fakeCouncil{}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
-	s.markDriftChecked = func(context.Context, string) error {
+	s.markDriftChecked = func(context.Context, string, string) error {
 		return errors.New("disk full")
 	}
 	driftFailCount := func() int {
@@ -1563,5 +1565,28 @@ func TestExpiryWarningRunsToTheEndOfTheLastDay(t *testing.T) {
 
 	if len(nf.expiries) != 1 {
 		t.Fatalf("a permit still valid until midnight tonight got %d expiry warnings, want 1", len(nf.expiries))
+	}
+}
+
+// An account linked to two tenants holds two sessions, and keep-warm touches
+// each with its own tenant — never one session on behalf of the other.
+func TestKeepWarmTouchesEveryTenantSession(t *testing.T) {
+	st := newStore(t)
+	const owner = "twohomes@example.com"
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner)
+	if err := st.SaveCouncilSession(context.Background(), store.CouncilSession{Owner: owner, CouncilID: "othertown", Cookie: "sealed-2"}); err != nil {
+		t.Fatal(err)
+	}
+	fc := &fakeCouncil{}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
+	time.Sleep(2 * time.Millisecond)
+	s.keepWarm(context.Background())
+	got := map[string]bool{}
+	for _, k := range fc.refreshedTenants {
+		got[k] = true
+	}
+	if !got[owner+"|"] || !got[owner+"|othertown"] || len(fc.refreshedTenants) != 2 {
+		t.Fatalf("refreshed = %v, want one refresh per tenant session", fc.refreshedTenants)
 	}
 }

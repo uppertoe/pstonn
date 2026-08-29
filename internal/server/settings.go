@@ -37,6 +37,29 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			base.LastReconnect = cs.ReconnectedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006, 3:04pm")
 		}
 	}
+	// Other tenants this account is linked to get a card each (the current
+	// tenant's card is the one above).
+	if sessions, err := s.store.ListCouncilSessionsFor(ctx, owner); err == nil && len(sessions) > 1 && s.councils != nil {
+		current, _ := s.store.CouncilIDFor(ctx, owner)
+		for _, cs := range sessions {
+			if cs.CouncilID == current || cs.Cookie == "" {
+				continue
+			}
+			c, ok := s.councils.ByID(cs.CouncilID)
+			if !ok {
+				continue
+			}
+			cv := connectionView{ID: c.ID, Name: c.Name, AutoReconnect: cs.Password != ""}
+			idle := cs.LastActive
+			if idle.IsZero() {
+				idle = cs.LinkedAt
+			}
+			if !idle.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
+				cv.RelinkBy = idle.Add(s.cfg.Council.SessionMaxAge).In(c.Location()).Format("2 Jan 2006")
+			}
+			base.OtherConnections = append(base.OtherConnections, cv)
+		}
+	}
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
 	}
@@ -288,4 +311,11 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/settings?tested=1", http.StatusSeeOther)
+}
+
+// connectionView is one non-current tenant's connection card on Settings.
+type connectionView struct {
+	ID, Name      string
+	AutoReconnect bool
+	RelinkBy      string
 }

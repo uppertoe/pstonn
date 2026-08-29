@@ -173,7 +173,7 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 func TestNoteExpiredReportsOnlyTaggedExpiries(t *testing.T) {
 	c := NewClient(nil, nil, nil, nil)
 	var got []int64
-	c.OnSessionExpired = func(owner string, gen int64) {
+	c.OnSessionExpired = func(owner, councilID string, gen int64) {
 		if owner != "o@example.com" {
 			t.Fatalf("hook got owner %q", owner)
 		}

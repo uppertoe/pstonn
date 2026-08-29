@@ -24,7 +24,7 @@ func TestCheckDriftClearsNotifiedKey(t *testing.T) {
 	if err := st.SetPermitNotifiedKey(ctx, pid, "success|AAA111>BBB222"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.checkDrift(ctx, owner); err != nil {
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
 		t.Fatal(err)
 	}
 	key, _, err := st.PermitNotify(ctx, pid)

@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	councilpkg "github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
@@ -425,7 +426,7 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 	cfg.Council.GovConcurrency = cfgConcurrency
 
 	client := parking.New(cfg, st, box)
-	sched := New(st, client, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Hour})
+	sched := New(st, councilpkg.Single{Client: client}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Hour})
 
 	// Seed the fleet: a linked session, a permit the council already holds under an
 	// OLD plate, a vehicle, and a rule for today naming the NEW one. That is exactly
@@ -727,7 +728,7 @@ func TestFleetUnderFailure(t *testing.T) {
 			p50, p95, p99, n := reads()
 
 			reqs := rig.council.total()
-			open := rig.sched.council.(*parking.Client).Blocked()
+			open := rig.sched.council.(councilpkg.Single).Client.Blocked()
 			t.Logf("\n"+
 				"    council requests ...... %d over %d passes (baseline %d for 1)\n"+
 				"    refusals served ....... %d\n"+
