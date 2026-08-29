@@ -141,7 +141,7 @@
 </script>
 <script{{with .Nonce}} nonce="{{.}}"{{end}} src="{{asset "htmx.min.js"}}"></script>
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "alpine.min.js"}}"></script>
-{{if or (eq .State "landing") (eq .State "how")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
+{{if or (eq .State "landing") (eq .State "how") (eq .State "guide")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "demos.js"}}"></script>{{end}}
 {{template "styles" .}}
 {{/* These live in the head, NOT in the body: the body is hx-boost="true", so htmx

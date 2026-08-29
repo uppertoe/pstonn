@@ -309,6 +309,10 @@
      scrollable). */
   .pop { position:absolute; z-index:30; top:100%; left:50%; translate:calc(-50% + var(--pop-shift,0px)) 0; margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; max-width:calc(100vw - 24px); animation:rise .16s ease both; }
   .pop .tt { font-size:12px; color:var(--muted); margin:0 0 9px; font-weight:600; }
+  /* A card whose day popover is open rises above what follows it (the manage-another
+     link, the tips): the popover hangs below the card's edge, and a later sibling
+     otherwise paints over it. */
+  .card:has(.pop:not([style*="none"])) { position:relative; z-index:5; }
   /* vehicle picker (colour-dotted options) */
   .vopts { display:grid; gap:2px; }
   .vopt { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:transparent; color:var(--ink); border:0; box-shadow:none; padding:8px 9px; border-radius:8px; font-weight:500; font-size:13px; }
@@ -537,6 +541,8 @@
   .poster-brand { display:inline-flex; align-items:center; gap:9px; font-family:'Space Grotesk',system-ui,sans-serif; font-weight:600; font-size:18px; letter-spacing:-.02em; }
   .poster-brand .dot { color:#fff; }
   .guide-list { padding-left:18px; margin:8px 0 0; display:grid; gap:8px; }
+  .guide-steps { padding-left:22px; margin:6px 0 0; display:grid; gap:8px; }
+  .guide-steps li { padding-left:4px; }
   .poster-qr { display:block; width:240px; height:240px; margin:16px auto 8px; background:#fff; border-radius:12px; padding:10px; box-sizing:content-box; }
   .poster-url { text-align:center; font-weight:700; font-size:22px; letter-spacing:.01em; margin:4px 0 14px; color:var(--pp-ink); }
   /* the share card: one lead line, the code, the address, a short note — spaced as a card, not a poster */

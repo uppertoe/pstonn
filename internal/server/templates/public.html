@@ -162,24 +162,7 @@
         <p>Set which registration is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
       </div>
       <div class="feature-demo">
-        <figure class="dm" data-demo="roster">
-        <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-week" data-week></div>
-          <div class="dm-picker">
-            <div class="ph">Which car?</div>
-            <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
-            <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
-            <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
-          </div>
-          <div class="dm-permit">
-            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
-            <div class="dm-sync">{{template "ic-check"}}</div>
-          </div>
-          <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
-        </div>
-        <div class="dm-caption"><span></span></div>
-        </figure>
+        {{template "demo-roster" .}}
       </div>
     </section>
 
@@ -189,18 +172,7 @@
         <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; book a car for a set window. Your weekly schedule takes back over the moment it ends.</p>
       </div>
       <div class="feature-demo">
-        <figure class="dm" data-demo="oneoff">
-        <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
-          <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
-          <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
-          <div class="dm-btn">{{template "ic-plus"}} Book</div>
-          <div class="dm-uph">Upcoming</div>
-          <div class="dm-booking"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span> <span class="when">Sat 12 &ndash; Sun 13 Jul</span></div>
-          <div class="dm-cal"></div>
-        </div>
-        </figure>
+        {{template "demo-oneoff" .}}
       </div>
     </section>
 
@@ -210,25 +182,7 @@
         <p>Send a private link or show a QR, and the visitor puts their own car on the permit &mdash; no account needed. There&rsquo;s also a printable QR code: a visitor scans it and requests a spot, and nothing changes until you approve it from your phone.</p>
       </div>
       <div class="feature-demo">
-        <figure class="dm" data-demo="guest">
-        <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Visitor pass</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-qrwrap">
-            <img class="dm-qr" src="/static/demo-qr.svg" alt="Example visitor-pass QR code" width="56" height="56">
-            <span class="dm-qrcap">Send it as a private link, or show it as a QR &mdash; the visitor opens it and picks their car.</span>
-          </div>
-          <div class="dm-gsub">Tap your car to put it on the permit.</div>
-          <div class="dm-gcars">
-            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
-            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick">{{template "ic-check"}}</span></div>
-            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick">{{template "ic-check"}}</span></div>
-          </div>
-          <div class="dm-permit">
-            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>
-            <div class="dm-sync">{{template "ic-check"}}</div>
-          </div>
-        </div>
-        </figure>
+        {{template "demo-guest" .}}
       </div>
     </section>
 
@@ -307,14 +261,30 @@
 {{end}}
 
 {{define "page-guide"}}
-{{/* ================= PUBLIC GUIDE: one question, answered ================= */}}
+{{/* ================= PUBLIC GUIDE: one question, properly answered ================= */}}
+{{/* The question, how it is done at the council (real steps, real links), how
+     p.stonn does it with the matching animated demo from the How page, then the
+     door in. Content lives in seo.go (guides) so the page and its structured data
+     cannot drift apart. */}}
 {{template "publicheader" .}}
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">{{.Guide.H1}}</h1>
     {{range .Guide.Paras}}<p>{{.}}</p>{{end}}
+    <h2 class="about-h2">{{.Guide.CouncilHeading}}</h2>
+    <ol class="guide-steps">
+      {{range .Guide.Steps}}<li>{{.}}</li>{{end}}
+    </ol>
+    {{if .Guide.CouncilNote}}<p>{{.Guide.CouncilNote}}</p>{{end}}
+    <h2 class="about-h2">With p.stonn</h2>
+    <div class="feature" style="margin-top:8px">
+      <div class="feature-text"><p>{{.Guide.Pstonn}}</p></div>
+      <div class="feature-demo">
+        {{if eq .Guide.Demo "roster"}}{{template "demo-roster" .}}{{else if eq .Guide.Demo "oneoff"}}{{template "demo-oneoff" .}}{{else if eq .Guide.Demo "guest"}}{{template "demo-guest" .}}{{end}}
+      </div>
+    </div>
     <p style="margin-top:22px"><a href="/schedule" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
-    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. See <a href="/how" hx-boost="false">how it works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
+    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council&rsquo;s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener">parking permit FAQs</a>. See also <a href="/how" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
   </section>
 </main>
 {{end}}
@@ -343,4 +313,60 @@
   <p class="ldisclaimer" style="margin-top:32px"><a href="/" hx-boost="false">← Back</a></p>
 </main>
 
+{{end}}
+
+{{define "demo-roster"}}
+        <figure class="dm" data-demo="roster">
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-week" data-week></div>
+          <div class="dm-picker">
+            <div class="ph">Which car?</div>
+            <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
+            <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
+            <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+          <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+        </figure>
+{{end}}
+{{define "demo-oneoff"}}
+        <figure class="dm" data-demo="oneoff">
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
+          <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
+          <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
+          <div class="dm-btn">{{template "ic-plus"}} Book</div>
+          <div class="dm-uph">Upcoming</div>
+          <div class="dm-booking"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span> <span class="when">Sat 12 &ndash; Sun 13 Jul</span></div>
+          <div class="dm-cal"></div>
+        </div>
+        </figure>
+{{end}}
+{{define "demo-guest"}}
+        <figure class="dm" data-demo="guest">
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Visitor pass</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-qrwrap">
+            <img class="dm-qr" src="/static/demo-qr.svg" alt="Example visitor-pass QR code" width="56" height="56">
+            <span class="dm-qrcap">Send it as a private link, or show it as a QR &mdash; the visitor opens it and picks their car.</span>
+          </div>
+          <div class="dm-gsub">Tap your car to put it on the permit.</div>
+          <div class="dm-gcars">
+            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+        </div>
+        </figure>
 {{end}}
