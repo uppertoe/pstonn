@@ -1,8 +1,10 @@
 # Council connections: making p.stonn multi-council
 
-Status: **planned, phase 0 in progress** (2026-08-29). No second council is being
-added yet — the goal of the current work is to decouple the app from the City of
-Stonnington so that adding one later is configuration plus a capture, not a rewrite.
+Status: **phases 0–2 implemented on branch `council-decoupling`** (2026-08-29),
+not deployed. No second council is enabled — the goal of this work was to decouple
+the app from the City of Stonnington so that adding one is a registry entry plus a
+live capture, not a rewrite. Every golden (page, fragment, HTTP response, email) is
+byte-identical to the pre-refactor output; the suite passes.
 
 ## Why
 
@@ -190,62 +192,45 @@ when done alongside the council pass; a real translation is its own project (and
 translation itself must be reviewed by a speaker, never shipped machine-generated for
 copy that mentions fines).
 
-## Phases
+## What was built (branch `council-decoupling`)
 
-**Phase 0 — seams, zero behaviour change.** Ships on its own; every existing test
-must pass with byte-identical rendered output.
+| Layer | Now |
+|---|---|
+| Contract | `internal/provider`: `Provider` (session-keyed, stateless), `Capabilities`, typed errors (`Error{Kind, Op, Detail}`, `Unavailable{RetryAfter…}`, sentinels), request `Surface` tagging |
+| Backends | `internal/provider/orikan` (the ePermits protocol, with its form/shape/identity tests and the env-gated live tools); `internal/provider/fake` (the sandbox, a real second implementation) |
+| Generic client | `internal/parking`: sealed opaque session blob (legacy rows import once), per-owner serialisation, plate cache, backoff, per-council breaker, governed surface-counted transport, a fleet-wide `ConcurrencyLimit`, expiry tagging; `NewClientFor(councilID, …)` |
+| Registry | `internal/council`: embedded `councils.json` (single source of truth; `COUNCILS_PATH` override; `COUNCIL_*` still overrides Stonnington; `COUNCIL_SANDBOX` narrows to one fake); validated on load; per-council permit policy, links, copy, terms, timezone |
+| Routing | `council.Mux` implements `server.Council` and `scheduler.Council`: choice → linked session → process default |
+| Schema | `council_id` on `council_session`, `permit` (`UNIQUE(council_id, council_permit_id)` via a column-aware rebuild) and `account_flags` (the sign-up choice); `breaker_state` per council; backfill to `stonnington`; tested from the pre-change schema |
+| Product | sign-up council choice (form asks only when >1 enabled; a linked account cannot be re-pointed); per-council timezone in the scheduler and every owner-scoped page; `/status` per-council breakdown |
+| Copy | `internal/i18n` catalogs (en-AU) + council terminology; templates, SEO, FAQ, guides, manifest and mail speak through `.Council`; guard tests keep literals out and keys in sync |
+| Tests | provider contract; generic client over a scripted stub and the fake; Orikan protocol; HTTP tests of link/picker/add/clear on the real client + fake provider, incl. a two-council run; migration; registry; mux; shared limit; goldens |
 
-0. ✅ **Golden harness** (the guardrail for everything below). 164 golden files:
-   `internal/server/testdata/golden/{pages,fragments,http}` (every page state and
-   htmx fragment at a pinned clock; every public GET through the real handler with
-   the CSP nonce masked), `internal/notify/testdata/golden` (every email/push/outbox
-   row the service composes, signed-link tokens masked) and
-   `internal/mailer/testdata/golden` (the HTML wrapper with the brand footer).
-   Regenerate with `go test ./internal/<pkg> -run Golden -update`, **only in a commit
-   that touches nothing else**, so the golden diff is the review of a copy change.
-   The set is locked both ways: a case without a golden and a golden without a case
-   both fail.
+## Remaining (not done in this branch)
 
-1. ✅ Server takes a `server.Council` interface, not `*parking.Client`
-   (`scheduler.Council` already existed). Interfaces are defined by their consumers,
-   Go-style; `PermitInfo`, the error sentinels and `FailureKind` stay in `parking`
-   for now — moving them buys nothing until a second connector exists.
-2. ✅ `internal/council` with the descriptor (`FromConfig`) and a single Stonnington
-   entry built from today's `cfg.Council`; `main.go` builds it and passes it to the
-   server. The vehicle-state id is set on the client from the descriptor rather than
-   hard-coded.
-3. ✅ Permit policy behind `council.PermitPolicy`; the server's helpers delegate.
-4. ✅ Provider contract extracted (see above): `internal/provider`, the Orikan
-   provider, the `fake` provider replacing the in-client sandbox branches, and the
-   generic client rewritten over the contract. The parking suite ports across
-   (protocol tests moved to `orikan`; integration tests run the generic client over
-   the Orikan provider at an httptest portal), plus new seam tests driving the
-   generic client with a scripted stub and the fake.
-5. `internal/i18n` scaffold + `T`; templates, `seo.go`, `notify.go`, `mailer` read
-   `.Council` and the catalog. Output for Stonnington stays identical.
+- **Landing / public pages per council.** Public pages render for the registry
+  default; `/councils/<id>` pages and a multi-council landing are not built. The
+  "For the City of X" section, guides and FAQ already parameterise.
+- **Per-account locale.** The catalog is locale-ready (`Bundles.For`, `LocaleTag()`
+  hook on page data) but nothing sets a locale yet; only en-AU exists. Dates still
+  format en-AU in `localTime`.
+- **Remaining generic sentences** stay literal in templates and Go; the harness
+  makes extracting them safe, one golden-neutral commit at a time.
+- **`terms.md`** still names the City of Stonnington: changing it re-prompts every
+  user for consent and is a wording change — needs the operator's approval first.
+- **Watchdog/operator alerts** don't name the council yet (the `/status` breakdown does).
+- **Second council** — phase 3: a live capture per the checklist below, then a
+  registry entry. If it is not config-only, split the auth strategy inside the
+  Orikan provider then.
 
-**Phase 1 — registry + schema.**
+## Backlog
 
-6. `councils.yaml`, loader, env-override merge, `COUNCILS_PATH`.
-7. Migrations: `council_id` on account / session / permit / breaker; backfill.
-8. `Mux`; `main.go` builds one client per enabled council; global concurrency cap;
-   `OnSessionExpired` wired per client.
-9. Admin `/status` groups sessions, stats and breaker per council; watchdog alerts
-   name the council.
-
-**Phase 2 — product surface.**
-
-10. Council picker at sign-up; per-council capacity; "request my council".
-11. Landing, guides, emails and terms re-cut for multi-council; `/councils/<id>`.
-12. `account.locale` + locale resolution; `<html lang>`; `localTime` per locale.
-
-**Phase 3 — prove it with a second tenant** (not started; needs a go decision).
-
-13. One Orikan council on the modern code + PKCE flow. Expected to be config-only —
-    this is the real test of the model.
-14. Only when a council needs a different auth flow: split `Client` into an auth
-    strategy (`login → session`, `renew(session) → token`) and an API shape. Not built
-    speculatively.
+- **Forward-auth proxy identity** (security review item): the app trusts `Remote-*`
+  headers from any private/link-local peer. It should identify the actual reverse
+  proxy (a pinned peer address, or a shared secret header from Caddy) rather than
+  the address class.
+- Council-aware operator alerts; per-council capacity enforcement at link time
+  (`Council.Capacity` is loaded, not yet enforced — `MaxAccounts` still global).
 
 ## Adding a council — checklist
 
