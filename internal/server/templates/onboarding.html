@@ -107,6 +107,13 @@
         And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
         invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
       </p>
+      {{- if .Councils}}
+      <label class="fld">Council
+        <select name="council_id" required>
+          {{range .Councils}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      {{- end}}
       <label class="fld">Council password
         <input name="council_password" type="password" autocomplete="current-password" required autofocus>
       </label>

@@ -22,55 +22,55 @@ import (
 // Council is a tenant descriptor. Fields are plain data so a descriptor can later
 // be loaded from a file; behaviour hangs off PermitPolicy.
 type Council struct {
-	// ID is the stable identifier: it will key database rows and appear in URLs,
-	// so it never changes once a council is live. Lower-case, no spaces.
-	ID string
+	// ID is the stable identifier: it keys database rows and appears in URLs, so
+	// it never changes once a council is live. Lower-case, no spaces.
+	ID string `json:"id"`
 	// Name is the council's full name as residents know it ("City of Stonnington");
 	// Short is the bare place name used mid-sentence ("Stonnington").
-	Name  string
-	Short string
+	Name  string `json:"name"`
+	Short string `json:"short"`
 	// Connector names the protocol driver: "orikan-ssp" (the Orikan ePermits
 	// self-service portal: Duende IdentityServer + /ssp-svc) or "fake" (the
 	// in-memory sandbox).
-	Connector string
+	Connector string `json:"connector"`
 	// Endpoints parameterise the connector.
-	Endpoints Endpoints
+	Endpoints Endpoints `json:"endpoints"`
 	// Timezone is the IANA zone the council's permit days are reckoned in.
-	Timezone string
+	Timezone string `json:"timezone"`
 	// Policy decides which of the council's permit types p.stonn may schedule.
-	Policy PermitPolicy
+	Policy PermitPolicy `json:"policy"`
 	// Links are the council's own pages residents are sent to.
-	Links Links
+	Links Links `json:"links"`
 	// Copy is council-specific prose and facts for the public pages.
-	Copy Copy
+	Copy Copy `json:"copy"`
 	// Enabled gates sign-up; Capacity (0 = unlimited) caps linked accounts.
-	Enabled  bool
-	Capacity int
+	Enabled  bool `json:"enabled"`
+	Capacity int  `json:"capacity"`
 }
 
 // Endpoints are the connector's parameters for an Orikan ePermits tenant.
 type Endpoints struct {
-	Issuer      string   // OIDC issuer, …/idm
-	APIBase     string   // …/ssp-svc
-	ClientID    string   // the public SPA client the portal itself uses
-	RedirectURI string   // that client's registered callback; the code is read off the 302
-	Scopes      []string // no offline_access — the client rejects it
+	Issuer      string   `json:"issuer"`       // OIDC issuer, …/idm
+	APIBase     string   `json:"api_base"`     // …/ssp-svc
+	ClientID    string   `json:"client_id"`    // the public SPA client the portal itself uses
+	RedirectURI string   `json:"redirect_uri"` // that client's registered callback; the code is read off the 302
+	Scopes      []string `json:"scopes"`       // no offline_access — the client rejects it
 }
 
 // Links are the council's own pages residents are sent to.
 type Links struct {
-	Portal        string // the self-service permit portal's front door
-	Register      string // create a portal account
-	ResetPassword string // forgotten-password page
-	ApplyVisitor  string // the council's page on applying for a visitor permit
+	Portal        string `json:"portal"`         // the self-service permit portal's front door
+	Register      string `json:"register"`       // create a portal account
+	ResetPassword string `json:"reset_password"` // forgotten-password page
+	ApplyVisitor  string `json:"apply_visitor"`  // the council's page on applying for a visitor permit
 }
 
 // Copy is council-specific prose and facts. It is deliberately small: anything
 // that reads as a sentence belongs in the message catalog (see the i18n section of
 // docs/council-connections.md), keyed by council where it differs.
 type Copy struct {
-	Suburbs []string // the suburbs the council's permit scheme covers, for the landing page
-	Phone   string   // the council's public switchboard, as printed on its site
+	Suburbs []string `json:"suburbs"` // the suburbs the council's permit scheme covers, for the landing page
+	Phone   string   `json:"phone"`   // the council's public switchboard, as printed on its site
 }
 
 // PermitPolicy decides which of a council's permit types p.stonn may schedule. The
@@ -80,16 +80,16 @@ type PermitPolicy struct {
 	// VisitorWord is the case-insensitive substring that identifies the shared
 	// visitor permit type, the only kind p.stonn schedules ("visitor" matches
 	// "(A) 1st Visitor Permit").
-	VisitorWord string
+	VisitorWord string `json:"visitor_word"`
 	// ResidentWord is matched as a whole word, case-insensitively, to identify a
 	// resident permit — one that holds the resident's OWN car and must never be
 	// scheduled even when it is changeable. Whole-word so that "Residential
 	// Tradesperson Permit" (a different type) is not caught by accident.
-	ResidentWord string
+	ResidentWord string `json:"resident_word"`
 	// DefaultVehicleState is the portal's vehicle-state id for the council's own
 	// state, used when a plate is written without a prior state to copy
 	// (VIC=1 ACT=2 NSW=3 WA=4 TAS=5 QLD=6 SA=7 NT=8).
-	DefaultVehicleState string
+	DefaultVehicleState string `json:"default_vehicle_state"`
 
 	residentRe *regexp.Regexp
 }
@@ -151,49 +151,45 @@ func (p PermitPolicy) compiled() PermitPolicy {
 	return p
 }
 
-// Stonnington is the City of Stonnington descriptor with its confirmed policy and
-// links. Endpoints are filled in by FromConfig (they default to Stonnington's in
-// config, and COUNCIL_* overrides still apply).
+// Stonnington is the City of Stonnington descriptor from the embedded registry
+// (a copy; the registry's own entry is not shared).
 func Stonnington() *Council {
-	return &Council{
-		ID:        "stonnington",
-		Name:      "City of Stonnington",
-		Short:     "Stonnington",
-		Connector: "orikan-ssp",
-		Timezone:  "Australia/Melbourne",
-		Policy: PermitPolicy{
-			VisitorWord:         "visitor",
-			ResidentWord:        "resident",
-			DefaultVehicleState: "1", // VIC
-		}.compiled(),
-		Links: Links{
-			Portal:        "https://parkingpermits.stonnington.vic.gov.au/",
-			Register:      "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register",
-			ResetPassword: "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword",
-			ApplyVisitor:  "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits",
-		},
-		Copy: Copy{
-			Suburbs: []string{"Prahran", "Windsor", "South Yarra", "Toorak", "Armadale", "Malvern", "Malvern East", "Kooyong"},
-			Phone:   "03 8290 1333",
-		},
-		Enabled: true,
+	reg, err := LoadEmbedded()
+	if err != nil {
+		panic(err) // the embedded registry is validated by tests
 	}
+	c, _ := reg.ByID("stonnington")
+	cp := *c
+	return &cp
 }
 
-// FromConfig returns the council the process is wired to. Phase 0: always
+// FromConfig returns the council the single-council configuration describes:
 // Stonnington, with the connector endpoints taken from COUNCIL_* config so an
 // operator override keeps working; in sandbox mode the connector is "fake".
 func FromConfig(cfg config.CouncilConfig) *Council {
 	c := Stonnington()
-	c.Endpoints = Endpoints{
-		Issuer:      cfg.Issuer,
-		APIBase:     cfg.APIBase,
-		ClientID:    cfg.ClientID,
-		RedirectURI: cfg.RedirectURI,
-		Scopes:      append([]string(nil), cfg.Scopes...),
+	applyConfig(c, cfg)
+	return c
+}
+
+// applyConfig lays the COUNCIL_* settings over a descriptor's endpoints.
+func applyConfig(c *Council, cfg config.CouncilConfig) {
+	if cfg.Issuer != "" {
+		c.Endpoints.Issuer = cfg.Issuer
+	}
+	if cfg.APIBase != "" {
+		c.Endpoints.APIBase = cfg.APIBase
+	}
+	if cfg.ClientID != "" {
+		c.Endpoints.ClientID = cfg.ClientID
+	}
+	if cfg.RedirectURI != "" {
+		c.Endpoints.RedirectURI = cfg.RedirectURI
+	}
+	if len(cfg.Scopes) > 0 {
+		c.Endpoints.Scopes = append([]string(nil), cfg.Scopes...)
 	}
 	if cfg.Sandbox {
 		c.Connector = "fake"
 	}
-	return c
 }

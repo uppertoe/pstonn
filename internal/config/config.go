@@ -63,6 +63,9 @@ type Config struct {
 	// TermsPath optionally points at a markdown terms file to use instead of the
 	// built-in one (TERMS_PATH), so terms can be edited without recompiling.
 	TermsPath string
+	// CouncilsPath optionally points at a councils registry file (the shape of
+	// internal/council/councils.json) to use instead of the embedded one.
+	CouncilsPath string
 
 	// PublicBaseURL is the app's externally-reachable base (no trailing slash),
 	// used to build absolute links in emails (the renewal-confirm link). Derived
@@ -379,6 +382,7 @@ func Load() (*Config, error) {
 		},
 		AuthLogoutURL: strings.TrimSpace(os.Getenv("AUTH_LOGOUT_URL")),
 		TermsPath:     strings.TrimSpace(os.Getenv("TERMS_PATH")),
+		CouncilsPath:  strings.TrimSpace(os.Getenv("COUNCILS_PATH")),
 		PublicBaseURL: strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
 		SMTP: SMTPConfig{
 			Host:     os.Getenv("SMTP_HOST"),

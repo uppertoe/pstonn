@@ -26,7 +26,7 @@ import (
 	"flag"
 
 	"github.com/uppertoe/pstonn/internal/config"
-	"github.com/uppertoe/pstonn/internal/council"
+	councilpkg "github.com/uppertoe/pstonn/internal/council"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
@@ -125,22 +125,31 @@ func run() error {
 		log.Print("APP_OIDC_ISSUER not set: OIDC login disabled; relying on forward_auth headers or DEV_IDENTITY_EMAIL")
 	}
 
-	// The council this process serves. Phase 0 of docs/council-connections.md: one
-	// descriptor (Stonnington), endpoints from COUNCIL_* config; the driver is built
-	// from it so the app never names the council directly.
-	tenant := council.FromConfig(cfg.Council)
-	transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council))
-	var prov provider.Provider
-	if tenant.Connector == fake.ID {
-		prov = fake.New()
-	} else {
-		prov = orikan.New(orikan.Config{
-			Issuer: tenant.Endpoints.Issuer, APIBase: tenant.Endpoints.APIBase,
-			ClientID: tenant.Endpoints.ClientID, RedirectURI: tenant.Endpoints.RedirectURI,
-			Scopes: tenant.Endpoints.Scopes, DefaultVehicleState: tenant.Policy.DefaultVehicleState,
-		}, transport)
+	// The councils this process serves (docs/council-connections.md): one provider
+	// and one governed client per enabled council, behind a mux that routes each
+	// account's calls to its own council. COUNCIL_* still overrides Stonnington's
+	// endpoints; COUNCIL_SANDBOX narrows the registry to one in-memory fake.
+	registry, err := councilpkg.Load(cfg.Council, cfg.CouncilsPath)
+	if err != nil {
+		return err
 	}
-	council := parking.NewClient(prov, st, box, transport)
+	st.DefaultCouncil = registry.Default.ID
+	clients := map[string]*parking.Client{}
+	for _, tenant := range registry.Enabled() {
+		transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council))
+		var prov provider.Provider
+		if tenant.Connector == fake.ID {
+			prov = fake.New()
+		} else {
+			prov = orikan.New(orikan.Config{
+				Issuer: tenant.Endpoints.Issuer, APIBase: tenant.Endpoints.APIBase,
+				ClientID: tenant.Endpoints.ClientID, RedirectURI: tenant.Endpoints.RedirectURI,
+				Scopes: tenant.Endpoints.Scopes, DefaultVehicleState: tenant.Policy.DefaultVehicleState,
+			}, transport)
+		}
+		clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)
+	}
+	council := councilpkg.NewMux(st, clients)
 	if cfg.Council.Sandbox {
 		log.Print("WARNING: COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
 	}
@@ -185,7 +194,9 @@ func run() error {
 	// Without this hook, a death discovered by the dashboard's background reads
 	// waited for the next keep-warm pass — up to ~9h at the traffic-reduced warm
 	// interval — while the page visibly failed every few seconds.
-	council.OnSessionExpired = sched.NoteSessionExpired
+	for _, c := range clients {
+		c.OnSessionExpired = sched.NoteSessionExpired
+	}
 	// State the rollover guarantee at startup rather than leaving it implicit: with
 	// a shared boundary (midnight, overwhelmingly) the question that matters is not
 	// the window setting but when every permit is actually expected to have
@@ -205,7 +216,7 @@ func run() error {
 		}
 	}
 
-	srv := server.New(cfg, st, sessions, auth, council, tenant, sched, notifier, mail, box)
+	srv := server.New(cfg, st, sessions, auth, council, registry, sched, notifier, mail, box)
 
 	// Track the worker loops so shutdown can join them: st.Close() runs on
 	// return from this function, and closing the store under a loop that is

@@ -111,7 +111,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	for _, p := range managed {
 		already[p.CouncilPermitID] = true
 	}
-	fallback := s.visitorNameFallback(permits)
+	fallback := s.visitorNameFallback(ctx, owner, permits)
 	if fallback && complete {
 		// The council appears to have renamed its permit types out from under the
 		// name-match — systemic (hits every new signup), so the operator must
@@ -133,7 +133,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				switch {
 				case !p.CanChangeVehicle:
 					t += " (not changeable — not offered)"
-				case s.isResidentPermit(p.PermitType):
+				case s.isResidentPermit(ctx, owner, p.PermitType):
 					t += " (changeable, resident — excluded, never offered)"
 				default:
 					t += " (changeable — offered with a caution)"
@@ -164,7 +164,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		// holder can change the vehicle can actually be scheduled. The rest are
 		// listed greyed-out with the reason, so the user sees them and isn't left
 		// wondering where a permit went.
-		visitor := s.visitorSchedulable(p, fallback)
+		visitor := s.visitorSchedulable(ctx, owner, p, fallback)
 		addable := visitor && p.CanChangeVehicle
 		reason := ""
 		switch {
@@ -232,22 +232,36 @@ const claimedByAnotherAccount = "That permit is already being scheduled through 
 // rename fallback, with the reasoning for each). The helpers below are the server's
 // view of the policy for the council this account belongs to.
 
-// policy returns the permit policy of the council the process is wired to.
-// Nil-safe for tests that build a Server without a descriptor.
-func (s *Server) policy() council.PermitPolicy {
-	if s.councilInfo == nil {
-		return council.Stonnington().Policy
+// councilFor returns the descriptor of the owner's council. Nil-safe for tests
+// that build a Server without a registry (Stonnington), and falls back to the
+// registry default when the account has no resolvable council.
+func (s *Server) councilFor(ctx context.Context, owner string) *council.Council {
+	if s.councils == nil {
+		return council.Stonnington()
 	}
-	return s.councilInfo.Policy
+	if s.store != nil && owner != "" {
+		if id, err := s.store.CouncilIDFor(ctx, owner); err == nil {
+			if c, ok := s.councils.ByID(id); ok {
+				return c
+			}
+		}
+	}
+	return s.councils.Default
 }
 
-func (s *Server) isVisitorPermit(permitType string) bool  { return s.policy().IsVisitor(permitType) }
-func (s *Server) isResidentPermit(permitType string) bool { return s.policy().IsResident(permitType) }
-func (s *Server) visitorNameFallback(permits []parking.PermitInfo) bool {
-	return s.policy().NameFallback(permits)
+// policyFor returns the permit policy of the owner's council.
+func (s *Server) policyFor(ctx context.Context, owner string) council.PermitPolicy {
+	return s.councilFor(ctx, owner).Policy
 }
-func (s *Server) visitorSchedulable(p parking.PermitInfo, fallback bool) bool {
-	return s.policy().Schedulable(p, fallback)
+
+func (s *Server) isResidentPermit(ctx context.Context, owner, permitType string) bool {
+	return s.policyFor(ctx, owner).IsResident(permitType)
+}
+func (s *Server) visitorNameFallback(ctx context.Context, owner string, permits []parking.PermitInfo) bool {
+	return s.policyFor(ctx, owner).NameFallback(permits)
+}
+func (s *Server) visitorSchedulable(ctx context.Context, owner string, p parking.PermitInfo, fallback bool) bool {
+	return s.policyFor(ctx, owner).Schedulable(p, fallback)
 }
 
 // fallbackWarn is the caution shown on a permit offered via the name fallback.
@@ -314,7 +328,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// gate (the greyed-out picker button is only a UI hint) — it shares
 	// visitorSchedulable with the picker so the two can't drift and offer a
 	// permit this gate then refuses.
-	if !s.visitorSchedulable(*match, s.visitorNameFallback(permits)) {
+	if !s.visitorSchedulable(ctx, owner, *match, s.visitorNameFallback(ctx, owner, permits)) {
 		s.message(w, http.StatusForbidden, "p.stonn only manages visitor permits.")
 		return
 	}

@@ -39,6 +39,29 @@ func (s *Server) councilLink(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Enter your council password.")
 		return
 	}
+	// Which council. With one enabled council the choice is implicit; with
+	// several the form names it, and the choice is recorded BEFORE the login so
+	// the session and permits are filed under it. A council the process is not
+	// serving is refused, and a linked account cannot be re-pointed elsewhere.
+	if s.councils != nil {
+		chosen := s.councils.Default
+		if enabled := s.councils.Enabled(); len(enabled) > 1 {
+			c, ok := s.councils.ByID(r.FormValue("council_id"))
+			if !ok || !c.Enabled {
+				s.formError(w, r, "Choose your council.")
+				return
+			}
+			chosen = c
+		}
+		if err := s.store.SetAccountCouncil(r.Context(), user, chosen.ID); err != nil {
+			if errors.Is(err, store.ErrCouncilMismatch) {
+				s.message(w, http.StatusConflict, "This account is already connected to a different council. Disconnect it from Settings first.")
+				return
+			}
+			s.serverError(w, err)
+			return
+		}
+	}
 	// Throttle password attempts per user: every submit forwards the password to
 	// the council's own login, and hammering it could trip the council's lockout
 	// on the user's real account (the username is pinned to their email, so this

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -50,16 +51,22 @@ func newCouncilRig(t *testing.T) *councilRig {
 	f := fake.New()
 	f.ApplyDelay = 0
 	f.RejectPassword = "wrong"
-	client := parking.NewClient(f, st, box, nil)
-	sched := scheduler.New(st, client, time.UTC, scheduler.Options{})
+	reg, err := council.Load(config.CouncilConfig{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.DefaultCouncil = reg.Default.ID
+	client := parking.NewClientFor(reg.Default.ID, f, st, box, nil)
+	mux := council.NewMux(st, map[string]*parking.Client{reg.Default.ID: client})
+	sched := scheduler.New(st, mux, time.UTC, scheduler.Options{})
 	s := &Server{
-		cfg:         &config.Config{DisplayLocation: time.UTC, PublicBaseURL: "https://p.example"},
-		store:       st,
-		box:         box,
-		terms:       loadTerms(""),
-		council:     client,
-		councilInfo: council.Stonnington(),
-		sched:       sched,
+		cfg:      &config.Config{DisplayLocation: time.UTC, PublicBaseURL: "https://p.example"},
+		store:    st,
+		box:      box,
+		terms:    loadTerms(""),
+		council:  mux,
+		councils: reg,
+		sched:    sched,
 	}
 	return &councilRig{s: s, st: st, fake: f, ctx: context.Background()}
 }
@@ -285,4 +292,83 @@ func excerpt(s string) string {
 		return s[:400] + "…"
 	}
 	return s
+}
+
+// Two enabled councils: the sign-up form asks which, the choice is recorded before
+// the login, and the session and permits are filed under it — a write from that
+// account reaches that council's portal and no other.
+func TestTwoCouncilsOverHTTP(t *testing.T) {
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "two.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	box, _ := secretbox.New(bytes.Repeat([]byte{3}, 32))
+	regPath := filepath.Join(t.TempDir(), "councils.json")
+	if err := os.WriteFile(regPath, []byte(`{"councils":[
+	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
+	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := council.Load(config.CouncilConfig{}, regPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.DefaultCouncil = reg.Default.ID
+	fakes := map[string]*fake.Provider{}
+	clients := map[string]*parking.Client{}
+	for _, c := range reg.Enabled() {
+		f := fake.New()
+		f.ApplyDelay = 0
+		fakes[c.ID] = f
+		clients[c.ID] = parking.NewClientFor(c.ID, f, st, box, nil)
+	}
+	mux := council.NewMux(st, clients)
+	s := &Server{
+		cfg:   &config.Config{DisplayLocation: time.UTC, PublicBaseURL: "https://p.example"},
+		store: st, box: box, terms: loadTerms(""), council: mux, councils: reg,
+		sched: scheduler.New(st, mux, time.UTC, scheduler.Options{}),
+	}
+	ctx := context.Background()
+	const user = "perth@example.com"
+	if err := st.RecordConsent(ctx, user, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	// The onboarding page asks which council.
+	page := s.doReq(http.MethodGet, "/schedule", user, "", nil).Body.String()
+	if !strings.Contains(page, `name="council_id"`) || !strings.Contains(page, "Othertown Council") {
+		t.Fatalf("no council choice offered:\n%s", excerpt(page))
+	}
+	// Linking without a choice is refused; with one, recorded.
+	if rr := s.doReq(http.MethodPost, "/council/link", user, "https://app.example.com", url.Values{"council_password": {"ok"}}); rr.Code != http.StatusBadRequest {
+		t.Fatalf("link without a council: code=%d", rr.Code)
+	}
+	rr := s.doReq(http.MethodPost, "/council/link", user, "https://app.example.com", url.Values{"council_password": {"ok"}, "council_id": {"othertown"}})
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("link: code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
+	}
+	if cs, _ := st.GetCouncilSession(ctx, user); cs.CouncilID != "othertown" {
+		t.Fatalf("session filed under %q", cs.CouncilID)
+	}
+	if rr := s.doReq(http.MethodPost, "/permits", user, "https://app.example.com", url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
+		t.Fatalf("add: code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
+	}
+	ps, _ := st.ListPermitsFor(ctx, user)
+	if len(ps) != 1 || ps[0].CouncilID != "othertown" {
+		t.Fatalf("permit filed under %+v", ps)
+	}
+	// A clear from this account reaches Othertown's portal, not Stonnington's.
+	if rr := s.doReq(http.MethodPost, "/permits/"+strconv.FormatInt(ps[0].ID, 10)+"/clear", user, "https://app.example.com", nil); rr.Code != http.StatusSeeOther {
+		t.Fatalf("clear: code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
+	}
+	if reg, _ := fakes["othertown"].Current("90001"); reg != "" {
+		t.Fatalf("othertown still shows %q", reg)
+	}
+	if reg, _ := fakes["stonnington"].Current("90001"); reg == "" {
+		t.Fatal("the clear reached the wrong council's portal")
+	}
+	// And the account cannot be re-pointed at the other council while linked.
+	if rr := s.doReq(http.MethodPost, "/council/link", user, "https://app.example.com", url.Values{"council_password": {"ok"}, "council_id": {"stonnington"}}); rr.Code != http.StatusConflict {
+		t.Fatalf("re-point while linked: code=%d", rr.Code)
+	}
 }

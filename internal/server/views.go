@@ -51,7 +51,9 @@ type dashboardData struct {
 	Contact       bool        // whether the public contact link/form is available
 	ContactVal    string      // contact form: the message text to redisplay after a validation error
 	ContactFrom   string      // contact form: the reply-to address to redisplay after a validation error
-	Relink        bool        // council session expired → prompt re-link
+	// Councils is the sign-up choice, offered only when more than one is enabled.
+	Councils []councilChoice
+	Relink   bool // council session expired → prompt re-link
 	// CapacityFull hides the onboarding link form from a NEW household when the
 	// deployment is at MaxAccounts, so the refusal arrives before terms are read
 	// and a third-party password is typed — not after, as a toast. councilLink
@@ -202,6 +204,13 @@ type confirmView struct {
 	Until string // when the session would otherwise lapse ("" if unknown)
 	Done  bool
 	Stale bool // token unknown/used/expired — reassure rather than alarm
+}
+
+// councilChoice is one option in the sign-up council picker.
+type councilChoice struct {
+	ID       string
+	Name     string
+	Selected bool
 }
 
 // changeView is one row of the account change log, rendered on Activity.
@@ -586,6 +595,15 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// The council account belongs to the primary; a secondary can only wait
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
+		// Several councils to choose from: the form asks. One: nothing to ask.
+		if s.councils != nil {
+			if enabled := s.councils.Enabled(); len(enabled) > 1 {
+				current := s.councilFor(ctx, owner)
+				for _, c := range enabled {
+					base.Councils = append(base.Councils, councilChoice{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
+				}
+			}
+		}
 		base.InAppBrowser = inAppBrowser(r.UserAgent())
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
 		// An unanswered invitation is the most likely reason a person with no
