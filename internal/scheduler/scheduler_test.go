@@ -53,6 +53,19 @@ type fakeTenant struct {
 
 	blocked   bool // fleet breaker "open" for the escalated busy-warning tests
 	listCalls int  // ListPermits (owner-grid) calls, to prove drift is decoupled from warm
+	// blockedIn narrows `blocked` to one tenant id when set ("" = every tenant), and
+	// blockedAsked records the tenant each Blocked query named, so a test can prove
+	// the scheduler asks about the PERMIT's portal rather than the fleet.
+	blockedIn    string
+	blockedAsked []string
+	// caps, when set, is what Capabilities reports per tenant id; a tenant with no
+	// entry (and a nil map) reports the Orikan-like default: keep warm, 0 window.
+	caps map[string]provider.Capabilities
+	// loginBudget is what LoginBudget reports; reconnectWait is how long a
+	// Reconnect "waits on the governor" before succeeding, honouring ctx — so a
+	// deadline that omits the budget expires mid-login, as the real one did.
+	loginBudget   time.Duration
+	reconnectWait time.Duration
 }
 
 // setCurrent makes the tenant report reg on a permit, as if someone had changed it
@@ -178,10 +191,30 @@ func (f *fakeTenant) Refresh(_ context.Context, owner, tenantID string) error {
 func (f *fakeTenant) Reconnect(ctx context.Context, owner, tenantID string) error {
 	f.reconnected = append(f.reconnected, owner)
 	_, f.reconnectHadDeadline = ctx.Deadline() // recoverOrRetire must bound this
+	if f.reconnectWait > 0 {
+		// The governor's hold: the login cannot even start until the tokens accrue,
+		// and a deadline that expires here cancels the flow part-way.
+		select {
+		case <-time.After(f.reconnectWait):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if !f.reconnectSet {
 		return parking.ErrNoSavedPassword // no saved password by default
 	}
 	return f.reconnectErr
+}
+
+func (f *fakeTenant) LoginBudget(string) time.Duration { return f.loginBudget }
+
+// Capabilities reports the configured set for the tenant, else a keep-warm
+// provider (the Orikan portal every existing test was written against).
+func (f *fakeTenant) Capabilities(_ context.Context, _, tenantID string) provider.Capabilities {
+	if c, ok := f.caps[tenantID]; ok {
+		return c
+	}
+	return provider.Capabilities{NeedsKeepWarm: true, SupportsRefresh: true, LoginKind: "password"}
 }
 
 // ListPermitsComplete reports the list as complete unless a test sets partialPermits,
@@ -212,10 +245,17 @@ func (f *fakeTenant) listCallCount() int {
 
 // blocked simulates the fleet circuit breaker being open (a confirmed shared-edge
 // block), which escalates the user-facing busy warning.
-func (f *fakeTenant) Blocked() bool {
+func (f *fakeTenant) Blocked(tenantID string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.blocked
+	f.blockedAsked = append(f.blockedAsked, tenantID)
+	return f.blocked && (f.blockedIn == "" || f.blockedIn == tenantID)
+}
+
+func (f *fakeTenant) blockedAskedSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.blockedAsked...)
 }
 
 type sentMail struct {
@@ -433,8 +473,8 @@ func TestWarmThresholdFor(t *testing.T) {
 	up := time.Date(2026, 7, 26, 9, 0, 0, 0, time.UTC)
 
 	// Deterministic: same (owner, updatedAt) → identical threshold across calls.
-	a1 := s.warmThresholdFor("a@example.com", up)
-	a2 := s.warmThresholdFor("a@example.com", up)
+	a1 := s.warmThresholdFor("a@example.com", up, 0)
+	a2 := s.warmThresholdFor("a@example.com", up, 0)
 	if a1 != a2 {
 		t.Fatalf("threshold not deterministic: %v vs %v", a1, a2)
 	}
@@ -444,17 +484,17 @@ func TestWarmThresholdFor(t *testing.T) {
 		t.Fatalf("threshold %v outside [%v,%v]", a1, lo, hi)
 	}
 	// A different owner (very likely) lands on a different phase.
-	if b := s.warmThresholdFor("b@example.com", up); b == a1 {
+	if b := s.warmThresholdFor("b@example.com", up, 0); b == a1 {
 		t.Fatalf("distinct owners share a threshold (%v); desync lost", a1)
 	}
 	// A new cycle (updatedAt slid) re-derives the offset.
-	if c := s.warmThresholdFor("a@example.com", up.Add(time.Hour)); c == a1 {
+	if c := s.warmThresholdFor("a@example.com", up.Add(time.Hour), 0); c == a1 {
 		t.Fatalf("threshold did not re-derive across cycles")
 	}
 	// jitterFrac 0 → exactly warmInterval (no jitter). Built directly: New() clamps
 	// a non-positive JitterFrac up to its 0.2 default.
 	s0 := &Scheduler{warmInterval: warm, jitterFrac: 0}
-	if got := s0.warmThresholdFor("a@example.com", up); got != warm {
+	if got := s0.warmThresholdFor("a@example.com", up, 0); got != warm {
 		t.Fatalf("jitterFrac 0: got %v, want %v", got, warm)
 	}
 }
@@ -1639,6 +1679,10 @@ func TestKeepWarmTouchesEveryTenantSession(t *testing.T) {
 	if err := st.SaveTenantSession(context.Background(), store.TenantSession{Owner: owner, TenantID: "othertown", Cookie: "sealed-2"}); err != nil {
 		t.Fatal(err)
 	}
+	// A session is warmed to act on a permit AT ITS OWN PORTAL, so the second
+	// session needs a permit filed under othertown (UpsertPermit files under the
+	// account's current tenant).
+	seedPermitAt(t, st, owner, "othertown", "perm-other")
 	fc := &fakeTenant{}
 	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
 	time.Sleep(2 * time.Millisecond)
@@ -1650,4 +1694,26 @@ func TestKeepWarmTouchesEveryTenantSession(t *testing.T) {
 	if !got[owner+"|"] || !got[owner+"|othertown"] || len(fc.refreshedTenants) != 2 {
 		t.Fatalf("refreshed = %v, want one refresh per tenant session", fc.refreshedTenants)
 	}
+}
+
+// seedPermitAt files a permit for owner under tenantID, then restores the
+// account's previous tenant selection so the rest of the fixture is unchanged.
+func seedPermitAt(t *testing.T, st *store.Store, owner, tenantID, councilPermitID string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	prev, err := st.TenantIDFor(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetAccountTenant(ctx, owner, tenantID); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := st.UpsertPermit(ctx, owner, councilPermitID, "14", "P")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetAccountTenant(ctx, owner, prev); err != nil {
+		t.Fatal(err)
+	}
+	return pid
 }

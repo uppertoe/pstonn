@@ -42,8 +42,11 @@ func TestCommitAfterApplyAlertsAndHeals(t *testing.T) {
 		t.Fatalf("a notification was sent despite the uncommitted state: %+v", applied)
 	}
 
-	// Heal: commit works now; the next pass re-records and notifies exactly once.
+	// Heal: commit works now; once the deferral has elapsed (the branch defers the
+	// permit rather than kicking it — see TestCommitFailureDeferralHoldsUnderRun),
+	// the next pass re-records and notifies exactly once.
 	s.commitActive = st.SetPermitActive
+	s.clearRetry(pid) // the 8-tick window has passed
 	s.reconcileAll(ctx)
 	time.Sleep(40 * time.Millisecond) // notifyUser delivers async
 	if p, _ := st.GetPermit(ctx, pid); p.ActiveRegistration != "ROSTER1" {
@@ -57,5 +60,30 @@ func TestCommitAfterApplyAlertsAndHeals(t *testing.T) {
 	}
 	if oks != 1 {
 		t.Fatalf("success notifications = %d, want exactly 1 (only the healed pass)", oks)
+	}
+}
+
+// TestCommitFailureDeferralHoldsUnderRun drives the commit-after-apply branch
+// through the real loop. The branch defers the permit for 8 ticks, but it used to
+// KickPermit straight after — and KickPermit clears that very deferral, so every
+// tick re-ran the doomed apply. Calling reconcileAll directly (as the test above
+// does) never sees this, because nothing consumes the kick. Here the loop runs at
+// a 10ms tick for well under the deferral (8 ticks x 0.8 jitter floor = 64ms), so
+// a second council write within the window can only mean the deferral was erased.
+func TestCommitFailureDeferralHoldsUnderRun(t *testing.T) {
+	st := newStore(t)
+	const owner = "commit-run@example.com"
+	seedActivePermit(t, st, owner, "c-run", "ROSTER1", "OLD999")
+	fc := &fakeTenant{}
+	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true, admin: true}})
+	s.interval = 10 * time.Millisecond
+	s.commitActive = func(context.Context, int64, string) error { return errors.New("disk full") }
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Millisecond)
+	defer cancel()
+	s.Run(ctx) // returns when ctx expires; joins the helper loops
+
+	if n := len(fc.callSnap()); n != 1 {
+		t.Fatalf("council writes = %d within the deferral, want exactly 1 (the deferral was erased by a kick)", n)
 	}
 }

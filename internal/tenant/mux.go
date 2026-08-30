@@ -12,8 +12,10 @@ import (
 )
 
 // ErrTenantUnavailable: the account belongs to a tenant this process is not
-// serving (disabled, or removed from the registry). Treated like "not linked".
-var ErrTenantUnavailable = fmt.Errorf("%w: the account's council is not available", parking.ErrNotLinked)
+// serving (disabled, or removed from the registry). Treated like "not linked" by
+// everything except the scheduler, which surfaces it (see parking.ErrTenantUnavailable
+// — the sentinel lives there so the scheduler can name it without this package).
+var ErrTenantUnavailable = parking.ErrTenantUnavailable
 
 // Mux routes each per-owner tenant call to the client for the owner's tenant.
 // The scheduler and the server keep calling one thing keyed by owner, exactly as
@@ -229,15 +231,33 @@ func (m *Mux) ClearVehicle(ctx context.Context, owner string, p model.Permit) er
 	return c.ClearVehicle(ctx, owner, p)
 }
 
-// Blocked reports whether ANY tenant's fleet circuit is open: the scheduler's
-// user-facing "confirmed block" warning is about our shared egress address.
-func (m *Mux) Blocked() bool {
+// Blocked reports whether the named tenant's fleet circuit is open — a confirmed
+// block at THAT portal's edge. It used to OR every tenant's breaker together on
+// the reasoning that the block is about our shared egress address; but a breaker
+// opens on one portal's push-back, and the scheduler acts on the answer per
+// permit: a Banyule block escalated every Stonnington household's busy warning
+// to "act now to avoid a fine" and suspended their drift reads, for a portal that
+// was answering us fine. "" asks about any tenant (the status page's fleet view).
+func (m *Mux) Blocked(tenantID string) bool {
+	if tenantID != "" {
+		c, ok := m.clients[tenantID]
+		return ok && c.Blocked()
+	}
 	for _, c := range m.clients {
 		if c.Blocked() {
 			return true
 		}
 	}
 	return false
+}
+
+// LoginBudget is the worst-case governor wait for one credential login at the
+// named tenant (see parking.Client.LoginBudget); 0 for a tenant not served.
+func (m *Mux) LoginBudget(tenantID string) time.Duration {
+	if c, ok := m.clients[tenantID]; ok {
+		return c.LoginBudget()
+	}
+	return 0
 }
 
 // Stats sums traffic across registry and reports the most recent push-back; the
@@ -314,4 +334,27 @@ func (s Single) ForgetPermit(owner, tenantID, tenantPermitID string) {
 	if s.mine(tenantID) {
 		s.Client.ForgetPermit(owner, tenantPermitID)
 	}
+}
+
+// Capabilities shadows the embedded client's no-argument form with the
+// tenant-aware signature the scheduler and server speak: a tenant that is not
+// this client's supports nothing, exactly as the Mux reports an unserved one.
+func (s Single) Capabilities(_ context.Context, _, tenantID string) provider.Capabilities {
+	if !s.mine(tenantID) {
+		return provider.Capabilities{}
+	}
+	return s.Client.Capabilities()
+}
+
+// Blocked is the per-tenant breaker read; a foreign tenant is never "blocked"
+// here, it is simply not served.
+func (s Single) Blocked(tenantID string) bool {
+	return s.mine(tenantID) && s.Client.Blocked()
+}
+
+func (s Single) LoginBudget(tenantID string) time.Duration {
+	if !s.mine(tenantID) {
+		return 0
+	}
+	return s.Client.LoginBudget()
 }

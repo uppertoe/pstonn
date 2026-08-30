@@ -112,6 +112,60 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	}
 }
 
+// TestReconnectQueueCompletesUnderGovernorHold: back-to-back reconnects drain the
+// login governor's burst, after which every login first WAITS for tokens. The
+// worker's deadline must cover that wait — a flat portal-only bound expired inside
+// it and cancelled logins mid-flow (a half-completed IdP authentication). The fake
+// models the hold as a ctx-honouring wait longer than the portal allowance alone;
+// with the governor's budget added, a queue of several reconnects all recover.
+func TestReconnectQueueCompletesUnderGovernorHold(t *testing.T) {
+	ctx := context.Background()
+	run := func(budget time.Duration) (*fakeTenant, *Scheduler, int) {
+		st := newStore(t)
+		fc := &fakeTenant{reconnectSet: true, reconnectWait: 40 * time.Millisecond, loginBudget: budget}
+		s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+		s.reconnectPortal = 15 * time.Millisecond // the portal's share alone is not enough
+		const n = 4
+		for i := 0; i < n; i++ {
+			owner := fmt.Sprintf("gov%d@example.com", i)
+			seedSession(t, st, owner)
+			s.enqueueReconnect(ctx, owner, "", genOf(t, st, owner))
+		}
+		for i := 0; i < n; i++ {
+			if !s.drainOneReconnect(ctx) {
+				break
+			}
+		}
+		return fc, s, n
+	}
+
+	// Without the budget the deadline expires inside the hold: nothing recovers.
+	fc, s, _ := run(0)
+	if queued, _, _ := s.ReconnectBacklog(); queued == 0 {
+		t.Fatal("control: a portal-only deadline should have expired inside the governor hold and deferred the reconnects")
+	}
+	// With it, every queued owner recovers in one drain each.
+	fc, s, n := run(60 * time.Millisecond)
+	if queued, _, _ := s.ReconnectBacklog(); queued != 0 {
+		t.Fatalf("queue still holds %d after draining %d reconnects under the governor hold", queued, n)
+	}
+	if len(fc.reconnected) != n {
+		t.Fatalf("reconnect attempts = %d, want %d", len(fc.reconnected), n)
+	}
+	if !fc.reconnectHadDeadline {
+		t.Fatal("the reconnect must still be bounded")
+	}
+	// The deadline is the portal allowance PLUS the governor's budget.
+	if got := s.reconnectDeadline(""); got != 15*time.Millisecond+60*time.Millisecond {
+		t.Fatalf("reconnect deadline = %v, want portal+budget", got)
+	}
+	// And the default portal allowance holds when no test override is set.
+	s.reconnectPortal = 0
+	if got := s.reconnectDeadline(""); got != reconnectPortalTime+60*time.Millisecond {
+		t.Fatalf("default reconnect deadline = %v, want %v", got, reconnectPortalTime+60*time.Millisecond)
+	}
+}
+
 // genOf returns an owner's current session generation — what a real discovery would
 // have captured at the moment of failure.
 func genOf(t *testing.T, st *store.Store, owner string) int64 {
