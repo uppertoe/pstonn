@@ -38,29 +38,29 @@ func TestPlateBadgeTiers(t *testing.T) {
 	}{
 		{"fresh: settled tick, no hint, no poll", func(pv *permitView) {},
 			[]string{tick, "Checked against the council record"},
-			[]string{spinner, warn, "checked ", "/permits/7/card"}},
-		{"recently confirmed: tick now, age hint, poll still armed", func(pv *permitView) {
-			pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo = true, true, "checked 2 hr ago"
+			[]string{spinner, warn, "confirmed ", "/permits/7/card"}},
+		{"recently confirmed: neutral last-known mark (never the green tick), age hint, poll still armed", func(pv *permitView) {
+			pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo = true, true, "confirmed 2 hr ago · checking…"
 		},
-			[]string{tick, "checked 2 hr ago", "checking again now", `hx-get="/permits/7/card?n=1"`},
-			[]string{spinner, warn}},
+			[]string{`class="plast"`, "confirmed 2 hr ago · checking…", "Last confirmed by the council", `hx-get="/permits/7/card?n=1"`},
+			[]string{tick, spinner, warn}},
 		{"old reading: spinner", func(pv *permitView) { pv.PlateRefreshing = true },
 			[]string{spinner, "Checking the council record", `hx-get="/permits/7/card?n=1"`},
-			[]string{tick, "checked "}},
+			[]string{tick, "confirmed "}},
 		{"nothing known: spinner", func(pv *permitView) { pv.PlateRefreshing, pv.PlateCheckedAgo = true, "" },
 			[]string{spinner},
-			[]string{tick, "checked "}},
+			[]string{tick, "confirmed "}},
 		{"applying beats recent: applying spinner, no age hint", func(pv *permitView) {
-			pv.Applying, pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo = true, true, true, "checked 2 hr ago"
+			pv.Applying, pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo = true, true, true, "confirmed 2 hr ago · checking…"
 		},
 			[]string{"Applying your change"},
-			[]string{tick, "checked 2 hr ago"}},
+			[]string{tick, "confirmed 2 hr ago · checking…"}},
 		{"budget spent beats recent: honest couldn't-check mark", func(pv *permitView) {
-			pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo = true, true, "checked 2 hr ago"
+			pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo = true, true, "confirmed 2 hr ago · checking…"
 			pv.pollSeed = len(platePollDelays)
 		},
 			[]string{warn, "couldn&rsquo;t check"},
-			[]string{tick, spinner, "checked 2 hr ago", "/permits/7/card"}},
+			[]string{tick, spinner, "confirmed 2 hr ago · checking…", "/permits/7/card"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -120,8 +120,8 @@ func TestBuildPermitViewPlateTiers(t *testing.T) {
 		p := base
 		p.ActiveConfirmedAt = now.Add(-2 * time.Hour)
 		pv := build(p)
-		if !pv.PlateRefreshing || !pv.PlateRecent || pv.PlateCheckedAgo != "checked 2 hr ago" {
-			t.Fatalf("refreshing=%v recent=%v hint=%q; want refreshing, recent, \"checked 2 hr ago\"", pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo)
+		if !pv.PlateRefreshing || !pv.PlateRecent || pv.PlateCheckedAgo != "confirmed 2 hr ago · checking…" {
+			t.Fatalf("refreshing=%v recent=%v hint=%q; want refreshing, recent, \"confirmed 2 hr ago · checking…\"", pv.PlateRefreshing, pv.PlateRecent, pv.PlateCheckedAgo)
 		}
 		// PollNext may sit past 1: the rig's owner holds no council session, so the
 		// kicked refresh fails at once and RefreshFailingFor seeds the honesty clock.

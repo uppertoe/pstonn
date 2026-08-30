@@ -303,7 +303,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	plateRecent := plateRefreshing && !confirmedAt.IsZero() && now.Sub(confirmedAt) < plateRecentWindow
 	plateCheckedAgo := ""
 	if plateRecent {
-		plateCheckedAgo = "checked " + agoText(now, confirmedAt)
+		plateCheckedAgo = "confirmed " + agoText(now, confirmedAt) + " · checking…"
 	}
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
