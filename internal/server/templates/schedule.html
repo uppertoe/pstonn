@@ -227,7 +227,7 @@
     {{/* The pill's failure states used to live entirely in title= — hover-only,
          which does not exist on the phone this page is checked from. The one
          state that means "do not trust the plate above" gets visible words. */}}
-    {{if .PlateUnconfirmed}}<span class="pnote">{{if .Applying}}change not confirmed{{else}}couldn&rsquo;t check &mdash; may be out of date{{end}}</span>{{else}}{{/* Always occupied, fixed width (.phint): the words change between "checked 2 hr ago", "checked just now", "checking…" and "applying…" but the pill must not reflow as a poll swaps one for another. */}}<span class="phint">{{if .Applying}}applying&hellip;{{else if .PlateCheckedAgo}}{{.PlateCheckedAgo}}{{else}}checking&hellip;{{end}}</span>{{end}}
+    {{if .PlateUnconfirmed}}<span class="pnote">{{if .Applying}}change not confirmed{{else}}couldn&rsquo;t check &mdash; may be out of date{{end}}</span>{{else}}{{/* Always occupied, fixed width (.phint): the words change between "checked 2 hr ago", "checked just now", "checking…" and "applying…" but the pill must not reflow as a poll swaps one for another. */}}<span class="phint">{{if .Applying}}applying&hellip;{{else if .PlateCheckedAgo}}{{.PlateCheckedAgo}}{{else if .PlateRefreshing}}checking&hellip;{{else}}checked just now{{end}}</span>{{end}}
     {{if .PollNext}}{{/* Bounded self-refresh: re-fetches the card until the council
          confirms the settled plate or the attempt cap is hit (see armPlatePoll), so a
          just-made change swaps in without a reload while an outage still can't loop.
