@@ -5,7 +5,7 @@
   <section class="lhero">
     <h1>{{T "public.hero" .}}</h1>
     <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
-    <a href="/schedule" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
+    <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
     <p class="lnote">{{T "public.hero_note" .}}</p>
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
@@ -229,7 +229,7 @@
       <li><a href="{{.Tenant.Links.ApplyVisitor}}" rel="noopener noreferrer">Visitor parking permits</a></li>
       <li><a href="{{.Tenant.Links.FAQ}}" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
     </ul>
-    <p>Once your council account has a visitor permit, <a href="/schedule" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
+    <p>Once your council account has a visitor permit, <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
   </section>
 
   <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>
@@ -287,7 +287,7 @@
         {{if eq .Guide.Demo "roster"}}{{template "demo-roster" .}}{{else if eq .Guide.Demo "oneoff"}}{{template "demo-oneoff" .}}{{else if eq .Guide.Demo "guest"}}{{template "demo-guest" .}}{{end}}
       </div>
     </div>
-    <p style="margin-top:22px"><a href="/schedule" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
+    <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
     <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor `target="_blank"` `rel="noopener"`) "faq" (link .Tenant.Links.FAQ `target="_blank"` `rel="noopener"`) "how" (link "/how" `hx-boost="false"`) "faq_page" (link "/faq" `hx-boost="false"`))}}</p>
   </section>
 </main>

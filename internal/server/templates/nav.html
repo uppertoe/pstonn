@@ -13,7 +13,7 @@
   </nav>
   <div class="appbar-r">
     <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle light / dark"><span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span></button>
-    <a href="/schedule" hx-boost="false"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
+    <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{if .SignedIn}}Open the app{{else}}Sign in{{end}}</button></a>
   </div>
 </header>
 {{end}}

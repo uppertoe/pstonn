@@ -1069,7 +1069,7 @@ window.popClamp = window.popClamp || function (el) {
   </nav>
   <div class="appbar-r">
     <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle light / dark"><span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span></button>
-    <a href="/schedule" hx-boost="false"><button type="button">Sign in</button></a>
+    <a href="/signin" hx-boost="false"><button type="button">Sign in</button></a>
   </div>
 </header>
 
@@ -1223,7 +1223,7 @@ window.popClamp = window.popClamp || function (el) {
       <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
       <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
     </ul>
-    <p>Once your council account has a visitor permit, <a href="/schedule" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
+    <p>Once your council account has a visitor permit, <a href="/signin" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
   </section>
 
   <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>

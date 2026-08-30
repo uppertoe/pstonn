@@ -339,6 +339,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /g/req/{id}", s.publicGuest(s.guestRequestStatus))
 
 	mux.HandleFunc("GET /{$}", s.landing) // public, not behind forward-auth
+	// The landing page's Sign in button. A dedicated path, forward-auth gated at
+	// the edge, that only ever bounces onward to the app: the button used to link
+	// to /schedule, and when the edge started sending anonymous /schedule to the
+	// landing page (shared-link hygiene) every sign-in silently looped back to the
+	// landing page for two days (2026-08-28..30). A path whose one job is "start
+	// signing in" cannot be caught by a rule about shared app URLs.
+	mux.HandleFunc("GET /signin", s.signin)
 	// Catch-all 404: anything no route claims gets the styled message page
 	// instead of the mux's bare text. Registered at "/" (the landing owns the
 	// exact root via /{$}). Known trade: a wrong-METHOD request on a real path

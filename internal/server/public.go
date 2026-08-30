@@ -9,6 +9,23 @@ import (
 // landing is the PUBLIC marketing page (not behind forward-auth): what the app
 // does and how, with a sign-in button. Signed-in visitors get an "Open the app"
 // button instead.
+// signin is the target of every public "Sign in" button. Behind forward-auth
+// the request only arrives once the person is signed in, so it forwards to the
+// app; under the app's own OIDC login it starts that flow; with neither (a
+// misconfigured deployment) it falls back to the landing page rather than a
+// dead end.
+func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
+	if _, ok := identity.FromContext(r.Context()); ok {
+		http.Redirect(w, r, "/schedule", http.StatusFound)
+		return
+	}
+	if s.auth != nil {
+		http.Redirect(w, r, "/auth/login", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
 func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
 	// A signed-in visitor goes straight to the app rather than the marketing page.
