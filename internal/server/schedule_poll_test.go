@@ -86,10 +86,15 @@ func TestPlatePollSurvivesSlowColdRead(t *testing.T) {
 	if total < 180 {
 		t.Errorf("total poll window is only %ds; a cold read (multiple ~25s tries) needs a few minutes to land", total)
 	}
-	// Early polls stay quick (catch a normal apply), later ones back off (don't hammer
-	// or busy-poll during a long stall).
-	if platePollDelays[0] > 5 {
-		t.Errorf("first poll delay %ds is too slow for a normal apply", platePollDelays[0])
+	// Early polls stay quick (catch a normal apply, and a warm cold read that lands
+	// in a couple of seconds — a flat 5s opener left the badge stale for the whole
+	// 5s after the refresh had finished), later ones back off (don't hammer or
+	// busy-poll during a long stall).
+	if platePollDelays[0] > 2 {
+		t.Errorf("first poll delay %ds is too slow: a warm cold read lands in ~2s and the badge should follow it", platePollDelays[0])
+	}
+	if platePollDelays[1] > 3 {
+		t.Errorf("second poll delay %ds is too slow for a normal apply", platePollDelays[1])
 	}
 	if last := platePollDelays[len(platePollDelays)-1]; last < 30 {
 		t.Errorf("tail poll delay %ds does not back off; a long stall would poll too eagerly", last)

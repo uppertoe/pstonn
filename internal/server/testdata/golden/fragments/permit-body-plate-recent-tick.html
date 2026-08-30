@@ -34,9 +34,9 @@
     
     <span class="plate">ABC123</span>
     
-    <span class="pslot"><span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span></span>
+    <span class="pslot"><span class="pok" title="Confirmed by the council recently; checking again now"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></span>
     
-    
+    <span class="muted" style="font-size:12px;white-space:nowrap">checked 2 hr ago</span>
     
     <div style="display:none" hx-get="/permits/7/card?n=1" hx-trigger="load delay:2s" hx-target="closest .nowbadge" hx-swap="outerHTML" hx-select=".nowbadge"></div>
     
@@ -230,16 +230,16 @@
   
   <div class="cday today" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2, today. ABC123, weekly roster. Change still applying — not on the permit yet"
+       aria-label="Mon 2, today. ABC123, weekly roster"
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
-    <div class="bar applying" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
       <span class="reg">ABC123</span> <span class="muted">· weekly roster</span>
-      <br><span class="muted">still applying &mdash; not on the permit yet</span>
+      
     </div>
   </div>
   

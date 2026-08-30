@@ -617,8 +617,19 @@ type permitView struct {
 	// htmx fragment, where the dashboard's own IsPrimary is out of scope.
 	IsPrimary bool
 	// PlateRefreshing: "on permit now" was served from a stale (or absent) cache
-	// while a background tenant refresh runs. Renders a subtle "checking" spinner.
+	// while a background tenant refresh runs. Renders a subtle "checking" spinner —
+	// unless PlateRecent says the shown plate was council-confirmed recently
+	// enough to lead with.
 	PlateRefreshing bool
+	// PlateRecent: the refresh is outstanding, but the shown plate was confirmed
+	// by the council within plateRecentWindow (a persisted stamp, or an agreeing
+	// cached reading). The badge shows the tick at once, with PlateCheckedAgo as a
+	// quiet age hint, instead of a spinner on every cold visit; the poll still
+	// runs and swaps the badge if the refresh finds something different.
+	PlateRecent bool
+	// PlateCheckedAgo is the hint text for PlateRecent ("checked 2 hr ago"); ""
+	// otherwise. Composed in Go so the golden renders pin it at a fixed clock.
+	PlateCheckedAgo string
 	// Applying: the schedule's desired plate for right now is not yet the plate the
 	// tenant confirms is on the permit — a change is in flight (a booking just made,
 	// a roster edit affecting today). Renders an "applying" spinner. Crucially this

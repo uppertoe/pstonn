@@ -237,12 +237,31 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// background — never a synchronous tenant call), so the display is truthful
 	// and external portal changes are caught. With nothing cached yet, keep the
 	// stored belief. A non-fresh value marks the view PlateRefreshing, which
-	// renders a one-shot htmx follow-up so the refreshed plate swaps in without
+	// renders a bounded htmx follow-up so the refreshed plate swaps in without
 	// a manual reload.
+	//
+	// confirmedAt is when the SHOWN plate was last vouched for by the council:
+	// the persisted stamp (a confirmed apply, an adopted reading), or a cached
+	// reading that agrees with the stored plate, whichever is newer. It decides
+	// whether a refreshing card shows the tick straight away (see plateRecentWindow)
+	// — the cache alone could not, because it is process memory that is cold on
+	// nearly every daily visit (the "cold plate read" that made the badge spin for
+	// seconds on every morning glance).
 	plateRefreshing := false
-	if actual, _, fresh, err := s.tenant.CurrentVehicleCached(ctx, p.Owner,
+	confirmedAt := p.ActiveConfirmedAt
+	if actual, age, fresh, err := s.tenant.CurrentVehicleCached(ctx, p.Owner,
 		model.Permit{TenantID: p.TenantID, CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, plateMaxAge); err == nil {
 		plateRefreshing = !fresh
+		if readAt := now.Add(-age); model.SamePlate(actual, p.ActiveRegistration) && readAt.After(confirmedAt) {
+			confirmedAt = readAt
+			// A reading that AGREES writes nothing else, so nothing else would ever
+			// advance the stamp for a household whose plate never changes — and the
+			// next cold visit would spin again. Persist it (guarded on the plate, and
+			// only when newer, so a render inside one cache window costs one write).
+			if terr := s.store.TouchPermitConfirmed(ctx, p.ID, p.ActiveRegistration, readAt); terr != nil {
+				log.Printf("dashboard: stamp council confirmation for permit %d: %v", p.ID, terr)
+			}
+		}
 		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
 		// case they were entered with, and overwriting our belief with a case variant
 		// makes the scheduler's next tick see a plate that differs from its target —
@@ -269,10 +288,22 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			}
 			if ok {
 				p.ActiveRegistration = actual
+				confirmedAt = now // the store stamped it; mirror for this render
 			}
 		}
 	} else {
 		plateRefreshing = true // nothing cached yet; a background fetch is running
+	}
+	// Render tier for a card whose refresh is still outstanding: a plate the
+	// council confirmed within plateRecentWindow shows its tick now, with a quiet
+	// age hint, and the poll swaps the badge only if the refresh changes something
+	// (identical markup is a visual no-op). Older or unknown falls through to the
+	// "checking" spinner as before. Applying and the honesty cap are decided in
+	// armPlatePoll and take precedence in the template.
+	plateRecent := plateRefreshing && !confirmedAt.IsZero() && now.Sub(confirmedAt) < plateRecentWindow
+	plateCheckedAgo := ""
+	if plateRecent {
+		plateCheckedAgo = "checked " + agoText(now, confirmedAt)
 	}
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
@@ -430,6 +461,8 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// so a gentle one-time nudge is shown until they set one.
 		Unnamed:         p.Label == "" || p.Label == p.PermitNumber,
 		PlateRefreshing: plateRefreshing,
+		PlateRecent:     plateRecent,
+		PlateCheckedAgo: plateCheckedAgo,
 		Applying:        applying,
 		// The honesty clock must survive a reload: PlateUnconfirmed used to be
 		// reachable only by leaving the tab open for the whole poll budget, because
@@ -798,12 +831,28 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 // lands, while the bound still stops a genuine tenant outage from polling forever.
 // Past the cap the card keeps showing the last tenant-confirmed plate; the scheduler
 // goes on retrying and notifies out of band.
-var platePollDelays = []int{5, 5, 5, 10, 10, 15, 20, 30, 45, 60, 60, 60}
+//
+// The head is QUICK (2s, 3s): a warm cold-read — token still valid, portal
+// responsive — lands in a couple of seconds, and with a flat 5s opener the badge
+// sat on a stale answer for the whole 5s after the refresh had already finished.
+// The total budget (~5 min) is unchanged; only the first two waits moved.
+var platePollDelays = []int{2, 3, 5, 5, 10, 15, 20, 30, 45, 60, 60, 60}
 
 // plateMaxAge is how old a cached tenant reading may be before the dashboard
-// treats it as stale: shows the checking spinner and declines to adopt it into
+// treats it as stale: kicks a background refresh and declines to adopt it into
 // the stored record.
 const plateMaxAge = 5 * time.Minute
+
+// plateRecentWindow is how recently the council must have confirmed the stored
+// plate for a cold render to show it WITH ITS TICK (and a "checked 2 hr ago" hint)
+// while the refresh runs, rather than a spinner. Twelve hours: the scheduler's
+// drift pass re-reads every managed permit roughly every six hours and the
+// roster re-applies at midnight, so a plate confirmed within twelve hours has
+// been vouched for by at most two missed checks — recent enough that the last
+// confirmed value is the right thing to lead with, and the refresh corrects it
+// within seconds if the portal moved. Anything older gets the spinner: at that
+// age "checked yesterday" is what the reader needs to see before trusting it.
+const plateRecentWindow = 12 * time.Hour
 
 // attemptForStaleness maps how long refreshes have been FAILING consecutively
 // (parking.RefreshFailingFor — not the cache entry's age, which merely says
@@ -867,8 +916,18 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 }
 
 // respondPermitNotice is respondPermit with an outcome line at the top of the
-// card, for the person whose action just changed this permit.
+// card, for the person whose action just changed this permit. Both are the
+// MUTATION reply: they tell the page the schedule changed (see the legend).
 func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice string) {
+	s.renderPermitFragment(w, r, owner, p, notice, true)
+}
+
+// renderPermitFragment re-renders the card body. changed says whether the request
+// MUTATED the schedule: only then does the reply carry the schedule-changed
+// trigger. The self-poll (permitCard) passes false — it changes nothing, and
+// when every tick re-fetched the legend too, a badge check cost two requests
+// and re-rendered a key that could not have moved.
+func (s *Server) renderPermitFragment(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice string, changed bool) {
 	if r.Header.Get("HX-Request") == "" {
 		redirectHome(w, r)
 		return
@@ -899,7 +958,9 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 	// the page instead of pushing the key here: the key re-fetches itself, so the
 	// newest state comes from the newest request rather than from whichever
 	// overlapping response happened to land last.
-	w.Header().Set("HX-Trigger", "schedule-changed")
+	if changed {
+		w.Header().Set("HX-Trigger", "schedule-changed")
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "permit-body", pv); err != nil {
 		log.Printf("render permit-body: %v", err)
@@ -907,16 +968,17 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 }
 
 // permitCard re-renders one permit's card fragment. It is the target of the
-// one-shot follow-up fetch a page render emits when it served a stale plate:
+// bounded follow-up fetch a page render emits when it served a stale plate:
 // by the time this fires the background tenant refresh has usually landed, so
-// the swap shows the verified plate without a manual reload.
+// the swap shows the verified plate without a manual reload. A pure read: it
+// never carries the schedule-changed trigger (see renderPermitFragment).
 func (s *Server) permitCard(w http.ResponseWriter, r *http.Request) {
 	_, owner, _ := s.resolveAccount(r.Context())
 	p, ok := s.ownedPermit(w, r, owner)
 	if !ok {
 		return
 	}
-	s.respondPermit(w, r, owner, p)
+	s.renderPermitFragment(w, r, owner, p, "", false)
 }
 
 // windowEndText renders a booking's end for a human.

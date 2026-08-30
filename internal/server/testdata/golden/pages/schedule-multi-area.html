@@ -1080,9 +1080,10 @@ window.popClamp = window.popClamp || function (el) {
 
   
   
+  
   <section class="card" id="permit-7" style="--hue:var(--sec-schedule)"
            x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '7') addOpen=true"
-           @htmx:after-request="if(!$event.detail.elt.closest('.qrtrigger')) addOpen=false">
+           @htmx:after-request="if($event.detail.successful && $event.detail.requestConfig && $event.detail.requestConfig.verb !== 'get' && !$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     
     <div id="pbody-7">
 
