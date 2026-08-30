@@ -2609,7 +2609,7 @@ type passStats struct {
 // belonged to a still-live booking: the shared model.FindDisplaced policy, fed
 // this permit's owner-scoped vehicles and account members. Matching on the
 // outgoing plate is a heuristic; a false miss or spurious note is low-harm.
-func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []model.Override, vehByOwnerID map[ownerVehicle]model.VehicleInfo, prev, actor string, source model.Source, now time.Time) model.DisplacedBooking {
+func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []model.Override, vehByOwnerID map[ownerVehicle]model.VehicleInfo, rules []model.WeeklyRule, prev, actor string, source model.Source, now time.Time) model.DisplacedBooking {
 	if prev == "" {
 		return model.DisplacedBooking{}
 	}
@@ -2628,12 +2628,24 @@ func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []m
 	if d := model.FindDisplaced(overrides, vehicles, prev, actor, members, now); d.Reg != "" {
 		return d
 	}
-	// No live booking had put prev on: it was there through the roster (or lingering).
-	// A roster car replaced by the schedule's own day change is expected and told to
-	// nobody; replaced by a booking, a guest, or a manual change mid-day, its regular
-	// driver is very likely parked — warn them if the saved car carries an address.
+	// No live booking had put prev on: it was there through the roster, or it is
+	// lingering — a prior day's roster car, or a default, that no longer matches
+	// today's schedule. The roster's own day change is expected and told to nobody.
 	if source == model.SourceRoster || source == model.SourceNone {
 		return model.DisplacedBooking{}
+	}
+	// A booking, a guest, or a manual change mid-day replaced prev. The fallback
+	// below warns prev's regular driver on the theory they are parked today — but
+	// that only holds when prev is TODAY's rostered plate. A lingering plate means
+	// nobody was actually scheduled today, so its driver is not parked and must not
+	// be warned. (Without this gate, a one-off replacing yesterday's leftover plate
+	// emailed that driver and told the account it had — the reported bug.)
+	roster := model.Resolve(now, rules, nil) // the roster/none pick, one-offs excluded
+	if roster.Source != model.SourceRoster {
+		return model.DisplacedBooking{} // today has no rostered car; nobody was scheduled
+	}
+	if rr := vehByOwnerID[ownerVehicle{p.Owner, roster.VehicleID}].Registration; rr == "" || !model.SamePlate(prev, rr) {
+		return model.DisplacedBooking{} // prev was not today's rostered car — lingering
 	}
 	own := make(map[int64]model.VehicleInfo)
 	for k, v := range vehByOwnerID {
@@ -2904,7 +2916,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// warn its driver (email only) so they aren't caught out — and tell the
 		// account when that driver was unreachable, so a member can relay it. The
 		// notice is enqueued durably (a fast insert), so no goroutine is needed.
-		d := s.displaced(ctx, p, overrides, vehByOwnerID, prev, res.By, res.Source, now)
+		d := s.displaced(ctx, p, overrides, vehByOwnerID, rules, prev, res.By, res.Source, now)
 		// Key the notification on the TRANSITION (prev→want), not just the target.
 		// Keying on "success|want" alone would treat a re-assertion after an external
 		// change (someone edited the plate directly in the tenant portal, which
