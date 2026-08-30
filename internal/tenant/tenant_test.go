@@ -34,6 +34,52 @@ func TestStonningtonPolicy(t *testing.T) {
 	if pol.Schedulable(res, true) {
 		t.Error("resident permit offered under fallback")
 	}
+	// Stonnington is the swap model; nothing in this refactor may change that.
+	if m := Stonnington().Model; m != ModelSwap {
+		t.Errorf("Stonnington model = %q, want swap", m)
+	}
+}
+
+// TestModelAxis locks the open-set predicates the scheduler and validator branch
+// on: which models are recognised, and which drive the plate-write path.
+func TestModelAxis(t *testing.T) {
+	for _, m := range []Model{ModelSwap, ModelReplate, ModelCoupon, ModelPaper} {
+		if !m.Known() {
+			t.Errorf("%q should be a known model", m)
+		}
+	}
+	if Model("teleport").Known() {
+		t.Error("an unknown model reported known")
+	}
+	// Plate() gates SetVehicle: swap and replate write a plate, coupon and paper
+	// must not reach that path.
+	if !ModelSwap.Plate() || !ModelReplate.Plate() {
+		t.Error("swap and replate must be plate models")
+	}
+	if ModelCoupon.Plate() || ModelPaper.Plate() {
+		t.Error("coupon and paper must not be plate models")
+	}
+}
+
+// TestScheduleResidentPolicy is the re-plate generalisation: the same resident
+// permit that Stonnington must never schedule is schedulable for a council whose
+// policy opts in (Brimbank, Glen Eira's 3.3.1), with no visitor permit required.
+func TestScheduleResidentPolicy(t *testing.T) {
+	res := parking.PermitInfo{PermitType: "(A) 1st Resident Permit", CanChangeVehicle: true}
+	swap := PermitPolicy{VisitorWord: "visitor", ResidentWord: "resident"}
+	if swap.Schedulable(res, true) {
+		t.Error("swap policy scheduled a resident permit")
+	}
+	replate := PermitPolicy{ResidentWord: "resident", ScheduleResident: true}
+	if !replate.Schedulable(res, false) {
+		t.Error("replate policy did not schedule its resident permit (even without fallback)")
+	}
+	// Opting resident permits in does not drag in unrelated changeable types: they
+	// still need the name match or fallback.
+	other := parking.PermitInfo{PermitType: "Loading Zone Permit", CanChangeVehicle: true}
+	if replate.Schedulable(other, false) {
+		t.Error("replate scheduled an unrelated type with no fallback")
+	}
 }
 
 // An uncompiled policy (as a future file loader would produce) behaves like the

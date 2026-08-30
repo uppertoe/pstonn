@@ -307,8 +307,8 @@ func TestTwoTenantsOverHTTP(t *testing.T) {
 	box, _ := secretbox.New(bytes.Repeat([]byte{3}, 32))
 	regPath := filepath.Join(t.TempDir(), "councils.json")
 	if err := os.WriteFile(regPath, []byte(`{"tenants":[
-	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
-	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
+	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","model":"swap","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
+	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","model":"swap","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	reg, err := tenant.Load(config.CouncilConfig{}, regPath)
@@ -406,8 +406,8 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 	box, _ := secretbox.New(bytes.Repeat([]byte{5}, 32))
 	regPath := filepath.Join(t.TempDir(), "councils.json")
 	if err := os.WriteFile(regPath, []byte(`{"tenants":[
-	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
-	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
+	  {"id":"stonnington","name":"City of Stonnington","short":"Stonnington","connector":"fake","model":"swap","timezone":"Australia/Melbourne","policy":{"visitor_word":"visitor","resident_word":"resident"},"enabled":true},
+	  {"id":"othertown","name":"Othertown Council","short":"Othertown","connector":"fake","model":"swap","timezone":"Australia/Perth","policy":{"visitor_word":"visitor"},"enabled":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	reg, err := tenant.Load(config.CouncilConfig{}, regPath)

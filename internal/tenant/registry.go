@@ -137,8 +137,22 @@ func validate(c *Tenant) error {
 	if _, err := time.LoadLocation(c.Timezone); err != nil {
 		return fmt.Errorf("timezone %q: %w", c.Timezone, err)
 	}
-	if c.Policy.VisitorWord == "" {
-		return fmt.Errorf("policy.visitor_word is required (nothing would be schedulable)")
+	if !c.Model.Known() {
+		return fmt.Errorf("unknown model %q (swap, replate, coupon or paper)", c.Model)
+	}
+	// A plate model schedules by writing a plate onto a permit, so it needs at
+	// least one schedulable permit type: a visitor-named permit, or a resident
+	// permit the policy opts into scheduling (the re-plate model). Coupon and paper
+	// don't schedule a plate, so they carry no such requirement.
+	if c.Model.Plate() && c.Policy.VisitorWord == "" && !(c.Policy.ScheduleResident && c.Policy.ResidentWord != "") {
+		return fmt.Errorf("a %s tenant needs policy.visitor_word, or schedule_resident with resident_word (nothing would be schedulable)", c.Model)
+	}
+	// Only plate models have a scheduler today. A coupon council needs a date-based
+	// planner and a paper one has nothing to automate, so either may be described in
+	// the registry but must stay disabled until (if) its product ships — enabling it
+	// would offer residents a scheme p.stonn cannot actually drive.
+	if c.Enabled && !c.Model.Plate() {
+		return fmt.Errorf("model %q has no scheduler yet; keep the tenant disabled until it does", c.Model)
 	}
 	// Links land in href attributes across the site; only http(s) may.
 	for name, raw := range map[string]string{"portal": c.Links.Portal, "register": c.Links.Register, "reset_password": c.Links.ResetPassword,

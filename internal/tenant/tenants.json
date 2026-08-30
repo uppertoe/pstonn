@@ -5,6 +5,7 @@
       "name": "City of Stonnington",
       "short": "Stonnington",
       "connector": "orikan-ssp",
+      "model": "swap",
       "endpoints": {
         "issuer": "https://parkingpermits.stonnington.vic.gov.au/idm",
         "api_base": "https://parkingpermits.stonnington.vic.gov.au/ssp-svc",

@@ -19,8 +19,52 @@ import (
 	"github.com/uppertoe/pstonn/internal/parking"
 )
 
+// Model is the shape of a tenant's visitor-permit scheme — the axis that decides
+// which scheduler and which UI apply, orthogonal to Connector (the wire protocol).
+// One connector can back several models (Orikan SSP backs both a swap and a coupon
+// council) and one model spans several connectors, so the two are separate fields
+// read by different parts of the app: Connector selects the provider.Provider,
+// Model selects how p.stonn schedules against it. See docs/council-survey.md.
+//
+// The set is open by design: a new scheme is a new constant added to knownModels
+// (and, when it needs a different write path, a Plate() answer and its own
+// planner) — never a schema migration.
+type Model string
+
+const (
+	// ModelSwap: a standing visitor permit with no fixed plate; the holder edits
+	// the plate online. What p.stonn does today (Stonnington, Banyule).
+	ModelSwap Model = "swap"
+	// ModelReplate: no visitor product; the resident temporarily edits the plate on
+	// their own resident permit, displacing their everyday car (Brimbank, Kingston).
+	// Same plate-write contract and scheduler as swap; differs only in policy
+	// (resident permit is schedulable; "no roster entry" restores a home vehicle
+	// rather than clearing).
+	ModelReplate Model = "replate"
+	// ModelCoupon: a yearly book of single-day allocations (plate + date), spent
+	// rather than kept-correct (Glen Eira, Merri-bek). A different provider surface
+	// and a date-based planner; recognised here but not yet driven (see Plate).
+	ModelCoupon Model = "coupon"
+	// ModelPaper: a physical tag handed over. Nothing to automate; present so a
+	// paper council can still be described in the registry.
+	ModelPaper Model = "paper"
+)
+
+// knownModels is the closed-for-validation, open-for-extension set: a descriptor's
+// model must be one of these, and adding a scheme means adding it here.
+var knownModels = map[Model]bool{ModelSwap: true, ModelReplate: true, ModelCoupon: true, ModelPaper: true}
+
+// Known reports whether the model is one the registry recognises.
+func (m Model) Known() bool { return knownModels[m] }
+
+// Plate reports whether the model schedules by writing a plate onto a permit — the
+// SetVehicle/ClearVehicle contract the reconcile scheduler drives. True for swap
+// and replate; false for coupon (a date-based planner, not yet built) and paper.
+// The plate-swap path guards on this so a coupon tenant can never reach SetVehicle.
+func (m Model) Plate() bool { return m == ModelSwap || m == ModelReplate }
+
 // Tenant is a tenant descriptor. Fields are plain data so a descriptor can later
-// be loaded from a file; behaviour hangs off PermitPolicy.
+// be loaded from a file; behaviour hangs off Model and PermitPolicy.
 type Tenant struct {
 	// ID is the stable identifier: it keys database rows and appears in URLs, so
 	// it never changes once a tenant is live. Lower-case, no spaces.
@@ -33,6 +77,9 @@ type Tenant struct {
 	// self-service portal: Duende IdentityServer + /ssp-svc) or "fake" (the
 	// in-memory sandbox).
 	Connector string `json:"connector"`
+	// Model is the shape of the scheme (swap / replate / coupon / paper) — the axis
+	// that decides the scheduler and UI, independent of Connector. Required.
+	Model Model `json:"model"`
 	// Endpoints parameterise the connector.
 	Endpoints Endpoints `json:"endpoints"`
 	// Timezone is the IANA zone the tenant's permit days are reckoned in.
@@ -95,6 +142,13 @@ type PermitPolicy struct {
 	// written when a plate carries no state of its own. The connector maps the code
 	// to the portal's id; empty or unrecognised falls back to VIC.
 	HomeState string `json:"home_state"`
+	// ScheduleResident says a resident permit (ResidentWord) MAY be scheduled. False
+	// (the default, and Stonnington) keeps a resident permit off-limits even when the
+	// platform reports it changeable — its T&Cs bind it to the holder's own car.
+	// True is the re-plate model (Brimbank, Glen Eira's 3.3.1): the resident permit
+	// IS the visitor mechanism, so it is schedulable directly, not only under
+	// fallback. Turning this on is a policy decision per council, not a capability.
+	ScheduleResident bool `json:"schedule_resident"`
 
 	residentRe *regexp.Regexp
 }
@@ -138,14 +192,22 @@ func (p PermitPolicy) NameFallback(permits []parking.PermitInfo) bool {
 	return anyChangeable
 }
 
-// Schedulable reports whether a permit's TYPE may be scheduled: a visitor-named
-// permit, or — only under NameFallback — a changeable permit that is not a resident
-// permit. The picker's hint and addPermit's gate both call this so they cannot
-// drift. Resident permits are excluded even under fallback: they hold the holder's
-// own everyday vehicle and are themselves changeable, so offering one would let
-// p.stonn overwrite the resident's own plate.
+// Schedulable reports whether a permit's TYPE may be scheduled. A visitor-named
+// permit always is. A resident permit is schedulable only when the tenant's policy
+// opts in (ScheduleResident — the re-plate model, where the resident permit is the
+// visitor mechanism); otherwise it stays off-limits even under fallback, because it
+// holds the holder's own everyday vehicle and is itself changeable, so offering it
+// would let p.stonn overwrite the resident's own plate. Any other changeable,
+// non-resident type is offered only under NameFallback. The picker's hint and
+// addPermit's gate both call this so they cannot drift.
 func (p PermitPolicy) Schedulable(pi parking.PermitInfo, fallback bool) bool {
-	return p.IsVisitor(pi.PermitType) || (fallback && pi.CanChangeVehicle && !p.IsResident(pi.PermitType))
+	if p.IsVisitor(pi.PermitType) {
+		return true
+	}
+	if p.IsResident(pi.PermitType) {
+		return p.ScheduleResident
+	}
+	return fallback && pi.CanChangeVehicle
 }
 
 // compiled returns the policy with its regexp built once.
