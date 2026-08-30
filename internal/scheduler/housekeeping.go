@@ -9,6 +9,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/redact"
+	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // safeSweep runs one housekeeping pass under panic recovery, so a bug in a purge
@@ -78,6 +79,11 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	// window as the apply log rather than accumulating indefinitely.
 	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
 		log.Printf("scheduler: prune change log: %v", err)
+	}
+	// Referral invites name the inviter and a third party who never signed up;
+	// same 90-day window as the other logs (store.ReferralInviteRetention).
+	if _, err := s.store.PruneReferralInvites(ctx, time.Now().Add(-store.ReferralInviteRetention)); err != nil {
+		log.Printf("scheduler: prune referral invites: %v", err)
 	}
 	s.sweepOnboardNudges(ctx)
 	s.sweepFortnightNudges(ctx)

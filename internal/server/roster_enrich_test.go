@@ -44,7 +44,7 @@ func TestEnrichRoster(t *testing.T) {
 	if _, err := s.store.UpsertPermit(ctx, "dead@example.com", "P-dead", "14", "VPP3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.UpdatePermitMeta(ctx, "dead@example.com", "P-dead", "Cancelled", "VPP3", "(A) 1st Visitor Permit", time.Time{}); err != nil {
+	if err := s.store.UpdatePermitMeta(ctx, "dead@example.com", s.store.DefaultTenant, "P-dead", "Cancelled", "VPP3", "(A) 1st Visitor Permit", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 

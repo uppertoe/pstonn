@@ -560,7 +560,7 @@ func TestPermitMetaAndExpiryReminder(t *testing.T) {
 		t.Fatal(err)
 	}
 	end := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	if err := s.UpdatePermitMeta(ctx, owner, "555", "Granted", "VPP24714", "(A) 1st Visitor Permit", end); err != nil {
+	if err := s.UpdatePermitMeta(ctx, owner, s.DefaultTenant, "555", "Granted", "VPP24714", "(A) 1st Visitor Permit", end); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := s.GetPermit(ctx, pid)
@@ -574,7 +574,7 @@ func TestPermitMetaAndExpiryReminder(t *testing.T) {
 	if err := s.MarkPermitExpiryReminded(ctx, pid); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdatePermitMeta(ctx, owner, "555", "Granted", "VPP24714", "(A) 1st Visitor Permit", end); err != nil {
+	if err := s.UpdatePermitMeta(ctx, owner, s.DefaultTenant, "555", "Granted", "VPP24714", "(A) 1st Visitor Permit", end); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := s.GetPermit(ctx, pid); !p.ExpiryReminded {
@@ -582,14 +582,14 @@ func TestPermitMetaAndExpiryReminder(t *testing.T) {
 	}
 	// A new expiry date (renewal) clears the flag.
 	end2 := end.AddDate(0, 3, 0)
-	if err := s.UpdatePermitMeta(ctx, owner, "555", "Granted", "VPP24714", "(A) 1st Visitor Permit", end2); err != nil {
+	if err := s.UpdatePermitMeta(ctx, owner, s.DefaultTenant, "555", "Granted", "VPP24714", "(A) 1st Visitor Permit", end2); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := s.GetPermit(ctx, pid); p.ExpiryReminded {
 		t.Fatal("changed expiry date should clear reminded flag")
 	}
 	// Owner scoping: a different owner's update is a no-op.
-	if err := s.UpdatePermitMeta(ctx, "other@example.com", "555", "Cancelled", "X", "X", time.Time{}); err != nil {
+	if err := s.UpdatePermitMeta(ctx, "other@example.com", s.DefaultTenant, "555", "Cancelled", "X", "X", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := s.GetPermit(ctx, pid); p.Status != "Granted" {

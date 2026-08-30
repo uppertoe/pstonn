@@ -249,7 +249,7 @@ func (c *Client) Linked(ctx context.Context, owner string) bool {
 // the material is permanently unusable: mapped to ErrSessionExpired, which retires
 // the session and prompts a re-link rather than failing silently every tick.
 func (c *Client) openSession(owner string, cs store.TenantSession) (provider.Session, error) {
-	plain, legacy, err := c.box.OpenCtx(secretbox.TenantCookie(owner), cs.Cookie)
+	plain, legacy, err := c.box.OpenCtxAny(cs.Cookie, secretbox.TenantCookieFor(owner, c.TenantID), secretbox.TenantCookie(owner))
 	if legacy {
 		log.Printf("parking: session for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", redact.Email(owner))
 	}
@@ -268,7 +268,7 @@ func (c *Client) openSession(owner string, cs store.TenantSession) (provider.Ses
 	}
 	token := ""
 	if cs.AccessToken != "" {
-		if at, _, err := c.box.OpenCtx(secretbox.TenantToken(owner), cs.AccessToken); err == nil {
+		if at, _, err := c.box.OpenCtxAny(cs.AccessToken, secretbox.TenantTokenFor(owner, c.TenantID), secretbox.TenantToken(owner)); err == nil {
 			token = at
 		}
 	}
@@ -276,7 +276,7 @@ func (c *Client) openSession(owner string, cs store.TenantSession) (provider.Ses
 }
 
 func (c *Client) sealSession(owner string, s provider.Session) (string, error) {
-	return c.box.SealCtx(secretbox.TenantCookie(owner), sessionPrefix+string(s))
+	return c.box.SealCtx(secretbox.TenantCookieFor(owner, c.TenantID), sessionPrefix+string(s))
 }
 
 func (c *Client) ownerLock(owner string) *sync.Mutex {
@@ -405,7 +405,7 @@ func (c *Client) Link(ctx context.Context, owner, username, password string, sav
 	}
 	var sealedPass string
 	if savePassword {
-		if sealedPass, err = c.box.SealCtx(secretbox.TenantPassword(owner), password); err != nil {
+		if sealedPass, err = c.box.SealCtx(secretbox.TenantPasswordFor(owner, c.TenantID), password); err != nil {
 			return err
 		}
 	}
@@ -442,7 +442,7 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	if cs.TenantID != "" && c.TenantID != "" && cs.TenantID != c.TenantID {
 		return ErrNotLinked // never replay a saved password at another tenant's portal
 	}
-	password, legacy, err := c.box.OpenCtx(secretbox.TenantPassword(owner), cs.Password)
+	password, legacy, err := c.box.OpenCtxAny(cs.Password, secretbox.TenantPasswordFor(owner, c.TenantID), secretbox.TenantPassword(owner))
 	if legacy {
 		log.Printf("parking: saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", redact.Email(owner))
 	}

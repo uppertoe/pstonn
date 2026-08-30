@@ -235,7 +235,7 @@ func TestCheckDriftSkipsInactivePermits(t *testing.T) {
 	// Retire the permit: an end date whose local day is well past.
 	past := time.Now().AddDate(0, 0, -10)
 	fc.setTenantEndDate(tenantID, past)
-	if err := st.UpdatePermitMeta(ctx, owner, tenantID, "Approved", "", "", past); err != nil {
+	if err := st.UpdatePermitMeta(ctx, owner, st.DefaultTenant, tenantID, "Approved", "", "", past); err != nil {
 		t.Fatalf("set expiry: %v", err)
 	}
 	if p, err := st.GetPermit(ctx, pid); err != nil || !p.Inactive(time.Now(), time.UTC) {

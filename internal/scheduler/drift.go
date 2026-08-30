@@ -212,7 +212,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		byTenantID[pi.CouncilPermitID] = pi
 		// Refresh expiry/status/type from the same response. Owner-scoped, so it
 		// only touches rows this account manages.
-		if err := s.store.UpdatePermitMeta(ctx, owner, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate); err != nil {
+		if err := s.store.UpdatePermitMeta(ctx, owner, tenantID, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate); err != nil {
 			log.Printf("scheduler: drift meta write for permit %s: %v", pi.CouncilPermitID, err)
 			incomplete = err
 		}
@@ -265,7 +265,15 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 			actual = confirmed
 		}
 		if model.SamePlate(actual, p.ActiveRegistration) {
-			continue // agrees with our record (incl. the common grid==cached case): no drift
+			// Agrees with our record (incl. the common grid==cached case): no drift —
+			// but a read that agrees is still a council confirmation. Keep the stamp
+			// fresh so a household whose plate never changes still gets the tick on
+			// a cold dashboard visit instead of a spinner (the dashboard's own touch
+			// only fires after its background read lands).
+			if e := s.store.TouchPermitConfirmed(ctx, p.ID, p.ActiveRegistration, time.Now()); e != nil {
+				log.Printf("scheduler: stamp confirmation for permit %s: %v", p.CouncilPermitID, e)
+			}
+			continue
 		}
 		log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
 		// Record the external change durably so it appears in the activity log

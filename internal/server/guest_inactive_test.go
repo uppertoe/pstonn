@@ -28,7 +28,7 @@ func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
 func cancelPermit(t *testing.T, s *Server, owner, tenantPermitID string) {
 	t.Helper()
 	future := time.Now().Add(365 * 24 * time.Hour)
-	if err := s.store.UpdatePermitMeta(context.Background(), owner, tenantPermitID,
+	if err := s.store.UpdatePermitMeta(context.Background(), owner, s.store.DefaultTenant, tenantPermitID,
 		"Cancelled", "VPP-DEAD", "(B) 1st Visitor Permit", future); err != nil {
 		t.Fatalf("cancel permit: %v", err)
 	}

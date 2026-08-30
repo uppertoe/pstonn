@@ -409,7 +409,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Seed expiry + status + identifiers so the schedule shows them straight away;
 	// the scheduler keeps them fresh on the keep-warm cadence thereafter.
-	if err := s.store.UpdatePermitMeta(ctx, owner, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate); err != nil {
+	if err := s.store.UpdatePermitMeta(ctx, owner, tenantID, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate); err != nil {
 		log.Printf("addPermit: seed metadata for permit %s: %v", cpid, err)
 	}
 	target := match.PermitNumber

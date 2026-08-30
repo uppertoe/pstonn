@@ -172,7 +172,11 @@ WHERE permit.owner = excluded.owner`,
 // If the expiry date changes (a renewal, or a first read), the expiry-reminded
 // flag is cleared so the approaching-expiry reminder re-arms for the new date.
 // Owner-scoped and a no-op if the permit isn't the owner's.
-func (s *Store) UpdatePermitMeta(ctx context.Context, owner, tenantPermitID, status, permitNumber, permitType string, endDate time.Time) error {
+//
+// Scoped by tenant as well as owner: council permit ids overlap between portals,
+// so an owner linked at two councils would otherwise have both rows' status and
+// expiry overwritten by whichever portal's grid was read last.
+func (s *Store) UpdatePermitMeta(ctx context.Context, owner, tenantID, tenantPermitID, status, permitNumber, permitType string, endDate time.Time) error {
 	var ed string
 	if !endDate.IsZero() {
 		ed = endDate.UTC().Format(time.RFC3339)
@@ -182,8 +186,8 @@ UPDATE permit
 SET status = ?, end_date = ?, permit_number = ?, permit_type = ?,
     expiry_reminded = CASE WHEN end_date = ? THEN expiry_reminded ELSE '' END,
     updated_at = ?
-WHERE council_permit_id = ? AND owner = ?`,
-		status, ed, permitNumber, permitType, ed, nowUTC(), tenantPermitID, owner)
+WHERE council_permit_id = ? AND owner = ? AND council_id = ?`,
+		status, ed, permitNumber, permitType, ed, nowUTC(), tenantPermitID, owner, tenantID)
 	return err
 }
 
