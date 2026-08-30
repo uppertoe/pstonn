@@ -301,9 +301,14 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// "checking" spinner as before. Applying and the honesty cap are decided in
 	// armPlatePoll and take precedence in the template.
 	plateRecent := plateRefreshing && !confirmedAt.IsZero() && now.Sub(confirmedAt) < plateRecentWindow
+	// The age is shown for every state that has a confirmed reading — settled as
+	// well as recent — so the hint slot is always occupied and the pill never
+	// reflows between "checked 2 hr ago" and a bare tick. The icon, not the
+	// words, tells recent from settled: a spinner means a council read is in
+	// flight; the green tick means the council answered on this visit.
 	plateCheckedAgo := ""
-	if plateRecent {
-		plateCheckedAgo = "confirmed " + agoText(now, confirmedAt) + " · checking…"
+	if !confirmedAt.IsZero() && (plateRecent || !plateRefreshing) {
+		plateCheckedAgo = "checked " + agoText(now, confirmedAt)
 	}
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {

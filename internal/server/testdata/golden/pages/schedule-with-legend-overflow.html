@@ -758,8 +758,8 @@
   .pslot .pchk { width:11px; height:11px; border-radius:50%; border:2px solid var(--line); border-top-color:var(--muted); animation:spin .8s linear infinite; }
   .pslot .pok { display:inline-flex; color:var(--ok); }
   .pslot .pok svg { width:13px; height:13px; stroke-width:2.4; }
-  .pslot .plast { display:inline-flex; color:var(--muted); }
-  .pslot .plast svg { width:13px; height:13px; stroke-width:2.2; }
+   
+  .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:8.6em; }
   .pslot .pwarn { display:inline-flex; color:var(--warn); }
   .pslot .pwarn svg { width:13px; height:13px; stroke-width:2.4; }
   .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
@@ -1128,7 +1128,7 @@ window.popClamp = window.popClamp || function (el) {
     
     <span class="pslot"><span class="pok" title="Checked against the council record"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></span>
     
-    
+    <span class="phint">checking&hellip;</span>
     
   </div>
 </div>
