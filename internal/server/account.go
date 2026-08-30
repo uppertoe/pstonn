@@ -24,7 +24,13 @@ import (
 // sealed (DATA_ENCRYPTION_KEY) and stored so the scheduler can silently re-link if
 // the tenant session later expires.
 func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
-	user, _, isPrimary := s.resolveAccount(r.Context())
+	// MUTATING: fail closed on a membership-lookup blip (see accountForWrite). The
+	// lenient resolver would report a secondary as "own account, not primary" and
+	// answer 403 — harmless here, but the rule is one rule for every writer.
+	user, _, isPrimary, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	// Only the account owner links the tenant account; a secondary uses the
 	// primary's connection and cannot change it.
 	if !isPrimary {
@@ -177,7 +183,13 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 // switcher). Linked there already → the schedule; not yet → the picker, which
 // offers the link form for that tenant.
 func (s *Server) tenantSelect(w http.ResponseWriter, r *http.Request) {
-	user, owner, _ := s.resolveAccount(r.Context())
+	// MUTATING: writes the CURRENT tenant on owner. With the lenient resolver a
+	// DB blip made a secondary's owner their own address, so the switch landed on
+	// a phantom account and the household's real one never moved.
+	_, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	if s.registry == nil {
 		redirectHome(w, r)
 		return
@@ -191,7 +203,6 @@ func (s *Server) tenantSelect(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	_ = user
 	if s.tenant.Linked(r.Context(), owner, c.ID) {
 		redirectHome(w, r)
 		return
@@ -242,7 +253,10 @@ func (s *Server) tenantArg(r *http.Request, owner string) (string, error) {
 // permits, vehicles and schedule, so a later re-link resumes where it left off.
 // Owner-only: a secondary cannot disconnect the shared connection.
 func (s *Server) tenantUnlink(w http.ResponseWriter, r *http.Request) {
-	user, _, isPrimary := s.resolveAccount(r.Context())
+	user, _, isPrimary, ok := s.accountForWrite(w, r) // mutating: fail closed
+	if !ok {
+		return
+	}
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can disconnect the council account.")
 		return
@@ -286,7 +300,10 @@ func (s *Server) hasSavedPassword(ctx context.Context, owner string) bool {
 // no longer reconnect automatically, without disturbing the live session. Owner-
 // only. After this, a session expiry once again requires a manual re-link.
 func (s *Server) tenantForgetPassword(w http.ResponseWriter, r *http.Request) {
-	user, _, isPrimary := s.resolveAccount(r.Context())
+	user, _, isPrimary, ok := s.accountForWrite(w, r) // mutating: fail closed
+	if !ok {
+		return
+	}
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can change this.")
 		return
@@ -317,7 +334,10 @@ func (s *Server) tenantForgetPassword(w http.ResponseWriter, r *http.Request) {
 // schedule, apply log, and any shared access). Owner-only and guarded by a typed
 // confirmation. A secondary leaves via /account/leave instead.
 func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
-	user, _, isPrimary := s.resolveAccount(r.Context())
+	user, _, isPrimary, ok := s.accountForWrite(w, r) // mutating: fail closed
+	if !ok {
+		return
+	}
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "You have shared access to this account, so you cannot delete it. Use 'Leave this account' instead.")
 		return
@@ -344,7 +364,10 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 // account, up to two people. Access takes effect when that person signs in with
 // the same email (via the one-time code), so there is no new secret to share.
 func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
-	user, owner, isPrimary := s.resolveAccount(r.Context())
+	user, owner, isPrimary, ok := s.accountForWrite(w, r) // mutating: fail closed
+	if !ok {
+		return
+	}
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can share access.")
 		return
@@ -507,7 +530,10 @@ func (s *Server) declineInvite(w http.ResponseWriter, r *http.Request) {
 
 // removeMember (owner only) revokes a secondary's shared access.
 func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
-	user, owner, isPrimary := s.resolveAccount(r.Context())
+	user, owner, isPrimary, ok := s.accountForWrite(w, r) // mutating: fail closed
+	if !ok {
+		return
+	}
 	if !isPrimary {
 		s.message(w, http.StatusForbidden, "Only the account owner can change shared access.")
 		return

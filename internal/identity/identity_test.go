@@ -158,21 +158,3 @@ func TestFromContextRejectsEmptyEmail(t *testing.T) {
 		t.Fatal("an anonymous request must report ok=false")
 	}
 }
-
-func TestRequireUser(t *testing.T) {
-	var reached bool
-	h := Middleware("", nil, true)(RequireUser(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		reached = true
-	})))
-	r := httptest.NewRequest("GET", "/schedule", nil)
-	publicPeer(r)
-	r.Header.Set("Remote-Email", "spoofed@example.com")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if reached {
-		t.Fatal("handler ran for a request whose identity came from an untrusted peer")
-	}
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", w.Code)
-	}
-}

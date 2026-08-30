@@ -143,19 +143,6 @@ func FromContext(ctx context.Context) (User, bool) {
 	return u, ok && u.Email != ""
 }
 
-// RequireUser wraps a handler so it only runs for an authenticated request.
-// Behind the platform this is belt-and-braces (Caddy already gates the route),
-// but it also protects standalone runs and makes the dependency explicit.
-func RequireUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := FromContext(r.Context()); !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func splitGroups(raw string) []string {
 	var out []string
 	for _, g := range strings.Split(raw, ",") {

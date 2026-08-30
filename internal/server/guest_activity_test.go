@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/url"
 	"testing"
 	"time"
 
@@ -70,4 +71,51 @@ func TestGuestActivityResetsIdleClock(t *testing.T) {
 
 	// An account with no linked session is a no-op, never an error.
 	s.touchGuestActivity(ctx, "nolink@example.com")
+}
+
+// TestGuestIdleTouchOnlyOnHumanAction: resolving a token is the funnel every
+// guest surface passes through — including a mail scanner prefetching the
+// emailed link and the 2.5-second live poll from a tab left open — so it must
+// NOT reset the 90-day idle clock. Only the POST (a person asking for a plate)
+// does, consistent with tenantConfirm refusing link-following as liveness.
+func TestGuestIdleTouchOnlyOnHumanAction(t *testing.T) {
+	s := newGuestTestServer(t)
+	isolateGuestBounds(t)
+	ctx := context.Background()
+	const owner = "household@example.com"
+	_, _, raw := seedDoorQR(t, s, owner, "Idle")
+	if err := s.store.SaveTenantSession(ctx, store.TenantSession{Owner: owner}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.MarkReminderSent(ctx, owner, "", "tok-idle"); err != nil {
+		t.Fatal(err)
+	}
+	reminderOutstanding := func() bool {
+		t.Helper()
+		cs, err := s.store.GetTenantSession(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !cs.ReminderSent.IsZero()
+	}
+
+	if w := s.getGuest("/g/" + raw); w.Code != 200 {
+		t.Fatalf("GET menu = %d", w.Code)
+	}
+	if !reminderOutstanding() {
+		t.Fatal("a bare GET of the link reset the idle clock (a scanner prefetch would too)")
+	}
+	if w := s.getGuest("/g/live/" + raw); w.Code == 500 {
+		t.Fatalf("GET live poll = %d", w.Code)
+	}
+	if !reminderOutstanding() {
+		t.Fatal("the live poll reset the idle clock")
+	}
+
+	if w := s.postGuest("/g/"+raw, "203.0.113.20", "", url.Values{"plate": {"HUM4N1"}}); w.Code != 200 {
+		t.Fatalf("POST request = %d %s", w.Code, w.Body.String())
+	}
+	if reminderOutstanding() {
+		t.Fatal("a visitor's request (a human act at the door) did not reset the idle clock")
+	}
 }
