@@ -1,12 +1,12 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: Your p.stonn account has been disconnected
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 You declined p.stonn's updated terms, so your council account has been disconnected and your permit is no longer being managed.
 
 Please check your visitor permit with the council. To reconnect, sign in again and accept the terms.
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: Your p.stonn account has been disconnected
 Priority: high
 Tags: warning

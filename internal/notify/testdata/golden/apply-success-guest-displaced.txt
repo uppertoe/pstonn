@@ -1,6 +1,6 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: Permit updated: Visitor now shows GUEST1
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 Your Visitor is now set to GUEST1.
 
@@ -10,7 +10,7 @@ This replaced ABC123, which an active booking had put on — we've emailed the p
 
 https://p.stonn.org
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: Permit updated: Visitor now shows GUEST1
 Priority: default
 Tags: white_check_mark

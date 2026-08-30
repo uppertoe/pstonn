@@ -1,10 +1,10 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: p.stonn test notification
-Provenance: You received this at lily@example.com because you asked p.stonn to send a test notification. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because you asked p.stonn to send a test notification. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 This is a test. Your permit-change notifications are set up correctly.
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: p.stonn test notification
 Priority: default
 Tags: bell

@@ -1,8 +1,8 @@
 === EMAIL to guest@example.com
-Subject: Your link to set a car on lily@example.com's parking permit
+Subject: Your link to set a car on primary@example.com's parking permit
 Provenance: You received this at guest@example.com because someone shared their visitor parking permit with you by email. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-lily@example.com has given you a link to put a car on their City of Stonnington visitor parking permit (Visitor).
+primary@example.com has given you a link to put a car on their City of Stonnington visitor parking permit (Visitor).
 
 When you arrive, open the link and choose your car. It stays on the permit until the end of the day.
 

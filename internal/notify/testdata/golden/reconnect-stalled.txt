@@ -1,6 +1,6 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: p.stonn can't reach the council — your permit schedule is paused
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
 
@@ -11,7 +11,7 @@ p.stonn keeps retrying automatically and your schedule resumes on its own once t
 Council portal: https://parkingpermits.stonnington.vic.gov.au/
 Open p.stonn: https://p.stonn.org
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: p.stonn can't reach the council — your permit schedule is paused
 Priority: high
 Tags: warning

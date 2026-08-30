@@ -98,7 +98,7 @@ func TestGuestApplyCarriesRegistrationState(t *testing.T) {
 	s, rp := newApplyRig(t)
 	isolateGuestBounds(t)
 	ctx := context.Background()
-	const owner = "lily@example.com"
+	const owner = "primary@example.com"
 	if err := s.tenant.Link(ctx, owner, "", owner, "ok", false, true, 0); err != nil {
 		t.Fatal(err)
 	}

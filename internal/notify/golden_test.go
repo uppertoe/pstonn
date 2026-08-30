@@ -37,7 +37,7 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden files from the
 const (
 	goldenDir = "testdata/golden"
 	appURL    = "https://p.stonn.org"
-	owner     = "lily@example.com"
+	owner     = "primary@example.com"
 	member    = "sam@example.com"
 	stranger  = "guest@example.com"
 )
@@ -142,7 +142,7 @@ func newRig(t *testing.T) *rig {
 	if err := st.AddMember(ctx, owner, member); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "pstonn-lily"}); err != nil {
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "pstonn-primary"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: member, EmailEnabled: true}); err != nil {

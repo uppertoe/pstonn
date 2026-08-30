@@ -116,8 +116,12 @@ func TestQueuedCriticalMailSurvivesUnsubscribe(t *testing.T) {
 	if err := st.SuppressAddress(ctx, owner, store.SuppressUnsubscribed, "one-click"); err != nil {
 		t.Fatal(err)
 	}
-	// Quiet hours cover the whole day, so the expiry warning is queued, not sent.
-	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, QuietFrom: 0, QuietUntil: 23}); err != nil {
+	// A quiet window anchored on the current hour (the service's clock is UTC),
+	// so the expiry warning is queued, not sent, whenever this test runs. A
+	// "whole day" window is not an option: MaxQuietHours clamps 0->23 to 0->12,
+	// which made this test fail every afternoon (CI at 12:50 UTC, 2026-08-30).
+	nowHour := time.Now().UTC().Hour()
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, QuietFrom: nowHour, QuietUntil: (nowHour + 2) % 24}); err != nil {
 		t.Fatal(err)
 	}
 	var sent []string

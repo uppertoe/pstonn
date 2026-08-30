@@ -25,7 +25,7 @@ func TestEnqueueApplyPerMemberPrefs(t *testing.T) {
 	}
 	defer st.Close()
 
-	const primary, secondary = "lily@example.com", "member1@example.com"
+	const primary, secondary = "primary@example.com", "member1@example.com"
 	if err := st.AddMember(ctx, primary, secondary); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestNotifyGuestRequestPerMemberFanout(t *testing.T) {
 	}
 	defer st.Close()
 
-	const primary, secondary = "lily@example.com", "member1@example.com"
+	const primary, secondary = "primary@example.com", "member1@example.com"
 	if err := st.AddMember(ctx, primary, secondary); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestQueuedMailCarriesProvenance(t *testing.T) {
 	}
 	defer st.Close()
 
-	const owner = "lily@example.com"
+	const owner = "primary@example.com"
 	// Put "now" inside quiet hours so every notification takes the DEFERRED branch
 	// — the one that was dropping the reason. The window is anchored to the current
 	// hour so this holds whenever the test runs (QuietUntil must be 0-23, so a
@@ -234,7 +234,7 @@ func TestGuestRequestLinkEmailOnly(t *testing.T) {
 	}
 	defer st.Close()
 
-	const owner = "lily@example.com"
+	const owner = "primary@example.com"
 	// Both channels on for the same person, so the split is visible on one member.
 	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "own-topic"}); err != nil {
 		t.Fatal(err)

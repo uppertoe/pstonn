@@ -72,7 +72,7 @@ func newTenantRig(t *testing.T) *tenantRig {
 	return &tenantRig{s: s, st: st, fake: f, ctx: context.Background()}
 }
 
-const rigUser = "lily@example.com"
+const rigUser = "primary@example.com"
 
 // consent accepts the terms for the user, the gate every tenant route sits behind.
 func (r *tenantRig) consent(t *testing.T, email string) {

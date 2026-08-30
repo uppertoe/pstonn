@@ -1,6 +1,6 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: Keep your Stonnington parking scheduler running
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 Hi,
 

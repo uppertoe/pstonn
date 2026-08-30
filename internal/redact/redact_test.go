@@ -4,12 +4,12 @@ import "testing"
 
 func TestEmail(t *testing.T) {
 	cases := map[string]string{
-		"lily@example.com":  "l***@example.com",
-		"UPPER@Example.COM": "U***@example.com", // domain lower-cased, mailbox initial kept
-		"  spaced@x.io  ":   "s***@x.io",
-		"":                  "(none)",
-		"not-an-address":    "***",
-		"@nodomain":         "***", // no local part
+		"primary@example.com": "p***@example.com",
+		"UPPER@Example.COM":   "U***@example.com", // domain lower-cased, mailbox initial kept
+		"  spaced@x.io  ":     "s***@x.io",
+		"":                    "(none)",
+		"not-an-address":      "***",
+		"@nodomain":           "***", // no local part
 	}
 	for in, want := range cases {
 		if got := Email(in); got != want {

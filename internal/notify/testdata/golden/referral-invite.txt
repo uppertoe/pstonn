@@ -1,8 +1,8 @@
 === EMAIL to guest@example.com
-Subject: lily@example.com thought you might like p.stonn
+Subject: primary@example.com thought you might like p.stonn
 Provenance: You received this at guest@example.com because someone who uses p.stonn asked us to tell you about it. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-lily@example.com uses p.stonn to look after their City of Stonnington visitor parking permit, and thought it might be useful for you too.
+primary@example.com uses p.stonn to look after their City of Stonnington visitor parking permit, and thought it might be useful for you too.
 
 p.stonn changes the car on your visitor permit for you — a weekly roster for regulars, one-off bookings for everyone else, and a link or QR code your visitors can use themselves. It's free for Stonnington residents.
 

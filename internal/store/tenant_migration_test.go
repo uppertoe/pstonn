@@ -77,11 +77,11 @@ CREATE TABLE breaker_state (
     last_pushback TEXT NOT NULL DEFAULT '',
     updated_at    TEXT NOT NULL DEFAULT ''
 );
-INSERT INTO council_session (owner, cookie_sealed, updated_at, linked_at, session_generation) VALUES ('lily@example.com', 'sealed', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', 7);
-INSERT INTO vehicle (id, owner, registration, label, created_at) VALUES (5, 'lily@example.com', 'ABC123', 'Van', '2026-08-01T00:00:00Z');
-INSERT INTO permit (id, owner, council_permit_id, permit_type_id, label, active_registration, permit_number, updated_at, fail_streak) VALUES (42, 'lily@example.com', '14576', '14', 'Visitor', 'ABC123', 'VPP24714', '2026-08-01T00:00:00Z', 2);
+INSERT INTO council_session (owner, cookie_sealed, updated_at, linked_at, session_generation) VALUES ('primary@example.com', 'sealed', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', 7);
+INSERT INTO vehicle (id, owner, registration, label, created_at) VALUES (5, 'primary@example.com', 'ABC123', 'Van', '2026-08-01T00:00:00Z');
+INSERT INTO permit (id, owner, council_permit_id, permit_type_id, label, active_registration, permit_number, updated_at, fail_streak) VALUES (42, 'primary@example.com', '14576', '14', 'Visitor', 'ABC123', 'VPP24714', '2026-08-01T00:00:00Z', 2);
 INSERT INTO weekly_rule (permit_id, weekday, vehicle_id) VALUES (42, 1, 5);
-INSERT INTO account_flags (owner, guests_enabled) VALUES ('lily@example.com', 0);
+INSERT INTO account_flags (owner, guests_enabled) VALUES ('primary@example.com', 0);
 INSERT INTO breaker_state (id, open_until, generation, last_pushback) VALUES (1, '2099-01-01T00:00:00Z', 3, '2026-08-20T00:00:00Z');
 `
 
@@ -105,11 +105,11 @@ func TestMigrateFromPreTenantSchema(t *testing.T) {
 	st.DefaultTenant = "stonnington" // as main sets it from the registry
 
 	// Rows are backfilled under Stonnington and otherwise untouched.
-	cs, err := st.GetTenantSession(ctx, "lily@example.com")
+	cs, err := st.GetTenantSession(ctx, "primary@example.com")
 	if err != nil || cs.TenantID != "stonnington" || cs.Cookie != "sealed" || cs.Generation != 7 {
 		t.Fatalf("session after migrate: %+v, %v", cs, err)
 	}
-	if id, err := st.TenantIDFor(ctx, "lily@example.com"); err != nil || id != "stonnington" {
+	if id, err := st.TenantIDFor(ctx, "primary@example.com"); err != nil || id != "stonnington" {
 		t.Fatalf("CouncilIDFor = %q, %v", id, err)
 	}
 	p, err := st.GetPermit(ctx, 42)
@@ -138,7 +138,7 @@ func TestMigrateFromPreTenantSchema(t *testing.T) {
 	if got, err := st.PermitInTenant(ctx, "othertown", "14576"); err != nil || got.Owner != "bob@example.com" {
 		t.Fatalf("PermitInCouncil(othertown) = %+v, %v", got, err)
 	}
-	if got, err := st.PermitInTenant(ctx, "stonnington", "14576"); err != nil || got.Owner != "lily@example.com" {
+	if got, err := st.PermitInTenant(ctx, "stonnington", "14576"); err != nil || got.Owner != "primary@example.com" {
 		t.Fatalf("PermitInCouncil(stonnington) = %+v, %v", got, err)
 	}
 	// The breaker pause carried across as Stonnington's; another tenant starts closed.
@@ -150,7 +150,7 @@ func TestMigrateFromPreTenantSchema(t *testing.T) {
 		t.Fatalf("other council's breaker: %+v, %v", bs, err)
 	}
 	// Guests flag survived the account_flags ALTER.
-	if on, err := st.GuestsEnabled(ctx, "lily@example.com"); err != nil || on {
+	if on, err := st.GuestsEnabled(ctx, "primary@example.com"); err != nil || on {
 		t.Fatalf("guests_enabled after migrate = %v, %v", on, err)
 	}
 	// Re-running the migrations on the migrated file is a no-op.
@@ -242,11 +242,11 @@ func TestMigrateSessionKeyToTenant(t *testing.T) {
 	if scoped, _ := st.sessionKeyIsScoped(); !scoped {
 		t.Fatal("session table not re-keyed")
 	}
-	cs, err := st.GetTenantSessionIn(ctx, "lily@example.com", "stonnington")
+	cs, err := st.GetTenantSessionIn(ctx, "primary@example.com", "stonnington")
 	if err != nil || cs.Cookie != "sealed" || cs.Generation != 7 {
 		t.Fatalf("session after migrate: %+v, %v", cs, err)
 	}
-	if err := st.SaveTenantSession(ctx, TenantSession{Owner: "lily@example.com", TenantID: "hume", Cookie: "h"}); err != nil {
+	if err := st.SaveTenantSession(ctx, TenantSession{Owner: "primary@example.com", TenantID: "hume", Cookie: "h"}); err != nil {
 		t.Fatalf("second tenant for the same owner: %v", err)
 	}
 }

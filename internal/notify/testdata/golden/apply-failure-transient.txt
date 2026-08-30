@@ -1,6 +1,6 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: Still updating your Visitor — it shows XYZ789 for now
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
 The permit still shows XYZ789, so that is the vehicle currently covered.
@@ -13,7 +13,7 @@ https://parkingpermits.stonnington.vic.gov.au/
 
 https://p.stonn.org
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: Still updating your Visitor — it shows XYZ789 for now
 Priority: default
 Tags: warning

@@ -54,7 +54,7 @@ CREATE TABLE override (
     created_at TEXT NOT NULL
 );
 INSERT INTO override (permit_id, vehicle_id, starts_at, ends_at, created_by, created_at)
-VALUES (42, 5, '2026-08-01T00:00:00Z', NULL, 'lily@example.com', '2026-08-01T00:00:00Z');
+VALUES (42, 5, '2026-08-01T00:00:00Z', NULL, 'primary@example.com', '2026-08-01T00:00:00Z');
 `); err != nil {
 			t.Fatal(err)
 		}

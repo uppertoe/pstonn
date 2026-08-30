@@ -1,6 +1,6 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: Your Visitor expires on 24 Aug 2026
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 Your Visitor is due to expire on 24 Aug 2026.
 
@@ -9,7 +9,7 @@ p.stonn keeps setting the vehicle, but it can't renew the permit itself — rene
 Open p.stonn: https://p.stonn.org
 Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: Your Visitor expires on 24 Aug 2026
 Priority: default
 Tags: calendar

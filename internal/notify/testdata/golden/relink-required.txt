@@ -1,6 +1,6 @@
-=== EMAIL to lily@example.com
+=== EMAIL to primary@example.com
 Subject: Action needed: reconnect your p.stonn council account
-Provenance: You received this at lily@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
 Your council connection has expired, so p.stonn has stopped updating your visitor permit.
 
@@ -9,7 +9,7 @@ Please open the app and re-link your council account so your schedule keeps runn
 Re-link: https://p.stonn.org
 Council portal: https://parkingpermits.stonnington.vic.gov.au/
 
-=== NTFY pstonn-lily
+=== NTFY pstonn-primary
 Title: Action needed: reconnect your p.stonn council account
 Priority: high
 Tags: warning

@@ -53,7 +53,7 @@ func TestTenantRowStatus(t *testing.T) {
 // A transient tenant failure leaves an "error" as the newest apply_log row for up to
 // 90 days. It must only read as a live fault while the permit is still failing (streak
 // > 0); once settled (streak 0, plate back in place) it is cleared history — this is
-// lily's case, where an old blip kept the panel showing "needs attention".
+// one user's case, where an old blip kept the panel showing "needs attention".
 func TestApplyFailureState(t *testing.T) {
 	cases := []struct {
 		status      string
