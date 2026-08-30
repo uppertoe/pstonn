@@ -1,7 +1,8 @@
 # Council connections: making p.stonn multi-council
 
-Status: **phases 0–2 implemented on branch `council-decoupling`** (2026-08-29),
-not deployed. No second council is enabled — the goal of this work was to decouple
+Status: **phases 0–2 merged to `main` and deployed to production** (2026-08-30,
+deliberately; implemented on branch `council-decoupling` 2026-08-29). No second
+council is enabled — the goal of this work was to decouple
 the app from the City of Stonnington so that adding one is a registry entry plus a
 live capture, not a rewrite. Every golden (page, fragment, HTTP response, email) is
 byte-identical to the pre-refactor output; the suite passes.

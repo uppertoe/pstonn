@@ -28,7 +28,7 @@ jobs:
       - run: go test -race ./...
       - run: CGO_ENABLED=0 go build ./...
       - name: gofmt
-        run: test -z "$(gofmt -l internal/ main.go)"
+        run: test -z "$(gofmt -l .)"
       - name: Vulnerability scan
         # Pinned like everything else in this workflow (the one @latest would be
         # the sole unpinned tool in the pipeline). The vuln DB itself is fetched

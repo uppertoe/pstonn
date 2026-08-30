@@ -222,7 +222,8 @@ and the healthcheck (`/app -healthcheck`). Full config reference:
 build, gofmt and `govulncheck` on every push and PR. On pushes to `main` it
 builds the multi-arch image, boots it and checks `/healthz` **before** pushing
 to GHCR. A weekly rebuild picks up base-image security fixes. All actions and
-base images are pinned by digest.
+base images are pinned by digest. To run the same fast checks locally before
+every push, enable the bundled hook once per clone: `git config core.hooksPath .githooks`.
 
 ## Status
 

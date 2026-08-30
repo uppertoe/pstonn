@@ -14,6 +14,15 @@
       "matchStrings": ["go-version:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the govulncheck pin in the CI workflow (go install golang.org/x/vuln/cmd/govulncheck@vX.Y.Z) so the scanner itself does not go stale.",
+      "fileMatch": ["^\\.github/workflows/[^/]+\\.ya?ml$"],
+      "matchStrings": ["go install golang\\.org/x/vuln/cmd/govulncheck@(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"],
+      "depNameTemplate": "golang.org/x/vuln",
+      "packageNameTemplate": "golang.org/x/vuln",
+      "datasourceTemplate": "go"
     }
   ],
   "packageRules": [

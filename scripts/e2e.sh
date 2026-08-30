@@ -6,7 +6,7 @@
 #   RUN A  dev-shaped   — the full user journey against the sandbox council.
 #   RUN B  prod-shaped  — real at-rest key, roster key, status token, proxy identity.
 set -uo pipefail
-cd /Users/eamonnupperton/Documents/developer/pstonn
+cd "$(git rev-parse --show-toplevel)"
 S="${PSTONN_E2E_TMP:-$(mktemp -d)}"
 go build -o "$S/pstonn" . || exit 1
 

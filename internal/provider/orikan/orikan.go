@@ -1080,12 +1080,34 @@ func (c *Client) postManage(ctx context.Context, ss *session, reqBody manageVehi
 	return nil
 }
 
+// confirmRetryDelay is the single pause confirmWrite takes when the first
+// read-back after a 2xx write does not yet show the plate we sent, before it
+// reads once more. A variable so tests can shorten it; the transport's governor
+// still paces the request itself.
+var confirmRetryDelay = 2 * time.Second
+
 // confirmWrite re-reads the portal's OWN record after a 2xx write and only
-// reports success once it shows the plate we sent. A mismatch is a durable
-// refusal (act-now notice), an unreadable confirm is transient (retry).
+// reports success once it shows the plate we sent. An unreadable confirm is
+// transient (retry). A mismatch on the FIRST read is treated as the portal not
+// having caught up yet (a 2xx followed by a stale read has been observed to be
+// lag, not refusal): wait briefly and read once more. Only when that second
+// read still disagrees is it a durable refusal (act-now notice) — at the cost of
+// exactly one extra request, and only on the mismatch path.
 // registration "" means "expect the permit empty" (the clear path).
 func (c *Client) confirmWrite(ctx context.Context, ss *session, p provider.PermitRef, registration string, op provider.Op) error {
 	confirmed, _, err := c.currentVehicle(ctx, ss, p, op)
+	if err != nil {
+		return provider.Fail(provider.FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
+	}
+	if model.SamePlate(confirmed, registration) {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return provider.Fail(provider.FailTransient, op, fmt.Errorf("change sent but not yet confirmed (portal still shows %q): %w", confirmed, ctx.Err()))
+	case <-time.After(confirmRetryDelay):
+	}
+	confirmed, _, err = c.currentVehicle(ctx, ss, p, op)
 	if err != nil {
 		return provider.Fail(provider.FailTransient, op, fmt.Errorf("change sent but could not be confirmed: %w", err))
 	}
