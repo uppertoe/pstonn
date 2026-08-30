@@ -768,7 +768,7 @@ X-Frame-Options: DENY
   .pslot .pok { display:inline-flex; color:var(--ok); }
   .pslot .pok svg { width:13px; height:13px; stroke-width:2.4; }
    
-  .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:8.6em; }
+  .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:19ch; }
   .pslot .pwarn { display:inline-flex; color:var(--warn); }
   .pslot .pwarn svg { width:13px; height:13px; stroke-width:2.4; }
   .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
