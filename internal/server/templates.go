@@ -96,7 +96,11 @@ var templateFuncs = template.FuncMap{
 		}
 		return out, nil
 	},
-	"link":        i18n.Link,
+	"link": i18n.Link,
+	// Typed link options: templates cannot pass raw attribute strings into an
+	// anchor tag (see i18n.LinkOption) — only these named options.
+	"newtab":      i18n.NewTab,
+	"noboost":     i18n.NoBoost,
 	"strong":      i18n.Strong,
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	// sourceLabel turns an apply-log source code into words for the Activity page.

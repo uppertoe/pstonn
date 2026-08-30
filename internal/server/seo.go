@@ -226,9 +226,9 @@ type guidePage struct {
 func tenantSignInSteps(c tenantView) []template.HTML {
 	return []template.HTML{
 		tr(c, "guide.signin_step", nil, i18n.Slots{
-			"portal":   i18n.Link(c.Links.Portal, `target="_blank"`, `rel="noopener"`),
-			"register": i18n.Link(c.Links.Register, `target="_blank"`, `rel="noopener"`),
-			"reset":    i18n.Link(c.Links.ResetPassword, `target="_blank"`, `rel="noopener"`),
+			"portal":   i18n.Link(c.Links.Portal, i18n.NewTab()),
+			"register": i18n.Link(c.Links.Register, i18n.NewTab()),
+			"reset":    i18n.Link(c.Links.ResetPassword, i18n.NewTab()),
 		}),
 		template.HTML(`In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.`),
 		template.HTML(`Enter the new registration and the state it&rsquo;s registered in, and save.`),
@@ -263,7 +263,7 @@ func guidesFor(c tenantView) []guidePage {
 			},
 			TenantHeading: "At the council, each visit",
 			Steps:         steps,
-			TenantNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
+			TenantNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
 			Pstonn:        "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
 			Demo:          "guest",
 		},
@@ -281,7 +281,7 @@ func guidesFor(c tenantView) []guidePage {
 				template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
 				template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
 			},
-			TenantNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, `target="_blank"`, `rel="noopener"`)}),
+			TenantNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
 			Pstonn:     "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
 			Demo:       "oneoff",
 		},

@@ -10,7 +10,7 @@
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
          up stuck, and the failure looks like "wrong password" when it isn't. */}}
-    <p class="lnote">{{T "public.need_account" . (slots "b" (strong) "how" (link "/how" `hx-boost="false"`))}}</p>
+    <p class="lnote">{{T "public.need_account" . (slots "b" (strong) "how" (link "/how" (noboost)))}}</p>
   </section>
   <div class="demos">
     <div class="dm-mini dm-showcase" data-demo="showcase">
@@ -68,7 +68,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>{{T "public.about_unofficial" . (slots "how" (link "/how" `hx-boost="false"`))}}</p>
+    <p>{{T "public.about_unofficial" . (slots "how" (link "/how" (noboost)))}}</p>
 
     <h2 class="about-h2">The short version</h2>
     <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
@@ -246,7 +246,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Frequently asked questions</h1>
-    <p>{{T "public.faq_unofficial" . (slots "how" (link "/how" `hx-boost="false"`))}}</p>
+    <p>{{T "public.faq_unofficial" . (slots "how" (link "/how" (noboost)))}}</p>
     {{range .FAQ}}
     <div class="faq-item">
       <h2 class="about-h2">{{.Q}}</h2>
@@ -288,7 +288,7 @@
       </div>
     </div>
     <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
-    <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor `target="_blank"` `rel="noopener"`) "faq" (link .Tenant.Links.FAQ `target="_blank"` `rel="noopener"`) "how" (link "/how" `hx-boost="false"`) "faq_page" (link "/faq" `hx-boost="false"`))}}</p>
+    <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor (newtab)) "faq" (link .Tenant.Links.FAQ (newtab)) "how" (link "/how" (noboost)) "faq_page" (link "/faq" (noboost)))}}</p>
   </section>
 </main>
 {{end}}

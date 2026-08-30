@@ -48,16 +48,63 @@ type Slot func(inner htmltemplate.HTML) htmltemplate.HTML
 // Slots is the set of slots a call site provides, by name.
 type Slots map[string]Slot
 
-// Link is an anchor slot. attrs are literal attribute strings the template
-// chooses (`hx-boost="false"`); href is escaped.
-func Link(href string, attrs ...string) Slot {
-	open := `<a href="` + htmltemplate.HTMLEscapeString(href) + `"`
-	for _, a := range attrs {
-		open += " " + a
+// LinkOption is a typed attribute for Link. The set is closed on purpose: the
+// anchor's attributes are emitted as raw HTML, so accepting free-form strings
+// here would be an injection primitive waiting for the first caller to pass
+// something user-derived. Add a new option when a new attribute is needed.
+type LinkOption func(*linkAttrs)
+
+type linkAttrs struct {
+	newTab  bool
+	noBoost bool
+}
+
+// NewTab opens the link in a new tab with the referrer/opener severed
+// (target="_blank" rel="noopener noreferrer").
+func NewTab() LinkOption { return func(a *linkAttrs) { a.newTab = true } }
+
+// NoBoost opts the link out of htmx boosting (hx-boost="false"), for links
+// that must be a full navigation.
+func NoBoost() LinkOption { return func(a *linkAttrs) { a.noBoost = true } }
+
+// Link is an anchor slot. href is attribute-escaped and must be an http(s) or
+// site-relative URL — anything else (javascript:, data:, a scheme-relative
+// host) renders as "#" so a bad value from configuration or a future caller
+// can never become a script-bearing link.
+func Link(href string, opts ...LinkOption) Slot {
+	var a linkAttrs
+	for _, o := range opts {
+		o(&a)
+	}
+	open := `<a href="` + htmltemplate.HTMLEscapeString(safeHref(href)) + `"`
+	if a.newTab {
+		open += ` target="_blank" rel="noopener noreferrer"`
+	}
+	if a.noBoost {
+		open += ` hx-boost="false"`
 	}
 	return func(inner htmltemplate.HTML) htmltemplate.HTML {
 		return htmltemplate.HTML(open + ">" + string(inner) + "</a>")
 	}
+}
+
+// safeHref admits absolute http(s) URLs and site-relative paths (a single
+// leading slash, or a bare relative path/fragment/query); everything else is
+// replaced with "#".
+func safeHref(href string) string {
+	h := strings.TrimSpace(href)
+	lower := strings.ToLower(h)
+	switch {
+	case strings.HasPrefix(lower, "https://"), strings.HasPrefix(lower, "http://"):
+		return h
+	case strings.HasPrefix(h, "//"):
+		return "#" // scheme-relative: a different host in disguise
+	case strings.HasPrefix(h, "/"), strings.HasPrefix(h, "#"), strings.HasPrefix(h, "?"):
+		return h
+	case h != "" && !strings.Contains(h, ":"):
+		return h // bare relative path
+	}
+	return "#"
 }
 
 // Strong is an emphasis slot.
