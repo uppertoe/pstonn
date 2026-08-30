@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -69,6 +71,31 @@ type OutboxItem struct {
 	Attempts     int
 	NotBefore    time.Time // earliest delivery; zero = send as soon as due (quiet-hours defer)
 	Reason       string    // "why you got this", rendered in the mail footer
+	// Critical marks safety-tier mail: the drain sends it past a self-service
+	// unsubscribe (a bounce or complaint still blocks), so a message that was
+	// merely HELD for quiet hours keeps the tier it would have had inline.
+	Critical bool
+}
+
+// dedupKeyPrefix tags a hashed dedup key, so the migration that hashes keys
+// written by older builds can tell the two apart and stay idempotent.
+const dedupKeyPrefix = "h1:"
+
+// HashDedupKey is what the outbox stores in place of the caller's key. Callers
+// build keys from the recipient, the permit label (usually a street address) and
+// the plate, and a delivered row keeps its key for a day after its content is
+// stripped — so the key was quietly the last copy of everything the stripping
+// removed. Dedup only ever compares keys for equality, which a digest preserves
+// exactly; the plaintext is never needed again.
+func HashDedupKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if strings.HasPrefix(key, dedupKeyPrefix) {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return dedupKeyPrefix + hex.EncodeToString(sum[:])
 }
 
 // outboxDedupWindow bounds how long a delivered (sent) row suppresses a
@@ -96,21 +123,22 @@ func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 	// outcome) each pass the check and double-insert — defeating the dedup this
 	// exists for.
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at, reason)
-SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10, ?12
+INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at, reason, critical)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10, ?12, ?13
 WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
   WHERE dedup_key = ?2
     AND (status = 'pending' OR (status = 'sent' AND sent_at > ?11)))`,
-		it.Account, it.DedupKey, strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
+		it.Account, HashDedupKey(it.DedupKey), strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
 		it.Subject, it.Body, nextAttempt, now,
-		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339), it.Reason)
+		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339), it.Reason, boolInt(it.Critical))
 	return err
 }
 
 // DueOutbox returns pending notifications whose next attempt is due, oldest first.
+// DedupKey comes back in its stored (hashed) form.
 func (s *Store) DueOutbox(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts, reason
+SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts, reason, critical
 FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 		now.UTC().Format(time.RFC3339), limit)
 	if err != nil {
@@ -121,13 +149,15 @@ FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 	for rows.Next() {
 		var it OutboxItem
 		var recips string
+		var critical int
 		if err := rows.Scan(&it.ID, &it.DedupKey, &recips, &it.NtfyTopic, &it.NtfyPriority, &it.NtfyTag,
-			&it.Subject, &it.Body, &it.Attempts, &it.Reason); err != nil {
+			&it.Subject, &it.Body, &it.Attempts, &it.Reason, &critical); err != nil {
 			return nil, err
 		}
 		if recips != "" {
 			it.Recipients = strings.Split(recips, "\n")
 		}
+		it.Critical = critical == 1
 		out = append(out, it)
 	}
 	return out, rows.Err()
@@ -138,7 +168,8 @@ func (s *Store) MarkOutboxSent(ctx context.Context, id int64) error {
 	// Strip the content as well as marking it sent. A delivered row is only ever
 	// consulted for dedup (dedup_key + status + sent_at, a 15-minute window), so
 	// keeping the composed message — plates, the permit label, guest addresses —
-	// for days afterwards is pure surplus personal data.
+	// for days afterwards is pure surplus personal data. The key itself is a
+	// digest (HashDedupKey), so what remains identifies nobody.
 	_, err := s.db.ExecContext(ctx, `
 UPDATE outbox SET status = 'sent', sent_at = ?, last_error = '',
   recipients = '', subject = '', body = '', ntfy_topic = '', reason = ''
@@ -154,15 +185,23 @@ func (s *Store) RescheduleOutbox(ctx context.Context, id int64, attempts int, ne
 	return err
 }
 
-// MarkOutboxDead retires a notification that has exhausted its retries.
+// MarkOutboxDead retires a notification that has exhausted its retries. It
+// strips the row exactly as MarkOutboxSent does: a dead row is never retried
+// and never dedups (see outboxDedupWindow), so its recipients and message are
+// surplus from this moment. What stays is the account (for deletion), the
+// hashed key and lastErr — which the caller has already redacted — so the
+// operator alert's row id still leads somewhere for a day.
 func (s *Store) MarkOutboxDead(ctx context.Context, id int64, lastErr string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE outbox SET status = 'dead', attempts = attempts + 1, last_error = ? WHERE id = ?`, lastErr, id)
+	_, err := s.db.ExecContext(ctx, `
+UPDATE outbox SET status = 'dead', attempts = attempts + 1, last_error = ?,
+  recipients = '', subject = '', body = '', ntfy_topic = '', reason = ''
+WHERE id = ?`, lastErr, id)
 	return err
 }
 
-// PurgeSentOutbox deletes delivered AND dead rows older than cutoff, so recipient/
-// content PII isn't kept indefinitely (dead rows were previously retained forever).
+// PurgeSentOutbox deletes delivered AND dead rows older than cutoff. Both kinds
+// are already stripped to account + hashed key + last error when they settle;
+// this removes even that bookkeeping once the dedup window is long past.
 // Returns rows removed.
 func (s *Store) PurgeSentOutbox(ctx context.Context, cutoff time.Time) (int64, error) {
 	c := cutoff.UTC().Format(time.RFC3339)

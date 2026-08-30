@@ -46,6 +46,19 @@ const (
 type capture struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
+	// keys maps a stored (hashed) dedup key back to the plaintext the service
+	// composed, recorded by the enqueue hook: the golden locks the composition,
+	// which the digest the outbox now stores cannot show.
+	keys map[string]string
+}
+
+func (c *capture) enqueued(it store.OutboxItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.keys == nil {
+		c.keys = map[string]string{}
+	}
+	c.keys[store.HashDedupKey(it.DedupKey)] = it.DedupKey
 }
 
 func (c *capture) email(to, subject, body string, o mailer.Options) error {
@@ -77,8 +90,18 @@ func (c *capture) ntfy(w http.ResponseWriter, r *http.Request) {
 func (c *capture) outbox(it store.OutboxItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	fmt.Fprintf(&c.buf, "=== OUTBOX account=%s recipients=%s ntfy=%s/%s/%s reason=%s\nDedup: %s\nSubject: %s\n\n%s\n\n",
-		it.Account, strings.Join(it.Recipients, ","), it.NtfyTopic, it.NtfyPriority, it.NtfyTag, it.Reason, it.DedupKey, it.Subject,
+	key := it.DedupKey
+	if plain, ok := c.keys[key]; ok {
+		key = plain
+	}
+	// The tier is only printed when set, so the routine goldens read as before
+	// and a critical row stands out.
+	tier := ""
+	if it.Critical {
+		tier = " critical=true"
+	}
+	fmt.Fprintf(&c.buf, "=== OUTBOX account=%s recipients=%s ntfy=%s/%s/%s reason=%s%s\nDedup: %s\nSubject: %s\n\n%s\n\n",
+		it.Account, strings.Join(it.Recipients, ","), it.NtfyTopic, it.NtfyPriority, it.NtfyTag, it.Reason, tier, key, it.Subject,
 		strings.ReplaceAll(it.Body, "\r\n", "\n"))
 }
 
@@ -113,6 +136,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	svc := New(st, m, ntfy.URL, "", appURL, "admin@stonn.org", "pstonn-admin", loc, []byte("golden-unsub-key"), []byte("golden-decide-key"))
+	svc.enqueueHook = c.enqueued
 
 	// Household: an owner with email + push, and a member with email only.
 	if err := st.AddMember(ctx, owner, member); err != nil {

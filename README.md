@@ -104,7 +104,11 @@ a missed tick heals on the next one.
 **Notifications** are per-user (email via any SMTP provider, push via a private
 ntfy topic) with quiet hours, durable retry through an outbox, and operator
 escalation when a user can't be reached. A lapsed council session proactively
-prompts a re-link rather than failing silently.
+prompts a re-link rather than failing silently. The outbox is **at-least-once**:
+a send and the write that records it are two steps, so a crash or a refused
+write between them can deliver the same message twice (a duplicate confirmation,
+never a missed one). The drain parks a row whose bookkeeping write fails rather
+than re-sending it every tick, which bounds the duplicates to one per incident.
 
 **Undeliverable email** is learned, not ignored. A hard SMTP rejection (5xx) at
 send time is classified as permanent, so the outbox stops retrying it instead of
@@ -142,9 +146,10 @@ server-rendered `html/template` with htmx and Alpine.js.
 **Retention** is enforced in code, on the housekeeping pass: activity and change
 logs 90 days; a door-QR request 7 days from the scan, whatever its outcome (and
 its poll secret dropped once settled); a revoked guest link's recipient address
-30 days; sent notifications
-stripped of their content at send and purged after 24h; bounce/unsubscribe
-suppressions 2 years, complaints kept. Container logs need a size cap too — stock Docker keeps json-file logs forever,
+30 days; sent and undeliverable notifications stripped of their content (and
+their dedup key stored only as a digest) when they settle and purged after 24h;
+referral invitations 90 days; bounce/unsubscribe suppressions 2 years,
+complaints kept. Container logs need a size cap too — stock Docker keeps json-file logs forever,
 while a journald host usually caps them already; see the note in
 `deploy/docker-compose.yml`. Backup retention comes from the
 platform's restic runner (see `deploy/backup-service.env.example`); whatever it

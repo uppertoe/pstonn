@@ -25,7 +25,7 @@ func TestEnqueueApplyPerMemberPrefs(t *testing.T) {
 	}
 	defer st.Close()
 
-	const primary, secondary = "lily@example.com", "eamonn@example.com"
+	const primary, secondary = "lily@example.com", "member1@example.com"
 	if err := st.AddMember(ctx, primary, secondary); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestNotifyGuestRequestPerMemberFanout(t *testing.T) {
 	}
 	defer st.Close()
 
-	const primary, secondary = "lily@example.com", "eamonn@example.com"
+	const primary, secondary = "lily@example.com", "member1@example.com"
 	if err := st.AddMember(ctx, primary, secondary); err != nil {
 		t.Fatal(err)
 	}
