@@ -57,7 +57,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			tenantLabel = func(p model.Permit) string { return s.tenantOfPermit(ctx, p).Name }
 		}
 	}
-	regions := s.tenant.Regions(ctx, owner)
+	regions := s.tenant.Regions(ctx, owner, "")
 	var pvs []permitView
 	var expired []expiredPermitView
 	for _, p := range managed {
@@ -651,7 +651,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// A one-off plate carries its own registration state; a saved-vehicle booking
 	// takes the vehicle's. Only a code the tenant offers is kept ("" = home state).
 	plateState := strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
-	if plateState != "" && !s.tenant.RegionValid(r.Context(), owner, plateState) {
+	if plateState != "" && !s.tenant.RegionValid(r.Context(), owner, p.TenantID, plateState) {
 		plateState = ""
 	}
 	// Cap simultaneously-live bookings per permit, atomically (count+insert in one tx),

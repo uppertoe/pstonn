@@ -45,7 +45,6 @@
         "phone": "03 8290 1333"
       },
       "enabled": true,
-      "capacity": 0,
       "terms": {
         "portal": "ePermits",
         "portal_site": "ePermits site",
@@ -97,7 +96,6 @@
         "phone": "03 9490 4222"
       },
       "enabled": false,
-      "capacity": 0,
       "terms": {
         "portal": "ePermits",
         "portal_site": "ePermits site",

@@ -29,7 +29,7 @@ import (
 // server-side counterpart of scheduler.Tenant: the handlers never name the
 // concrete client, so a per-tenant driver (or a multiplexer over several) can be
 // substituted without touching them. *parking.Client satisfies it.
-// See docs/tenant-connections.md.
+// See docs/council-connections.md.
 type Tenant interface {
 	// Link performs the credential login for owner with one tenant (tenant) and
 	// stores the session; tenantID "" means the owner's current tenant.
@@ -46,12 +46,14 @@ type Tenant interface {
 	ForgetPermit(owner, tenantID, tenantPermitID string)
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error
 	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
-	// Regions are the registration jurisdictions the owner's tenant offers for a
-	// vehicle's state (empty = the provider has no such concept, so no chooser).
-	Regions(ctx context.Context, owner string) []provider.Region
-	// RegionValid reports whether a submitted state code is one the tenant offers
-	// ("" — the tenant home state — is always valid).
-	RegionValid(ctx context.Context, owner, code string) bool
+	// Regions are the registration jurisdictions a vehicle's state may be, for
+	// the chooser: the named tenant's (a permit-scoped page passes its permit's
+	// tenant), or with "" the union over every tenant served (the account-wide
+	// vehicles page). Empty = no such concept, so no chooser.
+	Regions(ctx context.Context, owner, tenantID string) []provider.Region
+	// RegionValid reports whether a submitted state code is one the named tenant
+	// offers ("" — the tenant home state — is always valid).
+	RegionValid(ctx context.Context, owner, tenantID, code string) bool
 	// Stats is the traffic / breaker snapshot shown on /status.
 	Stats() parking.Stats
 }

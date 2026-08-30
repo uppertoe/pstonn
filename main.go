@@ -123,7 +123,7 @@ func run() error {
 		log.Print("APP_OIDC_ISSUER not set: OIDC login disabled; relying on forward_auth headers or DEV_IDENTITY_EMAIL")
 	}
 
-	// The registry this process serves (docs/tenant-connections.md): one provider
+	// The registry this process serves (docs/council-connections.md): one provider
 	// and one governed client per enabled tenant, behind a mux that routes each
 	// account's calls to its own tenant. COUNCIL_* still overrides Stonnington's
 	// endpoints; COUNCIL_SANDBOX narrows the registry to one in-memory fake.
@@ -135,13 +135,19 @@ func run() error {
 	clients := map[string]*parking.Client{}
 	// One concurrency cap across every tenant: they all leave through one address.
 	shared := parking.NewConcurrencyLimit(cfg.Council.GovConcurrency)
-	for _, tenant := range registry.Enabled() {
+	// Every tenant in the registry is built, enabled or not: a descriptor that
+	// cannot be built (unknown connector, missing endpoints, an incoherent
+	// provider) is a startup error today, not a surprise the day it is enabled.
+	// Only the enabled ones get a client and are served.
+	for _, tenant := range registry.All() {
 		transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council)).Share(shared)
 		prov, err := connectors.Build(tenant, transport)
 		if err != nil {
-			log.Fatalf("fatal: %v", err)
+			return err
 		}
-		clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)
+		if tenant.Enabled {
+			clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)
+		}
 	}
 	tenant := tenantpkg.NewMux(st, clients)
 	if cfg.Council.Sandbox {
@@ -205,12 +211,17 @@ func run() error {
 	for _, c := range clients {
 		c.OnSessionExpired = sched.NoteSessionExpired
 	}
-	notifier.TenantFor = func(ctx context.Context, owner string) *tenantpkg.Tenant {
-		id, err := st.TenantIDFor(ctx, owner)
-		if err != nil {
-			return nil
+	notifier.TenantFor = func(ctx context.Context, owner, tenantID string) *tenantpkg.Tenant {
+		// A permit's or session's own tenant when the message names one; the
+		// account's current tenant only for account-level mail.
+		if tenantID == "" {
+			id, err := st.TenantIDFor(ctx, owner)
+			if err != nil {
+				return nil
+			}
+			tenantID = id
 		}
-		c, _ := registry.ByID(id)
+		c, _ := registry.ByID(tenantID)
 		return c
 	}
 	// State the rollover guarantee at startup rather than leaving it implicit: with

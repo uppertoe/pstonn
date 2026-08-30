@@ -1,14 +1,14 @@
-// Package tenant describes a tenant tenant: which portal it runs, how p.stonn
-// talks to it, which of its permit types may be scheduled, and the names and links
-// its residents see. It is the seam between the tenant-agnostic app (schedules,
-// vehicles, guests, notifications) and the one tenant the app is currently wired
-// to, so that a second tenant is a descriptor plus a capture rather than a rewrite.
-// See docs/tenant-connections.md.
+// Package tenant describes a tenant (a council): which portal it runs, how
+// p.stonn talks to it, the shape of its permit scheme, which of its permit types
+// may be scheduled, and the names and links its residents see. It is the seam
+// between the tenant-agnostic app (schedules, vehicles, guests, notifications)
+// and the councils it serves, so that a new tenant is a registry entry plus — if
+// its portal is new — a connector, never a rewrite. See docs/council-connections.md.
 //
-// The protocol driver itself (login, session renewal, permit reads and writes)
-// lives in internal/parking; a descriptor names the connector it needs and the
-// parameters to build it with. Phase 0 (now) has exactly one descriptor —
-// Stonnington — built from the existing COUNCIL_* configuration.
+// A descriptor names its Connector (the wire protocol; internal/connectors maps
+// the name to a provider.Provider) and its Model (the scheme's shape; decides the
+// scheduler and UI). The registry (tenants.json, or TENANTS_PATH) validates every
+// entry on load; the Mux routes each account's calls to the client for its tenant.
 package tenant
 
 import (
@@ -60,7 +60,9 @@ func (m Model) Known() bool { return knownModels[m] }
 // Plate reports whether the model schedules by writing a plate onto a permit — the
 // SetVehicle/ClearVehicle contract the reconcile scheduler drives. True for swap
 // and replate; false for coupon (a date-based planner, not yet built) and paper.
-// The plate-swap path guards on this so a coupon tenant can never reach SetVehicle.
+// It is enforced twice: the registry refuses to ENABLE a non-plate tenant, and
+// connectors.Build refuses to BUILD one — so no client, and therefore no
+// SetVehicle, ever exists for a coupon or paper tenant.
 func (m Model) Plate() bool { return m == ModelSwap || m == ModelReplate }
 
 // Tenant is a tenant descriptor. Fields are plain data so a descriptor can later
@@ -93,9 +95,9 @@ type Tenant struct {
 	// Terms is the tenant's own vocabulary, laid over the catalog defaults (see
 	// internal/i18n): what it calls its portal, its permits, its parking brand.
 	Terms map[string]string `json:"terms"`
-	// Enabled gates sign-up; Capacity (0 = unlimited) caps linked accounts.
-	Enabled  bool `json:"enabled"`
-	Capacity int  `json:"capacity"`
+	// Enabled gates sign-up and whether this process builds a client for the
+	// tenant. (There is no per-tenant capacity: MAX_ACCOUNTS caps the deployment.)
+	Enabled bool `json:"enabled"`
 }
 
 // Endpoints are the connector's parameters for an Orikan ePermits tenant.
@@ -119,7 +121,7 @@ type Links struct {
 
 // Copy is tenant-specific prose and facts. It is deliberately small: anything
 // that reads as a sentence belongs in the message catalog (see the i18n section of
-// docs/tenant-connections.md), keyed by tenant where it differs.
+// docs/council-connections.md), keyed by tenant where it differs.
 type Copy struct {
 	Suburbs []string `json:"suburbs"` // the suburbs the tenant's permit scheme covers, for the landing page
 	Phone   string   `json:"phone"`   // the tenant's public switchboard, as printed on its site
@@ -221,7 +223,7 @@ func (p PermitPolicy) compiled() PermitPolicy {
 // Default is the embedded registry's default tenant (a copy): the fallback
 // wherever a page or message is rendered with no resolvable tenant.
 func Default() *Tenant {
-	reg, err := LoadEmbedded()
+	reg, err := embedded()
 	if err != nil {
 		panic(err) // the embedded registry is validated by tests
 	}
@@ -242,7 +244,7 @@ func Default() *Tenant {
 // Stonnington is the City of Stonnington descriptor from the embedded registry
 // (a copy; the registry's own entry is not shared).
 func Stonnington() *Tenant {
-	reg, err := LoadEmbedded()
+	reg, err := embedded()
 	if err != nil {
 		panic(err) // the embedded registry is validated by tests
 	}

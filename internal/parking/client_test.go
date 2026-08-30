@@ -187,7 +187,7 @@ func linkOwner(t *testing.T, c *Client, st *store.Store, box *secretbox.Box, own
 		t.Fatal(err)
 	}
 	genCS, _ := st.GetTenantSession(ctx, owner)
-	if err := st.UpdateTenantToken(ctx, owner, sealedCookie, sealedAT, time.Now().Add(time.Hour), genCS.Generation); err != nil {
+	if err := st.UpdateTenantToken(ctx, owner, genCS.TenantID, sealedCookie, sealedAT, time.Now().Add(time.Hour), genCS.Generation); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -45,6 +45,9 @@ type Provider struct {
 	ListErr  error
 	Extra    []provider.Permit
 	Partial  bool
+	// Regions, when set, replaces the canned Australian state set — so a test can
+	// give two fake tenants different jurisdictions and prove routing by tenant.
+	Regions []provider.Region
 }
 
 // New builds a fake portal seeded with a plate on each canned permit, like a real
@@ -66,7 +69,11 @@ var fakeRegions = []provider.Region{
 }
 
 func (f *Provider) Capabilities() provider.Capabilities {
-	return provider.Capabilities{CanClearVehicle: true, SupportsRefresh: true, NeedsKeepWarm: false, SupportsExpiry: true, LoginKind: "password", Regions: fakeRegions}
+	regions := fakeRegions
+	if f.Regions != nil {
+		regions = f.Regions
+	}
+	return provider.Capabilities{CanClearVehicle: true, SupportsRefresh: true, NeedsKeepWarm: false, SupportsExpiry: true, LoginKind: "password", Regions: regions}
 }
 
 type session struct {

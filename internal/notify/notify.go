@@ -33,12 +33,15 @@ type mailTenant struct {
 	Terms       map[string]string
 }
 
-// tenantOf resolves the tenant for an account (owner), or the default tenant
-// when the resolver is unset or the account is unknown.
-func (s *Service) tenantOf(ctx context.Context, owner string) mailTenant {
+// tenantOf resolves the tenant a message is about. tenantID names it exactly when
+// the message concerns one permit or one session (the scheduler and the guest
+// flows always have it); "" means an account-level message (invite, nudge,
+// referral), which takes the owner's current tenant. Falls back to the default
+// tenant when the resolver is unset or the id is unknown.
+func (s *Service) tenantOf(ctx context.Context, owner, tenantID string) mailTenant {
 	var c *tenant.Tenant
 	if s.TenantFor != nil {
-		c = s.TenantFor(ctx, owner)
+		c = s.TenantFor(ctx, owner, tenantID)
 	}
 	if c == nil {
 		c = tenant.Default()
@@ -63,9 +66,10 @@ func say(c mailTenant, key string, extra map[string]any) string {
 
 // Service dispatches notifications according to each user's stored preferences.
 type Service struct {
-	// TenantFor resolves an account's tenant, for wording and links; nil means
-	// the default tenant. Set by main.
-	TenantFor  func(ctx context.Context, owner string) *tenant.Tenant
+	// TenantFor resolves the tenant a message is about, for wording and links:
+	// tenantID when given (a permit's or session's tenant), else the owner's
+	// current tenant. nil means the default tenant. Set by main.
+	TenantFor  func(ctx context.Context, owner, tenantID string) *tenant.Tenant
 	store      *store.Store
 	mail       *mailer.Mailer
 	ntfyBase   string
@@ -254,12 +258,13 @@ func (s *Service) sendEmailCritical(ctx context.Context, to, subject, body, reas
 }
 
 func (s *Service) sendEmailWith(ctx context.Context, to, subject, body, reason string, critical bool) error {
-	return s.sendEmailAs(ctx, to, to, subject, body, reason, critical)
+	return s.sendEmailAs(ctx, to, "", to, subject, body, reason, critical)
 }
 
 // sendEmailAs is sendEmailWith for a recipient whose tenant is that of
-// tenantOwner (a guest or invitee has no account; the owner who reached them does).
-func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, to, subject, body, reason string, critical bool) error {
+// tenantOwner (a guest or invitee has no account; the owner who reached them
+// does), narrowed to tenantID when the mail concerns one permit.
+func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, subject, body, reason string, critical bool) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -274,7 +279,7 @@ func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, to, subject, bod
 			log.Printf("notify: critical notice to unsubscribed %s goes out anyway (unsubscribe mutes routine mail, not safety alerts)", RedactEmail(to))
 		}
 	}
-	c := s.tenantOf(ctx, tenantOwner)
+	c := s.tenantOf(ctx, tenantOwner, tenantID)
 	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to), Footer: say(c, "mail.footer_affiliation", nil)}
 	if reason != "" {
 		opts.Provenance = say(c, "mail.provenance", map[string]any{"To": to, "Reason": reason})
@@ -322,7 +327,7 @@ func (s *Service) NotifyAdmin(ctx context.Context, subject, body string) error {
 // their permit until they get a fine. Always emails the verified address (if
 // email is configured), plus push if enabled. Returns the number of channels
 // that accepted the message.
-func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
+func (s *Service) NotifyRelinkRequired(ctx context.Context, owner, tenantID string) int {
 	subject := "Action needed: reconnect your p.stonn council account"
 	body := "Your council connection has expired, so p.stonn has stopped updating your visitor permit.\n\n" +
 		"Please open the app and re-link your council account so your schedule keeps running. " +
@@ -330,7 +335,7 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 	if s.appURL != "" {
 		body += "\n\nRe-link: " + s.appURL
 	}
-	body += "\nCouncil portal: " + s.tenantOf(ctx, owner).Links.Portal
+	body += "\nCouncil portal: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
 	return s.broadcastAccount(ctx, owner, "relink", subject, body)
 }
 
@@ -341,7 +346,7 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner string) int {
 // through the same broken login flow, so the honest instruction is to manage
 // the permit at the tenant directly until service resumes. Returns the number
 // of channels that accepted the message.
-func (s *Service) NotifyReconnectStalled(ctx context.Context, owner string) int {
+func (s *Service) NotifyReconnectStalled(ctx context.Context, owner, tenantID string) int {
 	subject := "p.stonn can't reach the council — your permit schedule is paused"
 	body := "p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. " +
 		"Until it can, your visitor permit schedule is NOT being applied.\n\n" +
@@ -349,7 +354,7 @@ func (s *Service) NotifyReconnectStalled(ctx context.Context, owner string) int 
 		"change the vehicle yourself on the council website now, or that car is not covered and can be fined.\n\n" +
 		"p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. " +
 		"If this persists, it will email you again if re-linking becomes necessary."
-	body += "\n\nCouncil portal: " + s.tenantOf(ctx, owner).Links.Portal
+	body += "\n\nCouncil portal: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
 	if s.appURL != "" {
 		body += "\nOpen p.stonn: " + s.appURL
 	}
@@ -392,7 +397,7 @@ func (s *Service) broadcastAccount(ctx context.Context, owner, tag, subject, bod
 // date, so a lapsed permit doesn't quietly stop being valid. Respects each
 // member's channel preferences (routine reminder, not an emergency). Returns the
 // number of channels that accepted the message.
-func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel string, expiry time.Time) int {
+func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permitLabel string, expiry time.Time) int {
 	date := expiry.Format("2 Jan 2006")
 	subject := fmt.Sprintf("Your %s expires on %s", permitLabel, date)
 	body := fmt.Sprintf("Your %s is due to expire on %s.\n\n", permitLabel, date) +
@@ -401,7 +406,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, permitLabel str
 	if s.appURL != "" {
 		body += "\n\nOpen p.stonn: " + s.appURL
 	}
-	body += "\nRenew with the council: " + s.tenantOf(ctx, owner).Links.Portal
+	body += "\nRenew with the council: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
 	dels, err := s.accountDeliveries(ctx, owner)
 	if err != nil {
 		return 0
@@ -480,7 +485,7 @@ func (s *Service) NtfyBase() string { return s.ntfyBase }
 // SendRenewalReminder is the scheduler's re-authorise reminder (email only).
 // It builds its own body in the mailer, so the suppression check is inline here
 // rather than via sendEmail.
-func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline time.Time, confirmURL string) error {
+func (s *Service) SendRenewalReminder(ctx context.Context, to, tenantID string, deadline time.Time, confirmURL string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -493,7 +498,7 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 	}
 	// Same envelope obligations as every other person-facing mail: an unsubscribe
 	// and a "why you got this".
-	c := s.tenantOf(ctx, to)
+	c := s.tenantOf(ctx, to, tenantID)
 	subject := say(c, "mail.renewal_subject", nil)
 	body := say(c, "mail.renewal_body", map[string]any{"When": deadline.Format("Monday 2 January 2006"), "URL": confirmURL})
 	err := s.mail.SendOpts(to, subject, body, mailer.Options{
@@ -515,6 +520,7 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to string, deadline t
 // on the permit), and what to do. Transient softens the wording (we keep trying).
 type ApplyOutcome struct {
 	Owner       string
+	TenantID    string // the permit's tenant: the council and portal the message points at
 	PermitLabel string
 	Reg         string // the vehicle we tried to set
 	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
@@ -583,7 +589,7 @@ func (s *Service) firstApplyLine(ctx context.Context, o ApplyOutcome) string {
 	if n, err := s.store.CountSuccessfulApplies(ctx, o.Owner); err != nil || n != 1 {
 		return ""
 	}
-	return "\n\n" + say(s.tenantOf(ctx, o.Owner), "mail.referral_line", nil)
+	return "\n\n" + say(s.tenantOf(ctx, o.Owner, o.TenantID), "mail.referral_line", nil)
 }
 
 // composeApply builds the subject/body/priority/tags for an apply notification,
@@ -707,7 +713,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	if err != nil {
 		return err
 	}
-	subject, body, priority, tags := composeApply(o, s.tenantOf(ctx, o.Owner).Links.Portal)
+	subject, body, priority, tags := composeApply(o, s.tenantOf(ctx, o.Owner, o.TenantID).Links.Portal)
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
@@ -751,7 +757,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if err != nil {
 		return 0, err
 	}
-	subject, body, priority, tags := composeApply(o, s.tenantOf(ctx, o.Owner).Links.Portal)
+	subject, body, priority, tags := composeApply(o, s.tenantOf(ctx, o.Owner, o.TenantID).Links.Portal)
 	emailBody := body
 	if s.appURL != "" {
 		emailBody += "\n\n" + s.appURL
@@ -897,7 +903,7 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	}
 	subject := "You have been given access to a p.stonn account"
 	lines := []string{
-		say(s.tenantOf(ctx, ownerEmail), "mail.invite_lead", map[string]any{"Owner": ownerEmail}),
+		say(s.tenantOf(ctx, ownerEmail, ""), "mail.invite_lead", map[string]any{"Owner": ownerEmail}),
 		"",
 		"Sign in with this email address — you will get a one-time code to confirm it is you — then tap Accept on the page you land on.",
 		"",
@@ -930,7 +936,7 @@ func (s *Service) SendOnboardNudge(ctx context.Context, to string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
-	subject, body := onboardNudgeMessage(to, s.appURL, s.tenantOf(ctx, to))
+	subject, body := onboardNudgeMessage(to, s.appURL, s.tenantOf(ctx, to, ""))
 	return s.sendEmail(ctx, to, subject, body, reasonOnboard)
 }
 
@@ -982,7 +988,7 @@ func onboardNudgeMessage(to, appURL string, c mailTenant) (subject, body string)
 // SendGuestLink emails a recipient their personal guest-pass link (email only,
 // no-op without SMTP). The link lets them set one of the account's cars on the
 // visitor permit without an account of their own.
-func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel, url string) error {
+func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, tenantID, permitLabel, url string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -993,7 +999,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 		// into a clickable link. It stays in the body because it is how the recipient
 		// knows WHICH permit this is ("Nanny", the flat number), which matters in a
 		// household with more than one.
-		say(s.tenantOf(ctx, ownerEmail), "mail.guest_lead", map[string]any{"Owner": ownerEmail, "Label": neutraliseLinks(permitLabel)}),
+		say(s.tenantOf(ctx, ownerEmail, tenantID), "mail.guest_lead", map[string]any{"Owner": ownerEmail, "Label": neutraliseLinks(permitLabel)}),
 		"",
 		"When you arrive, open the link and choose your car. It stays on the permit until the end of the day.",
 		"",
@@ -1003,9 +1009,9 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, permitLabel
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
 		"",
-		say(s.tenantOf(ctx, ownerEmail), "mail.guest_promo", nil),
+		say(s.tenantOf(ctx, ownerEmail, tenantID), "mail.guest_promo", nil),
 	}
-	return s.sendEmailAs(ctx, ownerEmail, to, subject, strings.Join(lines, "\n"), reasonGuest, false)
+	return s.sendEmailAs(ctx, ownerEmail, tenantID, to, subject, strings.Join(lines, "\n"), reasonGuest, false)
 }
 
 // NotifyDriverDisplaced warns whoever is responsible for a displaced car (the
@@ -1586,7 +1592,7 @@ func (s *Service) SendFortnightNudge(ctx context.Context, to string) error {
 	body := strings.Join([]string{
 		"Hi — you've had p.stonn looking after your visitor permit for a couple of weeks now.",
 		"",
-		say(s.tenantOf(ctx, to), "mail.fortnight_line", nil),
+		say(s.tenantOf(ctx, to, ""), "mail.fortnight_line", nil),
 		"",
 		"Send them an invite: " + base + "/share",
 		"Or print a card with a QR code they can scan to get started: " + base + "/share#card",
@@ -1603,9 +1609,9 @@ func (s *Service) SendReferralInvite(ctx context.Context, to, sender string) err
 	}
 	subject := sender + " thought you might like p.stonn"
 	body := strings.Join([]string{
-		say(s.tenantOf(ctx, sender), "mail.referral_lead", map[string]any{"Sender": sender}),
+		say(s.tenantOf(ctx, sender, ""), "mail.referral_lead", map[string]any{"Sender": sender}),
 		"",
-		say(s.tenantOf(ctx, sender), "mail.referral_body", nil),
+		say(s.tenantOf(ctx, sender, ""), "mail.referral_body", nil),
 		"",
 		"Have a look: https://p.stonn.org",
 		"",

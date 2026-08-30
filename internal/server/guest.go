@@ -552,7 +552,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 	// permit owner's tenant (empty when the provider has no such concept, or — in
 	// tests — when no tenant is wired).
 	if gc.Grant.AllowPlate && s.tenant != nil {
-		view.Regions = s.tenant.Regions(ctx, permit.Owner)
+		view.Regions = s.tenant.Regions(ctx, permit.Owner, permit.TenantID)
 	}
 	// The label is the owner's own free text (or, failing that, the tenant permit
 	// id) and it headlines the page. On a printed door QR — left on a wall for
@@ -755,7 +755,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		// The typed plate's registration state, validated against the owner's tenant
 		// ("" — the tenant home state — when absent, unknown, or state-less provider).
 		regState = strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
-		if regState != "" && !s.tenant.RegionValid(r.Context(), permit.Owner, regState) {
+		if regState != "" && !s.tenant.RegionValid(r.Context(), permit.Owner, permit.TenantID, regState) {
 			regState = ""
 		}
 		createdBy = gc.Recipient
@@ -1088,7 +1088,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 	// path has no reconcile-loop retry behind it, so a fire-and-forget send could
 	// silently drop the "a guest put their car on your permit" notice.
 	outcome := notify.ApplyOutcome{
-		Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
+		Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
 		DisplacedReg: d.Reg, DisplacedTold: told,
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {
@@ -1468,7 +1468,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permit, _ := s.store.GetPermit(r.Context(), permitID)
-	sent := s.emailLinks(r.Context(), owner, permitLabel(permit), links)
+	sent := s.emailLinks(r.Context(), owner, permit.TenantID, permitLabel(permit), links)
 
 	base, ok := s.appShell(w, r, "guests")
 	if !ok {
@@ -1580,7 +1580,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 	s.logChange(r.Context(), owner, user, store.ActionGuestResend, recipient, "")
 	permit, _ := s.store.GetPermit(r.Context(), permitID)
 	links := []guestLinkView{{Email: recipient, URL: s.guestLink(raw)}}
-	if s.emailLinks(r.Context(), owner, permitLabel(permit), links) == 0 {
+	if s.emailLinks(r.Context(), owner, permit.TenantID, permitLabel(permit), links) == 0 {
 		// The send failed at runtime (SMTP up-check passed, delivery didn't). The
 		// old token is already superseded, so claiming success would leave the
 		// recipient with a dead link and nothing delivered. Show the fresh link
@@ -1700,7 +1700,14 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 				plabel = g.PermitLabel
 			}
 		}
-		sent := s.emailLinks(r.Context(), owner, plabel, newLinks)
+		// The mail names the permit's own council; the grant knows its permit.
+		tenantID := ""
+		if pid, err := s.store.GuestGrantPermit(r.Context(), owner, id); err == nil {
+			if p, err := s.store.GetPermit(r.Context(), pid); err == nil {
+				tenantID = p.TenantID
+			}
+		}
+		sent := s.emailLinks(r.Context(), owner, tenantID, plabel, newLinks)
 		base.NewGuestLinks = newLinks
 		switch {
 		case sent == len(newLinks):
@@ -1767,14 +1774,14 @@ func (s *Server) mintLinks(emails []string) ([]store.GuestRecipient, []guestLink
 // permit — so an account must not be able to mail-bomb a stranger (per-recipient)
 // or burn the SMTP reputation everyone shares (per-owner). A throttled link is
 // not lost: the caller always shows it on screen to copy.
-func (s *Server) emailLinks(ctx context.Context, owner, permitLabel string, links []guestLinkView) int {
+func (s *Server) emailLinks(ctx context.Context, owner, tenantID, permitLabel string, links []guestLinkView) int {
 	sent := 0
 	for _, l := range links {
 		if !s.guestLinkOut.allow("o:"+owner) || !s.guestLinkTo.allow("t:"+l.Email) {
 			log.Printf("guest link email to %s for %s throttled", notify.RedactEmail(l.Email), notify.RedactEmail(owner))
 			continue
 		}
-		if err := s.notify.SendGuestLink(ctx, l.Email, owner, permitLabel, l.URL); err == nil {
+		if err := s.notify.SendGuestLink(ctx, l.Email, owner, tenantID, permitLabel, l.URL); err == nil {
 			sent++
 		} else {
 			log.Printf("guest link email to %s for %s: %v", notify.RedactEmail(l.Email), notify.RedactEmail(owner), err)
@@ -2691,7 +2698,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 		// out like every other plate change (the guest-link path does the same).
 		d, told := s.displacedDriver(bg, permit, prev, req.Plate, user)
 		outcome := notify.ApplyOutcome{
-			Owner: permit.Owner, PermitLabel: permitLabel(permit), Reg: req.Plate, By: user, Source: "doorqr", OK: true,
+			Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: req.Plate, By: user, Source: "doorqr", OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: told,
 		}
 		if err := s.notify.EnqueueApply(bg, outcome); err != nil {

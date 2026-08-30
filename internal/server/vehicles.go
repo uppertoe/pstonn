@@ -30,7 +30,7 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base.Vehicles, _, _, _ = vehicleViews(vehicles)
-	base.Regions = s.tenant.Regions(r.Context(), base.Owner)
+	base.Regions = s.tenant.Regions(r.Context(), base.Owner, "")
 	if r.URL.Query().Get("saved") == "1" {
 		// Saving a driver email otherwise changes nothing visible on the page.
 		base.Flash = "Driver email saved."
@@ -75,7 +75,7 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	// absent, empty, or unrecognised value (a stale tab, a provider with no region
 	// concept) falls back to "" = the tenant's home state, the pre-feature default.
 	state := strings.ToUpper(strings.TrimSpace(r.FormValue("state")))
-	if state != "" && !s.tenant.RegionValid(r.Context(), owner, state) {
+	if state != "" && !s.tenant.RegionValid(r.Context(), owner, "", state) {
 		state = ""
 	}
 	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label, state); err != nil {

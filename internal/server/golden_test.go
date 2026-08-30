@@ -22,7 +22,7 @@ import (
 )
 
 // Golden renders: the shape lock for the multi-tenant decoupling
-// (docs/tenant-connections.md). Every page state, every htmx fragment and every
+// (docs/council-connections.md). Every page state, every htmx fragment and every
 // public HTTP response is rendered from fixed fixtures at a pinned clock and
 // compared byte-for-byte with the file under testdata/golden/. A refactor that
 // changes ANY output fails here with a diff, so "no behaviour change" is checked,

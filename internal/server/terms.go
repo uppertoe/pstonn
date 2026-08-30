@@ -143,7 +143,7 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 
 	_, err := s.store.GetTenantSession(ctx, user)
 	wasLinked := err == nil
-	if derr := s.store.DeleteTenantSession(ctx, user); derr != nil {
+	if derr := s.store.DeleteAllTenantSessions(ctx, user); derr != nil {
 		s.serverError(w, derr)
 		return
 	}

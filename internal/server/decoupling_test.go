@@ -13,7 +13,7 @@ import (
 // The decoupling guard: a tenant's name, portal host or phone number may appear
 // only where a tenant is DESCRIBED — the registry — never in code, templates or
 // catalogs, which must speak through the Tenant view. Without this the
-// coupling creeps back one string at a time (docs/tenant-connections.md).
+// coupling creeps back one string at a time (docs/council-connections.md).
 func TestNoTenantLiteralsOutsideTheRegistry(t *testing.T) {
 	root := filepath.Join("..", "..")
 	literal := regexp.MustCompile(`(?i)stonnington|8290 1333`)

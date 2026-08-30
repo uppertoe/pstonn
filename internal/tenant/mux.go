@@ -151,25 +151,48 @@ func (m *Mux) ForgetPermit(owner, tenantID, tenantPermitID string) {
 	}
 }
 
-// Regions returns the registration jurisdictions the owner's tenant offers for a
-// vehicle's state, ordered with the tenant's own state first. Empty means the
-// provider has no such concept (the UI then shows no chooser). Falls back to
-// nothing when the owner's tenant cannot be resolved yet (e.g. before linking).
-func (m *Mux) Regions(ctx context.Context, owner string) []provider.Region {
-	c, err := m.For(ctx, owner)
-	if err != nil || c == nil {
-		return nil
+// Regions returns the registration jurisdictions a vehicle may carry, for the
+// UI's state chooser. tenantID names the tenant a permit belongs to — every
+// permit-scoped page passes its permit's tenant, never the account's current
+// selection, because the two differ for an account linked in two areas. "" is the
+// account-wide case (the vehicles page, where a car is not yet tied to a permit):
+// the union over every tenant this process serves, the owner's current tenant
+// first, deduplicated by code. Empty means no served provider has the concept
+// (the UI then shows no chooser).
+func (m *Mux) Regions(ctx context.Context, owner, tenantID string) []provider.Region {
+	if tenantID != "" {
+		c, ok := m.clients[tenantID]
+		if !ok {
+			return nil
+		}
+		return c.Capabilities().Regions
 	}
-	return c.Capabilities().Regions
+	var out []provider.Region
+	seen := map[string]bool{}
+	add := func(c *parking.Client) {
+		for _, r := range c.Capabilities().Regions {
+			if !seen[r.Code] {
+				seen[r.Code] = true
+				out = append(out, r)
+			}
+		}
+	}
+	if c, err := m.For(ctx, owner); err == nil && c != nil {
+		add(c)
+	}
+	for _, id := range m.ids {
+		add(m.clients[id])
+	}
+	return out
 }
 
-// RegionValid reports whether code is one the owner's tenant offers. "" (meaning
-// the tenant's home state) is always valid.
-func (m *Mux) RegionValid(ctx context.Context, owner, code string) bool {
+// RegionValid reports whether code is one the named tenant offers ("" tenant: any
+// served tenant). "" code (the tenant's home state) is always valid.
+func (m *Mux) RegionValid(ctx context.Context, owner, tenantID, code string) bool {
 	if code == "" {
 		return true
 	}
-	for _, r := range m.Regions(ctx, owner) {
+	for _, r := range m.Regions(ctx, owner, tenantID) {
 		if r.Code == code {
 			return true
 		}

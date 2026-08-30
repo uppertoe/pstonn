@@ -33,7 +33,7 @@ func TestBuildRoutesEveryConnector(t *testing.T) {
 		{fake.ID, tenant.Endpoints{}, fake.ID},
 	}
 	for _, c := range cases {
-		p, err := Build(&tenant.Tenant{ID: "t", Connector: c.connector, Endpoints: c.endpoints}, nil)
+		p, err := Build(&tenant.Tenant{ID: "t", Connector: c.connector, Model: tenant.ModelSwap, Endpoints: c.endpoints}, nil)
 		if err != nil {
 			t.Fatalf("%s: Build error: %v", c.connector, err)
 		}
@@ -54,7 +54,7 @@ func TestBuildRoutesEveryConnector(t *testing.T) {
 // uncaptured op as ErrNotCaptured, so a wrongly-enabled descriptor fails loudly
 // rather than silently no-op'ing a resident's permit.
 func TestV7SkeletonIsHonest(t *testing.T) {
-	c := orikanv7.New(orikanv7.Config{})
+	c := orikanv7.New(orikanv7.Config{}, nil)
 	if _, err := c.Login(t.Context(), provider.Credentials{}); !errors.Is(err, provider.ErrNotCaptured) {
 		t.Errorf("Login err = %v, want ErrNotCaptured", err)
 	}

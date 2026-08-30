@@ -10,7 +10,7 @@
 // Wording is deliberately absent here. A provider never composes a sentence for a
 // person: it returns a kind, an operation and an optional tenant-supplied detail,
 // and the UI/notification layer chooses words for them (see the i18n section of
-// docs/tenant-connections.md). That is what lets a second backend be a genuine
+// docs/council-connections.md). That is what lets a second backend be a genuine
 // test of the architecture rather than a fork of the application.
 package provider
 
@@ -99,6 +99,34 @@ type Capabilities struct {
 	// concept and the UI shows no chooser. The first entry, if any, is the tenant's
 	// own/default region — what an unspecified Vehicle.Region resolves to.
 	Regions []Region
+}
+
+// Validate rejects a capability set the core cannot act on coherently. It is
+// checked when a connector is built (startup) and by the registry tests, so a
+// new connector cannot declare, say, a session that must be kept warm by a
+// Refresh it does not support — the scheduler would then believe it had warmed
+// sessions that were quietly dying.
+func (c Capabilities) Validate() error {
+	if c.LoginKind == "" {
+		return errors.New("provider: capabilities: LoginKind is required")
+	}
+	if c.NeedsKeepWarm && !c.SupportsRefresh {
+		return errors.New("provider: capabilities: NeedsKeepWarm requires SupportsRefresh (keep-warm IS a refresh)")
+	}
+	if c.NeedsKeepWarm && c.IdleWindow <= 0 {
+		return errors.New("provider: capabilities: NeedsKeepWarm requires a positive IdleWindow (the keep-warm cadence derives from it)")
+	}
+	seen := map[string]bool{}
+	for _, r := range c.Regions {
+		if r.Code == "" || r.Label == "" {
+			return fmt.Errorf("provider: capabilities: region %+v needs a code and a label", r)
+		}
+		if seen[r.Code] {
+			return fmt.Errorf("provider: capabilities: duplicate region code %q", r.Code)
+		}
+		seen[r.Code] = true
+	}
+	return nil
 }
 
 // Provider is one permit backend. Implementations must be safe for concurrent use;

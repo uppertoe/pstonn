@@ -1,12 +1,15 @@
 package tenant
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
@@ -32,9 +35,36 @@ type registryFile struct {
 	Tenants []*Tenant `json:"tenants"`
 }
 
-// LoadEmbedded parses the built-in registry with no overrides.
+// LoadEmbedded parses the built-in registry with no overrides (a fresh copy:
+// Load lays configuration over the entries it returns).
 func LoadEmbedded() (*Registry, error) {
 	return parse(tenantsJSON)
+}
+
+// embedded is the built-in registry parsed once, for the read-only lookups
+// (Default, Stonnington) that every page render and email may make.
+var embedded = sync.OnceValues(func() (*Registry, error) { return parse(tenantsJSON) })
+
+// connectorSpec is what the registry knows about a connector name: whether it
+// talks to a portal (and so must be given endpoints — which fields, the connector
+// itself decides in connectors.Build). The set here and the cases in
+// connectors.Build must agree; the connectors package's tests hold them together.
+type connectorSpec struct{ portal bool }
+
+var knownConnectors = map[string]connectorSpec{
+	"orikan-ssp":    {portal: true},
+	"orikan-ssp-v7": {portal: true},
+	"fake":          {},
+}
+
+// Connectors lists the connector names the registry accepts, sorted.
+func Connectors() []string {
+	out := make([]string, 0, len(knownConnectors))
+	for k := range knownConnectors {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Load builds the registry the process runs with: the file at path if given,
@@ -82,7 +112,11 @@ func Load(cfg config.CouncilConfig, path string) (*Registry, error) {
 
 func parse(raw []byte) (*Registry, error) {
 	var f registryFile
-	if err := json.Unmarshal(raw, &f); err != nil {
+	// Unknown keys are refused: a misspelt field ("enable", "capactiy") would
+	// otherwise be silently ignored and the tenant would run with the default.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&f); err != nil {
 		return nil, fmt.Errorf("tenants: %w", err)
 	}
 	if len(f.Tenants) == 0 {
@@ -113,26 +147,25 @@ func validate(c *Tenant) error {
 	if c.Name == "" || c.Short == "" {
 		return fmt.Errorf("name and short are required")
 	}
-	switch c.Connector {
-	case "orikan-ssp", "orikan-ssp-v7":
-		// Both Orikan generations need the same endpoint fields; they differ in what
-		// api_base points at (orikan-ssp: the /ssp-svc JSON API; orikan-ssp-v7: the
-		// /ssp server-rendered app) and in the auth flow, which the connector owns.
-		e := c.Endpoints
-		if e.Issuer == "" || e.APIBase == "" || e.ClientID == "" || e.RedirectURI == "" || len(e.Scopes) == 0 {
-			return fmt.Errorf("%s needs issuer, api_base, client_id, redirect_uri and scopes", c.Connector)
+	spec, ok := knownConnectors[c.Connector]
+	if !ok {
+		return fmt.Errorf("unknown connector %q (one of %s)", c.Connector, strings.Join(Connectors(), ", "))
+	}
+	e := c.Endpoints
+	if spec.portal && e.Issuer == "" && e.APIBase == "" && e.ClientID == "" && e.RedirectURI == "" {
+		return fmt.Errorf("%s talks to a portal and needs endpoints", c.Connector)
+	}
+	// The login flow carries a resident's plaintext tenant password; the scheme it
+	// may travel over is decided here and nowhere else. Any endpoint given — for
+	// any connector — must be https.
+	for name, raw := range map[string]string{"issuer": e.Issuer, "api_base": e.APIBase, "redirect_uri": e.RedirectURI} {
+		if raw == "" {
+			continue
 		}
-		// The login flow carries a resident's plaintext tenant password; the
-		// scheme it may travel over is decided here and nowhere else.
-		for name, raw := range map[string]string{"issuer": e.Issuer, "api_base": e.APIBase, "redirect_uri": e.RedirectURI} {
-			u, err := url.Parse(raw)
-			if err != nil || u.Scheme != "https" || u.Host == "" {
-				return fmt.Errorf("%s must be an https URL, got %q", name, raw)
-			}
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("%s must be an https URL, got %q", name, raw)
 		}
-	case "fake":
-	default:
-		return fmt.Errorf("unknown connector %q", c.Connector)
 	}
 	if c.Timezone == "" {
 		return fmt.Errorf("timezone is required")
@@ -156,6 +189,14 @@ func validate(c *Tenant) error {
 	// would offer residents a scheme p.stonn cannot actually drive.
 	if c.Enabled && !c.Model.Plate() {
 		return fmt.Errorf("model %q has no scheduler yet; keep the tenant disabled until it does", c.Model)
+	}
+	// Re-plate shares swap's write contract but not its clear semantics: with no
+	// roster entry the resident's OWN car must go back on the permit, and that
+	// restore path does not exist yet — the reconcile loop would ClearVehicle a
+	// resident permit and leave their everyday car uncovered. Describable, not
+	// enableable, until it does.
+	if c.Enabled && c.Model == ModelReplate {
+		return fmt.Errorf("model %q cannot be enabled yet: the scheduler has no home-vehicle restore path (it would clear the resident's own permit)", c.Model)
 	}
 	// Links land in href attributes across the site; only http(s) may.
 	for name, raw := range map[string]string{"portal": c.Links.Portal, "register": c.Links.Register, "reset_password": c.Links.ResetPassword,

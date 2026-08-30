@@ -40,9 +40,12 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Which tenant. With one enabled tenant the choice is implicit; with several
-	// the form names it (the sign-up choice, or "connect another area"), and the
-	// selection is recorded BEFORE the login so the session and permits are filed
-	// under it. A tenant the process is not serving is refused.
+	// the form names it (the sign-up choice, or "connect another area"). The login
+	// below is made against that tenant explicitly; the account's CURRENT tenant
+	// is switched to it only once the login has succeeded, so a failed "connect
+	// another area" does not leave the account pointed at an area it never linked
+	// (the dashboard would then show onboarding for it, though the real area is
+	// linked and running). A tenant the process is not serving is refused.
 	tenantID := ""
 	if s.registry != nil {
 		chosen := s.registry.Default
@@ -53,10 +56,6 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			chosen = c
-		}
-		if err := s.store.SetAccountTenant(r.Context(), user, chosen.ID); err != nil {
-			s.serverError(w, err)
-			return
 		}
 		tenantID = chosen.ID
 	}
@@ -150,6 +149,14 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 		}
 		s.message(w, http.StatusBadGateway, "Could not link your council account. This appears to be a problem at our end or on the council's site rather than your password. Please try again shortly.")
 		return
+	}
+	if tenantID != "" {
+		// The session is filed under tenantID by the link itself; this is the
+		// selection — where the picker, add-a-permit and the dashboard now act.
+		if err := s.store.SetAccountTenant(r.Context(), user, tenantID); err != nil {
+			s.serverError(w, err)
+			return
+		}
 	}
 	s.logChange(r.Context(), user, user, store.ActionCouncilLink, "", "")
 	// Drop any queued auto-reconnect for the OLD session: the user just established a

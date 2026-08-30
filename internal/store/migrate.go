@@ -510,7 +510,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// on existing permits, which is safe: any permit with a roster already
 		// renders the quiet button, not the pitch.
 		`ALTER TABLE permit ADD COLUMN copy_offer_done INTEGER NOT NULL DEFAULT 0`,
-		// Which tenant a row belongs to (docs/tenant-connections.md). Every row that
+		// Which tenant a row belongs to (docs/council-connections.md). Every row that
 		// predates the column is the City of Stonnington's — the only tenant the app
 		// has ever served — which the backfill below records.
 		`ALTER TABLE council_session ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
@@ -525,12 +525,12 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		}
 	}
 	// Backfill tenant_id on rows that predate multi-tenant support: they are all
-	// Stonnington's. Idempotent (only '' rows are touched).
+	// the legacy single tenant's. Idempotent (only '' rows are touched).
 	for _, stmt := range []string{
-		`UPDATE council_session SET council_id = 'stonnington' WHERE council_id = ''`,
-		`UPDATE permit SET council_id = 'stonnington' WHERE council_id = ''`,
+		`UPDATE council_session SET council_id = ? WHERE council_id = ''`,
+		`UPDATE permit SET council_id = ? WHERE council_id = ''`,
 	} {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.db.Exec(stmt, LegacyTenantID); err != nil {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
 	}
@@ -688,6 +688,11 @@ func (s *Store) rebuildOverrideTable() error {
 	}
 	return tx.Commit()
 }
+
+// LegacyTenantID is the tenant every row written before the tenant dimension
+// existed belongs to. The migration stamps it onto ” rows; the registry tests
+// check the embedded registry still describes it, so those rows never orphan.
+const LegacyTenantID = "stonnington"
 
 // permitUniqueIsScoped reports whether the permit table already carries the
 // per-tenant uniqueness constraint (read from its stored definition).

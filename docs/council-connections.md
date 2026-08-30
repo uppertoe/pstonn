@@ -42,7 +42,7 @@ wrong the moment a WA or QLD council is added.
   implicit flow (`ePermits80`, `id_token token`) and would be a second connector; a
   non-Orikan council would be a third.
 - **Council** — a tenant descriptor: id, names, connector and its parameters, permit
-  policy, links, copy, timezone, operational limits, enabled flag and capacity.
+  policy, links, copy, timezone, operational limits and enabled flag.
   Stonnington, Bayside, Hume… are the same connector with different parameters.
 
 ```go
@@ -59,7 +59,6 @@ type Council struct {
     Copy      Copy     // Suburbs, Phone, per-council notes (message keys, see i18n)
     Limits    Limits   // governor rates, login sub-limit, concurrency, idle window, warm interval
     Enabled   bool
-    Capacity  int
 }
 ```
 
@@ -249,6 +248,51 @@ old client: the plate cache stores the plate the app wrote rather than the
 council's own string for it (comparisons use `SamePlate`); breaker/cooldown
 success is counted per whole operation rather than per 2xx.
 
+## Second review pass (2026-08-30) — the tenant guarantees
+
+A correctness/security pass on the connector/model shape, aimed at making
+"a new tenant with passing tests works" true rather than hoped. What changed:
+
+- **Messages name the permit's tenant.** `notify.TenantFor(ctx, owner, tenantID)`;
+  `ApplyOutcome.TenantID`; every permit- or session-scoped notification passes the
+  permit's/session's tenant. Account-level mail (invite, nudges, referral) passes
+  `""` and gets the account's current tenant. A second-home account no longer gets
+  Stonnington's name and portal in an email about its Banyule permit.
+- **Regions follow the permit.** `Tenant.Regions(ctx, owner, tenantID)` /
+  `RegionValid(ctx, owner, tenantID, code)`; the guest and booking pages pass the
+  permit's tenant; the account-wide vehicles page passes `""` = the union over the
+  served tenants, current first.
+- **The seam enforces the contract.** `connectors.Build` refuses a non-plate model,
+  a connector it does not know, a portal connector without endpoints, and a
+  provider whose `Capabilities().Validate()` fails (keep-warm without refresh, no
+  idle window, malformed regions). `main` builds EVERY registry entry at startup,
+  enabled or not, so a bad descriptor fails the deploy, not the day it is enabled.
+- **Registry validation.** Unknown JSON keys are refused (`DisallowUnknownFields`);
+  `replate` cannot be enabled until the scheduler has a home-vehicle restore path;
+  any endpoint given must be https whatever the connector; `tenant.Connectors()`
+  is the registry's list and the connectors tests hold it equal to `Build`'s cases.
+- **Store.** `UpdateTenantToken` is tenant-scoped; the current-tenant wrappers
+  `ClearTenantPassword`/`DeleteTenantSession` are gone (`…In`, and
+  `DeleteAllTenantSessions` for consent withdrawal, say what they do);
+  `TenantIDFor`'s memo is epoch-checked so a read racing a write cannot pin a
+  stale tenant; `store.LegacyTenantID` names the backfill target and the registry
+  test checks it is still described.
+- **Link.** The account's current tenant is switched only after the login
+  succeeds, so a failed "connect another area" leaves the dashboard alone.
+- `orikanv7.New(cfg, tr)` takes the governed transport like `orikan.New`, so the
+  capture work cannot bypass the governor; its capabilities are now coherent.
+
+Tests that pin all of this: `connectors/registry_test.go` (every embedded tenant
+builds; names agree; undrivable pairings refused), `tenant/guard_test.go`
+(unknown fields, replate, copies), `tenant/regions_test.go`,
+`notify/tenant_routing_test.go`, `server/tenant_link_failure_test.go`,
+`store/tenant_memo_test.go`, `provider/capabilities_test.go`.
+
+**Adding a tenant, mechanically:** a `tenants.json` entry (validated on load and
+built by the connectors test); if its portal is new, a package under
+`internal/provider/`, a case in `connectors.Build`, and its name in
+`tenant.knownConnectors` — the tests fail until all three agree.
+
 ## Remaining (not done in this branch)
 
 - **Landing / public pages per council.** Public pages render for the registry
@@ -272,8 +316,9 @@ success is counted per whole operation rather than per 2xx.
   headers from any private/link-local peer. It should identify the actual reverse
   proxy (a pinned peer address, or a shared secret header from Caddy) rather than
   the address class.
-- Council-aware operator alerts; per-council capacity enforcement at link time
-  (`Council.Capacity` is loaded, not yet enforced — `MaxAccounts` still global).
+- Council-aware operator alerts; per-council capacity (there is none — the
+  descriptor field was dropped rather than left loaded-but-unenforced; `MAX_ACCOUNTS`
+  caps the deployment).
 
 ## Adding a council — checklist
 
@@ -289,7 +334,7 @@ Every council needs a live capture before it is enabled:
 - Login POST from the VPS IP works (edge behaviour is per host).
 - Timezone; copy and links; `/councils/<id>` page explaining the traffic to that
   council's operator (the honest-UA principle in `browser.go`).
-- `enabled: true` with a small capacity.
+- `enabled: true`.
 
 ## Open decisions
 

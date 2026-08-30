@@ -23,7 +23,7 @@ import (
 )
 
 // Golden emails and pushes: the shape lock for every notice the app sends (see
-// docs/tenant-connections.md and internal/server/golden_test.go for the pages).
+// docs/council-connections.md and internal/server/golden_test.go for the pages).
 // Each case drives one Service method against fixed fixtures and records what
 // went out — direct emails (via the mailer hook), ntfy pushes (via a fake ntfy
 // server) and outbox rows (drained after the call) — into one file under
@@ -207,17 +207,17 @@ func TestGoldenEmails(t *testing.T) {
 	run("enqueue-apply", func() {
 		_ = svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: true})
 	})
-	run("relink-required", func() { svc.NotifyRelinkRequired(ctx, owner) })
-	run("reconnect-stalled", func() { svc.NotifyReconnectStalled(ctx, owner) })
-	run("permit-expiry", func() { svc.NotifyPermitExpiry(ctx, owner, "Visitor", at.Add(14*24*time.Hour)) })
+	run("relink-required", func() { svc.NotifyRelinkRequired(ctx, owner, "") })
+	run("reconnect-stalled", func() { svc.NotifyReconnectStalled(ctx, owner, "") })
+	run("permit-expiry", func() { svc.NotifyPermitExpiry(ctx, owner, "", "Visitor", at.Add(14*24*time.Hour)) })
 	run("renewal-reminder", func() {
-		_ = svc.SendRenewalReminder(ctx, owner, at.Add(7*24*time.Hour), appURL+"/tenant/confirm?token=abc")
+		_ = svc.SendRenewalReminder(ctx, owner, "", at.Add(7*24*time.Hour), appURL+"/tenant/confirm?token=abc")
 	})
 	run("send-test", func() { _ = svc.SendTest(ctx, owner) })
 	run("disconnected", func() { _ = svc.NotifyDisconnected(ctx, owner) })
 	run("invite", func() { _ = svc.SendInvite(ctx, stranger, owner) })
 	run("onboard-nudge", func() { _ = svc.SendOnboardNudge(ctx, stranger) })
-	run("guest-link", func() { _ = svc.SendGuestLink(ctx, stranger, owner, "Visitor", appURL+"/g/tok") })
+	run("guest-link", func() { _ = svc.SendGuestLink(ctx, stranger, owner, "", "Visitor", appURL+"/g/tok") })
 	run("driver-displaced", func() {
 		_ = svc.NotifyDriverDisplaced(ctx, owner, stranger, "Visitor", "AAA111", "a one-off booking started", at)
 	})
@@ -242,8 +242,8 @@ func TestGoldenEmails(t *testing.T) {
 // With a resolver that knows nothing about the account, wording and links fall
 // back to the default tenant rather than failing or going blank.
 func TestTenantOfUnknownAccountUsesDefault(t *testing.T) {
-	svc := &Service{TenantFor: func(context.Context, string) *tenant.Tenant { return nil }}
-	c := svc.tenantOf(context.Background(), "nobody@example.com")
+	svc := &Service{TenantFor: func(context.Context, string, string) *tenant.Tenant { return nil }}
+	c := svc.tenantOf(context.Background(), "nobody@example.com", "")
 	def := tenant.Default()
 	if c.Name != def.Name || c.Links.Portal != def.Links.Portal || c.Terms["portal"] == "" {
 		t.Fatalf("default council not applied: %+v", c)

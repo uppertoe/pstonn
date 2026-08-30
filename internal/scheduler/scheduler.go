@@ -60,20 +60,20 @@ type Tenant interface {
 type Notifier interface {
 	Enabled() bool
 	AdminConfigured() bool
-	SendRenewalReminder(ctx context.Context, to string, deadline time.Time, confirmURL string) error
+	SendRenewalReminder(ctx context.Context, to, tenantID string, deadline time.Time, confirmURL string) error
 	// NotifyApply returns how many channels accepted the message (0 = the user was
 	// NOT reached; -1 = intentionally suppressed, e.g. failures-only success).
 	NotifyApply(ctx context.Context, o notify.ApplyOutcome) (int, error)
 	// NotifyRelinkRequired tells the user to reconnect their tenant account;
 	// returns the number of channels that accepted it (0 = not reached).
-	NotifyRelinkRequired(ctx context.Context, owner string) int
+	NotifyRelinkRequired(ctx context.Context, owner, tenantID string) int
 	// NotifyReconnectStalled tells the household automatic reconnection has been
 	// failing for a sustained stretch while their session is retained, so their
 	// schedule is paused; returns the number of channels that accepted it.
-	NotifyReconnectStalled(ctx context.Context, owner string) int
+	NotifyReconnectStalled(ctx context.Context, owner, tenantID string) int
 	// NotifyPermitExpiry warns the account that a permit is approaching expiry;
 	// returns the number of channels that accepted it (0 = not reached).
-	NotifyPermitExpiry(ctx context.Context, owner, permitLabel string, expiry time.Time) int
+	NotifyPermitExpiry(ctx context.Context, owner, tenantID, permitLabel string, expiry time.Time) int
 	// NotifyAdmin sends an operator alert to every configured admin channel.
 	NotifyAdmin(ctx context.Context, subject, body string) error
 	// NotifyDriverDisplaced warns the driver responsible for a displaced booking
@@ -1218,7 +1218,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 			// The renewal reminder (maybeRemind) is email-only and best-effort, so
 			// it must not be the sole signal: tell the user their permit just
 			// stopped being managed, exactly as the expired-cookie path does.
-			s.alertRelink(cs.Owner)
+			s.alertRelink(cs.Owner, cs.TenantID)
 		default:
 			log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", redact.Email(cs.Owner))
 		}
@@ -1487,7 +1487,7 @@ func (s *Scheduler) backoffReconnect(key sessionKey) {
 	attempts := it.attempts
 	s.reconnectMu.Unlock()
 	if attempts == reconnectStalledAlertAttempts {
-		s.alertReconnectStalled(key.owner)
+		s.alertReconnectStalled(key.owner, key.tenant)
 	}
 }
 
@@ -1632,7 +1632,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string,
 		return reconnectRetired
 	default:
 		log.Printf("scheduler: session for %s expired; unlinked (re-link required)", redact.Email(owner))
-		s.alertRelink(owner) // proactively tell the user, don't wait for fine time
+		s.alertRelink(owner, tenantID) // proactively tell the user, don't wait for fine time
 		return reconnectRetired
 	}
 }
@@ -1661,7 +1661,7 @@ func (s *Scheduler) releaseNotify(claim string) {
 // alertRelink notifies a user that their tenant connection dropped and they
 // must re-link, escalating to the operator if the user cannot be reached, so a
 // lapsed session never silently stops managing their permit until fine time.
-func (s *Scheduler) alertRelink(owner string) {
+func (s *Scheduler) alertRelink(owner, tenantID string) {
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
@@ -1680,7 +1680,7 @@ func (s *Scheduler) alertRelink(owner string) {
 		}
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if s.notifier.NotifyRelinkRequired(nctx, owner) == 0 {
+		if s.notifier.NotifyRelinkRequired(nctx, owner, tenantID) == 0 {
 			_ = s.notifier.NotifyAdmin(nctx, "User could not be told to re-link: "+owner,
 				fmt.Sprintf("%s's council session expired, so p.stonn stopped managing their permit, but no re-link notification could be delivered to them. They may get a fine.", owner))
 		}
@@ -1694,7 +1694,7 @@ func (s *Scheduler) alertRelink(owner string) {
 // wrong instruction here: an interactive re-link goes through the same broken
 // login, and recovery resumes on its own once it is repaired. What the
 // household needs to know is that the schedule is paused meanwhile.
-func (s *Scheduler) alertReconnectStalled(owner string) {
+func (s *Scheduler) alertReconnectStalled(owner, tenantID string) {
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
@@ -1710,7 +1710,7 @@ func (s *Scheduler) alertReconnectStalled(owner string) {
 		}
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if s.notifier.NotifyReconnectStalled(nctx, owner) == 0 {
+		if s.notifier.NotifyReconnectStalled(nctx, owner, tenantID) == 0 {
 			_ = s.notifier.NotifyAdmin(nctx, "User could not be told their schedule is paused: "+owner,
 				fmt.Sprintf("%s's council session expired and auto-reconnect has been failing for over an hour, but no notification could be delivered to them. Their schedule is not being applied; they may get a fine.", owner))
 		}
@@ -1787,6 +1787,9 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
+	// The message is about THIS permit: its council's name and portal, whatever
+	// tenant the account currently has selected.
+	o.TenantID = p.TenantID
 	notifiedKey, adminKey, _ := s.store.PermitNotify(ctx, p.ID)
 	if notifiedKey == key {
 		return // already successfully told about this exact outcome
@@ -2146,7 +2149,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		if label == "" {
 			label = "visitor permit"
 		}
-		if s.notifier.NotifyPermitExpiry(ctx, owner, label, p.EndDate.In(s.locOf(p.Owner, p.TenantID))) > 0 {
+		if s.notifier.NotifyPermitExpiry(ctx, owner, p.TenantID, label, p.EndDate.In(s.locOf(p.Owner, p.TenantID))) > 0 {
 			if e := s.store.MarkPermitExpiryReminded(ctx, p.ID); e != nil {
 				log.Printf("scheduler: mark permit %d expiry-reminded: %v", p.ID, e)
 			}
@@ -2263,7 +2266,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 		log.Printf("scheduler: mark reminder for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
-	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, deadline.In(s.locOf(cs.Owner, cs.TenantID)), url); err != nil {
+	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, cs.TenantID, deadline.In(s.locOf(cs.Owner, cs.TenantID)), url); err != nil {
 		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the

@@ -12,7 +12,7 @@ import (
 // permit table with its global UNIQUE(tenant_permit_id), tenant_session and
 // account_flags without tenant_id, and the single-row breaker_state. The
 // fixture is the old schema verbatim (the CREATE statements as they stood before
-// docs/tenant-connections.md phase 1), with rows that must survive intact and be
+// docs/council-connections.md phase 1), with rows that must survive intact and be
 // filed under Stonnington — the only tenant the app had ever served.
 const preTenantSchema = `
 CREATE TABLE council_session (
@@ -271,7 +271,7 @@ func TestTenantIDForPrecedence(t *testing.T) {
 		t.Fatalf("the sign-up choice must win: %q", id)
 	}
 	// The memo is invalidated by the writes that can change the answer.
-	if err := st.DeleteTenantSession(ctx, "p@x"); err != nil {
+	if err := st.DeleteAllTenantSessions(ctx, "p@x"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.DeleteAllForOwner(ctx, "p@x"); err != nil {

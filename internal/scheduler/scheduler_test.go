@@ -255,7 +255,7 @@ func (f *fakeNotifier) Enabled() bool { return f.on }
 // notifier, and the ntfy-only case has its own dedicated test.
 func (f *fakeNotifier) EmailAvailable() bool  { return f.on }
 func (f *fakeNotifier) AdminConfigured() bool { return f.admin }
-func (f *fakeNotifier) SendRenewalReminder(ctx context.Context, to string, deadline time.Time, url string) error {
+func (f *fakeNotifier) SendRenewalReminder(ctx context.Context, to, tenantID string, deadline time.Time, url string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, sentMail{to, url, deadline})
@@ -273,14 +273,14 @@ func (f *fakeNotifier) NotifyApply(_ context.Context, o notify.ApplyOutcome) (in
 	return 1, nil // default: delivered on one channel
 }
 
-func (f *fakeNotifier) NotifyRelinkRequired(_ context.Context, owner string) int {
+func (f *fakeNotifier) NotifyRelinkRequired(_ context.Context, owner, tenantID string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.relinks = append(f.relinks, owner)
 	return 1
 }
 
-func (f *fakeNotifier) NotifyReconnectStalled(_ context.Context, owner string) int {
+func (f *fakeNotifier) NotifyReconnectStalled(_ context.Context, owner, tenantID string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stalled = append(f.stalled, owner)
@@ -295,7 +295,7 @@ func (f *fakeNotifier) stalledSnap() []string {
 	return append([]string(nil), f.stalled...)
 }
 
-func (f *fakeNotifier) NotifyPermitExpiry(_ context.Context, owner, permitLabel string, expiry time.Time) int {
+func (f *fakeNotifier) NotifyPermitExpiry(_ context.Context, owner, tenantID, permitLabel string, expiry time.Time) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.expiries = append(f.expiries, owner+":"+permitLabel)

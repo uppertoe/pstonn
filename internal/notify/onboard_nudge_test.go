@@ -13,7 +13,7 @@ import (
 // somewhere to go). Plus the promises the sweep's code relies on: once-ever,
 // and honest about needing an existing permit.
 func TestOnboardNudgeMessage(t *testing.T) {
-	subject, body := onboardNudgeMessage("resident@example.com", "https://p.stonn.example", (&Service{}).tenantOf(context.Background(), ""))
+	subject, body := onboardNudgeMessage("resident@example.com", "https://p.stonn.example", (&Service{}).tenantOf(context.Background(), "", ""))
 
 	if subject == "" || strings.Contains(subject, "\n") {
 		t.Fatalf("subject unusable: %q", subject)
@@ -51,7 +51,7 @@ func TestOnboardNudgeMessage(t *testing.T) {
 	}
 
 	// A deployment with no public URL keeps the browser advice, minus the address.
-	_, body = onboardNudgeMessage("resident@example.com", "", (&Service{}).tenantOf(context.Background(), ""))
+	_, body = onboardNudgeMessage("resident@example.com", "", (&Service{}).tenantOf(context.Background(), "", ""))
 	if strings.Contains(body, "p.stonn.example") {
 		t.Fatal("stale URL leaked into the no-URL variant")
 	}

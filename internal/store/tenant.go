@@ -93,8 +93,13 @@ type TenantSession struct {
 
 // ---- Tenant session (per app user) ----
 
-// GetTenantSession returns the linked tenant session for an app user, or
-// ErrNotFound.
+// GetTenantSession returns the account's session with its CURRENT tenant (the
+// one selected in the menu), or ErrNotFound. It is for account-level pages that
+// act on "where the account is right now" (settings, the link form). Anything
+// that has a permit or a session in hand — the scheduler, the guest flows,
+// notifications — must use GetTenantSessionIn with that thing's own tenant: an
+// account linked in two areas has two sessions, and "current" is the wrong one
+// half the time.
 func (s *Store) GetTenantSession(ctx context.Context, owner string) (TenantSession, error) {
 	id, err := s.TenantIDFor(ctx, owner)
 	if err != nil {
@@ -428,13 +433,13 @@ WHERE owner = ? AND council_id = ? AND session_generation = ?`,
 // old one over it would silently undo the user's re-link (and lose the new cookie for
 // good, since keep-warm would then happily keep the old one alive). Returns
 // ErrSessionSuperseded when the row moved on.
-func (s *Store) UpdateTenantToken(ctx context.Context, owner, sealedCookie, sealedAccess string, expiry time.Time, expectedGen int64) error {
+func (s *Store) UpdateTenantToken(ctx context.Context, owner, tenantID, sealedCookie, sealedAccess string, expiry time.Time, expectedGen int64) error {
 	res, err := s.db.ExecContext(ctx, `
 UPDATE council_session
 SET cookie_sealed = ?, access_token_sealed = ?, token_expiry = ?, updated_at = ?,
     session_generation = session_generation + 1
-WHERE owner = ? AND session_generation = ?`,
-		sealedCookie, sealedAccess, expiry.UTC().Format(time.RFC3339), nowUTC(), owner, expectedGen)
+WHERE owner = ? AND council_id = ? AND session_generation = ?`,
+		sealedCookie, sealedAccess, expiry.UTC().Format(time.RFC3339), nowUTC(), owner, tenantID, expectedGen)
 	if err != nil {
 		return err
 	}
@@ -472,28 +477,21 @@ WHERE owner = ? AND council_id = ? AND session_generation = ?`,
 	return nil
 }
 
-// ClearTenantPassword drops a saved (sealed) tenant password without unlinking
-// the session — used by the settings "stop auto-reconnecting" action. If the
-// session later expires it will require a manual re-link, as if never saved.
-func (s *Store) ClearTenantPassword(ctx context.Context, owner string) error {
-	id, err := s.TenantIDFor(ctx, owner)
-	if err != nil {
-		return err
-	}
-	return s.ClearTenantPasswordIn(ctx, owner, id)
-}
-
-// ClearTenantPasswordIn is ClearTenantPassword for one tenant exactly.
+// ClearTenantPasswordIn drops a saved (sealed) tenant password for one tenant
+// without unlinking the session — the settings "stop auto-reconnecting" action.
+// If the session later expires it will require a manual re-link, as if never
+// saved.
 func (s *Store) ClearTenantPasswordIn(ctx context.Context, owner, tenantID string) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE council_session SET password_sealed = '', session_generation = session_generation + 1 WHERE owner = ? AND council_id = ?`, owner, tenantID)
 	return err
 }
 
-// DeleteTenantSession removes a user's linked session (e.g. on unlink or after
-// the cookie expires and re-linking is required). The user's permits, vehicles
-// and schedule are kept so a later re-link resumes exactly where they left off.
-func (s *Store) DeleteTenantSession(ctx context.Context, owner string) error {
+// DeleteAllTenantSessions disconnects the account from EVERY tenant it is linked
+// with — the consent-withdrawal path (declined terms), where nothing may keep
+// running. Permits, vehicles and schedule are kept so a later re-link resumes
+// where it left off. Anything that means one tenant uses DeleteTenantSessionIn.
+func (s *Store) DeleteAllTenantSessions(ctx context.Context, owner string) error {
 	defer s.forgetTenant(owner)
 	_, err := s.db.ExecContext(ctx, `DELETE FROM council_session WHERE owner = ?`, owner)
 	return err
@@ -620,6 +618,11 @@ func (s *Store) TenantIDFor(ctx context.Context, owner string) (string, error) {
 	if v, ok := s.tenantCache.Load(owner); ok {
 		return v.(string), nil
 	}
+	// A write can land between the query and the Store: it invalidates (bumping
+	// the epoch) BEFORE this read memoises, and the stale answer would then be
+	// pinned until the next write. Memoise only if no invalidation happened
+	// meanwhile; the next call simply queries again.
+	epoch := s.tenantEpoch.Load()
 	var id string
 	err := s.db.QueryRowContext(ctx, `
 SELECT COALESCE(
@@ -632,12 +635,19 @@ SELECT COALESCE(
 	if id == "" {
 		id = s.DefaultTenant
 	}
-	s.tenantCache.Store(owner, id)
+	if s.tenantEpoch.Load() == epoch {
+		s.tenantCache.Store(owner, id)
+	}
 	return id, nil
 }
 
-// forgetTenant drops the memoised current tenant for an owner.
-func (s *Store) forgetTenant(owner string) { s.tenantCache.Delete(owner) }
+// forgetTenant drops the memoised current tenant for an owner and marks the
+// moment, so a concurrent TenantIDFor that read before the write does not
+// memoise its now-stale answer.
+func (s *Store) forgetTenant(owner string) {
+	s.tenantEpoch.Add(1)
+	s.tenantCache.Delete(owner)
+}
 
 // SetAccountTenant records the account's current tenant (chosen at sign-up or
 // switched from the menu). It is a selection, not a binding: sessions and

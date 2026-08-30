@@ -189,7 +189,7 @@ func TestQueuedMailCarriesProvenance(t *testing.T) {
 			return svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "VPP1", Reg: "ABC123", OK: true})
 		}},
 		{"permit expiry", func() error {
-			svc.NotifyPermitExpiry(ctx, owner, "VPP1", time.Now().Add(14*24*time.Hour))
+			svc.NotifyPermitExpiry(ctx, owner, "", "VPP1", time.Now().Add(14*24*time.Hour))
 			return nil
 		}},
 		{"guest request", func() error {
@@ -325,7 +325,7 @@ func TestPermitExpiryAlwaysEmails(t *testing.T) {
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
 	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
 
-	if n := svc.NotifyPermitExpiry(ctx, owner, "VPP1", time.Now().Add(14*24*time.Hour)); n != 1 {
+	if n := svc.NotifyPermitExpiry(ctx, owner, "", "VPP1", time.Now().Add(14*24*time.Hour)); n != 1 {
 		t.Fatalf("delivered = %d, want 1 (queued email)", n)
 	}
 	rows, err := st.DueOutbox(ctx, time.Now().UTC().Add(3*time.Hour), 10)

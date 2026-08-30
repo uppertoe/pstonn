@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"modernc.org/sqlite"
@@ -37,8 +38,10 @@ type Store struct {
 	db   *sql.DB
 	path string // the DB file path, for opening a separate snapshot connection
 
-	// tenantCache memoises TenantIDFor per owner (see there).
+	// tenantCache memoises TenantIDFor per owner (see there); tenantEpoch is
+	// bumped by every invalidation so a read that raced a write is not memoised.
 	tenantCache sync.Map
+	tenantEpoch atomic.Uint64
 
 	// DefaultTenant is the tenant an account belongs to when it has made no
 	// choice and holds no session (the process's only enabled tenant). Set by

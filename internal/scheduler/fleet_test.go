@@ -487,7 +487,7 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 		if freshTokens {
 			tokenExpiry = time.Now().Add(time.Hour)
 		}
-		if err := st.UpdateTenantToken(ctx, owner, cs.Cookie, sealToken(owner, "tok-"+tag), tokenExpiry, cs.Generation); err != nil {
+		if err := st.UpdateTenantToken(ctx, owner, cs.TenantID, cs.Cookie, sealToken(owner, "tok-"+tag), tokenExpiry, cs.Generation); err != nil {
 			t.Fatalf("seed token %d: %v", i, err)
 		}
 		pid, err := st.UpsertPermit(ctx, owner, tenantIDFor(owner), "14", "Permit")

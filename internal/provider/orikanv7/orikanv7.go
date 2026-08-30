@@ -48,6 +48,8 @@ package orikanv7
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	"github.com/uppertoe/pstonn/internal/provider"
 )
@@ -69,11 +71,22 @@ type Config struct {
 // capture checklist. It exists so the descriptor, the registry validation and
 // connectors.Build have a real, distinct connector to wire to.
 type Client struct {
-	cfg Config
+	cfg  Config
+	http *http.Client
 }
 
-// New builds the connector. It never performs I/O.
-func New(cfg Config) *Client { return &Client{cfg: cfg} }
+// New builds the connector on the given transport — the generic client's
+// governed, counted RoundTripper, which is the ONLY way this connector may reach
+// the portal: taking it here (rather than reaching for http.DefaultClient when the
+// capture is filled in) is what keeps the rate governor, traffic accounting and
+// the fleet breaker in front of every request. nil means the default transport
+// (tests only). New never performs I/O.
+func New(cfg Config, tr http.RoundTripper) *Client {
+	if tr == nil {
+		tr = http.DefaultTransport
+	}
+	return &Client{cfg: cfg, http: &http.Client{Transport: tr, Timeout: 30 * time.Second}}
+}
 
 // The skeleton must satisfy the full contract so the seam compiles today and the
 // capture work only fills in method bodies.
@@ -91,13 +104,16 @@ var v7Regions = []provider.Region{
 }
 
 // Capabilities are the conservative pre-capture defaults: a cookie session that
-// must be kept warm, no confirmed clear-to-empty, expiry meaningful (Banyule's
-// permits carry a fixed 31 July end date). Revisit once the flow is captured.
+// must be kept warm (so Refresh IS supported — it is the keep-warm touch, which
+// until captured fails loudly with ErrNotCaptured rather than pretending), no
+// confirmed clear-to-empty, expiry meaningful (Banyule's permits carry a fixed
+// 31 July end date). Revisit once the flow is captured.
 func (c *Client) Capabilities() provider.Capabilities {
 	return provider.Capabilities{
-		CanClearVehicle: false, // unconfirmed — assume not until the form shows it
-		SupportsRefresh: false, // the web client requests no offline_access
-		NeedsKeepWarm:   true,  // ASP.NET auth cookie
+		CanClearVehicle: false,          // unconfirmed — assume not until the form shows it
+		SupportsRefresh: true,           // keep-warm needs it; the web client requests no offline_access
+		NeedsKeepWarm:   true,           // ASP.NET auth cookie
+		IdleWindow:      10 * time.Hour, // the Duende default, as for orikan-ssp; unmeasured
 		SupportsExpiry:  true,
 		LoginKind:       "password",
 		Regions:         v7Regions,

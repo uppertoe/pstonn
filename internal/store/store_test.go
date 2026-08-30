@@ -373,7 +373,7 @@ func TestSaveTenantSessionStampsLinkedAt(t *testing.T) {
 	}
 	// A token renewal must NOT move the re-authorise clock.
 	curGen, _ := s.GetTenantSession(ctx, "u@example.com")
-	if err := s.UpdateTenantToken(ctx, "u@example.com", "sealed2", "at", time.Now().Add(time.Hour), curGen.Generation); err != nil {
+	if err := s.UpdateTenantToken(ctx, "u@example.com", curGen.TenantID, "sealed2", "at", time.Now().Add(time.Hour), curGen.Generation); err != nil {
 		t.Fatal(err)
 	}
 	cs2, _ := s.GetTenantSession(ctx, "u@example.com")
@@ -403,14 +403,14 @@ func TestTenantPasswordRoundTrip(t *testing.T) {
 	}
 	// A token renewal must preserve the saved password.
 	pwGen, _ := s.GetTenantSession(ctx, owner)
-	if err := s.UpdateTenantToken(ctx, owner, "c2", "at", time.Now().Add(time.Hour), pwGen.Generation); err != nil {
+	if err := s.UpdateTenantToken(ctx, owner, pwGen.TenantID, "c2", "at", time.Now().Add(time.Hour), pwGen.Generation); err != nil {
 		t.Fatal(err)
 	}
 	if cs, _ := s.GetTenantSession(ctx, owner); cs.Password != "sealed-pw" {
 		t.Fatalf("token renew wiped saved password, got %q", cs.Password)
 	}
 	// ClearTenantPassword drops it but keeps the session.
-	if err := s.ClearTenantPassword(ctx, owner); err != nil {
+	if err := s.ClearTenantPasswordIn(ctx, owner, pwGen.TenantID); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := s.GetTenantSession(ctx, owner)
@@ -2920,7 +2920,7 @@ func TestSessionWritesAreGenerationConditioned(t *testing.T) {
 	if err := s.UpdateTenantCookie(ctx, owner, "", "stale-warm", before.Generation); !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("stale keep-warm write = %v, want ErrSessionSuperseded", err)
 	}
-	if err := s.UpdateTenantToken(ctx, owner, "stale-renew", "at", time.Now().Add(time.Hour), before.Generation); !errors.Is(err, ErrSessionSuperseded) {
+	if err := s.UpdateTenantToken(ctx, owner, before.TenantID, "stale-renew", "at", time.Now().Add(time.Hour), before.Generation); !errors.Is(err, ErrSessionSuperseded) {
 		t.Fatalf("stale renew write = %v, want ErrSessionSuperseded", err)
 	}
 	if got, _ := s.GetTenantSession(ctx, owner); got.Cookie != "fresh" {
@@ -2939,7 +2939,7 @@ func TestGenerationDoesNotResetAcrossRelink(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, _ := s.GetTenantSession(ctx, owner)
-	if err := s.DeleteTenantSession(ctx, owner); err != nil {
+	if err := s.DeleteAllTenantSessions(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, Cookie: "c2"}); err != nil {
@@ -3319,7 +3319,7 @@ func TestTenantLinkRefusedForAcceptedSecondary(t *testing.T) {
 
 	// Once accepted, it must not. (Clear the session first: AcceptInvite itself refuses
 	// while one exists, which is the guard's other half.)
-	if err := s.DeleteTenantSession(ctx, member); err != nil {
+	if err := s.DeleteAllTenantSessions(ctx, member); err != nil {
 		t.Fatalf("clear session: %v", err)
 	}
 	if err := s.AcceptInvite(ctx, member, primary); err != nil {
