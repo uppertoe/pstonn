@@ -251,7 +251,7 @@ func TestMoveGuestGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reqID, _, _, err := st.CreateGuestRequest(ctx, doorGrant.GrantID, src, owner, "TRD441", "nonce-move")
+	reqID, _, _, err := st.CreateGuestRequest(ctx, doorGrant.GrantID, src, owner, "TRD441", "", "nonce-move")
 	if err != nil {
 		t.Fatal(err)
 	}

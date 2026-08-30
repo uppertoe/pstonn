@@ -74,7 +74,7 @@ func TestApproveRequestOnInactivePermitRefuses(t *testing.T) {
 	ctx := context.Background()
 	const owner = "owner@example.com"
 	pid, grantID, _ := seedDoorQR(t, s, owner, "Door")
-	reqID, _, _, err := s.store.CreateGuestRequest(ctx, grantID, pid, owner, "TRD441", "nonce-dead")
+	reqID, _, _, err := s.store.CreateGuestRequest(ctx, grantID, pid, owner, "TRD441", "", "nonce-dead")
 	if err != nil {
 		t.Fatal(err)
 	}

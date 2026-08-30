@@ -54,6 +54,10 @@ func (s *Server) guestDecideApply(w http.ResponseWriter, r *http.Request) {
 	if s.decideThrottled(w, r) {
 		return
 	}
+	// Public and mutating, so outside withUser's blanket body cap: without it a
+	// multipart body buffers 32MB and spills to disk for anyone holding a URL —
+	// the same reason tenantConfirmApply and every /g/ POST cap by hand.
+	limitBody(r)
 	req, addr, ok := s.resolveDecideRequest(r)
 	if !ok {
 		s.message(w, http.StatusOK, decideNeutral)

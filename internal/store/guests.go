@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
@@ -34,6 +36,7 @@ type GuestRequest struct {
 	Owner       string
 	PermitID    int64
 	Plate       string
+	State       string // the plate's registration state code as the visitor chose it ("" = the tenant's home state)
 	Status      string // pending | approved | denied
 	RequestedAt time.Time
 	DecidedAt   time.Time // when the holder approved/denied ("" while pending)
@@ -680,16 +683,52 @@ func (s *Store) PendingGuestRequestsInReserve(ctx context.Context, grantID int64
 	return n >= maxPendingGuestRequests-guestReqReserved, nil
 }
 
-func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, nonce string) (id int64, effNonce string, created bool, err error) {
+// guestReqStateReady records, per Store, that guest_request.state is known to
+// exist, so the ALTER below runs once per process rather than once per query.
+// Keyed by *Store (not a field) because this file must be able to add the column
+// without a change to the shared schema/migration files: the column is what
+// carries a door-QR visitor's chosen registration state from the scan to the
+// approval, and until it existed the approval silently applied the plate under
+// the tenant's home state. The ALTER belongs in migrate.go's additive list too;
+// this stays harmless once it is (duplicate column → no-op).
+var guestReqStateReady sync.Map
+
+// ensureGuestRequestState adds guest_request.state if the schema predates it.
+// Every reader and writer of the column calls it first, so an older database
+// upgrades on first touch instead of failing the door-QR flow with "no such
+// column". Same idempotent-by-tolerance rule as migrate.go: SQLite reports a
+// duplicate column as a generic error, so the message text is the only key.
+func (s *Store) ensureGuestRequestState(ctx context.Context) error {
+	if _, ok := guestReqStateReady.Load(s); ok {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `ALTER TABLE guest_request ADD COLUMN state TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
+	guestReqStateReady.Store(s, struct{}{})
+	return nil
+}
+
+// CreateGuestRequest records a printed-QR scan. state is the registration state
+// the visitor chose for the plate ("" = the tenant's home state); it is carried
+// on the row so the approval applies the plate exactly as it was requested. Same
+// plate, different state does NOT dedup against a pending row: plate alone is
+// the identity the visitor sees and re-scans, and the approval reads the state
+// from the row it approves.
+func (s *Store) CreateGuestRequest(ctx context.Context, grantID, permitID int64, owner, plate, state, nonce string) (id int64, effNonce string, created bool, err error) {
+	if err := s.ensureGuestRequestState(ctx); err != nil {
+		return 0, "", false, err
+	}
 	// Dedup (same plate re-scan reuses the pending request), the pending cap, and
 	// the insert are ONE guarded statement: a separate check-then-insert lets two
 	// simultaneous scans both pass the check and double-insert/over-fill.
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, nonce, status, requested_at)
-		 SELECT ?1, ?2, ?3, ?4, ?5, 'pending', ?6
+		`INSERT INTO guest_request (grant_id, owner, permit_id, plate, state, nonce, status, requested_at)
+		 SELECT ?1, ?2, ?3, ?4, ?8, ?5, 'pending', ?6
 		 WHERE NOT EXISTS (SELECT 1 FROM guest_request WHERE grant_id = ?1 AND plate = ?4 AND status = 'pending')
 		   AND (SELECT COUNT(*) FROM guest_request WHERE grant_id = ?1 AND status = 'pending') < ?7`,
-		grantID, owner, permitID, plate, nonce, nowUTC(), maxPendingGuestRequests)
+		grantID, owner, permitID, plate, nonce, nowUTC(), maxPendingGuestRequests, state)
 	if err != nil {
 		return 0, "", false, err
 	}
@@ -794,8 +833,11 @@ func (s *Store) PurgeDecidedGuestRequests(ctx context.Context, before time.Time)
 // GuestRequestForPoll returns a request only if the nonce matches — the visitor's
 // status check, safe against request-id enumeration.
 func (s *Store) GuestRequestForPoll(ctx context.Context, id int64, nonce string) (GuestRequest, error) {
+	if err := s.ensureGuestRequestState(ctx); err != nil {
+		return GuestRequest{}, err
+	}
 	return s.scanGuestRequest(s.db.QueryRowContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, decided_by, until_at, until_ts
+		`SELECT id, grant_id, owner, permit_id, plate, state, status, requested_at, decided_at, decided_by, until_at, until_ts
 		 FROM guest_request WHERE id = ? AND nonce = ? AND nonce != ''`, id, nonce))
 }
 
@@ -805,7 +847,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 func (s *Store) scanGuestRequest(row rowScanner) (GuestRequest, error) {
 	var r GuestRequest
 	var requested, decided, untilTS string
-	err := row.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &decided, &r.DecidedBy, &r.Until, &untilTS)
+	err := row.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.State, &r.Status, &requested, &decided, &r.DecidedBy, &r.Until, &untilTS)
 	if err == sql.ErrNoRows {
 		return GuestRequest{}, ErrNotFound
 	}
@@ -820,16 +862,22 @@ func (s *Store) scanGuestRequest(row rowScanner) (GuestRequest, error) {
 
 // GuestRequestByID returns a request (used by the visitor's polling status page).
 func (s *Store) GuestRequestByID(ctx context.Context, id int64) (GuestRequest, error) {
+	if err := s.ensureGuestRequestState(ctx); err != nil {
+		return GuestRequest{}, err
+	}
 	return s.scanGuestRequest(s.db.QueryRowContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, decided_by, until_at, until_ts
+		`SELECT id, grant_id, owner, permit_id, plate, state, status, requested_at, decided_at, decided_by, until_at, until_ts
 		 FROM guest_request WHERE id = ?`, id))
 }
 
 // ListPendingRequests returns an owner's still-pending printed-QR requests, newest
 // first (the approvals queue).
 func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestRequest, error) {
+	if err := s.ensureGuestRequestState(ctx); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, until_at FROM guest_request
+		`SELECT id, grant_id, owner, permit_id, plate, state, status, requested_at, until_at FROM guest_request
 		 WHERE owner = ? AND status = 'pending' ORDER BY id DESC`, owner)
 	if err != nil {
 		return nil, err
@@ -839,7 +887,7 @@ func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestR
 	for rows.Next() {
 		var r GuestRequest
 		var requested string
-		if err := rows.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.Status, &requested, &r.Until); err != nil {
+		if err := rows.Scan(&r.ID, &r.GrantID, &r.Owner, &r.PermitID, &r.Plate, &r.State, &r.Status, &requested, &r.Until); err != nil {
 			return nil, err
 		}
 		r.RequestedAt, _ = time.Parse(time.RFC3339, requested)
@@ -853,8 +901,11 @@ func (s *Store) ListPendingRequests(ctx context.Context, owner string) ([]GuestR
 // guests page's recent-activity list, so every account member — not just the one
 // who decided — can see how a request was resolved.
 func (s *Store) ListRecentDecidedRequests(ctx context.Context, owner string, since time.Time) ([]GuestRequest, error) {
+	if err := s.ensureGuestRequestState(ctx); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, grant_id, owner, permit_id, plate, status, requested_at, decided_at, decided_by, until_at, until_ts
+		`SELECT id, grant_id, owner, permit_id, plate, state, status, requested_at, decided_at, decided_by, until_at, until_ts
 		 FROM guest_request
 		 WHERE owner = ? AND status != 'pending' AND decided_at >= ?
 		 ORDER BY decided_at DESC, id DESC`,

@@ -95,12 +95,19 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Resolved BEFORE the send and the write, and fail-closed: the lenient
+	// resolver's fallback is the caller's own address, which would file a
+	// secondary's referral in a phantom account's log — and a 503 is only honest
+	// if nothing has been sent yet.
+	_, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	if err := s.notify.SendReferralInvite(ctx, to, u.Email); err != nil {
 		// A suppressed address (bounced, complained, unsubscribed) is not the
 		// sender's problem to solve, and the reason is not theirs to see.
 		log.Printf("referral from %s: %v", redact.Email(u.Email), err)
 	}
-	owner, _, _ := s.resolveAccount(ctx)
 	s.logChange(ctx, owner, u.Email, store.ActionReferralSend, to, "")
 	http.Redirect(w, r, "/share?sent=1", http.StatusSeeOther)
 }

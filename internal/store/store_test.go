@@ -1313,12 +1313,12 @@ func TestPrintedRequestFlow(t *testing.T) {
 	}
 
 	// A scan records a pending request the visitor can poll only with its nonce.
-	reqID, _, created, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "secretnonce")
+	reqID, _, created, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "", "secretnonce")
 	if err != nil || !created {
 		t.Fatalf("create request: created=%v err=%v", created, err)
 	}
 	// A second scan of the SAME plate reuses the pending request (no duplicate).
-	if id2, n2, created2, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "othernonce"); err != nil || created2 || id2 != reqID || n2 != "secretnonce" {
+	if id2, n2, created2, err := s.CreateGuestRequest(ctx, grantID, p, owner, "TRADIE1", "", "othernonce"); err != nil || created2 || id2 != reqID || n2 != "secretnonce" {
 		t.Fatalf("re-scan should reuse pending request: id=%d nonce=%q created=%v err=%v", id2, n2, created2, err)
 	}
 	if _, err := s.GuestRequestForPoll(ctx, reqID, "wrongnonce"); !errors.Is(err, ErrNotFound) {
@@ -1846,11 +1846,11 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 	}
 
 	// Same plate re-scan reuses the pending request.
-	id1, n1, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "nonce1")
+	id1, n1, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "", "nonce1")
 	if err != nil || !created {
 		t.Fatalf("first request: id=%d created=%v err=%v", id1, created, err)
 	}
-	id2, n2, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "nonce2")
+	id2, n2, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "", "nonce2")
 	if err != nil || created || id2 != id1 || n2 != n1 {
 		t.Fatalf("re-scan should reuse: id=%d created=%v err=%v", id2, created, err)
 	}
@@ -1858,15 +1858,15 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 	// Distinct plates fill the cap; one more is refused.
 	for i := 0; i < maxPendingGuestRequests-1; i++ {
 		plate := "BBB10" + string(rune('0'+i))
-		if _, _, _, err := s.CreateGuestRequest(ctx, gid, p, owner, plate, "n"); err != nil {
+		if _, _, _, err := s.CreateGuestRequest(ctx, gid, p, owner, plate, "", "n"); err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 	}
-	if _, _, _, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "n"); !errors.Is(err, ErrGuestRequestLimit) {
+	if _, _, _, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "", "n"); !errors.Is(err, ErrGuestRequestLimit) {
 		t.Fatalf("over-cap err = %v, want ErrGuestRequestLimit", err)
 	}
 	// But an existing plate still resolves to its pending row at the cap.
-	if id, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "n"); err != nil || created || id != id1 {
+	if id, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "AAA111", "", "n"); err != nil || created || id != id1 {
 		t.Fatalf("dup at cap: id=%d created=%v err=%v", id, created, err)
 	}
 
@@ -1882,7 +1882,7 @@ func TestGuestRequestCapExpiryAndPurge(t *testing.T) {
 	if _, err := s.DecideGuestRequest(ctx, owner, id1, true, "today", owner, time.Time{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deciding an expired request must fail, got %v", err)
 	}
-	if _, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "n"); err != nil || !created {
+	if _, _, created, err := s.CreateGuestRequest(ctx, gid, p, owner, "ZZZ999", "", "n"); err != nil || !created {
 		t.Fatalf("cap should free after expiry: created=%v err=%v", created, err)
 	}
 
@@ -2409,7 +2409,7 @@ func TestRetention(t *testing.T) {
 	}
 
 	// --- settled visitor requests drop the poll nonce ---
-	reqID, _, _, err := s.CreateGuestRequest(ctx, gid, pid, owner, "VIS123", "nonce-ret")
+	reqID, _, _, err := s.CreateGuestRequest(ctx, gid, pid, owner, "VIS123", "", "nonce-ret")
 	if err != nil {
 		t.Fatal(err)
 	}

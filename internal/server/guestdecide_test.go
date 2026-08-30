@@ -40,7 +40,7 @@ func seedDecideRequest(t *testing.T) (*Server, store.GuestRequest, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reqID, _, _, err := s.store.CreateGuestRequest(ctx, grantID, permitID, owner, "TRD441", "nonce-decide")
+	reqID, _, _, err := s.store.CreateGuestRequest(ctx, grantID, permitID, owner, "TRD441", "", "nonce-decide")
 	if err != nil {
 		t.Fatal(err)
 	}

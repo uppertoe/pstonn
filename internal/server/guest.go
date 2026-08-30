@@ -424,34 +424,37 @@ func revertPlate(baseline string, until time.Time, current string, cars []model.
 }
 
 // guestDesired returns the plate the schedule is currently steering the permit
-// toward ("" when nothing is scheduled), when that decision was made, and when
-// its booking ends (both zero when roster-driven/open-ended). It is the same
-// resolution the scheduler acts on, so the page's "still applying" state can
-// never disagree with what will be applied.
-func (s *Server) guestDesired(ctx context.Context, permit model.Permit) (want string, decidedAt, until time.Time) {
+// toward ("" when nothing is scheduled) with its registration state, when that
+// decision was made, and when its booking ends (both zero when roster-driven/
+// open-ended). It is the same resolution the scheduler acts on — including the
+// state: an ad-hoc plate's own, a saved car's — so the page's "still applying"
+// state can never disagree with what will be applied, and a guest revert that
+// hands the permit back to the schedule restores the plate under the state the
+// schedule would have used.
+func (s *Server) guestDesired(ctx context.Context, permit model.Permit) (want, state string, decidedAt, until time.Time) {
 	now := time.Now().In(s.locForPermit(ctx, permit))
 	rules, err := s.store.ListRules(ctx, permit.ID)
 	if err != nil {
-		return "", time.Time{}, time.Time{}
+		return "", "", time.Time{}, time.Time{}
 	}
 	overrides, err := s.store.ListOverrides(ctx, permit.ID, now)
 	if err != nil {
-		return "", time.Time{}, time.Time{}
+		return "", "", time.Time{}, time.Time{}
 	}
 	res := model.Resolve(now, rules, overrides)
 	if res.Source == model.SourceNone {
-		return "", time.Time{}, time.Time{}
+		return "", "", time.Time{}, time.Time{}
 	}
 	if res.Registration != "" {
-		want = res.Registration
+		want, state = res.Registration, res.State
 	} else {
 		vehicles, verr := s.store.ListVehiclesFor(ctx, permit.Owner)
 		if verr != nil {
-			return "", time.Time{}, time.Time{}
+			return "", "", time.Time{}, time.Time{}
 		}
 		for _, v := range vehicles {
 			if v.ID == res.VehicleID {
-				want = v.Registration
+				want, state = v.Registration, v.State
 				break
 			}
 		}
@@ -478,7 +481,129 @@ func (s *Server) guestDesired(ctx context.Context, permit model.Permit) (want st
 			}
 		}
 	}
-	return want, decidedAt, until
+	return want, state, decidedAt, until
+}
+
+// stateForPlate recovers the registration state to restore a plate under, from
+// the owner's saved cars. The tenant's own record reports a plate but not its
+// state, so a revert baseline (captured from that record) has no state of its
+// own to carry; the only other evidence is a saved car with the same plate.
+// Nothing matching means the tenant's home state (""), which is what the
+// portal applies by default.
+func stateForPlate(vehicles []model.Vehicle, plate string) string {
+	for _, v := range vehicles {
+		if model.SamePlate(v.Registration, plate) {
+			return v.State
+		}
+	}
+	return ""
+}
+
+// validRegion reports whether code is a registration state the owner's tenant
+// accepts. "" (the home state) is always valid; an unknown code, or no tenant
+// wired at all (tests), collapses to "" at the caller rather than reaching the
+// portal. Nil-guarded here so every form path shares one rule.
+func (s *Server) validRegion(ctx context.Context, permit model.Permit, code string) bool {
+	if code == "" {
+		return true
+	}
+	return s.tenant != nil && s.tenant.RegionValid(ctx, permit.Owner, permit.TenantID, code)
+}
+
+// formRegion reads the plate_state field of a typed-plate form, validated against
+// the permit owner's tenant — "" (the tenant home state) when absent, unknown, or
+// for a state-less provider.
+func (s *Server) formRegion(r *http.Request, permit model.Permit) string {
+	code := strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
+	if !s.validRegion(r.Context(), permit, code) {
+		return ""
+	}
+	return code
+}
+
+// guestApply is one tenant write made on a guest's authority: the plate (with
+// its registration state) to put on the permit, the link doing it, and how the
+// activity log should describe it.
+type guestApply struct {
+	permit model.Permit
+	plate  string
+	state  string // registration state code ("" = tenant home state)
+	// tokenID is the guest token whose authority the write exercises; overrideID
+	// is the override it exercises (0 for a revert: authority only, see
+	// authoriseGuestApply).
+	tokenID, overrideID int64
+	okDetail            string // activity-log detail on success ("activated by …")
+	logAs               string // server-log prefix on failure ("guest activate")
+}
+
+// applyGuestPlate is the one path by which a guest-authorised change reaches the
+// tenant: claim the permit's apply slot, re-check authorisation under it, write
+// the plate AND its state, record the belief, log the outcome and kick the
+// reconcile loop. Activation, revert and door-QR approval all used to carry
+// their own copy of this sequence, and the copies drifted — two of the three
+// dropped the registration state on the floor, applying an interstate plate
+// under the tenant's home state, which is exactly the fine this app exists to
+// prevent. One helper means one place for the next capability to be added.
+//
+// ctx must already be detached from the request (a closed tab mid-apply must not
+// cancel the tenant write halfway nor drop the bookkeeping); the tenant budget is
+// capped inside, below the server's 20s WriteTimeout, so a slow apply still
+// leaves room to write the response.
+//
+// Returns (denial, err): a denial other than guestApplyAllowed means NOTHING was
+// written and the caller should tell the visitor d.message(); otherwise err is
+// the tenant result — nil once the tenant confirmed the plate, errApplyBusy when
+// another change for the permit held the claim (the change is saved, so the
+// scheduler converges on it), or the tenant's own error.
+func (s *Server) applyGuestPlate(ctx context.Context, a guestApply) (guestApplyDenial, error) {
+	applyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	// Serialise with the reconcile loop for the duration of the write AND the
+	// active_registration write that records it. Without this the loop could be
+	// mid-apply of the roster plate, and whichever of us reached the tenant last
+	// would decide the plate while whichever wrote the database last decided our
+	// belief about it — leaving the tenant holding one car and the row naming
+	// another. Every later tick then compares its target against that wrong belief,
+	// finds nothing to do, and leaves a car uncovered until the next drift check.
+	// Bounded by applyCtx, so a stuck claim cannot hold the request open. Held over
+	// the tenant write and the row that records it — those two are the one decision
+	// — and released immediately after, so the audit row, the notices and rendering
+	// the page never hold up a reconcile pass.
+	release, claimed := s.sched.AcquireApply(applyCtx, a.permit.ID)
+	err := error(errApplyBusy)
+	if claimed {
+		// Re-check authorisation HERE, under the claim and immediately before the
+		// tenant write. The guarded insert proved the link was live at insert time,
+		// but a revocation landing in the gap since then deletes the override and tells
+		// the owner the pass has stopped working — this stops us then putting the
+		// revoked guest's plate on the real permit anyway.
+		if d := s.authoriseGuestApply(applyCtx, a.tokenID, a.overrideID); d != guestApplyAllowed {
+			release()
+			s.kickScheduler() // let reconcile restore the correct target
+			return d, nil
+		}
+		if err = s.tenant.SetVehicle(applyCtx, a.permit.Owner, a.permit, a.plate, a.state); err == nil {
+			if e := s.store.SetPermitActive(ctx, a.permit.ID, a.plate); e != nil {
+				// Tenant confirmed the change; only the local record failed. The Kick
+				// below drives a reconcile that re-records it (and alerts if it persists).
+				log.Printf("guest: applied %q at council for permit %d but local commit failed: %v", a.plate, a.permit.ID, e)
+			}
+		}
+	}
+	release()
+	// Plain Kick, deliberately: this path already attempted the tenant write
+	// itself, so clearing the permit's failure backoff would add tenant pressure
+	// without adding a chance of success — and most callers are unauthenticated.
+	s.sched.Kick()
+	if err == nil {
+		_ = s.store.RecordApply(ctx, a.permit.ID, a.plate, "guest", "success", a.okDetail)
+		return guestApplyAllowed, nil
+	}
+	// The activity log is user-facing: record a plain-English detail and keep the
+	// raw tenant error in the server log only.
+	log.Printf("%s %s on permit %d: %v", a.logAs, a.plate, a.permit.ID, err)
+	_ = s.store.RecordApply(ctx, a.permit.ID, a.plate, "guest", "error", guestApplyDetail(err))
+	return guestApplyAllowed, err
 }
 
 // untilText phrases when the winning booking ends, or "" when there is nothing
@@ -580,7 +705,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		view.OwnerEmail = permit.Owner
 		view.CurrentReg = current
 		view.CheckedAgo = s.guestPlateCheckedAgo(ctx, permit)
-		want, decidedAt, until := s.guestDesired(ctx, permit)
+		want, _, decidedAt, until := s.guestDesired(ctx, permit)
 		// Offer "put it back" only while THIS link's activation is still the winning
 		// plate. If the owner (or their schedule) has since booked over it, the guest
 		// has nothing to undo — and reverting would wrongly displace that deliberate
@@ -678,7 +803,7 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 	}
 	flash := ""
 	if view.PendingReg == "" && !view.Stalled {
-		if want, _, _ := s.guestDesired(r.Context(), permit); want != "" && model.SamePlate(current, want) {
+		if want, _, _, _ := s.guestDesired(r.Context(), permit); want != "" && model.SamePlate(current, want) {
 			flash = current + " is now on the permit."
 		}
 	}
@@ -752,12 +877,8 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reg = plate
-		// The typed plate's registration state, validated against the owner's tenant
-		// ("" — the tenant home state — when absent, unknown, or state-less provider).
-		regState = strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
-		if regState != "" && !s.tenant.RegionValid(r.Context(), permit.Owner, permit.TenantID, regState) {
-			regState = ""
-		}
+		// The typed plate's registration state, validated against the owner's tenant.
+		regState = s.formRegion(r, permit)
 		createdBy = gc.Recipient
 		if createdBy == "" {
 			createdBy = "visitor (QR)"
@@ -804,65 +925,31 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	until := untilPhrase(now, overnight)
+	// A real person just changed the permit through the household's link: that is
+	// the household-liveness evidence the 90-day idle bound wants (see
+	// touchGuestActivity) — unlike a GET, which mail scanners and the live poll
+	// also make.
+	s.touchGuestActivity(r.Context(), permit.Owner)
 	// Best-effort synchronous apply so the visitor gets a real result; the
-	// scheduler (kicked below) owns retries and eventual consistency regardless.
+	// scheduler (kicked inside) owns retries and eventual consistency regardless.
 	// Detached from the request context: a closed tab mid-apply must not cancel
 	// the tenant write halfway, nor silently drop the audit row and the
-	// displaced-driver notice after the change has already landed. Capped below
-	// the server's 20s WriteTimeout so a slow apply still leaves room to write
-	// the response.
+	// displaced-driver notice after the change has already landed.
 	bg := context.WithoutCancel(r.Context())
-	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
-	defer cancel()
-	// Serialise with the reconcile loop for the duration of the write AND the
-	// active_registration write that records it. Without this the loop could be
-	// mid-apply of the roster plate, and whichever of us reached the tenant last
-	// would decide the plate while whichever wrote the database last decided our
-	// belief about it — leaving the tenant holding one car and the row naming
-	// another. Every later tick then compares its target against that wrong belief,
-	// finds nothing to do, and leaves a car uncovered until the next drift check.
-	// Bounded by applyCtx, so a stuck claim cannot hold the request open. Held over
-	// the tenant write and the row that records it — those two are the one decision
-	// — and released immediately after, so the audit row, the notices and rendering
-	// the page never hold up a reconcile pass.
-	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
-	err := error(errApplyBusy)
-	if claimed {
-		// Re-check authorisation HERE, under the claim and immediately before the
-		// tenant write. The guarded insert proved the link was live at insert time,
-		// but a revocation landing in the gap since then deletes the override and tells
-		// the owner the pass has stopped working — this stops us then putting the
-		// revoked guest's plate on the real permit anyway.
-		if d := s.authoriseGuestApply(applyCtx, gc.TokenID, overrideID); d != guestApplyAllowed {
-			release()
-			s.kickScheduler() // let reconcile restore the correct target
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
-			return
-		}
-		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, reg, regState); err == nil {
-			if e := s.store.SetPermitActive(bg, permit.ID, reg); e != nil {
-				// Tenant confirmed the change; only the local record failed. The Kick
-				// below drives a reconcile that re-records it (and alerts if it persists).
-				log.Printf("guest: applied %q at council for permit %d but local commit failed: %v", reg, permit.ID, e)
-			}
-		}
+	d, err := s.applyGuestPlate(bg, guestApply{
+		permit: permit, plate: reg, state: regState, tokenID: gc.TokenID, overrideID: overrideID,
+		okDetail: "activated by " + createdBy, logAs: "guest activate",
+	})
+	if d != guestApplyAllowed {
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
+		return
 	}
-	release()
-	// Plain Kick, deliberately: this handler already attempted the tenant write
-	// itself, so clearing the permit's failure backoff would add tenant pressure
-	// without adding a chance of success — and this path is unauthenticated.
-	s.sched.Kick()
 	if err == nil {
-		_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "success", "activated by "+createdBy)
-		d, told := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
-		s.notifyGuestApply(bg, permit, reg, name, createdBy, d, told)
+		disp, told := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
+		s.notifyGuestApply(bg, permit, reg, name, createdBy, disp, told)
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
-	// The activity log is user-facing: record a plain-English detail and keep the
-	// raw tenant error in the server log only.
-	log.Printf("guest activate %s on permit %d: %v", reg, permit.ID, err)
-	_ = s.store.RecordApply(bg, permit.ID, reg, "guest", "error", guestApplyDetail(err))
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The override is saved and the scheduler will apply it shortly; the pending
 		// banner + poller (from renderGuestMenu) track the ACTUAL result — no claim.
@@ -922,12 +1009,22 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	// re-pinning the stale baseline would let a fresh pin leapfrog a booking the
 	// owner made after the guest activated. Only when nothing else covers now do we
 	// re-pin the pre-existing baseline (capped at end of today; see revertPinEnd).
+	// Either way the plate goes back under its OWN registration state: the schedule's
+	// resolved state when the schedule wins, else the state of the owner's saved car
+	// with that plate (the tenant record the baseline was captured from carries no
+	// state, so that is the only evidence; nothing matching means the home state).
+	// Restoring an interstate plate under the home state would leave the car it was
+	// covering uncovered — the exact fine the revert exists to avoid.
 	target := baseline
-	if want, _, _ := s.guestDesired(r.Context(), permit); want != "" {
-		target = want
+	targetState := ""
+	if want, wantState, _, _ := s.guestDesired(r.Context(), permit); want != "" {
+		target, targetState = want, wantState
 	} else {
+		if saved, err := s.store.ListVehiclesFor(r.Context(), permit.Owner); err == nil {
+			targetState = stateForPlate(saved, baseline)
+		}
 		end := revertPinEnd(now, gc.BaselineUntil)
-		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, "", now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
+		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, targetState, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
 			// The sweep above ALREADY committed, so "the permit wasn't changed" would be
 			// false. Say what actually happened and let reconcile settle the target.
 			log.Printf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
@@ -942,37 +1039,24 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.ClearGuestBaseline(r.Context(), gc.TokenID)
 	gc.BaselinePlate, gc.BaselineUntil = "", time.Time{}
 
+	// A deliberate act by the link holder: household liveness (see guestActivate).
+	s.touchGuestActivity(r.Context(), permit.Owner)
 	// Detached from the request (see guestActivate): a disconnect mid-apply must
-	// not drop the bookkeeping, and the budget stays under the WriteTimeout.
+	// not drop the bookkeeping. A revert is still a tenant write on a guest's
+	// authority — overrideID 0 checks the link is still live (it restores the
+	// pre-guest plate rather than exercising a vehicle/plate capability), and a
+	// revert racing the reconcile loop is the same lost update as an activation,
+	// except here the plate left behind would be the one just asked to be removed.
 	bg := context.WithoutCancel(r.Context())
-	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
-	defer cancel()
-	// Exclusive for this permit over the write and the row that records it (see
-	// guestActivate): a revert racing the reconcile loop is the same lost update, and
-	// here the plate left behind would be the one the guest just asked us to remove.
-	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
-	err := error(errApplyBusy)
-	if claimed {
-		// The same gate activation uses. A revert is still a tenant write on a guest's
-		// authority: if the link was revoked while we were deciding the target, it must
-		// not reach the portal (overrideID 0 — a revert restores the pre-guest plate
-		// rather than exercising a vehicle/plate capability).
-		if d := s.authoriseGuestApply(applyCtx, gc.TokenID, 0); d != guestApplyAllowed {
-			release()
-			s.kickScheduler()
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
-			return
-		}
-		if err = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, target, ""); err == nil {
-			if e := s.store.SetPermitActive(bg, permit.ID, target); e != nil {
-				log.Printf("guest: reverted permit %d to %q at council but local commit failed: %v", permit.ID, target, e)
-			}
-		}
+	d, err := s.applyGuestPlate(bg, guestApply{
+		permit: permit, plate: target, state: targetState, tokenID: gc.TokenID, overrideID: 0,
+		okDetail: "put back by " + createdBy, logAs: "guest revert to",
+	})
+	if d != guestApplyAllowed {
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
+		return
 	}
-	release()
-	s.sched.Kick()
 	if err == nil {
-		_ = s.store.RecordApply(bg, permit.ID, target, "guest", "success", "put back by "+createdBy)
 		// A revert can't displace a third party: the guest's own overrides were
 		// just swept, and the baseline is only re-pinned when nothing else covers
 		// now — so there is no displaced booking to chase.
@@ -980,8 +1064,6 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
-	log.Printf("guest revert to %s on permit %d: %v", target, permit.ID, err)
-	_ = s.store.RecordApply(bg, permit.ID, target, "guest", "error", guestApplyDetail(err))
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 		// The restore is saved; the pending banner + poller track the actual result.
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
@@ -1029,13 +1111,14 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	if err != nil || permit.Owner != gc.Grant.Owner {
 		return guestCtx{}, model.Permit{}, false
 	}
-	// A guest presenting a valid token IS household activity: someone the owner
-	// gave access to is using the service right now, which is exactly the
-	// evidence the 90-day idle bound wants. Resolving is the one funnel every
-	// guest surface (menu, poll, activate, revert, printed-QR request) passes
-	// through, so the touch lives here rather than in each handler. Hourly
-	// throttled inside.
-	s.touchGuestActivity(r.Context(), permit.Owner)
+	// Deliberately NO idle-clock touch here. This is the funnel every guest
+	// surface passes through, which is exactly why it must not count as liveness:
+	// a mail scanner prefetching the emailed link, a link-preview bot, and the
+	// 2.5-second /g/live poll from a tab left open all resolve a token, and none
+	// of them is a person still relying on the service. The touch lives on the
+	// activation, revert and printed-QR request POSTs — a human act — matching
+	// tenantConfirm, which likewise refuses to let link-following stand in for a
+	// person.
 	return guestCtx{GuestContext: gc, rawToken: raw}, permit, true
 }
 
@@ -1156,8 +1239,26 @@ func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noStore(w)
-	w.WriteHeader(http.StatusNotFound)
-	s.render(w, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
+	s.renderStatus(w, http.StatusNotFound, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
+}
+
+// renderStatus renders a full page under a non-200 status. WriteHeader has to
+// come AFTER the Content-Type is set (headers are frozen at that moment), so the
+// page is rendered to a buffer first — the messagePage pattern. Calling
+// WriteHeader then render() sent the status with no Content-Type, and browsers
+// were left to sniff the notice page.
+func (s *Server) renderStatus(w http.ResponseWriter, code int, data dashboardData) {
+	buf, err := s.renderBuf(w, data)
+	if err != nil {
+		// The bare page, as render() does: the styled notice shares the template
+		// set that just failed.
+		log.Printf("render %s page: %v", data.State, err)
+		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "Something went wrong rendering this page. Please try again."})
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
+	_, _ = buf.WriteTo(w)
 }
 
 // renderGuestInactive is the notice for a link whose token is still valid but
@@ -1175,8 +1276,7 @@ func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noStore(w)
-	w.WriteHeader(http.StatusGone)
-	s.render(w, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
+	s.renderStatus(w, http.StatusGone, dashboardData{State: "guest-result", Loc: s.cfg.DisplayLocation, Warn: msg})
 }
 
 func (s *Server) renderGuestResult(w http.ResponseWriter, ownerEmail string, ok bool, msg string) {
@@ -2126,7 +2226,7 @@ func (s *Server) requestLiveState(ctx context.Context, permit model.Permit, req 
 	if !end.IsZero() && !now.Before(end) {
 		return "ended", ""
 	}
-	want, _, _ := s.guestDesired(ctx, permit)
+	want, _, _, _ := s.guestDesired(ctx, permit)
 	if !model.SamePlate(want, req.Plate) {
 		return "superseded", want
 	}
@@ -2203,6 +2303,14 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 		s.renderGuestMenu(w, r, gc, permit, "", "", plateFormatMsg)
 		return
 	}
+	// The door-QR form offers the same state chooser as a typed-plate link (printed
+	// grants allow a plate), and the approval applies whatever the row carries — so
+	// the state has to be captured HERE or the visitor's interstate plate goes on
+	// under the home state after the resident says yes.
+	plateState := s.formRegion(r, permit)
+	// A visitor asking to park is a person at the door: household liveness (see
+	// touchGuestActivity). Counted only once the request is well-formed.
+	s.touchGuestActivity(r.Context(), permit.Owner)
 	// This browser's own remembered request, resolved before anything is created: it
 	// is the only evidence that the person asking is the one who asked before.
 	mine, myNonce, haveMine := s.guestReqFromCookie(r, gc)
@@ -2229,7 +2337,7 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 			return
 		}
 	}
-	reqID, nonce, created, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, randNonce())
+	reqID, nonce, created, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, plateState, randNonce())
 	if errors.Is(err, store.ErrGuestRequestLimit) {
 		s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please knock or contact them directly.")
 		return
@@ -2633,7 +2741,9 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	if terr != nil {
 		log.Printf("doorqr approve: no token for grant %d: %v", req.GrantID, terr)
 	}
-	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, "", now, &end, "visitor (printed QR)", doorToken)
+	// The state the visitor chose at the door travels with the request row, so the
+	// override (what the scheduler applies) and the write below agree with it.
+	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, req.State, now, &end, "visitor (printed QR)", doorToken)
 	if errors.Is(cerr, store.ErrGuestOverrideRefused) {
 		// The permit is at its guest-booking sub-cap. Tell the owner plainly instead of
 		// returning a 500 — approving a door-QR request must not look like the app is
@@ -2655,63 +2765,44 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 		return decideOutcome{kind: decideErr, err: err}
 	}
 	// Best-effort synchronous apply for instant feedback; the scheduler converges
-	// otherwise. SetVehicle returns nil only once the tenant confirms the plate.
-	confirmed := false
+	// otherwise (a claim we cannot get means we simply don't apply here — the
+	// override is saved, and both front doors have a wording for "approving"
+	// versus "applied"). Detached from the request (see guestActivate): a
+	// disconnect mid-apply must not drop the bookkeeping. This was once the one
+	// guest path that wrote to the tenant without re-checking authorisation under
+	// the claim; applyGuestPlate makes that impossible to leave out again.
 	prev := permit.ActiveRegistration
-	// Detached from the request (see guestActivate): a disconnect mid-apply must
-	// not drop the bookkeeping, and the budget stays under the WriteTimeout.
 	bg := context.WithoutCancel(r.Context())
-	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
-	// Exclusive for this permit while we write (see guestActivate): an approval
-	// racing the reconcile loop could otherwise leave the tenant holding the roster
-	// plate while the row claims the visitor's, and the visitor is standing at the
-	// door believing they are covered. A claim we cannot get means we simply don't
-	// apply here — the override is saved, so the scheduler applies it, and both
-	// front doors have a wording for "approving" versus "applied".
-	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
-	applyErr := error(errApplyBusy)
-	if claimed {
-		// The same gate guestActivate and guestRevert use. This was the one guest path
-		// that wrote to the tenant without re-checking authorisation under the claim:
-		// a door QR revoked between the approval and here would otherwise still have its
-		// visitor's plate applied, after the household was told the code had stopped.
-		if d := s.authoriseGuestApply(applyCtx, doorToken, ovID); d != guestApplyAllowed {
-			release()
-			cancel()                                    // this path returns early; don't leak the apply context
-			_ = s.store.DeleteOverride(bg, owner, ovID) // don't leave it for the scheduler
-			s.kickScheduler()
-			return decideOutcome{kind: decideRevoked}
-		}
-		if applyErr = s.tenant.SetVehicle(applyCtx, permit.Owner, permit, req.Plate, ""); applyErr == nil {
-			if e := s.store.SetPermitActive(bg, permit.ID, req.Plate); e != nil {
-				log.Printf("guest: approved plate %q for permit %d at council but local commit failed: %v", req.Plate, permit.ID, e)
-			}
-		}
+	d, applyErr := s.applyGuestPlate(bg, guestApply{
+		permit: permit, plate: req.Plate, state: req.State, tokenID: doorToken, overrideID: ovID,
+		okDetail: "approved a printed-QR request", logAs: "doorqr approve",
+	})
+	if d != guestApplyAllowed {
+		// A door QR revoked between the approval and here: the household was told the
+		// code had stopped, so the plate must not go on. Don't leave the override for
+		// the scheduler either.
+		_ = s.store.DeleteOverride(bg, owner, ovID)
+		return decideOutcome{kind: decideRevoked}
 	}
-	release()
 	if applyErr == nil {
-		_ = s.store.RecordApply(bg, permit.ID, req.Plate, "guest", "success", "approved a printed-QR request")
-		confirmed = true
 		// The approved plate may have bumped a still-live booking's car off the
 		// permit; warn that driver if they're reachable. The approving member saw
 		// the change happen, but the OTHER members didn't — fan the confirmation
 		// out like every other plate change (the guest-link path does the same).
-		d, told := s.displacedDriver(bg, permit, prev, req.Plate, user)
+		disp, told := s.displacedDriver(bg, permit, prev, req.Plate, user)
 		outcome := notify.ApplyOutcome{
 			Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: req.Plate, By: user, Source: "doorqr", OK: true,
-			DisplacedReg: d.Reg, DisplacedTold: told,
+			DisplacedReg: disp.Reg, DisplacedTold: told,
 		}
-		if err := s.notify.EnqueueApply(bg, outcome); err != nil {
-			log.Printf("doorqr apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
+		if s.notify != nil {
+			if err := s.notify.EnqueueApply(bg, outcome); err != nil {
+				log.Printf("doorqr apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
+			}
 		}
-	} else {
-		log.Printf("doorqr approve %s on permit %d: %v", req.Plate, permit.ID, applyErr)
 	}
-	cancel()
-	s.sched.Kick()
 
 	s.logChange(bg, owner, user, store.ActionRequestOK, req.Plate, "")
-	if confirmed {
+	if applyErr == nil {
 		return decideOutcome{kind: decideApplied, plate: req.Plate}
 	}
 	return decideOutcome{kind: decideApproving, plate: req.Plate}

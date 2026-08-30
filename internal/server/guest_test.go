@@ -269,7 +269,7 @@ func TestGuestReqFromCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reqID, nonce, _, err := s.store.CreateGuestRequest(ctx, grantA, pidA, owner, "GUEST1", "secretnonce")
+	reqID, nonce, _, err := s.store.CreateGuestRequest(ctx, grantA, pidA, owner, "GUEST1", "", "secretnonce")
 	if err != nil {
 		t.Fatal(err)
 	}
