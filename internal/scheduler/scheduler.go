@@ -3100,7 +3100,18 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	}
 	d := model.FindDisplaced(overrides, byID, prev, "", members, now)
 	if d.Reg == "" {
-		d = model.FindDisplacedVehicle(byID, prev, "", members)
+		// Same gate as displaced(): the saved-vehicle fallback warns prev's regular
+		// driver only when prev was TODAY's rostered car. A plate lingering from a
+		// prior day (or a default) that a portal edit happened to replace has no
+		// parked driver to warn.
+		rules, err := s.store.ListRules(ctx, p.ID)
+		if err != nil {
+			return
+		}
+		if roster := model.Resolve(now, rules, nil); roster.Source == model.SourceRoster &&
+			model.SamePlate(prev, byID[roster.VehicleID].Registration) {
+			d = model.FindDisplacedVehicle(byID, prev, "", members)
+		}
 	}
 	if d.Contact != "" {
 		s.warnDisplacedHow(ctx, p, d, prev, "it was changed at the council")

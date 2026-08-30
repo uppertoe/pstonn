@@ -1093,6 +1093,46 @@ func TestDisplaced(t *testing.T) {
 	}
 }
 
+// TestWarnExternallyDisplacedRosterGate covers the sibling path: when a council-
+// portal edit removes a plate, the saved-driver fallback must fire only when that
+// plate was TODAY's rostered car, never for a plate merely lingering on the permit.
+func TestWarnExternallyDisplacedRosterGate(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	fn := &fakeNotifier{on: true}
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
+	const owner = "owner@example.com"
+
+	pid, err := st.UpsertPermit(ctx, owner, "CPID1", "TYPE1", "Visitor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vid, err := st.CreateVehicle(ctx, owner, "MUM123", "Mum's car", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetVehicleEmail(ctx, owner, vid, "nanny@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	p := model.Permit{ID: pid, Owner: owner}
+
+	// No roster rule for today: MUM123 was lingering. A portal edit that removes it
+	// must NOT email its driver.
+	s.warnExternallyDisplaced(ctx, p, "MUM123")
+	if len(fn.displaced) != 0 {
+		t.Fatalf("a lingering plate changed at the council must not warn its driver, got %v", fn.displaced)
+	}
+
+	// With MUM123 as today's rostered car, the same portal edit does warn the driver.
+	if err := st.SetRule(ctx, pid, time.Now().In(s.loc).Weekday(), vid); err != nil {
+		t.Fatal(err)
+	}
+	s.warnExternallyDisplaced(ctx, p, "MUM123")
+	if len(fn.displaced) != 1 || fn.displaced[0] != "nanny@example.com" {
+		t.Fatalf("displacing today's rostered car at the council should warn the driver, got %v", fn.displaced)
+	}
+}
+
 func ptr(t time.Time) *time.Time { return &t }
 
 // TestDetectSystemicOwnerCounting locks in the fix that the "everything is
