@@ -240,7 +240,11 @@
          plate + status pill), and the re-armed poll div rides along inside it. Trade-off:
          today's calendar cell mirrors the pill but is outside the badge, so its
          applying marker clears on the next full render, not on the poll. */}}
-    <div style="display:none" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="closest .nowbadge" hx-swap="outerHTML" hx-select=".nowbadge"></div>
+    {{/* transition:false + .hx-quiet: the layout turns on globalViewTransitions, so
+         without the opt-out every poll tick cross-faded the WHOLE document (a visible
+         page-wide flicker every few seconds), and lit the top loading bar. A background
+         re-check of one badge must be invisible unless the plate actually changed. */}}
+    <div style="display:none" class="hx-quiet" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="closest .nowbadge" hx-swap="outerHTML transition:false" hx-select=".nowbadge"></div>
     {{end}}
   </div>
 </div>

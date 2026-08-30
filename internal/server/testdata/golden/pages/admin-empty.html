@@ -869,7 +869,8 @@
 
 <script>
   
-  addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
+  
+  addEventListener('htmx:beforeRequest', function (e) { var el = e.detail && e.detail.elt; if (el && el.classList && el.classList.contains('hx-quiet')) return; var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
   addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
   
   

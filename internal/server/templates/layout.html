@@ -152,8 +152,9 @@
      correct as well as sufficient. Keep new inline scripts here for the same
      reason. */}}
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>
-  // Show the top loading bar during any htmx request (incl. boosted navigation).
-  addEventListener('htmx:beforeRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
+  // Show the top loading bar during any htmx request (incl. boosted navigation) —
+  // except background polls marked .hx-quiet, which must not flash the bar every tick.
+  addEventListener('htmx:beforeRequest', function (e) { var el = e.detail && e.detail.elt; if (el && el.classList && el.classList.contains('hx-quiet')) return; var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
   addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
   // When a session lapses, forward-auth answers a boosted request with a 302 to
   // the cross-origin login page. htmx (an XHR) can't follow that redirect under
