@@ -635,6 +635,13 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The permit's portal may not allow an empty permit at all; the card never
+	// offers the action then, and this is the authoritative refusal (a stale tab,
+	// a hand-built request). Checked before any claim or tenant call.
+	if !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
+		s.formError(w, r, "This council's permit can't be left with no vehicle on it — put a different car on instead.")
+		return
+	}
 	now := time.Now().In(s.locForPermit(r.Context(), p))
 
 	// Detached + capped like every other tenant write on a request path, so a

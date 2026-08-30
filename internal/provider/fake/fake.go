@@ -48,6 +48,9 @@ type Provider struct {
 	// Regions, when set, replaces the canned Australian state set — so a test can
 	// give two fake tenants different jurisdictions and prove routing by tenant.
 	Regions []provider.Region
+	// NoClear declares a portal that cannot leave a permit with no vehicle
+	// (CanClearVehicle=false), so the UI's adaptation to that can be exercised.
+	NoClear bool
 }
 
 // New builds a fake portal seeded with a plate on each canned permit, like a real
@@ -73,7 +76,7 @@ func (f *Provider) Capabilities() provider.Capabilities {
 	if f.Regions != nil {
 		regions = f.Regions
 	}
-	return provider.Capabilities{CanClearVehicle: true, SupportsRefresh: true, NeedsKeepWarm: false, SupportsExpiry: true, LoginKind: "password", Regions: regions}
+	return provider.Capabilities{CanClearVehicle: !f.NoClear, SupportsRefresh: true, NeedsKeepWarm: false, SupportsExpiry: true, LoginKind: "password", Regions: regions}
 }
 
 type session struct {

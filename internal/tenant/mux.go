@@ -151,6 +151,19 @@ func (m *Mux) ForgetPermit(owner, tenantID, tenantPermitID string) {
 	}
 }
 
+// Capabilities reports what the named tenant's portal supports, so a page can
+// adapt (hide the clear action, drop the state chooser, treat expiry as unknown)
+// without knowing any portal. tenantID names the tenant a permit belongs to;
+// "" is the owner's current tenant. A tenant this process does not serve reports
+// the zero value: nothing supported, so nothing is offered.
+func (m *Mux) Capabilities(ctx context.Context, owner, tenantID string) provider.Capabilities {
+	c, err := m.client(ctx, owner, tenantID)
+	if err != nil || c == nil {
+		return provider.Capabilities{}
+	}
+	return c.Capabilities()
+}
+
 // Regions returns the registration jurisdictions a vehicle may carry, for the
 // UI's state chooser. tenantID names the tenant a permit belongs to — every
 // permit-scoped page passes its permit's tenant, never the account's current

@@ -371,7 +371,7 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 	current := permit.ActiveRegistration
 	if s.tenant != nil { // a tenant hiccup (or, in tests, no client at all) must not fail the page
 		if actual, _, _, err := s.tenant.CurrentVehicleCached(ctx, permit.Owner,
-			model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
+			model.Permit{TenantID: permit.TenantID, CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute); err == nil {
 			// This read just showed the tenant holding a different plate than our
 			// stored belief — the one state where the scheduler could wrongly skip a
 			// due change as "already correct". Don't wait out the ~6h drift cadence
@@ -399,7 +399,7 @@ func (s *Server) guestPlateCheckedAgo(ctx context.Context, permit model.Permit) 
 		return ""
 	}
 	_, age, fresh, err := s.tenant.CurrentVehicleCached(ctx, permit.Owner,
-		model.Permit{CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute)
+		model.Permit{TenantID: permit.TenantID, CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute)
 	if err != nil || fresh {
 		return ""
 	}

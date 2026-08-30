@@ -293,6 +293,31 @@ built by the connectors test); if its portal is new, a package under
 `internal/provider/`, a case in `connectors.Build`, and its name in
 `tenant.knownConnectors` — the tests fail until all three agree.
 
+## UI that depends on the portal — the three mechanisms (2026-08-30)
+
+An integration that needs the UI to differ is one of three things, each with its
+own mechanism; pick by kind, never by council name (the literal-lint enforces it):
+
+1. **Words, links, facts** → registry `terms`, the catalog, `links`, `copy`. No code.
+2. **Same model, different portal capabilities** → `provider.Capabilities`,
+   declared by the connector and consumed by the page through `capsView`
+   (`internal/server/views.go`): `buildPermitView` resolves the PERMIT's tenant's
+   capabilities via `Tenant.Capabilities(ctx, owner, tenantID)` and the card
+   branches on `.Caps` / the derived fields only — `CanClear` (button hidden AND
+   `clearPermit` refuses), `Regions` (chooser), `Expiry` (labels left unknown).
+   Adding a capability = a field on `Capabilities` (+ a `Validate()` rule if it
+   has one), a `capsView` field, a template branch, and a fake-provider toggle so
+   it is tested as a matrix (`TestPortalThatCannotClearOverHTTP` is the pattern).
+   A portal that needs extra vehicle attributes (make/model/colour — Banyule's
+   `GetJsonMakes/Models/Colours` hints at it) is the same mechanism one size up:
+   a `VehicleFields` capability the provider names, rendered generically by the
+   vehicle form, stored in one JSON column.
+3. **A different model** (coupon, replate) → a different page and planner
+   selected by `Model` at the handler, sharing the shell, vehicles, guests and
+   notifications. Not `{{if eq .Model …}}` sprinkled through the schedule page.
+   Built when a tenant exists to drive it; `Model.Plate()` keeps it unreachable
+   until then.
+
 ## Remaining (not done in this branch)
 
 - **Landing / public pages per council.** Public pages render for the registry

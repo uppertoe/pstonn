@@ -533,6 +533,25 @@ type inviteView struct {
 	Blocked string
 }
 
+// capsView is the page-facing shape of provider.Capabilities for one tenant:
+// what the portal can do, resolved for the permit (or, on account-wide pages,
+// the account's current tenant). Templates branch on these fields only.
+type capsView struct {
+	// CanClear: the portal can leave a permit with no vehicle at all. False hides
+	// the "take the car off" action and the handler refuses it.
+	CanClear bool
+	// Expiry: the portal reports a meaningful end date. False leaves the card's
+	// expiry labels empty ("expiry unknown") rather than showing a placeholder.
+	Expiry bool
+	// Regions: the portal has a registration-jurisdiction concept (non-empty
+	// Regions list on the view). False hides the state chooser.
+	Regions bool
+}
+
+func capsOf(c provider.Capabilities) capsView {
+	return capsView{CanClear: c.CanClearVehicle, Expiry: c.SupportsExpiry, Regions: len(c.Regions) > 0}
+}
+
 type permitView struct {
 	// Tenant names the permit's tenant when the account holds permits with more
 	// than one; "" otherwise (nothing to distinguish).
@@ -579,8 +598,15 @@ type permitView struct {
 	// CanClear offers the "take the car off" action: the permit shows a plate but
 	// nothing is scheduled for right now, so the plate is lingering (a departed
 	// guest, an ended booking) and the scheduler won't touch it. When a schedule
-	// covers now, clearing would just be re-applied, so the button is hidden.
+	// covers now, clearing would just be re-applied, so the button is hidden. It
+	// is also false whenever the permit's portal cannot leave a permit empty at
+	// all (Caps.CanClear) — the action then does not exist for this council.
 	CanClear bool
+	// Caps is what the permit's own portal supports, from the provider's declared
+	// capabilities. Every capability-dependent control in the card branches on it,
+	// never on a council name: a new tenant whose portal differs gets the right UI
+	// by declaring so in its connector.
+	Caps capsView
 	// ShowSetupNudge gates the "nothing scheduled yet" banner: an empty roster with
 	// no one-off bookings AND no history of using the guest/QR path. A QR-only
 	// household is using the permit as intended, so the nudge is suppressed for them.

@@ -74,7 +74,6 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		}
 		pv.IsPrimary = base.IsPrimary
 		pv.Tenant = tenantLabel(p)
-		pv.Regions = regions
 		pvs = append(pvs, pv)
 	}
 	base.Vehicles = vviews
@@ -242,7 +241,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// a manual reload.
 	plateRefreshing := false
 	if actual, _, fresh, err := s.tenant.CurrentVehicleCached(ctx, p.Owner,
-		model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, plateMaxAge); err == nil {
+		model.Permit{TenantID: p.TenantID, CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID}, plateMaxAge); err == nil {
 		plateRefreshing = !fresh
 		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
 		// case they were entered with, and overwriting our belief with a case variant
@@ -409,16 +408,21 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			break
 		}
 	}
+	// What THIS permit's portal can do decides which controls the card offers.
+	// Resolved by the permit's tenant, never the account's current selection.
+	caps := s.tenant.Capabilities(ctx, p.Owner, p.TenantID)
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
-		Days: days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
+		Caps:    capsOf(caps),
+		Regions: caps.Regions,
+		Days:    days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 		ActiveColor: colorOfPlate(vviews, p.ActiveRegistration),
 		RosterEmpty: len(rules) == 0,
 		CopyPitch:   len(rules) == 0 && !p.CopyOfferDone,
 		// Offer "take the car off" only in the lingering-plate state: a plate is on
 		// the permit but nothing is scheduled for now, so the scheduler won't clear
 		// or replace it. With a schedule covering now, a clear would be re-applied.
-		CanClear:       res.Source == model.SourceNone && p.ActiveRegistration != "",
+		CanClear:       caps.CanClearVehicle && res.Source == model.SourceNone && p.ActiveRegistration != "",
 		ShowSetupNudge: nudge,
 		Detail:         permitDetail(p),
 		// Still on the default name the picker assigned (the permit number, or blank):
@@ -438,13 +442,17 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// fresh answer never even swapped in (shipped 2026-08-10, caught the same
 		// evening as "couldn't check" on every cold dashboard visit).
 		pollSeed: attemptForStaleness(s.tenant.RefreshFailingFor(p.Owner,
-			model.Permit{CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID})),
+			model.Permit{TenantID: p.TenantID, CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID})),
 	}
 	// Default to a first-attempt poll; a fragment response refines this with the
 	// real attempt count (see respondPermit). A full page render keeps attempt 0
 	// (floored at pollSeed either way).
 	pv.armPlatePoll(0)
-	fillExpiry(&pv, now)
+	// A portal with no meaningful end date leaves expiry unknown rather than
+	// labelling whatever placeholder it reports.
+	if caps.SupportsExpiry {
+		fillExpiry(&pv, now)
+	}
 	// Offer to copy a schedule from the owner's other permits (e.g. after a
 	// renewal creates a fresh permit under a new tenant id).
 	for _, sp := range siblings {

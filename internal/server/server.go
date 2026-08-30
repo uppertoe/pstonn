@@ -46,6 +46,9 @@ type Tenant interface {
 	ForgetPermit(owner, tenantID, tenantPermitID string)
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error
 	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
+	// Capabilities is what the named tenant's portal supports (tenantID "" =
+	// the owner's current tenant); pages adapt to it rather than assume.
+	Capabilities(ctx context.Context, owner, tenantID string) provider.Capabilities
 	// Regions are the registration jurisdictions a vehicle's state may be, for
 	// the chooser: the named tenant's (a permit-scoped page passes its permit's
 	// tenant), or with "" the union over every tenant served (the account-wide
