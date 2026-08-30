@@ -10,6 +10,7 @@ package identity
 
 import (
 	"context"
+	"crypto/subtle"
 	"log"
 	"net"
 	"net/http"
@@ -91,6 +92,20 @@ func warnUntrustedIdentity(remoteAddr string) {
 		remoteAddr)
 }
 
+// warnMissingProxySecret is the shared-secret sibling of warnUntrustedIdentity:
+// a private peer sent identity headers without the configured X-Proxy-Secret.
+// Either the proxy's env lost the secret (sign-in outage — loud and quick to
+// spot) or something on a private network is impersonating the proxy.
+func warnMissingProxySecret(remoteAddr string) {
+	now := time.Now().UnixNano()
+	prev := lastSpoofLog.Load()
+	if now-prev < spoofLogEvery || !lastSpoofLog.CompareAndSwap(prev, now) {
+		return
+	}
+	log.Printf("SECURITY: ignoring Remote-* identity headers from private peer %s: PROXY_SECRET is set but the request carries no matching X-Proxy-Secret. "+
+		"If sign-in is broken, the reverse proxy's PSTONN_PROXY_SECRET env does not match the app's PROXY_SECRET.", remoteAddr)
+}
+
 // Middleware resolves the request identity.
 //
 // trustForwardAuth MUST be true only when the app runs behind the platform's
@@ -106,20 +121,40 @@ func warnUntrustedIdentity(remoteAddr string) {
 // proxy; (2) the app's signed session cookie via decode (OIDC login); (3)
 // devEmail, a local/standalone fallback that MUST be empty in production. decode
 // may be nil.
-func Middleware(devEmail string, decode Decoder, trustForwardAuth bool) func(http.Handler) http.Handler {
+// proxySecretHeader is presented by the reverse proxy alongside the Remote-*
+// identity headers when a shared secret is configured (PROXY_SECRET). The
+// private-peer test answers "did this arrive over a container network?"; the
+// secret answers "did it come from OUR proxy?" — a compromised neighbour on a
+// private network fails the second even where it could pass the first.
+const proxySecretHeader = "X-Proxy-Secret"
+
+// proxyPresentsSecret reports whether the request carries the configured shared
+// secret. An empty configured secret means this deployment has not opted in and
+// the peer test stands alone (self-host compatibility; the proxy-side header is
+// then simply absent too).
+func proxyPresentsSecret(r *http.Request, secret string) bool {
+	if secret == "" {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(r.Header.Get(proxySecretHeader)), []byte(secret)) == 1
+}
+
+func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var u User
 			if trustForwardAuth {
 				if email := strings.ToLower(strings.TrimSpace(r.Header.Get("Remote-Email"))); email != "" {
-					if fromTrustedProxy(r.RemoteAddr) {
+					if fromTrustedProxy(r.RemoteAddr) && proxyPresentsSecret(r, proxySecret) {
 						u = User{
 							Email:  email,
 							Name:   strings.TrimSpace(r.Header.Get("Remote-User")),
 							Groups: splitGroups(r.Header.Get("Remote-Groups")),
 						}
-					} else {
+					} else if !fromTrustedProxy(r.RemoteAddr) {
 						warnUntrustedIdentity(r.RemoteAddr)
+					} else {
+						warnMissingProxySecret(r.RemoteAddr)
 					}
 				}
 			}

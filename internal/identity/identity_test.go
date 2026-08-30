@@ -11,7 +11,7 @@ func resolve(t *testing.T, devEmail string, decode Decoder, trustForwardAuth boo
 	t.Helper()
 	var got User
 	var ok bool
-	h := Middleware(devEmail, decode, trustForwardAuth)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	h := Middleware(devEmail, decode, trustForwardAuth, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got, ok = FromContext(r.Context())
 	}))
 	r := httptest.NewRequest("GET", "/schedule", nil)

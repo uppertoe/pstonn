@@ -12,7 +12,7 @@ import (
 // identityMiddlewareFor wraps a handler in the same identity resolution the real
 // router uses, so a test can exercise one wrapper without building the whole mux.
 func identityMiddlewareFor(s *Server) func(http.Handler) http.Handler {
-	return identity.Middleware(s.cfg.DevIdentityEmail, nil, s.auth == nil)
+	return identity.Middleware(s.cfg.DevIdentityEmail, nil, s.auth == nil, s.cfg.ProxySecret)
 }
 
 // Signed-in pages show household data — permits, plates, the activity log, who has

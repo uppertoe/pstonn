@@ -42,6 +42,12 @@ type Config struct {
 	// local/standalone runs where no real login is wired up. It MUST be empty in
 	// production.
 	DevIdentityEmail string
+	// ProxySecret, when set, is a shared secret the reverse proxy must present
+	// (header X-Proxy-Secret) before the Remote-* identity headers are believed —
+	// defence in depth on top of the private-peer check, for the day the app is
+	// reachable from something on a private network that is not the proxy.
+	// PROXY_SECRET; optional, forward-auth mode only.
+	ProxySecret string
 
 	// SessionSecret signs the app's stateless session cookie (HMAC-SHA256).
 	// Required whenever app-login (AppOIDC) is enabled. SESSION_SECRET.
@@ -358,6 +364,7 @@ func Load() (*Config, error) {
 		SQLitePath:       env("SQLITE_PATH", "/data/pstonn.db"),
 		Domain:           os.Getenv("DOMAIN"),
 		DevIdentityEmail: strings.ToLower(strings.TrimSpace(os.Getenv("DEV_IDENTITY_EMAIL"))),
+		ProxySecret:      strings.TrimSpace(os.Getenv("PROXY_SECRET")),
 		CookieSecure:     env("COOKIE_SECURE", "true") != "false",
 		Council: CouncilConfig{
 			Issuer:              env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),

@@ -408,7 +408,7 @@ func (s *Server) Handler() http.Handler {
 	// OIDC login (s.auth == nil). In OIDC mode the headers are ignored so they
 	// cannot override the verified session cookie.
 	trustForwardAuth := s.auth == nil
-	return securityHeaders(identity.Middleware(s.cfg.DevIdentityEmail, decode, trustForwardAuth)(mux))
+	return securityHeaders(identity.Middleware(s.cfg.DevIdentityEmail, decode, trustForwardAuth, s.cfg.ProxySecret)(mux))
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
