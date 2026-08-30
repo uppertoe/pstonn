@@ -43,9 +43,16 @@
   <div class="banner warn">{{template "ic-cars"}} <span>Add your plates on the <a href="/vehicles">Vehicles</a> page first, then pick which vehicle covers each day of the week.</span></div>
   {{end}}
   {{range .Permits}}
+  {{/* The one-off modal closes itself after a SUCCESSFUL SUBMIT and nothing else.
+       The guard used to close it after any htmx request that bubbled through the
+       section except the QR trigger — which included the badge's own timer poll
+       (a GET from inside #pbody), so a modal open when the poll returned simply
+       vanished mid-typing. htmx 2's afterRequest detail carries `successful` and
+       `requestConfig.verb` (lower-case), so a form POST that landed is the only
+       thing that closes it; a failed submit keeps the form up with its error. */}}
   <section class="card" id="permit-{{.Permit.ID}}" style="--hue:var(--sec-schedule)"
            x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '{{.Permit.ID}}') addOpen=true"
-           @htmx:after-request="if(!$event.detail.elt.closest('.qrtrigger')) addOpen=false">
+           @htmx:after-request="if($event.detail.successful && $event.detail.requestConfig && $event.detail.requestConfig.verb !== 'get' && !$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     {{/* #pbody is the swap target for every card re-render (plate poll, roster edits,
          one-off add/delete). The teleported modals are rendered as a sibling OUTSIDE
          it, so a re-render can't null a modal the user has open. */}}
@@ -206,15 +213,21 @@
          "not one of your cars". */}}
     {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no car</span>{{end}}
     {{/* Fixed-size status slot: an "applying" spinner while a change is landing, a
-         "checking" spinner while a background council read runs, a tick once the
-         shown plate IS the council's confirmed state — same footprint throughout, so
-         the pill never shifts. The plate above stays the council-confirmed value the
-         whole time; the spinner announces a pending change, it does not pre-show it. */}}
-    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="Not confirmed on the permit yet — p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="Couldn't check with the council — showing the last plate it confirmed, which may be out of date. p.stonn keeps trying." aria-label="Couldn't confirm with the council; showing the last known plate">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if .PlateRefreshing}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
+         "checking" spinner while a background council read runs with nothing recent
+         to lean on, a tick once the shown plate IS the council's confirmed state —
+         same footprint throughout, so the pill never shifts. The plate above stays
+         the council-confirmed value the whole time; the spinner announces a pending
+         change, it does not pre-show it.
+
+         PlateRecent is the cold-visit case: the refresh is still running but the
+         council confirmed this plate within the last hours, so the tick shows at
+         once and the age hint below says how recently. The poll rides along and
+         swaps the badge only if the refresh finds something different. */}}
+    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="Not confirmed on the permit yet — p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="Couldn't check with the council — showing the last plate it confirmed, which may be out of date. p.stonn keeps trying." aria-label="Couldn't confirm with the council; showing the last known plate">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if and .PlateRefreshing (not .PlateRecent)}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else if .PlateRecent}}<span class="pok" title="Confirmed by the council recently; checking again now">{{template "ic-check"}}</span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
     {{/* The pill's failure states used to live entirely in title= — hover-only,
          which does not exist on the phone this page is checked from. The one
          state that means "do not trust the plate above" gets visible words. */}}
-    {{if .PlateUnconfirmed}}<span class="pnote">{{if .Applying}}change not confirmed{{else}}couldn&rsquo;t check &mdash; may be out of date{{end}}</span>{{end}}
+    {{if .PlateUnconfirmed}}<span class="pnote">{{if .Applying}}change not confirmed{{else}}couldn&rsquo;t check &mdash; may be out of date{{end}}</span>{{else if and .PlateRecent (not .Applying)}}{{/* Information, not a warning: muted, so the tick stays the headline. Inline like the badge's own label, rather than a stylesheet rule that would touch every page's golden. */}}<span class="muted" style="font-size:12px;white-space:nowrap">{{.PlateCheckedAgo}}</span>{{end}}
     {{if .PollNext}}{{/* Bounded self-refresh: re-fetches the card until the council
          confirms the settled plate or the attempt cap is hit (see armPlatePoll), so a
          just-made change swaps in without a reload while an outage still can't loop.

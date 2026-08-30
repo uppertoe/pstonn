@@ -20,6 +20,11 @@ func TestAttemptForStaleness(t *testing.T) {
 	if got := attemptForStaleness(time.Minute); got <= 0 || got >= len(platePollDelays) {
 		t.Fatalf("1 min stale: attempt = %d, want inside (0, %d)", got, len(platePollDelays))
 	}
+	// The quick 2s/3s head is walked the same way: ten seconds of failure has
+	// consumed the first three attempts (2+3+5) and no more.
+	if got := attemptForStaleness(10 * time.Second); got != 3 {
+		t.Fatalf("10s failing: attempt = %d, want 3 (2s+3s+5s consumed)", got)
+	}
 	// Stale for hours: the budget is spent, so the render shows "couldn't
 	// confirm" immediately rather than a fresh spinner.
 	if got := attemptForStaleness(3 * time.Hour); got != len(platePollDelays) {

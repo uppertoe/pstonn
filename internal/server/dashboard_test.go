@@ -740,6 +740,14 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p.armPlatePoll(0)
 			return p
 		}, `hx-select=".nowbadge"`},
+		// A cold render leaning on a recent council confirmation: tick and age hint
+		// up front, the poll still riding along to catch drift.
+		{"plate-recent-tick", func() permitView {
+			p := samplePermitViewAt(loc, now)
+			p.PlateRefreshing, p.PlateRecent, p.PlateCheckedAgo = true, true, "checked 2 hr ago"
+			p.armPlatePoll(0)
+			return p
+		}, `checked 2 hr ago`},
 		{"applying-follow-up", func() permitView {
 			// A change in flight arms the same bounded poll, even with a fresh cache.
 			p := samplePermitViewAt(loc, now)

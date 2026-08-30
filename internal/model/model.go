@@ -27,13 +27,20 @@ type Permit struct {
 	CouncilPermitID    string // e.g. "14423"
 	PermitTypeID       string // fkPermitTypeID, e.g. "15"
 	Label              string
-	ActiveRegistration string    // last registration we know is allocated
-	EndDate            time.Time // permit expiry from the tenant record (zero = unknown)
-	Status             string    // tenant permit status, e.g. "Granted" (empty = unknown)
-	ExpiryReminded     bool      // an expiry reminder has been sent for the current EndDate
-	PermitNumber       string    // tenant permit number, e.g. "VPP24714" (empty = unknown)
-	PermitType         string    // tenant permit type, e.g. "(A) 1st Visitor Permit"
-	FailStreak         int       // consecutive failed/blocked reconcile attempts; 0 = healthy
+	ActiveRegistration string // last registration we know is allocated
+	// ActiveConfirmedAt is when ActiveRegistration was last CONFIRMED BY THE
+	// COUNCIL — a confirmed apply, or a council read that agreed with (or was
+	// adopted into) the stored plate. Zero = never recorded (a row that predates
+	// the column). It survives restarts, which the in-memory plate cache does not:
+	// the schedule page uses it to show a recently-confirmed plate with its tick
+	// straight away instead of a "checking" spinner on every cold visit.
+	ActiveConfirmedAt time.Time
+	EndDate           time.Time // permit expiry from the tenant record (zero = unknown)
+	Status            string    // tenant permit status, e.g. "Granted" (empty = unknown)
+	ExpiryReminded    bool      // an expiry reminder has been sent for the current EndDate
+	PermitNumber      string    // tenant permit number, e.g. "VPP24714" (empty = unknown)
+	PermitType        string    // tenant permit type, e.g. "(A) 1st Visitor Permit"
+	FailStreak        int       // consecutive failed/blocked reconcile attempts; 0 = healthy
 	// CopyOfferDone: the "renewed this permit? copy your schedule" pitch has been
 	// answered — dismissed, a copy ran, or a roster day was set — and must never
 	// lead again on this permit. The quiet copy button stays available regardless.

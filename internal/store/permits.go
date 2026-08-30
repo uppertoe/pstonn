@@ -4,12 +4,46 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 )
 
 // ---- Permits ----
+
+// permitSchemaOnce guards the lazy ADD COLUMN in ensurePermitSchema, one
+// sync.Once per *Store (tests open many stores per process).
+var permitSchemaOnce sync.Map // *Store -> *sync.Once
+
+// ensurePermitSchema adds permit.active_confirmed_at to a database that
+// predates it, once per open store. The proper home for this is the tolerant
+// ALTER list in migrate.go (and rebuildPermitTable's column list); it lives here
+// so the permit code is self-contained until that line lands — every permit
+// method runs it before touching the table, so a pre-column database never
+// sees "no such column: active_confirmed_at". Idempotent-by-tolerance the same
+// way migrate.go's loop is: SQLite reports a duplicate column as a generic
+// SQLITE_ERROR, so the message text is the only key.
+//
+// It must run BEFORE a method opens a rows cursor or a transaction: the pool
+// holds one connection, so an Exec issued mid-iteration blocks forever.
+func (s *Store) ensurePermitSchema() error {
+	v, _ := permitSchemaOnce.LoadOrStore(s, &sync.Once{})
+	var err error
+	v.(*sync.Once).Do(func() {
+		_, err = s.db.Exec(`ALTER TABLE permit ADD COLUMN active_confirmed_at TEXT NOT NULL DEFAULT ''`)
+		if err != nil && strings.Contains(err.Error(), "duplicate column") {
+			err = nil
+		}
+		if err != nil {
+			err = fmt.Errorf("ensure permit.active_confirmed_at: %w", err)
+			permitSchemaOnce.Delete(s) // let the next call retry rather than stay broken
+		}
+	})
+	return err
+}
 
 // ListPermits returns every permit across all owners (used by the scheduler,
 // which reconciles each permit using its owner's tenant session).
@@ -25,21 +59,24 @@ func (s *Store) ListPermitsFor(ctx context.Context, owner string) ([]model.Permi
 }
 
 // permitCols is the column list backing scanPermit; keep the two in lockstep.
-const permitCols = `id, owner, council_id, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak, copy_offer_done`
+const permitCols = `id, owner, council_id, council_permit_id, permit_type_id, label, active_registration, end_date, status, expiry_reminded, permit_number, permit_type, fail_streak, copy_offer_done, active_confirmed_at`
 
 // scanPermit reads one permit row (permitCols order), parsing the stored strings.
 func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 	var p model.Permit
-	var endDate, reminded string
+	var endDate, reminded, confirmedAt string
 	var copyDone int
 	err := sc.Scan(&p.ID, &p.Owner, &p.TenantID, &p.CouncilPermitID, &p.PermitTypeID, &p.Label,
 		&p.ActiveRegistration, &endDate, &p.Status, &reminded, &p.PermitNumber, &p.PermitType,
-		&p.FailStreak, &copyDone)
+		&p.FailStreak, &copyDone, &confirmedAt)
 	if err != nil {
 		return p, err
 	}
 	if endDate != "" {
 		p.EndDate, _ = time.Parse(time.RFC3339, endDate)
+	}
+	if confirmedAt != "" {
+		p.ActiveConfirmedAt, _ = time.Parse(time.RFC3339, confirmedAt)
 	}
 	p.ExpiryReminded = reminded == "1"
 	p.CopyOfferDone = copyDone == 1
@@ -47,6 +84,9 @@ func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 }
 
 func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]model.Permit, error) {
+	if err := s.ensurePermitSchema(); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -64,6 +104,9 @@ func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]
 }
 
 func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
+	if err := s.ensurePermitSchema(); err != nil {
+		return model.Permit{}, err
+	}
 	p, err := scanPermit(s.db.QueryRowContext(ctx,
 		`SELECT `+permitCols+` FROM permit WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -75,6 +118,9 @@ func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
 // PermitInTenant looks a permit up by the tenant's own id WITHIN one tenant —
 // the lookup a handler must use, since two registry' id spaces overlap.
 func (s *Store) PermitInTenant(ctx context.Context, tenantID, tenantPermitID string) (model.Permit, error) {
+	if err := s.ensurePermitSchema(); err != nil {
+		return model.Permit{}, err
+	}
 	p, err := scanPermit(s.db.QueryRowContext(ctx,
 		`SELECT `+permitCols+` FROM permit WHERE council_id = ? AND council_permit_id = ?`, tenantID, tenantPermitID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -189,10 +235,38 @@ func (s *Store) ClearFailStreak(ctx context.Context, id int64) error {
 	return err
 }
 
+// SetPermitActive records the plate the council now holds on the permit, and
+// stamps active_confirmed_at: every caller writes a COUNCIL-CONFIRMED plate — a
+// confirmed apply (scheduler, guest, clear) or the plate read off the council's
+// own list when the permit is added — so the stamp is unconditional here rather
+// than a flag each caller could forget.
 func (s *Store) SetPermitActive(ctx context.Context, id int64, registration string) error {
+	if err := s.ensurePermitSchema(); err != nil {
+		return err
+	}
+	now := nowUTC()
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE permit SET active_registration = ?, updated_at = ? WHERE id = ?`,
-		registration, nowUTC(), id)
+		`UPDATE permit SET active_registration = ?, active_confirmed_at = ?, updated_at = ? WHERE id = ?`,
+		registration, now, now, id)
+	return err
+}
+
+// TouchPermitConfirmed records that a council read taken at `at` AGREED with the
+// stored plate — the common case, where nothing changes and so nothing else
+// writes the stamp. Guarded on the plate (a CAS like SetPermitActiveIfUnchanged:
+// a reading that took seconds must not vouch for a plate an apply committed
+// meanwhile) and monotonic (never moves the stamp backwards, and a no-op when
+// the reading is not newer than the stamp, so a render inside one cache window
+// costs at most one write). RFC3339 UTC strings order lexically, and ” sorts
+// before any of them, so the comparison is a plain string one.
+func (s *Store) TouchPermitConfirmed(ctx context.Context, id int64, registration string, at time.Time) error {
+	if err := s.ensurePermitSchema(); err != nil {
+		return err
+	}
+	ts := at.UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET active_confirmed_at = ? WHERE id = ? AND active_registration = ? AND active_confirmed_at < ?`,
+		ts, id, registration, ts)
 	return err
 }
 
@@ -244,10 +318,16 @@ func (s *Store) CountPermits(ctx context.Context) (int, error) {
 // "changed at the portal" row, a duplicate "updated" notice, and a needless tenant
 // round trip before it heals. A compare-and-swap discards the stale read instead, and
 // unlike taking the apply claim it holds no lock across the network call.
+//
+// The adopted plate is a council reading, so active_confirmed_at is stamped with it.
 func (s *Store) SetPermitActiveIfUnchanged(ctx context.Context, id int64, from, to string) (bool, error) {
+	if err := s.ensurePermitSchema(); err != nil {
+		return false, err
+	}
+	now := nowUTC()
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE permit SET active_registration = ?, updated_at = ? WHERE id = ? AND active_registration = ?`,
-		to, nowUTC(), id, from)
+		`UPDATE permit SET active_registration = ?, active_confirmed_at = ?, updated_at = ? WHERE id = ? AND active_registration = ?`,
+		to, now, now, id, from)
 	if err != nil {
 		return false, err
 	}
