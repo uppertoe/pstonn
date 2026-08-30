@@ -39,6 +39,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider/orikan"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 	tenantpkg "github.com/uppertoe/pstonn/internal/tenant"
@@ -425,7 +426,12 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 	cfg.Council.GovBurst = 1 << 20
 	cfg.Council.GovConcurrency = cfgConcurrency
 
-	client := parking.New(cfg, st, box)
+	tr := parking.NewTransport(parking.LimitsFromConfig(cfg.Council))
+	p := orikan.New(orikan.Config{
+		Issuer: cfg.Council.Issuer, APIBase: cfg.Council.APIBase, ClientID: cfg.Council.ClientID,
+		RedirectURI: cfg.Council.RedirectURI, Scopes: cfg.Council.Scopes,
+	}, tr)
+	client := parking.NewClientFor("", p, st, box, tr)
 	sched := New(st, tenantpkg.Single{Client: client}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Hour})
 
 	// Seed the fleet: a linked session, a permit the tenant already holds under an

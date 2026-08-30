@@ -71,7 +71,7 @@ func liveClient(t *testing.T) (*Client, *secretbox.Box, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return New(cfg, st, box), box, st
+	return liveOrikanClient(cfg, st, box), box, st
 }
 
 // TestLiveMeasureIdleTimeout empirically brackets the tenant session cookie's
@@ -231,7 +231,7 @@ func TestLiveLinkLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := New(cfg, st, box)
+	c := liveOrikanClient(cfg, st, box)
 
 	// 1. Headless login → stores the sealed session cookie, discards the password.
 	if err := c.Link(ctx, owner, username, password, false, true, 0); err != nil {
@@ -283,7 +283,7 @@ func TestLiveSetVehicle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := New(cfg, st, box)
+	c := liveOrikanClient(cfg, st, box)
 	sealed, err := box.Seal(cookie)
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +372,7 @@ func TestLiveSessionKick(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := New(cfg, st, box)
+	c := liveOrikanClient(cfg, st, box)
 
 	switch phase {
 	case "link":
@@ -433,7 +433,7 @@ func TestLiveReadFlow(t *testing.T) {
 	}
 	defer st.Close()
 
-	c := New(cfg, st, box)
+	c := liveOrikanClient(cfg, st, box)
 	sealed, err := box.Seal(cookie)
 	if err != nil {
 		t.Fatal(err)
@@ -624,4 +624,15 @@ func TestLiveWarmRenewIdleTimeout(t *testing.T) {
 		}
 	}
 	fmt.Printf("reached PROBE_MAX %s with the session still alive at every gap; the idle window under authorize-only warming is at least %s\n", maxGap, lastGood)
+}
+
+// liveOrikanClient builds an Orikan-backed client explicitly (the generic client
+// no longer hard-codes a connector). Test-only.
+func liveOrikanClient(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
+	tr := NewTransport(LimitsFromConfig(cfg.Council))
+	p := orikan.New(orikan.Config{
+		Issuer: cfg.Council.Issuer, APIBase: cfg.Council.APIBase, ClientID: cfg.Council.ClientID,
+		RedirectURI: cfg.Council.RedirectURI, Scopes: cfg.Council.Scopes,
+	}, tr)
+	return NewClientFor("", p, st, box, tr)
 }

@@ -26,12 +26,10 @@ import (
 	"flag"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/connectors"
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
-	"github.com/uppertoe/pstonn/internal/provider"
-	"github.com/uppertoe/pstonn/internal/provider/fake"
-	"github.com/uppertoe/pstonn/internal/provider/orikan"
 	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/server"
@@ -139,15 +137,9 @@ func run() error {
 	shared := parking.NewConcurrencyLimit(cfg.Council.GovConcurrency)
 	for _, tenant := range registry.Enabled() {
 		transport := parking.NewTransport(parking.LimitsFromConfig(cfg.Council)).Share(shared)
-		var prov provider.Provider
-		if tenant.Connector == fake.ID {
-			prov = fake.New()
-		} else {
-			prov = orikan.New(orikan.Config{
-				Issuer: tenant.Endpoints.Issuer, APIBase: tenant.Endpoints.APIBase,
-				ClientID: tenant.Endpoints.ClientID, RedirectURI: tenant.Endpoints.RedirectURI,
-				Scopes: tenant.Endpoints.Scopes, HomeState: tenant.Policy.HomeState,
-			}, transport)
+		prov, err := connectors.Build(tenant, transport)
+		if err != nil {
+			log.Fatalf("fatal: %v", err)
 		}
 		clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)
 	}

@@ -89,7 +89,7 @@ func stubClient(t *testing.T, p provider.Provider) (*Client, *store.Store, *secr
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewClient(p, st, box, nil), st, box
+	return NewClientFor("", p, st, box, nil), st, box
 }
 
 func TestLinkSealsProviderSessionAndPinsUsername(t *testing.T) {

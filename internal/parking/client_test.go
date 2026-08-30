@@ -161,7 +161,7 @@ func clientAtIssuer(t *testing.T, base, issuer string) (*Client, *store.Store, *
 		Issuer: issuer, APIBase: base + "/ssp-svc", ClientID: "test-client",
 		RedirectURI: base + "/ssp/callback", Scopes: []string{"openid"},
 	}, nil)
-	c := NewClient(p, st, box, nil)
+	c := NewClientFor("", p, st, box, nil)
 	return c, st, box
 }
 

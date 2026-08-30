@@ -21,7 +21,7 @@ func TestCurrentVehicleCachedNeverBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := NewClient(nil, st, nil, nil) // no session stored: any background refresh fails fast
+	c := NewClientFor("", nil, st, nil, nil) // no session stored: any background refresh fails fast
 	ctx := context.Background()
 	p := model.Permit{CouncilPermitID: "14576"}
 	const owner = "o@example.com"
@@ -56,7 +56,7 @@ func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := NewClient(nil, st, nil, nil) // unlinked: a background refresh cannot supply an answer
+	c := NewClientFor("", nil, st, nil, nil) // unlinked: a background refresh cannot supply an answer
 	ctx := context.Background()
 	p := model.Permit{CouncilPermitID: "14576"}
 	const first, second = "first@example.com", "second@example.com"
@@ -87,7 +87,7 @@ func TestRegCacheIsOwnerScopedAndForgettable(t *testing.T) {
 // TestCooldownBackoff confirms a penalised owner enters cooldown and that a
 // success clears it.
 func TestCooldownBackoff(t *testing.T) {
-	c := NewClient(nil, nil, nil, nil)
+	c := NewClientFor("", nil, nil, nil, nil)
 	const owner = "a@b.com"
 	if _, blocked := c.cooldownFor(owner); blocked {
 		t.Fatal("owner should start un-penalised")
@@ -115,7 +115,7 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	c := NewClient(nil, st, nil, nil) // no session: any background refresh fails fast
+	c := NewClientFor("", nil, st, nil, nil) // no session: any background refresh fails fast
 	ctx := context.Background()
 	p := model.Permit{CouncilPermitID: "14576"}
 	const owner = "o@example.com"
@@ -171,7 +171,7 @@ func TestRefreshFailingForTracksTheStreakNotTheAge(t *testing.T) {
 // what stops a dashboard-discovered death waiting ~9h for the next keep-warm
 // pass (observed live 2026-08-11).
 func TestNoteExpiredReportsOnlyTaggedExpiries(t *testing.T) {
-	c := NewClient(nil, nil, nil, nil)
+	c := NewClientFor("", nil, nil, nil, nil)
 	var got []int64
 	c.OnSessionExpired = func(owner, tenantID string, gen int64) {
 		if owner != "o@example.com" {

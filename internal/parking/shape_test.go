@@ -58,7 +58,7 @@ func TestCurrentVehicleRejectsMultipleVehicles(t *testing.T) {
 // resurrect the cache entry: storeRegIfCurrent drops a write whose generation is
 // stale.
 func TestForgetPermitInvalidatesInFlightRefresh(t *testing.T) {
-	c := NewClient(nil, nil, nil, nil)
+	c := NewClientFor("", nil, nil, nil, nil)
 	key := regKey{"owner@example.com", "p1"}
 
 	gen := c.regGeneration(key)             // captured "before the read"

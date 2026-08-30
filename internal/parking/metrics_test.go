@@ -59,7 +59,7 @@ func TestClientBreakerGate(t *testing.T) {
 // A pushback must be captured for the operator: the X-Azure-Ref correlation id, the
 // status, and the surface, surfaced through Stats() for the status endpoint.
 func TestRecordPushbackDiagnostics(t *testing.T) {
-	c := NewClient(nil, nil, nil, nil)
+	c := NewClientFor("", nil, nil, nil, nil)
 	c.recordPushback(&provider.Unavailable{
 		Status: 429, Surface: provider.SurfaceAuth, ContentType: "text/html",
 		RetryAfter: 120 * time.Second, Ref: "20260801T000000Z-abc123",

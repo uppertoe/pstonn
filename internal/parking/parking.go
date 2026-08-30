@@ -20,11 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/provider"
-	"github.com/uppertoe/pstonn/internal/provider/fake"
-	"github.com/uppertoe/pstonn/internal/provider/orikan"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
@@ -127,32 +124,15 @@ type regKey struct {
 	permitID string
 }
 
-// New builds a Client for the tenant the process is configured for — the Orikan
-// provider from COUNCIL_* config, or the in-memory fake under COUNCIL_SANDBOX —
-// with a governed transport sized from the same config. Multi-tenant wiring
-// builds providers and clients explicitly via NewClient.
-func New(cfg *config.Config, st *store.Store, box *secretbox.Box) *Client {
-	tr := NewTransport(LimitsFromConfig(cfg.Council))
-	var p provider.Provider
-	if cfg.Council.Sandbox {
-		p = fake.New()
-	} else {
-		p = orikan.New(orikan.Config{
-			Issuer: cfg.Council.Issuer, APIBase: cfg.Council.APIBase, ClientID: cfg.Council.ClientID,
-			RedirectURI: cfg.Council.RedirectURI, Scopes: cfg.Council.Scopes,
-		}, tr)
-	}
-	return NewClient(p, st, box, tr)
-}
-
-// NewClient wires a provider to the store and cipher. tr is the transport the
-// provider was built on (its traffic is what Stats reports); nil is fine for a
-// provider that makes no requests.
-func NewClient(p provider.Provider, st *store.Store, box *secretbox.Box, tr *Transport) *Client {
-	return NewClientFor("", p, st, box, tr)
-}
-
-// NewClientFor is NewClient for a named tenant (see Client.TenantID).
+// NewClientFor wires a provider to the store and cipher for a named tenant (see
+// Client.TenantID). tr is the transport the provider was built on (its traffic is
+// what Stats reports); nil is fine for a provider that makes no requests.
+//
+// The generic client depends ONLY on the provider.Provider interface — it never
+// imports a specific connector. Which connector backs a tenant is a wiring
+// decision made once at startup (see the connector factory in main), so a new
+// backend (a scraped server-rendered portal, a different vendor) plugs in here
+// with no change to this client, the scheduler, or the server.
 func NewClientFor(tenantID string, p provider.Provider, st *store.Store, box *secretbox.Box, tr *Transport) *Client {
 	c := &Client{
 		TenantID: tenantID,
