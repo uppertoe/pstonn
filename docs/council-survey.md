@@ -30,7 +30,7 @@ swap itself — which is what creates the chore p.stonn removes.
 | Council | Model | Vendor / portal | Login | Cost & quantity | Confidence |
 |---|---|---|---|---|---|
 | **Stonnington** | Swap | Orikan ePermits, Angular SPA, `parkingpermits.stonnington.vic.gov.au` | Council-local `/idm`, code+PKCE, `ePermits.ssp.web` | $60/$90/$100 resident (Jan 2026); visitor permits per household | Live (production tenant) |
-| **Banyule** | Swap (or paper, resident's choice) | Orikan ePermits **v7**, server-rendered, `epermits-ssp.banyule.vic.gov.au/ssp/` | Council-local `/idm`, **hybrid `code id_token` + form_post**, `ePermits.ssp.web.v7` | Max 3/property in any resident/visitor mix; 1st visitor $50, 2nd $75, conc. $11; expire 31 July | Site text + login redirect verified; API unverified |
+| **Banyule** | Swap (or paper, resident's choice) | Orikan ePermits **v7**, server-rendered, `epermits-ssp.banyule.vic.gov.au/ssp/` | Council-local `/idm`, **hybrid `code id_token` + form_post, no PKCE**, `ePermits.ssp.web.v7` | Max 3/property in any resident/visitor mix; 1st visitor $50, 2nd $75, conc. $11; expire 31 July | Auth flow + no-`/ssp-svc` confirmed (unauth recon 2026-08-30); permit read/write shape needs a capture |
 | **Brimbank** | Re-plate | Orikan ePermits, `epermits.brimbank.vic.gov.au/SSP` | **PayStay** OIDC (`paystay.com.au`), `ePermits.Brimbank` | 1st free, 2nd $46; max 2; one vehicle at a time | Site text + redirect verified |
 | **Whitehorse** | Re-plate | Orikan, `whitehorse-epermits.orikan.tech/ssp/` | Council-local ("Digital Permits By Orikan") | Not published | Site FAQ verified; flow unverified |
 | **Kingston** | Re-plate | In-house, `residentparkingpermit.kingston.vic.gov.au` | Council in-house | 1st free, 2nd $55; max 2; "change the car any time online" | Site text only |
@@ -73,13 +73,22 @@ Known:
 - Portal is Orikan ePermits v7 on a council-hosted domain with its own IdM —
   tenant-local credentials like Stonnington's, not a PayStay account.
 
-Unknown (needs a live account):
-- Whether `/ssp-svc` exists in the same shape (v7 is server-rendered ASP.NET;
-  the Angular SPA + `ssp-svc` JSON API we drive at Stonnington may not be there
-  at all — the write path could be a form POST with anti-forgery tokens).
-- The auth flow: hybrid `code id_token` via form_post means the callback is a
-  POST to `/ssp/` carrying the id_token; session durability (cookie vs token)
-  unknown.
+Confirmed by unauthenticated recon (2026-08-30):
+- `/ssp-svc/` returns **404** — the Angular SPA's JSON API we drive at Stonnington
+  is not here. The permit read is HTML off the server-rendered app; the write is a
+  form POST with a `__RequestVerificationToken`. So this is a distinct connector,
+  `orikan-ssp-v7`, not a parameterisation of `orikan-ssp`.
+- Auth: the SSP web client `ePermits.ssp.web.v7` requests `response_type=code
+  id_token`, `response_mode=form_post`, `scope=openid profile`, redirect back to
+  `/ssp/` itself, and **no PKCE**. The IdP is a modern Duende IdentityServer that
+  *does* advertise `offline_access` and S256, though the web client uses neither.
+  The `/idm` login is standard ASP.NET Identity (a `__RequestVerificationToken`
+  form POST), the same shape `orikan` already signs in against.
+
+Still unknown (needs a live account — the capture checklist lives in the
+`internal/provider/orikanv7` package doc):
+- The hybrid callback's POST body and the app session it sets (cookie name/lifetime).
+- The permits-page HTML shape and the change-vehicle form's fields.
 - Whether visitor permits report `CanChangeVehicle` the same way, and whether
   a permit can be left with no vehicle (`CanClearVehicle`).
 

@@ -52,6 +52,58 @@
         "epermit": "ePermit",
         "parking_brand": "Stonnington Parking"
       }
+    },
+    {
+      "id": "banyule",
+      "name": "Banyule City Council",
+      "short": "Banyule",
+      "connector": "orikan-ssp-v7",
+      "model": "swap",
+      "endpoints": {
+        "issuer": "https://epermits-ssp.banyule.vic.gov.au/idm",
+        "api_base": "https://epermits-ssp.banyule.vic.gov.au/ssp",
+        "client_id": "ePermits.ssp.web.v7",
+        "redirect_uri": "https://epermits-ssp.banyule.vic.gov.au/ssp/",
+        "scopes": [
+          "openid",
+          "profile"
+        ]
+      },
+      "timezone": "Australia/Melbourne",
+      "policy": {
+        "visitor_word": "visitor",
+        "resident_word": "resident",
+        "home_state": "VIC"
+      },
+      "links": {
+        "portal": "https://epermits-ssp.banyule.vic.gov.au/ssp/",
+        "register": "https://epermits-ssp.banyule.vic.gov.au/idm/account/Register",
+        "reset_password": "https://epermits-ssp.banyule.vic.gov.au/idm/account/ForgotPassword",
+        "apply_visitor": "https://www.banyule.vic.gov.au/Parking-roads/Parking-permit",
+        "permits": "https://www.banyule.vic.gov.au/Parking-roads/Parking-permit",
+        "faq": "https://www.banyule.vic.gov.au/Parking-roads/Parking-permit"
+      },
+      "copy": {
+        "suburbs": [
+          "Ivanhoe",
+          "Heidelberg",
+          "Rosanna",
+          "Macleod",
+          "Montmorency",
+          "Greensborough",
+          "Watsonia",
+          "Bundoora"
+        ],
+        "phone": "03 9490 4222"
+      },
+      "enabled": false,
+      "capacity": 0,
+      "terms": {
+        "portal": "ePermits",
+        "portal_site": "ePermits site",
+        "epermit": "ePermit",
+        "parking_brand": "Banyule Parking"
+      }
     }
   ]
 }

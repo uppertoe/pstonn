@@ -16,6 +16,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/provider/fake"
 	"github.com/uppertoe/pstonn/internal/provider/orikan"
+	"github.com/uppertoe/pstonn/internal/provider/orikanv7"
 	"github.com/uppertoe/pstonn/internal/tenant"
 )
 
@@ -34,6 +35,15 @@ func Build(t *tenant.Tenant, tr http.RoundTripper) (provider.Provider, error) {
 			Scopes:      t.Endpoints.Scopes,
 			HomeState:   t.Policy.HomeState,
 		}, tr), nil
+	case orikanv7.ID:
+		return orikanv7.New(orikanv7.Config{
+			Issuer:      t.Endpoints.Issuer,
+			PortalBase:  t.Endpoints.APIBase, // the /ssp app base (v7 has no /ssp-svc)
+			ClientID:    t.Endpoints.ClientID,
+			RedirectURI: t.Endpoints.RedirectURI,
+			Scopes:      t.Endpoints.Scopes,
+			HomeState:   t.Policy.HomeState,
+		}), nil
 	case fake.ID:
 		return fake.New(), nil
 	default:

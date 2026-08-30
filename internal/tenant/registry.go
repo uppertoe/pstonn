@@ -114,10 +114,13 @@ func validate(c *Tenant) error {
 		return fmt.Errorf("name and short are required")
 	}
 	switch c.Connector {
-	case "orikan-ssp":
+	case "orikan-ssp", "orikan-ssp-v7":
+		// Both Orikan generations need the same endpoint fields; they differ in what
+		// api_base points at (orikan-ssp: the /ssp-svc JSON API; orikan-ssp-v7: the
+		// /ssp server-rendered app) and in the auth flow, which the connector owns.
 		e := c.Endpoints
 		if e.Issuer == "" || e.APIBase == "" || e.ClientID == "" || e.RedirectURI == "" || len(e.Scopes) == 0 {
-			return fmt.Errorf("orikan-ssp needs issuer, api_base, client_id, redirect_uri and scopes")
+			return fmt.Errorf("%s needs issuer, api_base, client_id, redirect_uri and scopes", c.Connector)
 		}
 		// The login flow carries a resident's plaintext tenant password; the
 		// scheme it may travel over is decided here and nowhere else.
