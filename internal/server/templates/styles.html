@@ -706,6 +706,17 @@
      text it can hold ("checked 12 days ago", 19 characters — ch units, not em, so it is
      measured in this font's own digits) so swapping the words never moves the pill. */
   .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:19ch; }
+  /* Phones: the pill cannot hold label + plate + icon + a 19ch hint on one line
+     without breaking the label into two or three lines. Below 560px it becomes a
+     full-width, two-row block — label · plate · icon on the first row, the hint
+     (always present, so the height never changes either) under them. */
+  @media (max-width:560px){
+    .nowbadge { display:grid; grid-template-columns:auto 1fr auto; grid-template-areas:"label plate icon" "hint hint hint"; align-items:center; column-gap:9px; row-gap:2px; width:100%; border-radius:16px; padding:9px 14px; }
+    .nowbadge > .muted { grid-area:label; }
+    .nowbadge > .plate { grid-area:plate; justify-self:start; }
+    .nowbadge > .pslot { grid-area:icon; }
+    .nowbadge > .phint, .nowbadge > .pnote { grid-area:hint; min-width:0; white-space:normal; }
+  }
   .pslot .pwarn { display:inline-flex; color:var(--warn); }
   .pslot .pwarn svg { width:13px; height:13px; stroke-width:2.4; }
   .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
