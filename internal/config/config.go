@@ -194,7 +194,8 @@ type CouncilConfig struct {
 	// prompts a re-link. Deliberately NOT measured from the original link: this is
 	// set-and-forget software, so a household using it every week would otherwise
 	// be retired on schedule while one that moved away a year ago looked identical
-	// to one that linked yesterday. COUNCIL_SESSION_MAX_AGE_DAYS, default 90.
+	// to one that linked yesterday. COUNCIL_SESSION_MAX_AGE_DAYS, default 90. 0
+	// disables the bound entirely and is flagged loudly by CouncilWarnings.
 	SessionMaxAge time.Duration
 
 	// WarmInterval is how stale a still-valid session may get before keep-warm
@@ -565,6 +566,13 @@ func (c CouncilConfig) CouncilWarnings() []string {
 	var w []string
 	if c.ExpiryWarningMargin > 0 && c.WarmSafetyMargin > 0 && c.ExpiryWarningMargin <= c.WarmSafetyMargin {
 		w = append(w, fmt.Sprintf("COUNCIL_EXPIRY_WARNING_MARGIN (%s) is not above COUNCIL_WARM_SAFETY_MARGIN (%s): the near-expiry alert will not precede the warm clamp floor, so a forming reconnect backlog may go unwarned", c.ExpiryWarningMargin, c.WarmSafetyMargin))
+	}
+	// 0 is legal — the scheduler documents it as "disables" — but it is the one
+	// value that quietly removes the promise the README and /security make: that
+	// a council session is never held for a household that has stopped using the
+	// app. Nothing else in the log would say so, hence the shouting.
+	if c.SessionMaxAge == 0 {
+		w = append(w, "COUNCIL_SESSION_MAX_AGE_DAYS=0 DISABLES the re-authorise bound: council sessions (and any saved passwords) will be kept and renewed INDEFINITELY for households that have stopped using the app, contrary to what the README and /security promise. Set it to a positive number of days (default 90) unless this is deliberate")
 	}
 	if c.ReminderLead > 0 && c.SessionMaxAge > 0 && c.ReminderLead >= c.SessionMaxAge {
 		w = append(w, fmt.Sprintf("COUNCIL_REMINDER_LEAD (%s) is not less than the session max age (%s): the re-authorise reminder would never be sent before the session is retired", c.ReminderLead, c.SessionMaxAge))

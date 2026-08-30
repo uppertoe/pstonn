@@ -874,7 +874,7 @@ func TestDeleteAllForOwner(t *testing.T) {
 		t.Fatalf("alice apply-log survived: %+v", l)
 	}
 	// Alice's queued notification (email + plate) must not survive deletion.
-	if due, _ := s.DueOutbox(ctx, time.Now(), 10); len(due) != 1 || due[0].DedupKey != "d-"+bob {
+	if due, _ := s.DueOutbox(ctx, time.Now(), 10); len(due) != 1 || due[0].DedupKey != HashDedupKey("d-"+bob) {
 		t.Fatalf("outbox after delete = %+v, want only bob's row", due)
 	}
 	// Bob is untouched.
@@ -1572,7 +1572,7 @@ func TestOutboxNotBefore(t *testing.T) {
 	if err := s.EnqueueOutbox(ctx, OutboxItem{DedupKey: "now", Recipients: []string{"a@x.co"}, Subject: "now", Body: "B"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := s.DueOutbox(ctx, time.Now(), 10); len(d) != 1 || d[0].DedupKey != "now" {
+	if d, _ := s.DueOutbox(ctx, time.Now(), 10); len(d) != 1 || d[0].DedupKey != HashDedupKey("now") {
 		t.Fatalf("due now = %+v, want only the immediate one", d)
 	}
 	if d, _ := s.DueOutbox(ctx, time.Now().Add(2*time.Hour), 10); len(d) != 2 {
@@ -1589,7 +1589,7 @@ func TestOutboxDedupWindow(t *testing.T) {
 	s := newTestStore(t)
 	countKey := func() int {
 		var n int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE dedup_key = 'k'`).Scan(&n); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox WHERE dedup_key = ?`, HashDedupKey("k")).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -2362,7 +2362,7 @@ func TestRetention(t *testing.T) {
 	}
 	var n int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM outbox WHERE dedup_key = 'k1'`).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM outbox WHERE dedup_key = ?`, HashDedupKey("k1")).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 1 {

@@ -71,6 +71,15 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_log WHERE owner = ?`, owner); err != nil {
 		return err
 	}
+	// Referral invitations they asked us to send go with the account; where they
+	// were the RECIPIENT of someone else's invitation, the address is blanked
+	// rather than the row deleted, so the sender's daily cap still counts it.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM referral_invite WHERE owner = ?`, owner); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE referral_invite SET recipient = '' WHERE recipient = ?`, owner); err != nil {
+		return err
+	}
 	// The owner's own address on the suppression list: it is their personal data,
 	// and a returning user must not inherit a stale "we don't email you" flag.
 	// Guest/driver addresses are deliberately KEPT: they belong to third parties,
@@ -800,4 +809,23 @@ func (s *Store) CountReferralInvitesSince(ctx context.Context, owner string, sin
 		`SELECT COUNT(*) FROM referral_invite WHERE owner = ? AND sent_at >= ?`,
 		owner, since.UTC().Format(time.RFC3339)).Scan(&n)
 	return n, err
+}
+
+// ReferralInviteRetention is how long a referral row is kept. The cap only reads
+// the last 24 hours, but the row is also the account's own record of who it
+// asked us to write to — the same class of fact as the activity log, which is
+// kept 90 days, so it gets the same bound rather than a shorter one that would
+// make "who did I invite?" unanswerable while "what did I change?" is not. The
+// recipient is a third party's address, and 90 days is the ceiling, not a target.
+const ReferralInviteRetention = 90 * 24 * time.Hour
+
+// PruneReferralInvites deletes referral rows sent before cutoff (the housekeeping
+// pass calls it with now - ReferralInviteRetention). Returns rows removed.
+func (s *Store) PruneReferralInvites(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM referral_invite WHERE sent_at < ?`, cutoff.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

@@ -98,6 +98,10 @@ type Service struct {
 	// lastWriteAlert paces the operator alert for that condition, which otherwise
 	// repeats on every 15-second tick for as long as the disk stays broken.
 	lastWriteAlert time.Time
+	// enqueueHook sees every message as composed, BEFORE the store hashes its
+	// dedup key. Tests only: the golden files lock the plaintext key composition,
+	// which the stored (digest) form cannot show. nil in production.
+	enqueueHook func(store.OutboxItem)
 }
 
 // New builds a Service. mail may be nil (email disabled); ntfyBase may be empty
@@ -133,6 +137,18 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 // the leakiest surface, the full address stays in the DB) now lives in redact.
 func RedactEmail(a string) string       { return redact.Email(a) }
 func redactEmails(list []string) string { return redact.Emails(list) }
+
+// errText renders a send error for a joined error string or last_error column,
+// with the recipient scrubbed out of the server's own words. The mailer wraps
+// the SMTP reply verbatim, and a rejection at RCPT TO routinely echoes the
+// address ("550 5.1.1 <a@b.com>: user unknown"), so redacting only the prefix we
+// add ourselves still left the full address in the log the caller %v's.
+func errText(e error, addrs ...string) string {
+	if e == nil {
+		return ""
+	}
+	return redact.InText(e.Error(), addrs...)
+}
 
 // neutraliseLinks strips whole URLs out of owner-supplied free text (a permit
 // label) before it reaches mail we send to people who never opted in.
@@ -250,9 +266,13 @@ func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason strin
 // unsubscribe page says exactly that. A bounce or a complaint still blocks:
 // those addresses are dead or asked-us-to-stop-via-their-provider, and mailing
 // them anyway damages deliverability for every user of the sending domain.
-// (Outbox rows never need this: an action-needed outcome bypasses the
-// quiet-hours hold and is sent inline, so queued rows are routine by
-// construction.)
+//
+// A critical message that is QUEUED rather than sent inline (a permit-expiry
+// warning held for quiet hours, a guest-activation failure routed through
+// EnqueueApply) carries the same flag on its outbox row, so deliver() applies
+// the same rule when the row comes due. Without that the hold quietly demoted
+// the message: sent at 9pm it would reach an unsubscribed member, sent at 11pm
+// it would not.
 func (s *Service) sendEmailCritical(ctx context.Context, to, subject, body, reason string) error {
 	return s.sendEmailWith(ctx, to, subject, body, reason, true)
 }
@@ -377,7 +397,7 @@ func (s *Service) broadcastAccount(ctx context.Context, owner, tag, subject, bod
 		mpref, _ := s.store.GetNotifyPref(ctx, m)
 		if s.mail.Enabled() {
 			if e := s.sendEmailCritical(ctx, m, subject, body, reasonAccount); e != nil {
-				log.Printf("notify %s email %s: %v", tag, RedactEmail(m), e)
+				log.Printf("notify %s email %s: %s", tag, RedactEmail(m), errText(e, m))
 			} else {
 				delivered++
 			}
@@ -437,6 +457,9 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permi
 				// member's reminder. Every sibling fan-out keys on d.email for this reason.
 				DedupKey: fmt.Sprintf("expiry|%s|%s|%s|%s", owner, permitLabel, date, d.email),
 				Reason:   reasonAccount,
+				// Same tier as the inline send below: the hold must not turn a
+				// safety notice into routine mail an unsubscribe can swallow.
+				Critical: true,
 			}
 			if wantEmail {
 				m.Recipients = []string{d.email}
@@ -452,7 +475,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permi
 		reached := false
 		if wantEmail {
 			if e := s.sendEmailCritical(ctx, d.email, subject, body, reasonAccount); e != nil {
-				log.Printf("notify permit-expiry email %s: %v", RedactEmail(d.email), e)
+				log.Printf("notify permit-expiry email %s: %s", RedactEmail(d.email), errText(e, d.email))
 			} else {
 				reached = true
 			}
@@ -729,6 +752,8 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 			NotBefore: s.deferUntil(d.pref, now, o),
 			Reason:    reasonAccount,
+			// The queued twin of NotifyApply's inline choice of sendEmailCritical.
+			Critical: o.actionNeeded(),
 		}
 		if s.emailWanted(d.pref, o) {
 			m.Recipients = []string{d.email}
@@ -794,7 +819,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				m.NtfyTopic = d.pref.NtfyTopic
 			}
 			if e := s.enqueueSplit(ctx, m); e != nil {
-				errs = append(errs, "queue "+d.email+": "+e.Error())
+				errs = append(errs, "queue "+RedactEmail(d.email)+": "+errText(e, d.email))
 			} else {
 				delivered++
 			}
@@ -811,14 +836,16 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				send = s.sendEmailCritical
 			}
 			if e := send(ctx, d.email, subject, emailBody, reasonAccount); e != nil {
-				errs = append(errs, "email "+d.email+": "+e.Error())
+				// Redacted throughout: the caller %v's this error into the log, and a
+				// server rejection echoes the address inside e itself.
+				errs = append(errs, "email "+RedactEmail(d.email)+": "+errText(e, d.email))
 			} else {
 				reached = true
 			}
 		}
 		if wantNtfy {
 			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, priority, tags); e != nil {
-				errs = append(errs, "ntfy "+d.email+": "+e.Error())
+				errs = append(errs, "ntfy "+RedactEmail(d.email)+": "+errText(e, d.email))
 			} else {
 				reached = true
 			}
@@ -831,7 +858,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		return -1, nil // nobody was due a notification
 	}
 	if len(errs) > 0 {
-		return delivered, fmt.Errorf("notify %s: %s", o.Owner, strings.Join(errs, "; "))
+		return delivered, fmt.Errorf("notify %s: %s", RedactEmail(o.Owner), strings.Join(errs, "; "))
 	}
 	return delivered, nil
 }
@@ -849,7 +876,7 @@ func (s *Service) SendTest(ctx context.Context, user string) error {
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
 		if e := s.sendEmail(ctx, user, subject, body, reasonTest); e != nil {
-			errs = append(errs, "email "+user+": "+e.Error())
+			errs = append(errs, "email "+RedactEmail(user)+": "+errText(e, user))
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
@@ -878,7 +905,7 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 		// "Your permit is no longer being managed" is a safety notice, not a
 		// courtesy: an unsubscribe must not swallow it.
 		if e := s.sendEmailCritical(ctx, owner, subject, body, reasonAccount); e != nil {
-			errs = append(errs, "email: "+e.Error())
+			errs = append(errs, "email: "+errText(e, owner))
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
@@ -1090,14 +1117,14 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 					"\n(This link can only answer this one request, and only from your address.)"
 			}
 			if e := s.enqueueSplit(ctx, em); e != nil {
-				errs = append(errs, d.email+": "+e.Error())
+				errs = append(errs, RedactEmail(d.email)+": "+errText(e, d.email))
 			}
 		}
 		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
 			pm := m
 			pm.NtfyTopic = d.pref.NtfyTopic
 			if e := s.enqueueSplit(ctx, pm); e != nil {
-				errs = append(errs, d.email+": "+e.Error())
+				errs = append(errs, RedactEmail(d.email)+": "+errText(e, d.email))
 			}
 		}
 	}
@@ -1156,7 +1183,7 @@ func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary
 			continue
 		}
 		if e := s.enqueueSplit(ctx, m); e != nil {
-			errs = append(errs, d.email+": "+e.Error())
+			errs = append(errs, RedactEmail(d.email)+": "+errText(e, d.email))
 		}
 	}
 	if len(errs) > 0 {
@@ -1241,14 +1268,21 @@ type outMessage struct {
 	Body         string
 	NotBefore    time.Time // earliest delivery (quiet-hours defer); zero = immediate
 	Reason       string    // "why you got this", for the mail footer
+	// Critical marks safety-tier mail (see sendEmailCritical): deliver() lets it
+	// past a self-service unsubscribe, exactly as the inline path would have.
+	Critical bool
 }
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
-	return s.store.EnqueueOutbox(ctx, store.OutboxItem{
+	it := store.OutboxItem{
 		Account: m.Account, DedupKey: m.DedupKey, Reason: m.Reason, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
-		NotBefore: m.NotBefore,
-	})
+		NotBefore: m.NotBefore, Critical: m.Critical,
+	}
+	if s.enqueueHook != nil {
+		s.enqueueHook(it)
+	}
+	return s.store.EnqueueOutbox(ctx, it)
 }
 
 // enqueueSplit stores one outbox row per recipient per channel. A combined row
@@ -1268,7 +1302,7 @@ func (s *Service) enqueueSplit(ctx context.Context, m outMessage) error {
 			row.DedupKey += "|email|" + r
 		}
 		if err := s.enqueue(ctx, row); err != nil {
-			errs = append(errs, "queue email "+r+": "+err.Error())
+			errs = append(errs, "queue email "+RedactEmail(r)+": "+errText(err, r))
 		}
 	}
 	if m.NtfyTopic != "" {
@@ -1303,8 +1337,9 @@ func (s *Service) RunOutbox(ctx context.Context) {
 		case <-t.C:
 			s.drainOutbox(ctx)
 		case <-purge.C:
-			// 24h, not 7 days: a sent row is stripped of its content at send and is
-			// only needed for the 15-minute dedup window, so a day is generous.
+			// 24h, not 7 days: a sent or dead row is stripped of its content when it
+			// settles and is only needed for the 15-minute dedup window (its key is
+			// hashed at enqueue), so a day is generous.
 			if _, err := s.store.PurgeSentOutbox(ctx, time.Now().Add(-24*time.Hour)); err != nil {
 				log.Printf("notify: purge outbox: %v", err)
 			}
@@ -1474,8 +1509,9 @@ func (s *Service) flushUnrecorded(ctx context.Context) bool {
 // so a failure to escalate is logged as well.
 //
 // The row id, not the message: the subject carries the permit label (typically a
-// street address) and a plate, and the row itself is still in the DB for a day if
-// an operator needs the detail.
+// street address) and a plate. The dead row keeps only its account, hashed dedup
+// key and (redacted) last error for a day, so an operator can correlate it with
+// the account but the message itself is gone.
 func (s *Service) announceDead(ctx context.Context, id int64, u outboxUpdate) {
 	log.Printf("notify: DROPPED outbox row %d (%s) to %s: %s", id, u.why, u.who, u.lastErr)
 	if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
@@ -1504,17 +1540,21 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			// emailTargets, or a row addressed ONLY to a dead address would retry
 			// eight times and then dead-letter, which is exactly the reputation
 			// damage the suppression list exists to prevent.
-			e := s.sendEmail(ctx, addr, it.Subject, it.Body, it.Reason)
+			// The row's tier decides whether an unsubscribe blocks it, the same
+			// way the inline sender chose between sendEmail and sendEmailCritical.
+			e := s.sendEmailWith(ctx, addr, it.Subject, it.Body, it.Reason, it.Critical)
 			if errors.Is(e, ErrSuppressed) {
 				log.Printf("notify: skipping suppressed recipient %s (outbox row %d)", RedactEmail(addr), it.ID)
 				continue
 			}
 			emailTargets++
 			if e != nil {
-				// Redacted: this string is stored in last_error and repeated in the
-				// dead-letter log and operator alert, so the full address would end up in
-				// three places that all outlive the notification.
-				errs = append(errs, "email "+RedactEmail(addr)+": "+e.Error())
+				// Redacted, including inside the server's own words (a rejection
+				// echoes the address): this string is stored in last_error and
+				// repeated in the dead-letter log and operator alert, so the full
+				// address would end up in three places that all outlive the
+				// notification.
+				errs = append(errs, "email "+RedactEmail(addr)+": "+errText(e, addr))
 				if !errors.Is(e, mailer.ErrPermanent) {
 					allPermanent = false
 				}

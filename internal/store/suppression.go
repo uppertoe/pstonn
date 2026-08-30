@@ -99,34 +99,63 @@ func (s *Store) IsSuppressed(ctx context.Context, address string) (bool, string,
 	return true, reason, nil
 }
 
-// SuppressedAmong returns the subset of addresses that are suppressed, mapped to
-// their reason. Used to annotate a list (e.g. a guest pass's recipients) without
-// a query per address.
+// SuppressedAmong returns the subset of addresses that are suppressed, keyed by
+// the address AS GIVEN and mapped to its reason. Used to annotate a list (e.g. a
+// guest pass's recipients) without a query per address.
 func (s *Store) SuppressedAmong(ctx context.Context, addresses []string) (map[string]string, error) {
 	out := map[string]string{}
 	if len(addresses) == 0 {
 		return out, nil
 	}
-	// Materialise the rows before issuing any follow-up query: the store runs on a
-	// single connection, so a nested query while a cursor is open would deadlock.
-	rows, err := s.db.QueryContext(ctx, `SELECT address, reason FROM mail_suppression`)
-	if err != nil {
-		return nil, err
+	// One IN (...) query over the candidates, not a scan of the whole list: this
+	// runs on the guest-pass page and on every displaced-driver check, and the
+	// list grows for two years while the candidates stay at a handful.
+	seen := map[string]bool{}
+	var args []any
+	for _, a := range addresses {
+		n := normaliseAddr(a)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		args = append(args, n)
 	}
-	defer rows.Close()
-	all := map[string]string{}
-	for rows.Next() {
-		var a, r string
-		if err := rows.Scan(&a, &r); err != nil {
+	if len(args) == 0 {
+		return out, nil
+	}
+	found := map[string]string{}
+	// Chunked well under SQLite's bound-parameter limit; a caller never passes
+	// anything like this many, but the query must not fail if one does.
+	const chunk = 500
+	for start := 0; start < len(args); start += chunk {
+		end := start + chunk
+		if end > len(args) {
+			end = len(args)
+		}
+		part := args[start:end]
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT address, reason FROM mail_suppression WHERE address IN (?`+strings.Repeat(",?", len(part)-1)+`)`, part...)
+		if err != nil {
 			return nil, err
 		}
-		all[a] = r
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+		// Materialise before the next chunk's query: the store runs on a single
+		// connection, so a nested query while a cursor is open would deadlock.
+		for rows.Next() {
+			var a, r string
+			if err := rows.Scan(&a, &r); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			found[a] = r
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
 	}
 	for _, a := range addresses {
-		if r, ok := all[normaliseAddr(a)]; ok {
+		if r, ok := found[normaliseAddr(a)]; ok {
 			out[a] = r
 		}
 	}

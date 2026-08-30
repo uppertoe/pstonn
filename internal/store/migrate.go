@@ -10,26 +10,33 @@ import (
 )
 
 // schemaVersion is the migration set this build knows how to apply. It is
-// RECORDED after a successful run, for the operator and for a future "this file
-// was written by a newer binary" check — it is deliberately NOT used to skip the
-// migrations. Skipping on a version match would mean that forgetting to bump this
-// constant silently stops a newly added ALTER from ever reaching an existing
-// database, which is a far worse failure than re-running statements that are all
+// RECORDED after a successful run and CHECKED before one: a file whose recorded
+// version is higher than this was written by a newer binary, and this build does
+// not know what that binary's columns mean (a rollback after a deploy is the
+// realistic way to get here). It is deliberately NOT used to skip the migrations.
+// Skipping on a version match would mean that forgetting to bump this constant
+// silently stops a newly added ALTER from ever reaching an existing database,
+// which is a far worse failure than re-running statements that are all
 // idempotent and cost microseconds on an already-migrated file.
-const schemaVersion = 4
+//
+// History: 4 = per-tenant permit/session keys; 5 = outbox.critical, hashed
+// outbox dedup keys.
+const schemaVersion = 5
 
 // migrationLockTTL bounds how long a dead migrator keeps the next start out. A
 // process killed mid-migration leaves the row claimed, and with no takeover window
 // the app could never boot again without manual surgery on the database — so the
 // lock expires. It is set well above a real migration (milliseconds) and well
-// below any plausible restart loop.
-const migrationLockTTL = 5 * time.Minute
+// below any plausible restart loop. A variable rather than a constant only so the
+// lock tests can exercise the takeover without waiting five minutes.
+var migrationLockTTL = 5 * time.Minute
 
 // migrationLockWait is how long to wait for another process to finish migrating
 // before giving up. Losing the race is normal and harmless (the winner's work is
 // what this process needs); waiting forever is not, because a stuck peer would
-// turn into a container that never reports healthy and never says why.
-const migrationLockWait = 30 * time.Second
+// turn into a container that never reports healthy and never says why. Variable
+// for the same reason as migrationLockTTL.
+var migrationLockWait = 30 * time.Second
 
 // migratorSeq distinguishes migration-lock holders within one process; see
 // lockMigrations.
@@ -57,6 +64,21 @@ func (s *Store) migrate() error {
 		return err
 	}
 	defer release()
+	// Refuse a file from the future BEFORE touching it. Every statement below is
+	// written to be re-runnable, but only against shapes this build has seen; a
+	// newer binary's columns, backfills or rebuilds are unknown here, and "it
+	// opened fine" would just mean the damage is deferred to the first query that
+	// finds a column missing. Read under the lock so a peer mid-upgrade cannot
+	// slip its new version in between the check and our own migrations.
+	var found int
+	if err := s.db.QueryRow(`SELECT version FROM schema_migration WHERE id = 1`).Scan(&found); err != nil {
+		return fmt.Errorf("migrate: read schema version: %w", err)
+	}
+	if found > schemaVersion {
+		return fmt.Errorf("migrate: this database is at schema version %d, but this binary only knows version %d: "+
+			"it was last opened by a newer build. Run the newer build (or restore the snapshot taken before the upgrade) "+
+			"rather than downgrading against it", found, schemaVersion)
+	}
 	if err := s.applyMigrations(); err != nil {
 		return err
 	}
@@ -168,6 +190,7 @@ CREATE TABLE IF NOT EXISTS vehicle (
     label        TEXT NOT NULL DEFAULT '',
     color        TEXT NOT NULL DEFAULT '',   -- stable per-plate colour, assigned at creation
     state        TEXT NOT NULL DEFAULT '',   -- registration state code ("NSW"); '' = tenant home state
+    email        TEXT NOT NULL DEFAULT '',   -- optional driver contact, told when this car is displaced
     created_at   TEXT NOT NULL,
     UNIQUE(owner, registration)
 );
@@ -186,6 +209,8 @@ CREATE TABLE IF NOT EXISTS permit (
     permit_number       TEXT NOT NULL DEFAULT '',   -- council permit number, e.g. "VPP24714"
     permit_type         TEXT NOT NULL DEFAULT '',   -- council permit type, e.g. "(A) 1st Visitor Permit"
     updated_at          TEXT NOT NULL,
+    fail_streak         INTEGER NOT NULL DEFAULT 0, -- consecutive failed applies (0 = nothing failing now)
+    copy_offer_done     INTEGER NOT NULL DEFAULT 0, -- the "copy your schedule onto the renewed permit" pitch was answered
     UNIQUE(council_id, council_permit_id)
 );
 
@@ -257,9 +282,10 @@ CREATE TABLE IF NOT EXISTS notify_pref (
 -- email; owner is the primary account it belongs to. member_email is the primary
 -- key, so a person can be a secondary on at most one account at a time.
 CREATE TABLE IF NOT EXISTS account_member (
-    member_email TEXT PRIMARY KEY,
-    owner        TEXT NOT NULL,
-    added_at     TEXT NOT NULL
+    member_email   TEXT PRIMARY KEY,
+    owner          TEXT NOT NULL,
+    added_at       TEXT NOT NULL,
+    invite_pending INTEGER NOT NULL DEFAULT 0   -- 1 = an unanswered offer; grants nothing (see the ALTER below)
 );
 CREATE INDEX IF NOT EXISTS idx_member_owner ON account_member(owner);
 
@@ -351,9 +377,11 @@ CREATE INDEX IF NOT EXISTS idx_guest_request_owner ON guest_request(owner, statu
 
 -- Per-account flags. guests_enabled is the global kill-switch for guest passes.
 CREATE TABLE IF NOT EXISTS account_flags (
-    owner          TEXT PRIMARY KEY,
-    guests_enabled INTEGER NOT NULL DEFAULT 1,
-    council_id     TEXT NOT NULL DEFAULT ''     -- the council chosen at sign-up, before any link exists
+    owner                TEXT PRIMARY KEY,
+    guests_enabled       INTEGER NOT NULL DEFAULT 1,
+    onboard_nudge_sent   TEXT NOT NULL DEFAULT '',   -- when the once-ever "you never connected" mail went out ('' = never)
+    fortnight_nudge_sent TEXT NOT NULL DEFAULT '',   -- when the once-ever "tell a neighbour" mail went out ('' = never)
+    council_id           TEXT NOT NULL DEFAULT ''    -- the council chosen at sign-up, before any link exists
 );
 
 -- Durable notification outbox: a message is enqueued (composed + addressed) and a
@@ -362,7 +390,7 @@ CREATE TABLE IF NOT EXISTS account_flags (
 CREATE TABLE IF NOT EXISTS outbox (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     account       TEXT NOT NULL DEFAULT '',        -- owner the message concerns, so account deletion can purge it
-    dedup_key     TEXT NOT NULL DEFAULT '',        -- idempotency; skip if a live/sent row shares a non-empty key
+    dedup_key     TEXT NOT NULL DEFAULT '',        -- idempotency; skip if a live/sent row shares a non-empty key. Stored HASHED (see HashDedupKey)
     recipients    TEXT NOT NULL DEFAULT '',        -- newline-separated email addresses
     ntfy_topic    TEXT NOT NULL DEFAULT '',
     ntfy_priority TEXT NOT NULL DEFAULT '',
@@ -375,7 +403,8 @@ CREATE TABLE IF NOT EXISTS outbox (
     last_error    TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL,
     sent_at       TEXT NOT NULL DEFAULT '',
-    reason        TEXT NOT NULL DEFAULT ''   -- "why you got this", shown in the mail footer
+    reason        TEXT NOT NULL DEFAULT '',  -- "why you got this", shown in the mail footer
+    critical      INTEGER NOT NULL DEFAULT 0 -- safety-tier mail: delivered past a self-service unsubscribe
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 
@@ -516,6 +545,11 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		`ALTER TABLE council_session ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE permit ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE account_flags ADD COLUMN council_id TEXT NOT NULL DEFAULT ''`,
+		// Whether a queued message is safety-tier (see notify.sendEmailCritical). A
+		// row held for quiet hours used to lose its tier on the way through the
+		// outbox, so the same permit-expiry warning reached an unsubscribed member
+		// when sent at 9pm and not when held until 6am.
+		`ALTER TABLE outbox ADD COLUMN critical INTEGER NOT NULL DEFAULT 0`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
@@ -606,6 +640,15 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate override table: %w", err)
 		}
 	}
+	// Hash the outbox dedup keys older builds stored in plaintext. The key embeds
+	// the recipient, the permit label and the plate, and it outlives the stripped
+	// message by a day — so until this ran, stripping removed nothing the key did
+	// not keep. Dedup compares for equality, which the digest preserves; a still-
+	// pending row keeps deduping against new enqueues because they hash the same
+	// way. Idempotent by the prefix: an already-hashed key is left alone.
+	if err := s.hashLegacyDedupKeys(); err != nil {
+		return err
+	}
 	// Indexes that depend on ADD COLUMN-ed columns, or on the rebuilt override
 	// table, must come AFTER both: creating them in the schema block above would
 	// fail on a database predating the column.
@@ -625,28 +668,152 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 	return nil
 }
 
+// hashLegacyDedupKeys rewrites plaintext outbox dedup keys as digests. Rows are
+// read out first (single connection: no nested statements over an open cursor).
+func (s *Store) hashLegacyDedupKeys() error {
+	rows, err := s.db.Query(`SELECT id, dedup_key FROM outbox WHERE dedup_key != '' AND dedup_key NOT LIKE ?`, dedupKeyPrefix+"%")
+	if err != nil {
+		return fmt.Errorf("migrate: read outbox dedup keys: %w", err)
+	}
+	type row struct {
+		id  int64
+		key string
+	}
+	var todo []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.key); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range todo {
+		if _, err := s.db.Exec(`UPDATE outbox SET dedup_key = ? WHERE id = ?`, HashDedupKey(r.key), r.id); err != nil {
+			return fmt.Errorf("migrate: hash outbox dedup key: %w", err)
+		}
+	}
+	return nil
+}
+
 // columnExists reports whether table has a column named col.
 func (s *Store) columnExists(table, col string) (bool, error) {
-	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	names, err := s.tableColumns(table)
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return false, err
-		}
+	for _, name := range names {
 		if name == col {
 			return true, nil
 		}
 	}
-	return false, rows.Err()
+	return false, nil
+}
+
+// tableColumns returns a table's column names in declaration order (empty for a
+// table that does not exist).
+func (s *Store) tableColumns(table string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
+// rebuildColumn is one column a table rebuild carries across: its name, and the
+// literal used when the source table predates it.
+type rebuildColumn struct{ name, def string }
+
+// The column lists of every table a migration rebuilds. A rebuild runs AFTER the
+// ALTER loop, so each list must name every column the live table has by then —
+// omitting one silently drops it from the rebuilt table and breaks every insert
+// that names it until the next restart re-adds it (guest_token_id on override,
+// once). TestRebuildColumnListsMatchLiveTables holds each list to PRAGMA
+// table_info of the migrated table, on a fresh file and on the legacy fixtures,
+// so a future ADD COLUMN without a matching entry here fails CI instead of prod.
+var (
+	overrideColumns = []rebuildColumn{
+		{"id", "NULL"}, {"permit_id", "0"}, {"vehicle_id", "NULL"}, {"registration", "''"}, {"state", "''"},
+		{"starts_at", "''"}, {"ends_at", "NULL"}, {"created_by", "''"}, {"created_at", "''"}, {"guest_token_id", "0"},
+	}
+	permitColumns = []rebuildColumn{
+		{"id", "NULL"}, {"owner", "''"}, {"council_id", "''"}, {"council_permit_id", "''"},
+		{"permit_type_id", "''"}, {"label", "''"}, {"active_registration", "''"}, {"end_date", "''"},
+		{"status", "''"}, {"expiry_reminded", "''"}, {"permit_number", "''"}, {"permit_type", "''"},
+		{"updated_at", "''"}, {"fail_streak", "0"}, {"copy_offer_done", "0"},
+	}
+	sessionColumns = []rebuildColumn{
+		{"owner", "''"}, {"council_id", "''"}, {"sub", "''"}, {"council_email", "''"}, {"cookie_sealed", "''"},
+		{"access_token_sealed", "''"}, {"token_expiry", "''"}, {"updated_at", "''"}, {"linked_at", "''"},
+		{"reminder_sent_at", "''"}, {"confirm_token", "''"}, {"password_sealed", "''"}, {"reconnected_at", "''"},
+		{"last_active_at", "''"}, {"drift_checked_at", "''"}, {"session_generation", "1"},
+	}
+	breakerColumns = []rebuildColumn{
+		// The pre-tenant table had no council_id: the one row it held was the
+		// legacy tenant's pause, so that is what the copy files it under.
+		{"council_id", "'" + LegacyTenantID + "'"}, {"open_until", "''"}, {"generation", "0"}, {"last_pushback", "''"}, {"updated_at", "''"},
+	}
+	// rebuiltTables maps each rebuilt table to its list, for the test above.
+	rebuiltTables = map[string][]rebuildColumn{
+		"override": overrideColumns, "permit": permitColumns,
+		"council_session": sessionColumns, "breaker_state": breakerColumns,
+	}
+)
+
+// copyColumns builds the INSERT ... SELECT that carries rows from the old table
+// into its rebuilt twin: every listed column is named on the insert side, and on
+// the select side a column the old table lacks takes its default literal, so
+// the rebuild never fails on a very old shape. except lists columns to SELECT as
+// their default even when present (a legacy rebuild that must not copy them).
+func (s *Store) copyColumns(table, newTable string, cols []rebuildColumn, except ...string) (string, error) {
+	have, err := s.tableColumns(table)
+	if err != nil {
+		return "", err
+	}
+	existing := map[string]bool{}
+	for _, n := range have {
+		existing[n] = true
+	}
+	for _, n := range except {
+		existing[n] = false
+	}
+	var names, selects []string
+	for _, c := range cols {
+		names = append(names, c.name)
+		if existing[c.name] {
+			selects = append(selects, c.name)
+		} else {
+			selects = append(selects, c.def)
+		}
+	}
+	return `INSERT INTO ` + newTable + ` (` + strings.Join(names, ", ") + `) SELECT ` +
+		strings.Join(selects, ", ") + ` FROM ` + table, nil
 }
 
 // rebuildOverrideTable redefines override with a nullable vehicle_id and a
 // registration column, preserving existing rows.
 func (s *Store) rebuildOverrideTable() error {
+	// This legacy rebuild predates the state column, so the source table has no
+	// state to copy: new rows take '' (= the tenant's home state), the same
+	// default the ALTER path gives existing rows. registration is likewise
+	// defaulted — the rebuild only runs when the table lacks it.
+	copyStmt, err := s.copyColumns("override", "override_new", overrideColumns, "state", "registration")
+	if err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 		return err
 	}
@@ -657,10 +824,8 @@ func (s *Store) rebuildOverrideTable() error {
 	}
 	defer tx.Rollback()
 	for _, stmt := range []string{
-		// Must mirror the base schema exactly: the ALTER loop has already run, so
-		// omitting a column it added (guest_token_id, once) would silently drop it
-		// from the rebuilt table and break every guest-override insert until the
-		// next restart re-added it.
+		// Must mirror the base schema exactly (overrideColumns is the checked list;
+		// the CREATE below must agree with it — see the test named there).
 		`CREATE TABLE override_new (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     permit_id      INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
@@ -673,11 +838,7 @@ func (s *Store) rebuildOverrideTable() error {
     created_at     TEXT NOT NULL,
     guest_token_id INTEGER NOT NULL DEFAULT 0
 )`,
-		// This legacy rebuild predates the state column, so the source table has no
-		// state to copy: new rows take '' (= the tenant's home state), the same
-		// default the ALTER path gives existing rows.
-		`INSERT INTO override_new (id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id)
-    SELECT id, permit_id, vehicle_id, '', '', starts_at, ends_at, created_by, created_at, guest_token_id FROM override`,
+		copyStmt,
 		`DROP TABLE override`,
 		`ALTER TABLE override_new RENAME TO override`,
 		`CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id)`,
@@ -714,39 +875,10 @@ func (s *Store) permitUniqueIsScoped() (bool, error) {
 func (s *Store) rebuildPermitTable() error {
 	// Copy only the columns the existing table actually has (a very old database
 	// may predate some), defaulting the rest, so the rebuild never fails on shape.
-	existing := map[string]bool{}
-	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('permit')`)
+	copyStmt, err := s.copyColumns("permit", "permit_new", permitColumns)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return err
-		}
-		existing[name] = true
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	cols := []struct{ name, def string }{
-		{"id", "NULL"}, {"owner", "''"}, {"council_id", "''"}, {"council_permit_id", "''"},
-		{"permit_type_id", "''"}, {"label", "''"}, {"active_registration", "''"}, {"end_date", "''"},
-		{"status", "''"}, {"expiry_reminded", "''"}, {"permit_number", "''"}, {"permit_type", "''"},
-		{"updated_at", "''"}, {"fail_streak", "0"}, {"copy_offer_done", "0"},
-	}
-	var names, selects []string
-	for _, c := range cols {
-		names = append(names, c.name)
-		if existing[c.name] {
-			selects = append(selects, c.name)
-		} else {
-			selects = append(selects, c.def)
-		}
-	}
-
 	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 		return err
 	}
@@ -777,7 +909,7 @@ func (s *Store) rebuildPermitTable() error {
     copy_offer_done     INTEGER NOT NULL DEFAULT 0,
     UNIQUE(council_id, council_permit_id)
 )`,
-		`INSERT INTO permit_new (` + strings.Join(names, ", ") + `) SELECT ` + strings.Join(selects, ", ") + ` FROM permit`,
+		copyStmt,
 		`DROP TABLE permit`,
 		`ALTER TABLE permit_new RENAME TO permit`,
 	} {
@@ -791,6 +923,13 @@ func (s *Store) rebuildPermitTable() error {
 // rebuildBreakerTable converts the single-row breaker_state into one row per
 // tenant, carrying any existing pause across as Stonnington's.
 func (s *Store) rebuildBreakerTable() error {
+	// The old shape has no council_id, so the copy takes breakerColumns' literal
+	// for it; only the single legacy row is carried.
+	copyStmt, err := s.copyColumns("breaker_state", "breaker_state_new", breakerColumns)
+	if err != nil {
+		return err
+	}
+	copyStmt += ` WHERE id = 1`
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -804,8 +943,7 @@ func (s *Store) rebuildBreakerTable() error {
     last_pushback TEXT NOT NULL DEFAULT '',
     updated_at    TEXT NOT NULL DEFAULT ''
 )`,
-		`INSERT INTO breaker_state_new (council_id, open_until, generation, last_pushback, updated_at)
-    SELECT 'stonnington', open_until, generation, last_pushback, updated_at FROM breaker_state WHERE id = 1`,
+		copyStmt,
 		`DROP TABLE breaker_state`,
 		`ALTER TABLE breaker_state_new RENAME TO breaker_state`,
 	} {
@@ -831,37 +969,9 @@ func (s *Store) sessionKeyIsScoped() (bool, error) {
 // foreign key; foreign keys are toggled off around the DROP/RENAME as for the
 // other rebuilds, and the migration lock guarantees a single migrator.
 func (s *Store) rebuildSessionTable() error {
-	existing := map[string]bool{}
-	rows, err := s.db.Query(`SELECT name FROM pragma_table_info('council_session')`)
+	copyStmt, err := s.copyColumns("council_session", "council_session_new", sessionColumns)
 	if err != nil {
 		return err
-	}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return err
-		}
-		existing[name] = true
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	cols := []struct{ name, def string }{
-		{"owner", "''"}, {"council_id", "''"}, {"sub", "''"}, {"council_email", "''"}, {"cookie_sealed", "''"},
-		{"access_token_sealed", "''"}, {"token_expiry", "''"}, {"updated_at", "''"}, {"linked_at", "''"},
-		{"reminder_sent_at", "''"}, {"confirm_token", "''"}, {"password_sealed", "''"}, {"reconnected_at", "''"},
-		{"last_active_at", "''"}, {"drift_checked_at", "''"}, {"session_generation", "1"},
-	}
-	var names, selects []string
-	for _, c := range cols {
-		names = append(names, c.name)
-		if existing[c.name] {
-			selects = append(selects, c.name)
-		} else {
-			selects = append(selects, c.def)
-		}
 	}
 	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
 		return err
@@ -892,7 +1002,7 @@ func (s *Store) rebuildSessionTable() error {
     session_generation   INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (owner, council_id)
 )`,
-		`INSERT INTO council_session_new (` + strings.Join(names, ", ") + `) SELECT ` + strings.Join(selects, ", ") + ` FROM council_session`,
+		copyStmt,
 		`DROP TABLE council_session`,
 		`ALTER TABLE council_session_new RENAME TO council_session`,
 	} {
