@@ -129,6 +129,11 @@ func (c *Client) Blocked() bool {
 	return open
 }
 
+// LoginBudget is the worst-case time this client's governor may hold a full
+// credential login waiting for rate tokens (0 when ungoverned). The scheduler adds
+// it to its reconnect deadline so a governed wait can never be what expires it.
+func (c *Client) LoginBudget() time.Duration { return c.gov.loginBudget() }
+
 // Stats snapshots current tenant load and breaker state.
 func (c *Client) Stats() Stats {
 	now := time.Now()

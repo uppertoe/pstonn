@@ -106,3 +106,24 @@ func TestNilGovernorAllows(t *testing.T) {
 	}
 	release() // must not panic
 }
+
+// TestLoginBudgetCoversDrainedBuckets: under the DEFAULT limits a full credential
+// login (6 requests) needs 30s of login-bucket accrual once the burst is spent
+// (12/min = one token per 5s) plus 6s in the total bucket, so a reconnect deadline
+// sized without it would expire mid-login on the second back-to-back reconnect.
+// A nil governor (request-free providers, bare test clients) budgets nothing.
+func TestLoginBudgetCoversDrainedBuckets(t *testing.T) {
+	tr := NewTransport(Limits{})
+	if got, want := tr.gov.loginBudget(), 36*time.Second; got != want {
+		t.Fatalf("default login budget = %v, want %v", got, want)
+	}
+	if got := (*governor)(nil).loginBudget(); got != 0 {
+		t.Fatalf("nil governor budget = %v, want 0", got)
+	}
+	if got := NewClientFor("t", nil, nil, nil, nil).LoginBudget(); got != 0 {
+		t.Fatalf("ungoverned client budget = %v, want 0", got)
+	}
+	if got := NewClientFor("t", nil, nil, nil, tr).LoginBudget(); got != 36*time.Second {
+		t.Fatalf("governed client budget = %v, want 36s", got)
+	}
+}

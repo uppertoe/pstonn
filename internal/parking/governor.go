@@ -130,6 +130,36 @@ func newGovernor(totalPerMin, totalBurst, loginPerMin, loginBurst float64, concu
 	}
 }
 
+// loginFlowRequests is how many login-surface requests one full credential login
+// makes (form GET, password POST, the IdP redirects and the token exchange) — the
+// same "~6" the login burst is sized to admit at once.
+const loginFlowRequests = 6
+
+// loginBudget is the WORST-CASE time the governor may hold one full credential
+// login before its last request is admitted: both buckets empty, and every request
+// waiting for a token to accrue in the login sub-limit and then in the total.
+// Zero for a nil governor. Rate-limit waits only — the concurrency slot and the
+// network are the caller's to budget separately.
+//
+// It exists so a caller can size a deadline around the governor instead of under
+// it. The reconnect worker used to hand every login a flat 20s: once a burst of
+// back-to-back reconnects had drained the login bucket, the next login spent its
+// whole deadline waiting for tokens and was cancelled mid-flow — a half-completed
+// IdP authentication, the worst possible outcome of a timeout, from a wait the
+// governor itself had imposed.
+func (g *governor) loginBudget() time.Duration {
+	if g == nil {
+		return 0
+	}
+	perRequest := func(tb *tokenBucket) time.Duration {
+		if tb == nil || tb.perSec <= 0 {
+			return 0
+		}
+		return time.Duration(float64(time.Second) / tb.perSec)
+	}
+	return time.Duration(loginFlowRequests) * (perRequest(g.login) + perRequest(g.total))
+}
+
 // acquire blocks until this request may proceed under both the rate ceilings and
 // the concurrency cap, returning a release for the concurrency slot. A nil governor
 // is a no-op (feature disabled / tests). Rate is taken BEFORE a concurrency slot so

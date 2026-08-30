@@ -23,7 +23,7 @@ func TestWarmThresholdJitterIsOneSidedDown(t *testing.T) {
 	updated := time.Unix(1_700_000_000, 0)
 	for i := 0; i < 200; i++ {
 		owner := "owner-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
-		got := s.warmThresholdFor(owner, updated)
+		got := s.warmThresholdFor(owner, updated, 0)
 		if got > base {
 			t.Fatalf("%s threshold %s exceeds the configured interval %s — jitter is not one-sided", owner, got, base)
 		}
@@ -49,7 +49,7 @@ func TestWarmThresholdClampedBelowIdleWindow(t *testing.T) {
 	updated := time.Unix(1_700_000_000, 0)
 	for i := 0; i < 200; i++ {
 		owner := "own-" + string(rune('a'+i%26)) + string(rune('a'+i/26))
-		got := s.warmThresholdFor(owner, updated)
+		got := s.warmThresholdFor(owner, updated, s.idleWindow)
 		if got > ceil {
 			t.Fatalf("%s threshold %s exceeds idleWindow-margin %s — a session could lapse before its first renew", owner, got, ceil)
 		}

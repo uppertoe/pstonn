@@ -155,7 +155,7 @@ func TestMuxAggregatesHealth(t *testing.T) {
 		_ = st.SetAccountTenant(ctx, o, "othertown")
 		_ = m.Link(ctx, o, "", o, "pw", false, true, 0)
 	}
-	if !m.Blocked() {
+	if !m.Blocked("") {
 		t.Fatal("three owners pushed back on one council must read as blocked fleet-wide")
 	}
 	s := m.Stats()
@@ -164,5 +164,41 @@ func TestMuxAggregatesHealth(t *testing.T) {
 	}
 	if c, _ := m.Client("stonnington"); c.Blocked() {
 		t.Fatal("the other council's breaker must stay closed")
+	}
+	// Per tenant, the answer is the PERMIT's portal, not the fleet: a block at one
+	// council must not escalate the other's households.
+	if !m.Blocked("othertown") {
+		t.Fatal("othertown's own breaker is open and must read blocked")
+	}
+	if m.Blocked("stonnington") {
+		t.Fatal("stonnington must not inherit othertown's block")
+	}
+	if m.Blocked("gone") {
+		t.Fatal("an unserved tenant is not served, not blocked")
+	}
+}
+
+// TestSingleAdaptsPerTenantReads: the single-client adaptor answers the
+// tenant-aware capability/breaker/budget reads for its own tenant only.
+func TestSingleAdaptsPerTenantReads(t *testing.T) {
+	m, _, fakes := muxRig(t, "stonnington")
+	c, _ := m.Client("stonnington")
+	fakes["stonnington"].NoClear = true
+	s := Single{c}
+	ctx := context.Background()
+	if s.Capabilities(ctx, "o", "").CanClearVehicle || s.Capabilities(ctx, "o", "stonnington").CanClearVehicle {
+		t.Fatal("own tenant should report the provider's capabilities (NoClear)")
+	}
+	if !s.Capabilities(ctx, "o", "stonnington").SupportsRefresh {
+		t.Fatal("own tenant should report SupportsRefresh")
+	}
+	if c := s.Capabilities(ctx, "o", "othertown"); c.SupportsRefresh || c.LoginKind != "" {
+		t.Fatalf("a foreign tenant should support nothing, got %+v", c)
+	}
+	if s.Blocked("stonnington") || s.Blocked("othertown") || s.Blocked("") {
+		t.Fatal("nothing has pushed back; nothing is blocked")
+	}
+	if s.LoginBudget("stonnington") != 0 || s.LoginBudget("othertown") != 0 {
+		t.Fatal("an ungoverned client budgets nothing")
 	}
 }

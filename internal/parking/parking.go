@@ -43,6 +43,16 @@ var (
 	ErrCouncilBusy       = provider.ErrUnavailable
 	ErrPermitListPartial = provider.ErrPermitListPartial
 	ErrUnsupported       = provider.ErrUnsupported
+
+	// ErrTenantUnavailable is a ROUTING failure: the permit or account belongs to a
+	// tenant this process is not serving (disabled, removed from the registry, or
+	// another client's), so no session could ever be used for it here. It wraps
+	// ErrNotLinked because every caller that treats "not linked" as "nothing to
+	// do" is right to do so for this too — but the scheduler must tell the two
+	// apart: a genuinely unlinked account is prompted by the dashboard, whereas a
+	// permit whose tenant was switched off would otherwise sit silently unapplied
+	// forever with nobody told.
+	ErrTenantUnavailable = fmt.Errorf("%w: the account's council is not available", ErrNotLinked)
 )
 
 type (
@@ -84,6 +94,9 @@ type Client struct {
 	regGenMu sync.Mutex
 	regGen   map[regKey]uint64
 	traffic  *trafficCounters
+	// gov is the transport's governor (nil for a request-free provider), read only
+	// to size deadlines around the waits it imposes — see LoginBudget.
+	gov *governor
 
 	ownerLocks    sync.Map   // owner -> *sync.Mutex, serialises every tenant call per owner
 	cooldownUntil sync.Map   // owner -> time.Time, soft-block backoff deadline
@@ -145,6 +158,7 @@ func NewClientFor(tenantID string, p provider.Provider, st *store.Store, box *se
 	}
 	if tr != nil {
 		c.traffic = tr.traffic
+		c.gov = tr.gov
 	} else {
 		c.traffic = newTrafficCounters()
 	}
@@ -468,7 +482,7 @@ func ref(p model.Permit) provider.PermitRef { return provider.PermitRef{ID: p.Co
 // between portals, so acting on it here would address a stranger's permit.
 func (c *Client) permitMine(p model.Permit) error {
 	if p.TenantID != "" && c.TenantID != "" && p.TenantID != c.TenantID {
-		return fmt.Errorf("%w: permit belongs to council %q, this client serves %q", ErrNotLinked, p.TenantID, c.TenantID)
+		return fmt.Errorf("%w: permit belongs to council %q, this client serves %q", ErrTenantUnavailable, p.TenantID, c.TenantID)
 	}
 	return nil
 }
