@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS permit (
     updated_at          TEXT NOT NULL,
     fail_streak         INTEGER NOT NULL DEFAULT 0, -- consecutive failed applies (0 = nothing failing now)
     copy_offer_done     INTEGER NOT NULL DEFAULT 0, -- the "copy your schedule onto the renewed permit" pitch was answered
+    active_confirmed_at TEXT NOT NULL DEFAULT '',   -- UTC instant the council last confirmed active_registration (apply or read)
     UNIQUE(council_id, council_permit_id)
 );
 
@@ -371,7 +372,8 @@ CREATE TABLE IF NOT EXISTS guest_request (
     decided_at   TEXT NOT NULL DEFAULT '',
     decided_by   TEXT NOT NULL DEFAULT '',  -- which account member decided ('' = expired unanswered)
     until_at     TEXT NOT NULL DEFAULT '',  -- human when-it-ends, set on approval
-    until_ts     TEXT NOT NULL DEFAULT ''   -- RFC3339 UTC end of the approved window; the source of truth for "has this pass lapsed" (until_at is only display text)
+    until_ts     TEXT NOT NULL DEFAULT '',  -- RFC3339 UTC end of the approved window; the source of truth for "has this pass lapsed" (until_at is only display text)
+    state        TEXT NOT NULL DEFAULT ''   -- registration state the visitor chose at the door QR ('' = home state)
 );
 CREATE INDEX IF NOT EXISTS idx_guest_request_owner ON guest_request(owner, status);
 
@@ -501,6 +503,9 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		`ALTER TABLE council_session ADD COLUMN session_generation INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE guest_request ADD COLUMN decided_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_request ADD COLUMN until_ts TEXT NOT NULL DEFAULT ''`,
+		// The state a door-QR visitor chose; without it an interstate plate was written
+		// under whatever state the previous car had (review 2026-08-30).
+		`ALTER TABLE guest_request ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
 		// Which member minted a guest pass. Needed to revoke a departing member's
 		// passes without touching the primary's: a pass is a bearer capability over
 		// the permit, so losing account access must also lose the passes you made.
@@ -550,6 +555,9 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// outbox, so the same permit-expiry warning reached an unsubscribed member
 		// when sent at 9pm and not when held until 6am.
 		`ALTER TABLE outbox ADD COLUMN critical INTEGER NOT NULL DEFAULT 0`,
+		// When the council last confirmed the stored plate, so a cold dashboard visit
+		// can show a recently-confirmed tick instead of a spinner (2026-08-30).
+		`ALTER TABLE permit ADD COLUMN active_confirmed_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
@@ -754,6 +762,7 @@ var (
 		{"permit_type_id", "''"}, {"label", "''"}, {"active_registration", "''"}, {"end_date", "''"},
 		{"status", "''"}, {"expiry_reminded", "''"}, {"permit_number", "''"}, {"permit_type", "''"},
 		{"updated_at", "''"}, {"fail_streak", "0"}, {"copy_offer_done", "0"},
+		{"active_confirmed_at", "''"},
 	}
 	sessionColumns = []rebuildColumn{
 		{"owner", "''"}, {"council_id", "''"}, {"sub", "''"}, {"council_email", "''"}, {"cookie_sealed", "''"},
@@ -907,6 +916,7 @@ func (s *Store) rebuildPermitTable() error {
     updated_at          TEXT NOT NULL,
     fail_streak         INTEGER NOT NULL DEFAULT 0,
     copy_offer_done     INTEGER NOT NULL DEFAULT 0,
+    active_confirmed_at TEXT NOT NULL DEFAULT '',
     UNIQUE(council_id, council_permit_id)
 )`,
 		copyStmt,
