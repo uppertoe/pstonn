@@ -70,6 +70,26 @@ func (b *Box) SealCtx(context, plaintext string) (string, error) {
 // window, not the end state: tenant cookies and tokens re-seal on every keep-warm
 // pass, and the rest re-seal on their next write.
 func (b *Box) OpenCtx(context, encoded string) (plaintext string, legacy bool, err error) {
+	return b.OpenCtxAny(encoded, context)
+}
+
+// OpenCtxAny is OpenCtx with a chain of contexts: contexts[0] is the binding a
+// fresh seal carries, and each later one is a binding an OLDER build used for the
+// same column. A blob that opens under the first is current; one that opens under
+// any later context, or unbound, is reported legacy so the caller re-seals it
+// under the first on its next write. This is how a binding is tightened without
+// unlinking anyone: the tenant-scoped contexts (TenantCookieFor and friends) are
+// opened as OpenCtxAny(blob, TenantCookieFor(owner, tenant), TenantCookie(owner)),
+// and the owner-only window closes as rows are re-sealed.
+//
+// The unbound fallback at the end is the original migration window and carries
+// the same caveat: a blob from another context and an old unbound blob are
+// indistinguishable here, which is precisely why every fallback has to go away
+// once deployments have turned over.
+func (b *Box) OpenCtxAny(encoded string, contexts ...string) (plaintext string, legacy bool, err error) {
+	if len(contexts) == 0 || contexts[0] == "" {
+		return "", false, errors.New("secretbox: an empty context would bind nothing")
+	}
 	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", false, err
@@ -79,12 +99,11 @@ func (b *Box) OpenCtx(context, encoded string) (plaintext string, legacy bool, e
 		return "", false, errors.New("secretbox: ciphertext too short")
 	}
 	nonce, ct := raw[:ns], raw[ns:]
-	if pt, err := b.aead.Open(nil, nonce, ct, []byte(context)); err == nil {
-		return string(pt), false, nil
+	for i, context := range contexts {
+		if pt, err := b.aead.Open(nil, nonce, ct, []byte(context)); err == nil {
+			return string(pt), i > 0, nil
+		}
 	}
-	// Bound open failed. Either it is an old unbound blob, or it is a blob from
-	// another context — and those two are indistinguishable here, which is precisely
-	// why the fallback has to go away once deployments have turned over.
 	pt, err := b.aead.Open(nil, nonce, ct, nil)
 	if err != nil {
 		return "", false, err

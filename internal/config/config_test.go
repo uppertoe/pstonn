@@ -364,6 +364,33 @@ func TestCouncilWarnings(t *testing.T) {
 	}
 }
 
+// COUNCIL_SESSION_MAX_AGE_DAYS=0 is accepted (the scheduler treats it as "no
+// bound") but it silently breaks the promise that a departed household's session
+// is not held forever, so it must be shouted about at startup.
+func TestSessionMaxAgeZeroWarnsLoudly(t *testing.T) {
+	t.Setenv("DOMAIN", "example.com")
+	t.Setenv("COUNCIL_SESSION_MAX_AGE_DAYS", "0")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("0 is documented as legal, but Load refused: %v", err)
+	}
+	if cfg.Council.SessionMaxAge != 0 {
+		t.Fatalf("SessionMaxAge = %v, want 0", cfg.Council.SessionMaxAge)
+	}
+	ws := strings.Join(cfg.Council.CouncilWarnings(), ";")
+	if !strings.Contains(ws, "COUNCIL_SESSION_MAX_AGE_DAYS=0") || !strings.Contains(ws, "INDEFINITELY") {
+		t.Fatalf("expected a loud warning about the disabled re-authorise bound, got %q", ws)
+	}
+	t.Setenv("COUNCIL_SESSION_MAX_AGE_DAYS", "90")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws := strings.Join(cfg.Council.CouncilWarnings(), ";"); strings.Contains(ws, "MAX_AGE") {
+		t.Fatalf("a set bound must not warn: %q", ws)
+	}
+}
+
 // The settings documented as "0 disables" must actually accept 0; the shared parser
 // used to reject every duration <= 0, so the documented off-switch did not work.
 func TestZeroDisablesDurationsAreAccepted(t *testing.T) {
