@@ -307,8 +307,15 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// words, tells recent from settled: a spinner means a council read is in
 	// flight; the green tick means the council answered on this visit.
 	plateCheckedAgo := ""
-	if !confirmedAt.IsZero() && (plateRecent || !plateRefreshing) {
+	switch {
+	case !confirmedAt.IsZero() && (plateRecent || !plateRefreshing):
 		plateCheckedAgo = "checked " + agoText(now, confirmedAt)
+	case !plateRefreshing:
+		// Settled (a fresh reading agreed) but nothing stamped the instant — a
+		// permit from before the stamp existed, or a reading that lost the CAS.
+		// A tick beside "checking…" would be a contradiction; a fresh reading is
+		// by definition minutes old at most.
+		plateCheckedAgo = "checked just now"
 	}
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
