@@ -8,7 +8,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
@@ -81,13 +80,8 @@ type Server struct {
 	notify   *notify.Service
 	mail     *mailer.Mailer // nil when SMTP is unconfigured; used by the contact form
 	box      *secretbox.Box // at-rest cipher; seals the reprintable door-QR token
-	// misconfigAlertAt throttles the operator alert for the "protected handler
-	// reached without identity behind forward-auth" state — a routing/config bug
-	// (an app route missing from the proxy's forward-auth list, or a proxy-secret
-	// mismatch). UnixNano; one alert per misconfigAlertEvery.
-	misconfigAlertAt atomic.Int64
-	terms            Terms
-	contact          *rateLimiter // per-IP throttle on the public contact form
+	terms    Terms
+	contact  *rateLimiter // per-IP throttle on the public contact form
 	// invite-email throttles so a primary can't email-bomb an address or mass-send
 	// via SMTP: fanout caps per-owner sends, target dedups per recipient.
 	inviteFanout *rateLimiter
