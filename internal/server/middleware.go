@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/redact"
@@ -171,6 +173,32 @@ func noStoreCache(w http.ResponseWriter) {
 	w.Header().Set("Pragma", "no-cache")
 }
 
+// misconfigAlertEvery throttles the misconfigured-route operator alert. A broken
+// route floods this branch on every attempt; one page per window is enough.
+const misconfigAlertEvery = 15 * time.Minute
+
+// alertMisconfiguredRoute pages the operator that a signed-in-only route is
+// reachable without identity — an app route missing from the reverse proxy's
+// forward-auth list, or a proxy-secret mismatch. Throttled; a no-op when no
+// admin channel is configured (local/dev).
+func (s *Server) alertMisconfiguredRoute(method, path string) {
+	if s.notify == nil || !s.notify.AdminConfigured() {
+		return
+	}
+	now := time.Now().UnixNano()
+	prev := s.misconfigAlertAt.Load()
+	if now-prev < int64(misconfigAlertEvery) || !s.misconfigAlertAt.CompareAndSwap(prev, now) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_ = s.notify.NotifyAdmin(ctx,
+			"Sign-in BROKEN for a route — check the proxy config",
+			fmt.Sprintf("A signed-in-only route (%s %s) was reached WITHOUT an identity behind forward-auth. In a correct deployment this cannot happen: either this route is missing from the reverse proxy's forward-auth path list (so it fell through to the catch-all and no Remote-* headers were injected), or PROXY_SECRET/PSTONN_PROXY_SECRET drifted. Real users cannot get past this route until it is fixed. Add the route to the proxy's @app list (or realign the shared secret), then re-render and redeploy.", method, path))
+	}()
+}
+
 // user returns the signed-in identity, or redirects/errs and reports ok=false.
 func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bool) {
 	if u, ok := identity.FromContext(r.Context()); ok {
@@ -183,7 +211,18 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 		// missing) goes to the log where it belongs. This state means the deployment
 		// is misconfigured, so it is the operator who needs the detail, not a member
 		// of the public reading about APP_OIDC_*.
-		log.Print("sign-in is not configured: run behind the forward-auth layer, set APP_OIDC_*, or use DEV_IDENTITY_EMAIL for local use")
+		// Behind forward-auth (the production posture), reaching a signed-in-only
+		// handler with NO identity is impossible in a correct deployment: the proxy
+		// either injects the verified Remote-* headers or redirects an anonymous
+		// visitor to the login page. If we are here, a real route is missing from
+		// the proxy's forward-auth path (so it fell to the catch-all, which injects
+		// no identity), or the shared proxy secret drifted — either way legitimate
+		// sign-in is broken for that route and no user can get past it. That is an
+		// operator emergency, and it used to be only a log line nobody watched (it
+		// hid a two-day /tenant/link outage). Page the operator, throttled, naming
+		// the route so the fix is obvious. Not fired in local/dev (no admin channel).
+		log.Printf("sign-in is not configured for %s %s: run behind the forward-auth layer, set APP_OIDC_*, or use DEV_IDENTITY_EMAIL for local use", r.Method, r.URL.Path)
+		s.alertMisconfiguredRoute(r.Method, r.URL.Path)
 		s.message(w, http.StatusUnauthorized, "Sign-in isn't available right now. Please try again shortly.")
 	}
 	return identity.User{}, false
