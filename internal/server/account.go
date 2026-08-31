@@ -164,7 +164,16 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	linkedTenant := tenantID
+	if linkedTenant == "" {
+		linkedTenant = s.store.DefaultTenant
+	}
 	s.logChange(r.Context(), user, user, store.ActionCouncilLink, "", "")
+	// Operator milestone: the success counterpart to the "council link for …:
+	// login rejected" line above, so link-success vs link-rejected is one grep
+	// (a run of rejections with no successes is exactly the signal that linking
+	// is broken). Redacted, like every other address in the log.
+	log.Printf("council linked for %s (tenant=%s, saved-password=%t)", redact.Email(user), linkedTenant, savePassword)
 	// Drop any queued auto-reconnect for the OLD session: the user just established a
 	// fresh one, and stale recovery work must not act on it (the scheduler's generation
 	// check is the hard guard; this is the fast path).
@@ -272,6 +281,7 @@ func (s *Server) tenantUnlink(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sched.CancelReconnect(user) // no session to reconnect; drop any queued attempt
 	s.logChange(r.Context(), user, user, store.ActionCouncilUnlink, "", "")
+	log.Printf("council unlinked for %s", redact.Email(user)) // operator milestone (churn)
 	redirectHome(w, r)
 }
 
@@ -357,6 +367,7 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 	// The account is gone, so any session still holding it must go too — otherwise a
 	// signed cookie keeps asserting an identity whose data no longer exists.
 	s.revokeSessions(r.Context(), user)
+	log.Printf("account deleted for %s", redact.Email(user)) // operator milestone (churn)
 	redirectHome(w, r)
 }
 

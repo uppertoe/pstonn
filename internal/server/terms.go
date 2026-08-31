@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/redact"
+	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // defaultTermsMD is the built-in agreement, editable as markdown. Operators can
@@ -99,9 +101,18 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A brand-new signup is someone with no prior consent on file; a re-acceptance
+	// after a terms change is not. Checked BEFORE recording so a terms-change day
+	// (when everyone re-accepts) does not flood the log with false "new account"
+	// lines. Owner-scoped; a lookup blip just skips the milestone, never blocks.
+	_, cerr := s.store.LatestConsent(r.Context(), u.Email)
+	firstTime := errors.Is(cerr, store.ErrNotFound)
 	if err := s.store.RecordConsent(r.Context(), u.Email, s.terms.Version, s.terms.Hash()); err != nil {
 		s.serverError(w, err)
 		return
+	}
+	if firstTime {
+		log.Printf("new account for %s", redact.Email(u.Email)) // operator milestone (sign-up)
 	}
 	redirectHome(w, r)
 }
