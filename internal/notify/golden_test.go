@@ -237,13 +237,16 @@ func TestGoldenEmails(t *testing.T) {
 	run("renewal-reminder", func() {
 		_ = svc.SendRenewalReminder(ctx, owner, "", at.Add(7*24*time.Hour), appURL+"/tenant/confirm?token=abc")
 	})
-	run("send-test", func() { _ = svc.SendTest(ctx, owner) })
+	run("send-test", func() { _ = svc.SendTest(ctx, owner, "") })
 	run("disconnected", func() { _ = svc.NotifyDisconnected(ctx, owner) })
 	run("invite", func() { _ = svc.SendInvite(ctx, stranger, owner) })
 	run("onboard-nudge", func() { _ = svc.SendOnboardNudge(ctx, stranger) })
 	run("guest-link", func() { _ = svc.SendGuestLink(ctx, stranger, owner, "", "Visitor", appURL+"/g/tok") })
 	run("driver-displaced", func() {
 		_ = svc.NotifyDriverDisplaced(ctx, owner, stranger, "Visitor", "AAA111", "a one-off booking started", at)
+	})
+	run("driver-added", func() {
+		_ = svc.NotifyDriverAdded(ctx, owner, "", stranger, "AAA111")
 	})
 	run("guest-request", func() { _ = svc.NotifyGuestRequest(ctx, owner, "Visitor", "GUEST1", appURL+"/g/req/4", 4) })
 	run("account-change", func() { _ = svc.NotifyAccountChange(ctx, owner, member, "added the car ABC123 (Van)") })

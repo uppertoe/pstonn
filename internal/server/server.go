@@ -300,6 +300,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /notifications/resume-email", s.withConsent(s.resumeEmail))
 	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
 	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))
+	mux.HandleFunc("POST /notifications/test-push", s.withConsent(s.testPush))
+	mux.HandleFunc("GET /notifications/ntfy-status", s.withConsent(s.ntfyStatus))
+	// Public, token-only: the Confirm button on a test push, posted by the ntfy app
+	// from the phone (no session). Must be listed as public at the proxy.
+	mux.HandleFunc("POST /ntfy/confirm/{token}", s.ntfyConfirm)
 	// Public, token-only: the renewal-confirm link from the reminder email.
 	mux.HandleFunc("GET /tenant/confirm", s.tenantConfirm)
 	// The renewal-confirm link is in emails already sent under the old path; keep it answering.
@@ -390,6 +395,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /vehicles", s.withConsent(s.addVehicle))
 	mux.HandleFunc("POST /vehicles/{id}/delete", s.withConsent(s.deleteVehicle))
 	mux.HandleFunc("POST /vehicles/{id}/email", s.withConsent(s.setVehicleEmail))
+	mux.HandleFunc("POST /vehicles/{id}/notify", s.withConsent(s.setVehicleNotify))
 	mux.HandleFunc("POST /permits", s.withConsent(s.addPermit))
 	mux.HandleFunc("POST /permits/{id}/delete", s.withConsent(s.deletePermit))
 	mux.HandleFunc("POST /permits/{id}/name", s.withConsent(s.renamePermit))

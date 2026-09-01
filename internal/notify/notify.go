@@ -92,6 +92,11 @@ type Service struct {
 	// alternating two of them on purpose) would otherwise mail a stranger
 	// indefinitely; the 15-minute outbox dedup only bounds the rate, not the total.
 	displacedTo *sendLimiter
+	// driverAddedTo throttles the "your car is on the permit" reassurance per
+	// recipient. Roster changeovers fire this ~once a day per permit already; the
+	// cap is a backstop against a plate flapping. 3/day leaves room for a driver
+	// who covers two households.
+	driverAddedTo *sendLimiter
 	// unrecorded holds bookkeeping the store refused for rows the drain has ALREADY
 	// acted on. Touched only by the single RunOutbox goroutine, so it needs no lock.
 	unrecorded map[int64]outboxUpdate
@@ -127,8 +132,9 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		// displaced hears about it when the booking ends, so once or twice a day. Far
 		// below what makes an unsolicited mail stream feel like harassment, and well
 		// under the rate that earns a spam complaint against the whole domain.
-		displacedTo: newSendLimiter(6, 24*time.Hour),
-		unrecorded:  map[int64]outboxUpdate{},
+		displacedTo:   newSendLimiter(6, 24*time.Hour),
+		driverAddedTo: newSendLimiter(3, 24*time.Hour),
+		unrecorded:    map[int64]outboxUpdate{},
 	}
 }
 
@@ -231,6 +237,7 @@ const (
 	reasonGuest    = "someone shared their visitor parking permit with you by email"
 	reasonInvite   = "someone gave this address shared access to their p.stonn account"
 	reasonDisplace = "this address is the contact for a car that was on a visitor permit"
+	reasonDriverOn = "this address is the contact for a car put on a visitor parking permit"
 	reasonTest     = "you asked p.stonn to send a test notification"
 	reasonOnboard  = "you signed up for p.stonn with it but haven't connected a council account yet"
 	reasonReferral = "someone who uses p.stonn asked us to tell you about it"
@@ -866,7 +873,15 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 // SendTest sends a "notifications are working" message on the acting user's OWN
 // enabled channels (their email, their push topic), so each person confirms their
 // own setup — a secondary's test doesn't reach the primary and vice versa.
-func (s *Service) SendTest(ctx context.Context, user string) error {
+//
+// confirmURL, when set, is the endpoint a Confirm button on the PUSH posts back
+// to (a one-time token in its path). Tapping it is the only proof p.stonn accepts
+// that the push channel works: it shows the message reached a device and was
+// seen, which neither a subscription nor a 200 from the ntfy server does (an
+// iPhone gets pushes via an APNs relay, and either platform may have the OS
+// notification permission denied). The email carries no such button — email is
+// the channel this confirmation lets a household turn off.
+func (s *Service) SendTest(ctx context.Context, user, confirmURL string) error {
 	pref, err := s.store.GetNotifyPref(ctx, user)
 	if err != nil {
 		return err
@@ -880,7 +895,7 @@ func (s *Service) SendTest(ctx context.Context, user string) error {
 		}
 	}
 	if pref.NtfyEnabled && s.ntfyBase != "" && pref.NtfyTopic != "" {
-		if e := s.sendNtfy(ctx, pref.NtfyTopic, subject, body, "default", "bell"); e != nil {
+		if e := s.sendTestPush(ctx, pref.NtfyTopic, confirmURL); e != nil {
 			errs = append(errs, "ntfy: "+e.Error())
 		}
 	}
@@ -888,6 +903,42 @@ func (s *Service) SendTest(ctx context.Context, user string) error {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// SendTestPush sends the test to the acting user's push topic ONLY — the button
+// inside the push set-up steps, so someone wiring up their phone is not also
+// mailed (and is not blocked by a mail failure). Same Confirm semantics as
+// SendTest. ErrNoPush when push is off or unconfigured for them.
+func (s *Service) SendTestPush(ctx context.Context, user, confirmURL string) error {
+	pref, err := s.store.GetNotifyPref(ctx, user)
+	if err != nil {
+		return err
+	}
+	if !pref.NtfyEnabled || s.ntfyBase == "" || pref.NtfyTopic == "" {
+		return ErrNoPush
+	}
+	return s.sendTestPush(ctx, pref.NtfyTopic, confirmURL)
+}
+
+// ErrNoPush: a push-only send was asked for by someone whose push channel is off.
+var ErrNoPush = errors.New("notify: push notifications are not enabled")
+
+func (s *Service) sendTestPush(ctx context.Context, topic, confirmURL string) error {
+	const subject = "p.stonn test notification"
+	body := "This is a test. Your permit-change notifications are set up correctly."
+	var extra map[string]string
+	if confirmURL != "" {
+		body += " Tap Confirm so p.stonn knows push notifications reach this phone."
+		// JSON form of the Actions header: the token is base64 and the
+		// comma-separated form would need every '=' escaped. `clear` dismisses
+		// the notification once tapped. Click opens Settings, where the result
+		// shows, for anyone who taps the body instead of the button.
+		extra = map[string]string{
+			"Actions": fmt.Sprintf(`[{"action":"http","label":"Confirm","url":%q,"method":"POST","clear":true}]`, confirmURL),
+			"Click":   s.appURL + "/settings",
+		}
+	}
+	return s.sendNtfyHeaders(ctx, topic, subject, body, "default", "bell", extra)
 }
 
 // NotifyDisconnected tells the user their tenant account was disconnected,
@@ -1068,6 +1119,34 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDisplace})
 }
 
+// NotifyDriverAdded tells a car's driver (a non-user, email only) that their car
+// is now ON the permit — reassurance so a nanny/cleaner knows they're covered
+// when they arrive. Sent for any add (roster included) when the household left
+// the per-car notify toggle on; throttled per recipient and deduped per day so a
+// flapping plate can't spam. The one-click unsubscribe + provenance are added by
+// the send path from the Reason. No-op without SMTP. The council's name comes
+// from the permit's own tenant, so it stays correct across councils.
+func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, plate string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	c := s.tenantOf(ctx, owner, tenantID)
+	subject := fmt.Sprintf("Your car is on a %s parking permit", c.Short)
+	lines := []string{
+		fmt.Sprintf("%s is now on a %s visitor parking permit, so you're covered to park where the permit applies.", plate, c.Name),
+		"",
+		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee \u2014 if you're unsure, check with them.",
+	}
+	if !s.driverAddedTo.allow(to) {
+		log.Printf("notify: driver-added notice to %s throttled (per-recipient cap)", RedactEmail(to))
+		return nil
+	}
+	// Deduped per day so a re-add of the same plate the same day is silent.
+	key := fmt.Sprintf("driver-on|%s|%s|%s", to, plate, time.Now().In(s.loc).Format("2006-01-02"))
+	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
+		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn})
+}
+
 // NotifyGuestRequest tells the account (all members) that someone scanned a
 // printed QR and is asking to put a plate on the permit, so they can approve or
 // decline it in the app. Each member is nudged on the channels THEY chose (the
@@ -1193,6 +1272,11 @@ func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary
 }
 
 func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, tags string) error {
+	return s.sendNtfyHeaders(ctx, topic, title, body, priority, tags, nil)
+}
+
+// sendNtfyHeaders is sendNtfy with extra publish headers (Actions, Click, …).
+func (s *Service) sendNtfyHeaders(ctx context.Context, topic, title, body, priority, tags string, extra map[string]string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.ntfyBase+"/"+topic, strings.NewReader(body))
 	if err != nil {
 		return err
@@ -1200,6 +1284,9 @@ func (s *Service) sendNtfy(ctx context.Context, topic, title, body, priority, ta
 	req.Header.Set("Title", title)
 	req.Header.Set("Priority", priority)
 	req.Header.Set("Tags", tags)
+	for k, v := range extra {
+		req.Header.Set(k, v)
+	}
 	if s.ntfyToken != "" {
 		req.Header.Set("Authorization", "Bearer "+s.ntfyToken)
 	}

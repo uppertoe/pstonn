@@ -17,6 +17,12 @@
           <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off">
           <button type="submit" class="ghost sm">Save</button>
         </form>
+        {{if .Email}}
+        <label class="vnotify empty-note" style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
+          <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none" style="flex:none">
+          Email this driver when their car goes on the permit
+        </label>
+        {{end}}
       </div>
       {{else}}
       <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
@@ -28,7 +34,7 @@
       {{if .Regions}}<select name="state" class="vstate" aria-label="{{T "vehicle.state_label" .}}" title="{{T "vehicle.state_label" .}}">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>{{end}}
       <button type="submit">{{template "ic-plus"}} Add</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">A driver email is optional. It is used to pre-fill guest passes, so that person can set their own car on the permit. See <a href="/guests">Guests</a>.</p>
+    <p class="empty-note" style="margin-top:10px">A driver email is optional. It pre-fills guest passes, and (unless you untick it above) tells that driver when their car goes on the permit. See <a href="/guests">Guests</a>.</p>
   </section>
 
 {{end}}

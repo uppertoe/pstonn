@@ -196,7 +196,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	// id can never read another user's registration.
 	vehByOwnerID := make(map[ownerVehicle]model.VehicleInfo, len(vehicles))
 	for _, v := range vehicles {
-		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email, State: v.State}
+		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email, State: v.State, NotifyDriver: v.NotifyDriver}
 	}
 	// The herd the rollover window is sized against. Total permits over-estimates
 	// how many share any one boundary, which errs toward a wider window (gentler on
@@ -635,6 +635,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// address exists" stood BOTH people down when the address was suppressed (a
 		// previous bounce/unsubscribe means it is guaranteed never to be delivered).
 		told := s.warnDisplaced(ctx, p, d, prev, want)
+		// Symmetric reassurance: tell the driver of the car just put ON the permit
+		// (opt-out per car; roster changes included).
+		s.notifyAddedDriver(ctx, p, want, vehByOwnerID)
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), By: res.By, OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: told,

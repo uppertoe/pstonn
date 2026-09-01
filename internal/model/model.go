@@ -17,6 +17,11 @@ type Vehicle struct {
 	Email        string // optional: who drives this car (default guest-pass recipient)
 	Color        string // stable per-plate colour (hex), the at-a-glance cue
 	State        string // registration state code (e.g. "NSW"); "" = the tenant's home state
+	// NotifyDriver: email this car's driver (Email) when the car is put ON the
+	// permit — a "you're covered" reassurance. Default true; per-car opt-out on
+	// the Vehicles page. Independent of the displaced ("came off") notice, which
+	// is always sent.
+	NotifyDriver bool
 }
 
 // Permit is a tenant visitor permit that holds one active vehicle at a time.
@@ -336,6 +341,7 @@ type VehicleInfo struct {
 	Label        string
 	Email        string
 	State        string // registration state code ("" = tenant home state)
+	NotifyDriver bool   // email the driver when this car is put on the permit
 }
 
 // DisplacedBooking is the outcome of FindDisplaced. Reg == "" means no live

@@ -19,7 +19,17 @@ type NotifyPref struct {
 	FailuresOnly bool
 	QuietFrom    int // quiet-hours window start (local hour, 0-23)
 	QuietUntil   int // overnight notices held to this local hour; == QuietFrom disables
+	// NtfyConfirmedAt is when a push sent to NtfyTopic was tapped on a device
+	// (RFC3339 UTC), i.e. proof the channel delivers and is seen — not merely that a
+	// topic was typed into the app. Empty until then, and reset by a new topic. It
+	// is the precondition for turning email off: without it, a household can
+	// switch to push, never subscribe (or deny the OS permission), and believe it
+	// is being told about changes when nothing reaches it (observed 2026-08-31).
+	NtfyConfirmedAt string
 }
+
+// NtfyConfirmed reports whether the current topic has been confirmed on a device.
+func (p NotifyPref) NtfyConfirmed() bool { return p.NtfyConfirmedAt != "" }
 
 // GetNotifyPref returns the user's notification preferences, or a sensible
 // default (email on, ntfy off) when they have never set them.
@@ -27,8 +37,8 @@ func (s *Store) GetNotifyPref(ctx context.Context, owner string) (NotifyPref, er
 	p := NotifyPref{Owner: owner, EmailEnabled: true, QuietFrom: 22, QuietUntil: 6}
 	var email, ntfy, failures int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until FROM notify_pref WHERE owner = ?`, owner).
-		Scan(&email, &ntfy, &p.NtfyTopic, &failures, &p.QuietFrom, &p.QuietUntil)
+		`SELECT email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until, ntfy_confirmed_at FROM notify_pref WHERE owner = ?`, owner).
+		Scan(&email, &ntfy, &p.NtfyTopic, &failures, &p.QuietFrom, &p.QuietUntil, &p.NtfyConfirmedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, nil // defaults
 	}
@@ -42,17 +52,37 @@ func (s *Store) GetNotifyPref(ctx context.Context, owner string) (NotifyPref, er
 // SetNotifyPref upserts a user's notification preferences.
 func (s *Store) SetNotifyPref(ctx context.Context, p NotifyPref) error {
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO notify_pref (owner, email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO notify_pref (owner, email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until, ntfy_confirmed_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(owner) DO UPDATE SET
     email_enabled = excluded.email_enabled,
     ntfy_enabled  = excluded.ntfy_enabled,
     ntfy_topic    = excluded.ntfy_topic,
     failures_only = excluded.failures_only,
     quiet_from    = excluded.quiet_from,
-    quiet_until   = excluded.quiet_until`,
-		p.Owner, boolInt(p.EmailEnabled), boolInt(p.NtfyEnabled), p.NtfyTopic, boolInt(p.FailuresOnly), p.QuietFrom, p.QuietUntil)
+    quiet_until   = excluded.quiet_until,
+    ntfy_confirmed_at = excluded.ntfy_confirmed_at`,
+		p.Owner, boolInt(p.EmailEnabled), boolInt(p.NtfyEnabled), p.NtfyTopic, boolInt(p.FailuresOnly), p.QuietFrom, p.QuietUntil, p.NtfyConfirmedAt)
 	return err
+}
+
+// ConfirmNtfy records that a push to topic reached a device and was acted on. It
+// stamps only the row whose CURRENT topic is topic: a confirmation minted for an
+// old topic (the user pressed "New topic" after the test went out) must not
+// vouch for the new one, which no device has subscribed to yet. Reports whether
+// a row was stamped; an already-confirmed row is left with its first timestamp.
+func (s *Store) ConfirmNtfy(ctx context.Context, owner, topic string, at time.Time) (bool, error) {
+	if topic == "" {
+		return false, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE notify_pref SET ntfy_confirmed_at = ? WHERE owner = ? AND ntfy_topic = ? AND ntfy_confirmed_at = ''`,
+		at.UTC().Format(time.RFC3339), owner, topic)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // ---- Notification outbox ----

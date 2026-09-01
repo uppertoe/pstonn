@@ -283,6 +283,7 @@ type fakeNotifier struct {
 	relinks       []string
 	stalled       []string // owners told auto-reconnect has stalled (session retained)
 	displaced     []string // guest emails told their car came off the permit
+	added         []string // driver emails told their car went on the permit
 	expiries      []string // "owner:permitLabel" per expiry warning sent
 	expiryDeliver int      // channels to report delivered (0 => 1)
 	nudged        []string // stalled signups sent the onboarding recovery email
@@ -362,6 +363,13 @@ func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permi
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.displaced = append(f.displaced, to)
+	return nil
+}
+
+func (f *fakeNotifier) NotifyDriverAdded(_ context.Context, owner, tenantID, to, plate string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.added = append(f.added, to)
 	return nil
 }
 

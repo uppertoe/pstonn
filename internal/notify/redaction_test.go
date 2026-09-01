@@ -64,7 +64,7 @@ func TestApplyErrorsRedactRecipients(t *testing.T) {
 	}
 
 	// SendTest and NotifyDisconnected build the same kind of string.
-	if err := svc.SendTest(ctx, owner); err == nil || strings.Contains(err.Error(), owner) {
+	if err := svc.SendTest(ctx, owner, ""); err == nil || strings.Contains(err.Error(), owner) {
 		t.Fatalf("SendTest error = %v; must not name the address", err)
 	}
 	if err := svc.NotifyDisconnected(ctx, owner); err == nil || strings.Contains(err.Error(), owner) {

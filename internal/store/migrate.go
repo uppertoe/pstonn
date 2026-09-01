@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS vehicle (
     color        TEXT NOT NULL DEFAULT '',   -- stable per-plate colour, assigned at creation
     state        TEXT NOT NULL DEFAULT '',   -- registration state code ("NSW"); '' = tenant home state
     email        TEXT NOT NULL DEFAULT '',   -- optional driver contact, told when this car is displaced
+    notify_driver INTEGER NOT NULL DEFAULT 1,  -- email that driver when the car is put ON the permit (default on)
     created_at   TEXT NOT NULL,
     UNIQUE(owner, registration)
 );
@@ -275,7 +276,8 @@ CREATE TABLE IF NOT EXISTS notify_pref (
     ntfy_topic    TEXT NOT NULL DEFAULT '',
     failures_only INTEGER NOT NULL DEFAULT 0,  -- 1 = only notify on failures, not every change
     quiet_from    INTEGER NOT NULL DEFAULT 22, -- quiet-hours window start (local hour); == quiet_until disables
-    quiet_until   INTEGER NOT NULL DEFAULT 6   -- overnight notices are held and delivered at this local hour
+    quiet_until   INTEGER NOT NULL DEFAULT 6,  -- overnight notices are held and delivered at this local hour
+    ntfy_confirmed_at TEXT NOT NULL DEFAULT '' -- RFC3339 UTC when a push to ntfy_topic was tapped on a device; '' = never (reset on a new topic)
 );
 
 -- Shared access: a primary account owner may grant up to two other verified
@@ -484,8 +486,12 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		`ALTER TABLE permit ADD COLUMN permit_type TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE notify_pref ADD COLUMN quiet_from INTEGER NOT NULL DEFAULT 22`,
 		`ALTER TABLE notify_pref ADD COLUMN quiet_until INTEGER NOT NULL DEFAULT 6`,
+		`ALTER TABLE notify_pref ADD COLUMN ntfy_confirmed_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN color TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
+		// Default 1 so existing cars with a driver email start reassuring that
+		// driver when they go on the permit; households opt out per car.
+		`ALTER TABLE vehicle ADD COLUMN notify_driver INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE vehicle ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE override ADD COLUMN state TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_grant ADD COLUMN allow_plate INTEGER NOT NULL DEFAULT 0`,

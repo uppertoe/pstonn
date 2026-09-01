@@ -125,6 +125,38 @@ func (s *Scheduler) warnDisplacedHow(ctx context.Context, p model.Permit, d mode
 	return true
 }
 
+// notifyAddedDriver emails the driver of the car just put ON the permit, if that
+// car has a contact email and its household left the per-car notify toggle on.
+// The symmetric partner of warnDisplaced (which covers a car coming OFF). Best
+// effort: a suppressed or throttled address is simply skipped.
+func (s *Scheduler) notifyAddedDriver(ctx context.Context, p model.Permit, want string, vehByOwnerID map[ownerVehicle]model.VehicleInfo) {
+	if want == "" || s.notifier == nil || !s.notifier.Enabled() {
+		return
+	}
+	// Find the OWNER's saved car matching the new plate; an ad-hoc one-off plate
+	// (no saved vehicle) has no driver contact and is skipped.
+	var vi model.VehicleInfo
+	found := false
+	for k, v := range vehByOwnerID {
+		if k.owner == p.Owner && model.SamePlate(v.Registration, want) {
+			vi, found = v, true
+			break
+		}
+	}
+	if !found || vi.Email == "" || !vi.NotifyDriver {
+		return
+	}
+	if sup, err := s.store.SuppressedAmong(ctx, []string{vi.Email}); err != nil || len(sup) > 0 {
+		if err != nil {
+			log.Printf("scheduler: suppression check for %s: %v", notify.RedactEmail(vi.Email), err)
+		}
+		return
+	}
+	if err := s.notifier.NotifyDriverAdded(ctx, p.Owner, p.TenantID, vi.Email, want); err != nil {
+		log.Printf("scheduler: enqueue driver-added for %s: %v", notify.RedactEmail(vi.Email), err)
+	}
+}
+
 // permitLabel is the human name for a permit in notifications.
 func permitLabel(p model.Permit) string {
 	if p.Label != "" {

@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/redact"
@@ -62,6 +65,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("tested") == "1" {
 		base.Flash = "Test notification sent."
+		if r.URL.Query().Get("confirm") == "1" {
+			base.Flash = "Test notification sent. Tap Confirm on the one that reaches your phone — once you have, you can turn off email."
+		}
 	}
 	// Every address below is validated before it is composed into a message. These
 	// are written by our own redirects, but nothing stops someone handing a signed-in
@@ -155,6 +161,11 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user string, pref store.NotifyPref, status, errMsg string) {
 	nv := s.notifyViewOf(r.Context(), user, pref)
 	nv.Status, nv.Error = status, errMsg
+	s.renderNotifyView(w, r, nv)
+}
+
+// renderNotifyView is renderNotify for a caller that has already shaped the view.
+func (s *Server) renderNotifyView(w http.ResponseWriter, r *http.Request, nv notifyView) {
 	if r.Header.Get("HX-Request") != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "notify-body", nv); err != nil {
@@ -221,6 +232,19 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		s.renderNotify(w, r, user, pref, "", "Keep at least one method on.")
 		return
 	}
+	// Email may only go off in favour of a push channel that has PROVED it delivers:
+	// a test push whose Confirm button was tapped on a device (ntfyConfirm). A typed
+	// topic proves nothing — the phone may never subscribe, or the OS may have
+	// notification permission denied — and the failure mode is a household that
+	// believes it is being told about its permit and never is (observed 2026-08-31:
+	// push on, email off, no device ever subscribed). Once confirmed, either channel
+	// may be turned off, never both (the guard above).
+	if !email && ntfy && !pref.NtfyConfirmed() {
+		w.Header().Set("HX-Retarget", "#notify-body")
+		w.Header().Set("HX-Reswap", "innerHTML")
+		s.renderNotify(w, r, user, pref, "", "You can turn off email once you've confirmed push notifications on your phone: tap Send a test to my phone, then Confirm on the notification.")
+		return
+	}
 	pref.EmailEnabled, pref.NtfyEnabled = email, ntfy
 	// Turning email back on is how someone undoes their own unsubscribe: the opt-out
 	// lives in the suppression list (so it applies to people with no account too),
@@ -283,11 +307,25 @@ func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pref.Owner, pref.NtfyTopic, pref.NtfyEnabled = user, notify.RandomTopic(), true
+	// No device has subscribed to the new topic, so its confirmation starts over —
+	// and a household running push-only would now have no proven channel at all, so
+	// email comes back on until the new topic is confirmed (the same rule saveNotify
+	// applies when they try to switch it off).
+	status := "New topic. Subscribe to it in the ntfy app, then tap Send a test to my phone and Confirm on the notification."
+	pref.NtfyConfirmedAt = ""
+	if !pref.EmailEnabled {
+		pref.EmailEnabled = true
+		status += " Email is back on until you have."
+	}
 	if err := s.store.SetNotifyPref(r.Context(), pref); err != nil {
 		s.serverError(w, err)
 		return
 	}
-	s.renderNotify(w, r, user, pref, "New topic. Re-subscribe in the ntfy app.", "")
+	// The one write on this page that silently changes what a phone must be
+	// subscribed to; without a line here a "my pushes stopped" report cannot be
+	// told apart from a subscription that was never made.
+	log.Printf("ntfy topic regenerated for %s", redact.Email(user))
+	s.renderNotify(w, r, user, pref, status, "")
 }
 
 // testNotify sends a test message on the signed-in user's own enabled channels.
@@ -303,14 +341,102 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "You've sent a few test notifications already. Please wait a little while before sending another.")
 		return
 	}
-	if err := s.notify.SendTest(r.Context(), user); err != nil {
+	confirmURL, awaiting := s.ntfyConfirmURL(r.Context(), user)
+	if err := s.notify.SendTest(r.Context(), user, confirmURL); err != nil {
 		// Details (SMTP hosts, dial errors, ntfy URLs) go to the log, not the
 		// browser.
 		log.Printf("test notify %s: %v", redact.Email(user), err)
 		s.message(w, http.StatusBadGateway, "Couldn't send the test notification. Check your channels in Settings, and ask the operator to check the logs if it keeps failing.")
 		return
 	}
+	if awaiting {
+		http.Redirect(w, r, "/settings?tested=1&confirm=1", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/settings?tested=1", http.StatusSeeOther)
+}
+
+// ntfyConfirmURL mints the Confirm-button URL for an UNCONFIRMED push channel:
+// tapping it is the proof that lets email be turned off (see saveNotify /
+// ntfyConfirm). A confirmed channel gets "" (nothing left to prove), as does one
+// that is off. awaiting says whether a button went out, for the flash copy.
+func (s *Server) ntfyConfirmURL(ctx context.Context, user string) (confirmURL string, awaiting bool) {
+	pref, err := s.store.GetNotifyPref(ctx, user)
+	if err != nil || !pref.NtfyEnabled || pref.NtfyTopic == "" || pref.NtfyConfirmed() || !s.notify.NtfyAvailable() {
+		return "", false
+	}
+	tok, err := s.mintNtfyConfirm(user, pref.NtfyTopic, time.Now().Add(ntfyConfirmTTL))
+	if err != nil {
+		log.Printf("test notify %s: mint confirm token: %v", redact.Email(user), err)
+		return "", false
+	}
+	return s.cfg.PublicBaseURL + "/ntfy/confirm/" + tok, true
+}
+
+// testPush is the button INSIDE the push set-up steps: a test to the phone only.
+// The page-level "Send a test notification" goes to every enabled channel, which
+// is the wrong tool while someone is wiring up their phone — it also mails them,
+// and a mail failure would report the push as failed too. Answers over htmx into
+// the notifications fragment so the person stays next to the steps, with a status
+// that says what to do on the phone.
+func (s *Server) testPush(w http.ResponseWriter, r *http.Request) {
+	user, _, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	pref, err := s.store.GetNotifyPref(r.Context(), user)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	w.Header().Set("HX-Retarget", "#notify-body")
+	w.Header().Set("HX-Reswap", "innerHTML")
+	if !s.testNotifyLimit.allow("u:" + user) {
+		s.renderNotify(w, r, user, pref, "", "You've sent a few test notifications already. Please wait a little while before sending another.")
+		return
+	}
+	confirmURL, awaiting := s.ntfyConfirmURL(r.Context(), user)
+	if err := s.notify.SendTestPush(r.Context(), user, confirmURL); err != nil {
+		if errors.Is(err, notify.ErrNoPush) {
+			s.renderNotify(w, r, user, pref, "", "Turn on push notifications first.")
+			return
+		}
+		log.Printf("test push %s: %v", redact.Email(user), err)
+		s.renderNotify(w, r, user, pref, "", "Couldn't reach the push server just now. Please try again shortly.")
+		return
+	}
+	nv := s.notifyViewOf(r.Context(), user, pref)
+	nv.Status = "Test sent to your phone."
+	if awaiting {
+		// The box itself shows "sent" and what to do next, and starts polling
+		// ntfyStatus so the page flips to confirmed on its own when the phone is
+		// tapped — the person is looking at this box, not at a status line below it.
+		nv.PushSent = true
+		nv.Status = "Test sent to your phone — tap Confirm on the notification when it arrives."
+	}
+	s.renderNotifyView(w, r, nv)
+}
+
+// ntfyStatus is polled by the notifications fragment while a test push awaits its
+// Confirm tap. It answers 204 (htmx: leave the page alone) until the channel is
+// confirmed, then the fragment itself so the box turns green without a reload.
+// Never re-renders an unconfirmed box: that would clobber whatever the person is
+// editing in the same form every few seconds.
+func (s *Server) ntfyStatus(w http.ResponseWriter, r *http.Request) {
+	user, _, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	pref, err := s.store.GetNotifyPref(r.Context(), user)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if !pref.NtfyConfirmed() {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.renderNotify(w, r, user, pref, "Your phone is confirmed.", "")
 }
 
 // connectionView is one non-current tenant's connection card on Settings.

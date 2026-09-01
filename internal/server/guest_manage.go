@@ -876,6 +876,23 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/vehicles?saved=1", http.StatusSeeOther)
 }
 
+// setVehicleNotify toggles the per-car "email the driver when this car goes on
+// the permit" flag. A live htmx save from the checkbox on the Vehicles page: an
+// unchecked box sends no field, so absence means off. Replies 204 (nothing to
+// swap).
+func (s *Server) setVehicleNotify(w http.ResponseWriter, r *http.Request) {
+	_, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	on := r.FormValue("notify") != ""
+	if err := s.store.SetVehicleNotifyDriver(r.Context(), owner, pathInt(r, "id"), on); err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.serverError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // parseEmails splits a free-text recipient list (comma/space/semicolon/newline
 // separated), lower-cases, validates, and de-duplicates. Invalid tokens are
 // dropped so one typo doesn't discard the rest, and returned separately so the

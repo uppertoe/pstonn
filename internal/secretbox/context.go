@@ -57,6 +57,13 @@ func TenantPasswordFor(owner, tenant string) string {
 // grant belongs to a permit, and the permit row already names its council.
 func GuestToken(owner string) string { return "guest-token:" + owner }
 
+// NtfyConfirm binds the token carried by a test push's Confirm button. The
+// plaintext names the owner and topic itself, and the button posts back from the
+// phone with no session, so the context cannot depend on the owner — the purpose
+// alone is what keeps this blob from opening as anything else (or anything else
+// from opening as a confirmation).
+func NtfyConfirm() string { return "ntfy-confirm" }
+
 // withTenant lays out purpose:tenant:owner. The tenant goes BEFORE the owner
 // because an owner is an email address, which may legally contain a colon, while a
 // tenant id is a registry slug that never does — so the string parses one way only.

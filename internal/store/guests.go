@@ -988,7 +988,7 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 		gc.BaselineUntil, _ = time.Parse(time.RFC3339, blUntil)
 	}
 	gc.Vehicles, err = s.queryVehicles(ctx, `
-SELECT v.id, v.registration, v.label, v.email, v.color, v.state FROM vehicle v
+SELECT v.id, v.registration, v.label, v.email, v.color, v.state, v.notify_driver FROM vehicle v
 JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
 WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
 	return gc, err
@@ -1024,7 +1024,7 @@ func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrant
 	for i := range out {
 		g := &out[i]
 		g.Vehicles, err = s.queryVehicles(ctx, `
-SELECT v.id, v.registration, v.label, v.email, v.color, v.state FROM vehicle v
+SELECT v.id, v.registration, v.label, v.email, v.color, v.state, v.notify_driver FROM vehicle v
 JOIN guest_grant_vehicle gv ON gv.vehicle_id = v.id
 WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, g.Grant.ID)
 		if err != nil {

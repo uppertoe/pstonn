@@ -160,39 +160,78 @@
 <form hx-post="/notifications" hx-target="#notify-body" hx-swap="none" hx-trigger="change"
       class="stack notify-form"
       x-data="{ntfy: {{if .NtfyEnabled}}true{{else}}false{{end}},
-               guard(e) {
-                 if (e.target.checked || [...e.target.form.querySelectorAll('.chan')].some(c => c.checked)) return;
+               confirmed: {{if .NtfyConfirmed}}true{{else}}false{{end}},
+               refuse(e, msg) {
                  e.target.checked = true;
                  if (e.target.name === 'ntfy_enabled') this.ntfy = true;
                  e.stopPropagation();
                  const row = e.target.closest('.toggle');
                  row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake');
-                 this.$refs.status.textContent = '⚠ Keep at least one method on.';
+                 this.$refs.status.textContent = '⚠ ' + msg;
                  this.$refs.status.className = 'notify-status err';
+               },
+               guard(e) {
+                 if (e.target.checked) return;
+                 if (![...e.target.form.querySelectorAll('.chan')].some(c => c.checked)) return this.refuse(e, 'Keep at least one method on.');
+                 {{/* Mirrors saveNotify: email may only go off for a push channel a device has confirmed. */}}
+                 if (e.target.name === 'email_enabled' && this.ntfy && !this.confirmed) return this.refuse(e, 'You can turn off email once you\'ve confirmed push notifications on your phone: tap Send a test to my phone, then Confirm on the notification.');
                }}"
       @htmx:after-request="if ($event.target === $root && $event.detail.successful) { $refs.status.textContent = '✓ Saved'; $refs.status.className = 'notify-status ok'; }">
   {{if .EmailAvailable}}
   <label class="toggle"><input type="checkbox" class="chan" name="email_enabled" {{if .EmailEnabled}}checked{{end}} @change="guard($event)"> <span>Email me at <strong>{{.UserEmail}}</strong></span></label>
   {{end}}
   {{if .NtfyAvailable}}
-  <div>
-    <label class="toggle"><input type="checkbox" class="chan" name="ntfy_enabled" x-model="ntfy" {{if .NtfyEnabled}}checked{{end}} @change="guard($event)"> <span>Push notifications to my phone</span></label>
-    <div class="steps" x-show="ntfy" x-cloak>
-      <p class="steps-lead">Free, and takes a minute:</p>
-      <ol>
-        <li>Install the <strong>ntfy</strong> app (App Store or Google Play).</li>
-        <li>Open it and tap <strong>+</strong> to add a subscription.</li>
-        <li>Server: <code>{{.NtfyBase}}</code></li>
-        <li>Topic: <code>{{.NtfyTopic}}</code></li>
-      </ol>
-      <button type="button" class="ghost sm" hx-post="/notifications/regen-topic" hx-target="#notify-body" hx-swap="innerHTML"
-              hx-confirm="Generate a new topic? Your current topic stops working and you'll need to re-subscribe in the ntfy app." data-confirm-ok="New topic">{{template "ic-plus"}} New topic</button>
-    </div>
-  </div>
+  <label class="toggle"><input type="checkbox" class="chan" name="ntfy_enabled" x-model="ntfy" {{if .NtfyEnabled}}checked{{end}} @change="guard($event)"> <span>Push notifications to my phone</span></label>
   {{end}}
+  {{/* The status sits right under the toggles, not under the (tall) push
+       set-up box: a refused toggle must explain itself where the tick was. */}}
   <p class="notify-status{{if .Error}} err{{else if .Status}} ok{{end}}" x-ref="status" role="status" aria-live="polite">
     {{if .Error}}⚠ {{.Error}}{{else if .Status}}✓ {{.Status}}{{else}}At least one method must stay on.{{end}}
   </p>
+  {{if .NtfyAvailable}}
+  <div>
+    <div class="steps" x-show="ntfy" x-cloak>
+      {{/* The labels are the apps' own (verified against ntfy-android strings.xml
+           and ntfy-ios SubscriptionAddView, 2026-09-01): both call it "Use another
+           server" with a "Service URL" field; a self-hosted server is not the
+           default, and people who skip that toggle subscribe on ntfy.sh instead
+           and never hear from us. */}}
+      <p class="steps-lead">Free, and takes a minute:</p>
+      <ol>
+        <li>Install the <strong>ntfy</strong> app (App Store or Google Play).</li>
+        <li>Open it and tap <strong>+</strong> (<em>Subscribe to topic</em> on Android, <em>Add subscription</em> on iPhone).</li>
+        <li>Turn on <strong>Use another server</strong> and enter the Service URL: <code>{{.NtfyBase}}</code></li>
+        <li>Topic name: <code>{{.NtfyTopic}}</code> &mdash; then <strong>Subscribe</strong>.</li>
+        <li>Tap <strong>Send a test to my phone</strong> below, then <strong>Confirm</strong> on the notification when it arrives.</li>
+      </ol>
+      {{/* The confirmation is what unlocks turning email off (saveNotify); say
+           where the household stands so the refused toggle never surprises. */}}
+      {{/* A banner, not a note: a muted line under a finished-looking list reads
+           as "done", and the person leaves with a topic nobody is subscribed
+           to. Pending must look like the step it is. */}}
+      {{if .NtfyConfirmed}}
+      <div class="banner ok" style="margin:16px 0 16px">{{template "ic-check"}} <span><strong>Your phone is set up</strong> &mdash; confirmed on {{.NtfyConfirmedOn}}. Push notifications are getting through, so you can turn off email if you&rsquo;d rather.</span></div>
+      {{else if .PushSent}}
+      {{/* Sent, tap awaited: the box says so and polls ntfyStatus (204 until the
+           tap, then the confirmed fragment) so it turns green by itself. */}}
+      <div class="banner info" style="margin:16px 0 16px;align-items:flex-start" hx-get="/notifications/ntfy-status" hx-trigger="every 4s" hx-target="#notify-body" hx-swap="innerHTML">{{template "ic-bell"}} <span><strong>Sent to your phone.</strong> Now tap <strong>Confirm</strong> on the notification when it arrives &mdash; this page will update by itself once you have. Nothing arrived? Check the topic and Service URL in the ntfy app, then send again.</span></div>
+      {{else}}
+      <div class="banner warn" style="margin:16px 0 16px;align-items:flex-start">{{template "ic-alert"}} <span><strong>One more step: confirm your phone.</strong> Tap <strong>Send a test to my phone</strong>, then <strong>Confirm</strong> on the notification when it arrives. That tells p.stonn the notifications are getting through &mdash; you can turn off email once you have.</span></div>
+      {{end}}
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        {{/* Push-only test (testPush): while someone is wiring up their phone,
+             mailing them as well is noise, and a mail failure must not read as a
+             push failure. Answers into this fragment so they stay by the steps.
+             After a send the banner above says so; the button stays put. */}}
+        {{/* Same label and icon in every state: the banner carries the result,
+             and a button that changes width shifts everything under it. */}}
+        <button type="button" class="sm" hx-post="/notifications/test-push" hx-target="#notify-body" hx-swap="innerHTML">{{template "ic-bell"}} Send a test to my phone</button>
+        <button type="button" class="ghost sm" hx-post="/notifications/regen-topic" hx-target="#notify-body" hx-swap="innerHTML"
+                hx-confirm="Generate a new topic? Your current topic stops working and you'll need to re-subscribe in the ntfy app." data-confirm-ok="New topic">{{template "ic-plus"}} New topic</button>
+      </div>
+    </div>
+  </div>
+  {{end}}
   {{if .EmailAvailable}}
   {{/* The tier the toggles above cannot switch off. Stated, not argued: the
        page says what happens, and the list is the actual set of forced-email

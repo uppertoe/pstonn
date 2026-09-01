@@ -13,7 +13,7 @@ import (
 // ListVehicles returns every vehicle across all owners (used by the scheduler to
 // map vehicle IDs to registrations for permits it reconciles).
 func (s *Store) ListVehicles(ctx context.Context) ([]model.Vehicle, error) {
-	return s.queryVehicles(ctx, `SELECT id, registration, label, email, color, state FROM vehicle ORDER BY label, registration`)
+	return s.queryVehicles(ctx, `SELECT id, registration, label, email, color, state, notify_driver FROM vehicle ORDER BY label, registration`)
 }
 
 // VehicleRef is a vehicle plus its owner, used by the scheduler to resolve a
@@ -26,12 +26,13 @@ type VehicleRef struct {
 	Label        string
 	Email        string
 	State        string // registration state code ("" = tenant home state)
+	NotifyDriver bool   // email the driver when this car is put on the permit
 }
 
 // ListVehicleRefs returns every vehicle with its owner, for owner-scoped
 // resolution in the scheduler.
 func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email, state FROM vehicle`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email, state, notify_driver FROM vehicle`)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
 	var out []VehicleRef
 	for rows.Next() {
 		var v VehicleRef
-		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email, &v.State); err != nil {
+		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email, &v.State, &v.NotifyDriver); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -59,7 +60,7 @@ func (s *Store) VehicleOwnedBy(ctx context.Context, owner string, id int64) (boo
 // ListVehiclesFor returns the vehicles owned by one app user.
 func (s *Store) ListVehiclesFor(ctx context.Context, owner string) ([]model.Vehicle, error) {
 	return s.queryVehicles(ctx,
-		`SELECT id, registration, label, email, color, state FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
+		`SELECT id, registration, label, email, color, state, notify_driver FROM vehicle WHERE owner = ? ORDER BY label, registration`, owner)
 }
 
 func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([]model.Vehicle, error) {
@@ -71,7 +72,7 @@ func (s *Store) queryVehicles(ctx context.Context, query string, args ...any) ([
 	var out []model.Vehicle
 	for rows.Next() {
 		var v model.Vehicle
-		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email, &v.Color, &v.State); err != nil {
+		if err := rows.Scan(&v.ID, &v.Registration, &v.Label, &v.Email, &v.Color, &v.State, &v.NotifyDriver); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -257,6 +258,20 @@ func (s *Store) BackfillVehicleColors(ctx context.Context) error {
 func (s *Store) SetVehicleEmail(ctx context.Context, owner string, id int64, email string) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE vehicle SET email = ? WHERE id = ? AND owner = ?`, email, id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetVehicleNotifyDriver toggles whether this car's driver is emailed when the
+// car is put on the permit. Owner-scoped.
+func (s *Store) SetVehicleNotifyDriver(ctx context.Context, owner string, id int64, on bool) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE vehicle SET notify_driver = ? WHERE id = ? AND owner = ?`, on, id, owner)
 	if err != nil {
 		return err
 	}

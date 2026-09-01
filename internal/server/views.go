@@ -452,6 +452,14 @@ type notifyView struct {
 	FailuresOnly   bool   // only notify when something needs attention
 	Status         string // transient confirmation after auto-save
 	Error          string // transient error (e.g. tried to turn everything off)
+	// NtfyConfirmed: a test push to the current topic was tapped on a device — the
+	// precondition for turning email off. NtfyConfirmedOn is that day, for display.
+	NtfyConfirmed   bool
+	NtfyConfirmedOn string
+	// PushSent: a test has just gone to the phone and the tap is what's awaited.
+	// The box shows "sent" and polls for the confirmation so the page turns green
+	// by itself when the phone is tapped (render-only; never stored).
+	PushSent bool
 	// Suppressed surfaces the mail-suppression list in Settings. Without it the
 	// page showed "Email me" happily ticked while every message was being dropped
 	// — an unsubscribe (which a mail scanner can trigger via the one-click POST)
@@ -468,7 +476,11 @@ func (s *Server) notifyViewOf(ctx context.Context, user string, pref store.Notif
 		EmailEnabled: pref.EmailEnabled, NtfyEnabled: pref.NtfyEnabled,
 		NtfyTopic: pref.NtfyTopic, NtfyBase: s.notify.NtfyBase(), UserEmail: user,
 		QuietEnabled: pref.QuietFrom != pref.QuietUntil, QuietFrom: pref.QuietFrom, QuietUntil: pref.QuietUntil,
-		FailuresOnly: pref.FailuresOnly,
+		FailuresOnly:  pref.FailuresOnly,
+		NtfyConfirmed: pref.NtfyConfirmed(),
+	}
+	if t, err := time.Parse(time.RFC3339, pref.NtfyConfirmedAt); err == nil {
+		nv.NtfyConfirmedOn = t.In(time.Local).Format("2 Jan 2006")
 	}
 	if bad, why, err := s.store.IsSuppressed(ctx, user); err == nil {
 		nv.SuppressedInfo = true
@@ -505,6 +517,7 @@ func legendVehicles(vehicles []vehicleView, used map[string]bool) (shown []vehic
 }
 
 type vehicleView struct {
+	NotifyDriver bool
 	ID           int64
 	Label        string
 	Registration string
@@ -774,7 +787,7 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 		if c == "" {
 			c = "#667085" // defensive: a pre-backfill row with no colour
 		}
-		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c, Email: v.Email, State: v.State}
+		views[i] = vehicleView{ID: v.ID, Label: v.Label, Registration: v.Registration, Color: c, Email: v.Email, State: v.State, NotifyDriver: v.NotifyDriver}
 		colorByID[v.ID] = c
 		regByID[v.ID] = v.Registration
 		labelByID[v.ID] = v.Label
