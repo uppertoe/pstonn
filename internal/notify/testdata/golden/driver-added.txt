@@ -1,10 +1,14 @@
 === OUTBOX account= recipients=guest@example.com ntfy=// reason=this address is the contact for a car put on a visitor parking permit
 Dedup: driver-on|guest@example.com|AAA111|DATE
-Subject: Your car is on a Stonnington parking permit
+Subject: AAA111 is on a Stonnington visitor parking permit
 
-AAA111 is now on a City of Stonnington visitor parking permit, so you're covered to park where the permit applies.
+Your car is now on a City of Stonnington visitor parking permit, so you're covered to park where the permit applies.
+
+---
 
 This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee — if you're unsure, check with them.
+
+---
 
 If you have your own Stonnington visitor parking permit, p.stonn can schedule it for you too — free.
 https://p.stonn.org

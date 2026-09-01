@@ -25,6 +25,7 @@ type VehicleRef struct {
 	Registration string
 	Label        string
 	Email        string
+	Color        string // plate colour (hex), so a driver email can match the on-site chip
 	State        string // registration state code ("" = tenant home state)
 	NotifyDriver bool   // email the driver when this car is put on the permit
 }
@@ -32,7 +33,7 @@ type VehicleRef struct {
 // ListVehicleRefs returns every vehicle with its owner, for owner-scoped
 // resolution in the scheduler.
 func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email, state, notify_driver FROM vehicle`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, owner, registration, label, email, color, state, notify_driver FROM vehicle`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +41,7 @@ func (s *Store) ListVehicleRefs(ctx context.Context) ([]VehicleRef, error) {
 	var out []VehicleRef
 	for rows.Next() {
 		var v VehicleRef
-		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email, &v.State, &v.NotifyDriver); err != nil {
+		if err := rows.Scan(&v.ID, &v.Owner, &v.Registration, &v.Label, &v.Email, &v.Color, &v.State, &v.NotifyDriver); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

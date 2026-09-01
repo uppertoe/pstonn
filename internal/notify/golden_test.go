@@ -254,7 +254,7 @@ func TestGoldenEmails(t *testing.T) {
 		_ = svc.NotifyDriverDisplaced(ctx, owner, stranger, "Visitor", "AAA111", "a one-off booking started", at)
 	})
 	run("driver-added", func() {
-		_ = svc.NotifyDriverAdded(ctx, owner, "", stranger, "AAA111")
+		_ = svc.NotifyDriverAdded(ctx, owner, "", stranger, "AAA111", "#3b82f6")
 	})
 	run("guest-request", func() { _ = svc.NotifyGuestRequest(ctx, owner, "Visitor", "GUEST1", appURL+"/g/req/4", 4) })
 	run("account-change", func() { _ = svc.NotifyAccountChange(ctx, owner, member, "added the car ABC123 (Van)") })

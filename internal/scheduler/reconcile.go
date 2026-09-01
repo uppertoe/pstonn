@@ -196,7 +196,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	// id can never read another user's registration.
 	vehByOwnerID := make(map[ownerVehicle]model.VehicleInfo, len(vehicles))
 	for _, v := range vehicles {
-		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email, State: v.State, NotifyDriver: v.NotifyDriver}
+		vehByOwnerID[ownerVehicle{v.Owner, v.ID}] = model.VehicleInfo{Registration: v.Registration, Label: v.Label, Email: v.Email, Color: v.Color, State: v.State, NotifyDriver: v.NotifyDriver}
 	}
 	// The herd the rollover window is sized against. Total permits over-estimates
 	// how many share any one boundary, which errs toward a wider window (gentler on

@@ -262,7 +262,7 @@ var ErrSuppressed = errors.New("address is suppressed (previous bounce or compla
 // address bounces we still want every future attempt made (and the failure
 // logged), rather than the app quietly muting its own alarm channel.
 func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason string) error {
-	return s.sendEmailWith(ctx, to, subject, body, reason, false)
+	return s.sendEmailWith(ctx, to, subject, body, reason, false, mailer.Hero{})
 }
 
 // sendEmailCritical is sendEmail for safety-critical mail: messages whose miss
@@ -281,17 +281,17 @@ func (s *Service) sendEmail(ctx context.Context, to, subject, body, reason strin
 // the message: sent at 9pm it would reach an unsubscribed member, sent at 11pm
 // it would not.
 func (s *Service) sendEmailCritical(ctx context.Context, to, subject, body, reason string) error {
-	return s.sendEmailWith(ctx, to, subject, body, reason, true)
+	return s.sendEmailWith(ctx, to, subject, body, reason, true, mailer.Hero{})
 }
 
-func (s *Service) sendEmailWith(ctx context.Context, to, subject, body, reason string, critical bool) error {
-	return s.sendEmailAs(ctx, to, "", to, subject, body, reason, critical)
+func (s *Service) sendEmailWith(ctx context.Context, to, subject, body, reason string, critical bool, hero mailer.Hero) error {
+	return s.sendEmailAs(ctx, to, "", to, subject, body, reason, critical, hero)
 }
 
 // sendEmailAs is sendEmailWith for a recipient whose tenant is that of
 // tenantOwner (a guest or invitee has no account; the owner who reached them
 // does), narrowed to tenantID when the mail concerns one permit.
-func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, subject, body, reason string, critical bool) error {
+func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, subject, body, reason string, critical bool, hero mailer.Hero) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
@@ -307,7 +307,7 @@ func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, su
 		}
 	}
 	c := s.tenantOf(ctx, tenantOwner, tenantID)
-	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to), Footer: say(c, "mail.footer_affiliation", nil)}
+	opts := mailer.Options{UnsubscribeURL: s.UnsubscribeURL(to), Footer: say(c, "mail.footer_affiliation", nil), Hero: hero}
 	if reason != "" {
 		opts.Provenance = say(c, "mail.provenance", map[string]any{"To": to, "Reason": reason})
 	}
@@ -1097,7 +1097,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, tenantID, p
 		"",
 		say(s.tenantOf(ctx, ownerEmail, tenantID), "mail.guest_promo", nil),
 	}
-	return s.sendEmailAs(ctx, ownerEmail, tenantID, to, subject, strings.Join(lines, "\n"), reasonGuest, false)
+	return s.sendEmailAs(ctx, ownerEmail, tenantID, to, subject, strings.Join(lines, "\n"), reasonGuest, false, mailer.Hero{})
 }
 
 // NotifyDriverDisplaced warns whoever is responsible for a displaced car (the
@@ -1134,19 +1134,26 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 // flapping plate can't spam. The one-click unsubscribe + provenance are added by
 // the send path from the Reason. No-op without SMTP. The council's name comes
 // from the permit's own tenant, so it stays correct across councils.
-func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, plate string) error {
+func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, plate, color string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
 	c := s.tenantOf(ctx, owner, tenantID)
-	subject := fmt.Sprintf("Your car is on a %s parking permit", c.Short)
+	// The plate leads the subject (and rides the row as a centred chip in the HTML
+	// mail), so the body doesn't repeat it \u2014 it just reassures. Blocks are split by
+	// blank lines; a "---" block becomes a section separator in the HTML render.
+	subject := fmt.Sprintf("%s is on a %s visitor parking permit", plate, c.Short)
 	lines := []string{
-		fmt.Sprintf("%s is now on a %s visitor parking permit, so you're covered to park where the permit applies.", plate, c.Name),
+		fmt.Sprintf("Your car is now on a %s visitor parking permit, so you're covered to park where the permit applies.", c.Name),
+		"",
+		"---",
 		"",
 		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee \u2014 if you're unsure, check with them.",
 	}
 	if s.appURL != "" {
 		lines = append(lines, "",
+			"---",
+			"",
 			fmt.Sprintf("If you have your own %s visitor parking permit, p.stonn can schedule it for you too \u2014 free.", c.Short),
 			s.appURL)
 	}
@@ -1157,7 +1164,8 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 	// Deduped per day so a re-add of the same plate the same day is silent.
 	key := fmt.Sprintf("driver-on|%s|%s|%s", to, plate, time.Now().In(s.loc).Format("2006-01-02"))
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
-		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn})
+		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn,
+		HeroPlate: plate, HeroColor: color})
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a
@@ -1371,13 +1379,17 @@ type outMessage struct {
 	// Critical marks safety-tier mail (see sendEmailCritical): deliver() lets it
 	// past a self-service unsubscribe, exactly as the inline path would have.
 	Critical bool
+	// HeroPlate/HeroColor render a centred plate chip in the HTML mail (driver-on
+	// notice); they ride the row because the outbox delivers after enqueue.
+	HeroPlate string
+	HeroColor string
 }
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 	it := store.OutboxItem{
 		Account: m.Account, DedupKey: m.DedupKey, Reason: m.Reason, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
-		NotBefore: m.NotBefore, Critical: m.Critical,
+		NotBefore: m.NotBefore, Critical: m.Critical, HeroPlate: m.HeroPlate, HeroColor: m.HeroColor,
 	}
 	if s.enqueueHook != nil {
 		s.enqueueHook(it)
@@ -1642,7 +1654,7 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			// damage the suppression list exists to prevent.
 			// The row's tier decides whether an unsubscribe blocks it, the same
 			// way the inline sender chose between sendEmail and sendEmailCritical.
-			e := s.sendEmailWith(ctx, addr, it.Subject, it.Body, it.Reason, it.Critical)
+			e := s.sendEmailWith(ctx, addr, it.Subject, it.Body, it.Reason, it.Critical, mailer.Hero{Plate: it.HeroPlate, Color: it.HeroColor})
 			if errors.Is(e, ErrSuppressed) {
 				log.Printf("notify: skipping suppressed recipient %s (outbox row %d)", RedactEmail(addr), it.ID)
 				continue

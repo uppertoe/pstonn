@@ -89,7 +89,7 @@ type Notifier interface {
 	NotifyDriverDisplaced(ctx context.Context, owner, to, permitLabel, oldReg, how string, at time.Time) error
 	// NotifyDriverAdded reassures a car's driver (email only) that their car is
 	// now ON the permit. The permit's tenant supplies the council name.
-	NotifyDriverAdded(ctx context.Context, owner, tenantID, to, plate string) error
+	NotifyDriverAdded(ctx context.Context, owner, tenantID, to, plate, color string) error
 	// SendOnboardNudge emails a stalled signup (terms accepted, tenant never
 	// connected) the once-ever recovery note. Email-only, like the renewal
 	// reminder: this person configured no other channel.

@@ -152,7 +152,7 @@ func (s *Scheduler) notifyAddedDriver(ctx context.Context, p model.Permit, want 
 		}
 		return
 	}
-	if err := s.notifier.NotifyDriverAdded(ctx, p.Owner, p.TenantID, vi.Email, want); err != nil {
+	if err := s.notifier.NotifyDriverAdded(ctx, p.Owner, p.TenantID, vi.Email, want, vi.Color); err != nil {
 		log.Printf("scheduler: enqueue driver-added for %s: %v", notify.RedactEmail(vi.Email), err)
 	}
 }

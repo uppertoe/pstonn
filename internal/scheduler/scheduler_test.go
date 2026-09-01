@@ -366,7 +366,7 @@ func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permi
 	return nil
 }
 
-func (f *fakeNotifier) NotifyDriverAdded(_ context.Context, owner, tenantID, to, plate string) error {
+func (f *fakeNotifier) NotifyDriverAdded(_ context.Context, owner, tenantID, to, plate, color string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.added = append(f.added, to)

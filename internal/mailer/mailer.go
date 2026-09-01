@@ -70,6 +70,16 @@ type Options struct {
 	// Footer is the affiliation line under the HTML card ("Not affiliated with
 	// the City of X."); the tenant is the sender's business, not the mailer's.
 	Footer string
+	// Hero renders a single centred plate chip at the top of the HTML card,
+	// styled like the plates on the site. Empty Plate = no chip.
+	Hero Hero
+}
+
+// Hero is an optional centred plate chip for the HTML mail. Color is a hex
+// string ("#RRGGBB" or "RRGGBB"); empty falls back to a neutral chip.
+type Hero struct {
+	Plate string
+	Color string
 }
 
 // Send delivers a plain-text email. A nil *Mailer is a no-op.
@@ -171,7 +181,7 @@ func (m *Mailer) send(to, subject, body string, o Options) error {
 	b.WriteString("--" + emailBoundary + "\r\n")
 	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(b64Wrap(htmlDocument(subject, body, o.Footer, o.Provenance, o.UnsubscribeURL)) + "\r\n")
+	b.WriteString(b64Wrap(htmlDocument(subject, body, o.Footer, o.Provenance, o.UnsubscribeURL, o.Hero)) + "\r\n")
 	b.WriteString("--" + emailBoundary + "--\r\n")
 	return m.deliver(to, []byte(b.String()))
 }

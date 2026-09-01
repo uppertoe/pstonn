@@ -340,6 +340,7 @@ type VehicleInfo struct {
 	Registration string
 	Label        string
 	Email        string
+	Color        string // plate colour (hex), so a driver email can match the on-site chip
 	State        string // registration state code ("" = tenant home state)
 	NotifyDriver bool   // email the driver when this car is put on the permit
 }
