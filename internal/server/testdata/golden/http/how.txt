@@ -791,6 +791,8 @@ X-Frame-Options: DENY
   .pslot .pok svg { width:13px; height:13px; stroke-width:2.4; }
    
   .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:19ch; }
+  .vemail { display:flex; align-items:center; gap:8px; }
+  .vsaved { color:var(--ok); font-size:12px; font-weight:600; white-space:nowrap; }
    
   @media (max-width:560px){
     .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"plate label" "icon hint"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }

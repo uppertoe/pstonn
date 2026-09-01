@@ -763,6 +763,8 @@
   .pslot .pok svg { width:13px; height:13px; stroke-width:2.4; }
    
   .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:19ch; }
+  .vemail { display:flex; align-items:center; gap:8px; }
+  .vsaved { color:var(--ok); font-size:12px; font-weight:600; white-space:nowrap; }
    
   @media (max-width:560px){
     .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"plate label" "icon hint"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }
@@ -1084,7 +1086,7 @@ window.popClamp = window.popClamp || function (el) {
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
       
-      <div class="vrow">
+      <div class="vrow" x-data="{email: &#34;van@example.com&#34;, saved: false}">
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:#2f6feb"></span>Van</span>
           <span class="plate" style="--plate:#2f6feb;margin-left:auto">ABC123</span>
@@ -1092,19 +1094,21 @@ window.popClamp = window.popClamp || function (el) {
             <button class="danger icon" type="submit" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg></button>
           </form>
         </div>
-        <form method="post" action="/vehicles/1/email" class="vemail">
-          <input type="email" name="email" value="van@example.com" placeholder="driver email (optional)" autocomplete="off">
-          <button type="submit" class="ghost sm">Save</button>
-        </form>
         
-        <label class="vnotify empty-note" style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
+        <div class="vemail">
+          <input type="email" name="email" value="van@example.com" placeholder="driver email (optional)" autocomplete="off"
+                 x-model="email"
+                 hx-post="/vehicles/1/email" hx-trigger="change" hx-swap="none"
+                 @htmx:after-request="if($event.detail.successful){saved=true; setTimeout(()=>saved=false, 1600)}">
+          <span class="vsaved" x-show="saved" x-cloak x-transition>Saved</span>
+        </div>
+        <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
           <input type="checkbox" name="notify" hx-post="/vehicles/1/notify" hx-trigger="change" hx-swap="none" style="flex:none">
           Email this driver when their car goes on the permit
         </label>
-        
       </div>
       
-      <div class="vrow">
+      <div class="vrow" x-data="{email: &#34;&#34;, saved: false}">
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:#127a49"></span>Mum</span>
           <span class="plate" style="--plate:#127a49;margin-left:auto">AAA111</span>
@@ -1112,11 +1116,18 @@ window.popClamp = window.popClamp || function (el) {
             <button class="danger icon" type="submit" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg></button>
           </form>
         </div>
-        <form method="post" action="/vehicles/2/email" class="vemail">
-          <input type="email" name="email" value="" placeholder="driver email (optional)" autocomplete="off">
-          <button type="submit" class="ghost sm">Save</button>
-        </form>
         
+        <div class="vemail">
+          <input type="email" name="email" value="" placeholder="driver email (optional)" autocomplete="off"
+                 x-model="email"
+                 hx-post="/vehicles/2/email" hx-trigger="change" hx-swap="none"
+                 @htmx:after-request="if($event.detail.successful){saved=true; setTimeout(()=>saved=false, 1600)}">
+          <span class="vsaved" x-show="saved" x-cloak x-transition>Saved</span>
+        </div>
+        <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
+          <input type="checkbox" name="notify" hx-post="/vehicles/2/notify" hx-trigger="change" hx-swap="none" style="flex:none">
+          Email this driver when their car goes on the permit
+        </label>
       </div>
       
     </div>

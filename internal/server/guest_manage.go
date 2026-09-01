@@ -873,6 +873,10 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logChange(r.Context(), owner, user, store.ActionVehicleEmail,
 		s.plateOf(r.Context(), owner, pathInt(r, "id")), detail)
+	if r.Header.Get("HX-Request") != "" {
+		w.WriteHeader(http.StatusNoContent) // live save from the Vehicles page; no reload
+		return
+	}
 	http.Redirect(w, r, "/vehicles?saved=1", http.StatusSeeOther)
 }
 

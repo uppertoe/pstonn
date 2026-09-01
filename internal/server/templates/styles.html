@@ -710,6 +710,8 @@
      text it can hold ("checked 12 days ago", 19 characters — ch units, not em, so it is
      measured in this font's own digits) so swapping the words never moves the pill. */
   .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:19ch; }
+  .vemail { display:flex; align-items:center; gap:8px; }
+  .vsaved { color:var(--ok); font-size:12px; font-weight:600; white-space:nowrap; }
   /* Phones: the pill cannot hold label + plate + icon + a 19ch hint on one line
      without breaking the label into two or three lines. Below 560px it becomes a
      full-width, two-row block: plate · "on permit now" on the first row, the status

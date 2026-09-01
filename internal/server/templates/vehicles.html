@@ -5,7 +5,7 @@
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
       {{range .Vehicles}}
-      <div class="vrow">
+      <div class="vrow" x-data="{email: {{printf "%q" .Email}}, saved: false}">
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}{{if .State}} <span class="vstate-chip" title="{{T "vehicle.state_label" .}}">&middot; {{.State}}</span>{{end}}</span>
           <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
@@ -13,16 +13,22 @@
             <button class="danger icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button>
           </form>
         </div>
-        <form method="post" action="/vehicles/{{.ID}}/email" class="vemail">
-          <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off">
-          <button type="submit" class="ghost sm">Save</button>
-        </form>
-        {{if .Email}}
-        <label class="vnotify empty-note" style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
+        {{/* Live save: the email posts on change (blur) with no reload, and the
+             "notify this driver" tick appears the moment the field has a value
+             (Alpine x-show), so the two controls feel like one. hx-swap="none"
+             because the handler replies 204; a validation error arrives as 422
+             and the global toast shows it. */}}
+        <div class="vemail">
+          <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off"
+                 x-model="email"
+                 hx-post="/vehicles/{{.ID}}/email" hx-trigger="change" hx-swap="none"
+                 @htmx:after-request="if($event.detail.successful){saved=true; setTimeout(()=>saved=false, 1600)}">
+          <span class="vsaved" x-show="saved" x-cloak x-transition>Saved</span>
+        </div>
+        <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
           <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none" style="flex:none">
           Email this driver when their car goes on the permit
         </label>
-        {{end}}
       </div>
       {{else}}
       <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
