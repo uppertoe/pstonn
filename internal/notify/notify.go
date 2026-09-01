@@ -587,6 +587,14 @@ type ApplyOutcome struct {
 // with the high-priority push suppressed.
 func (o ApplyOutcome) actionNeeded() bool { return !o.OK && (!o.Transient || o.Urgent) }
 
+// fromSchedule reports whether a successful change was the household's own
+// schedule acting — the roster, or a one-off booking they made. The "only tell
+// me about problems" preference (FailuresOnly) mutes these, but NOT a change
+// made by someone else (a guest link, an approved door-QR request): that is a
+// third party touching the permit, which the household should hear about even
+// with routine confirmations off.
+func (o ApplyOutcome) fromSchedule() bool { return o.Source == "roster" || o.Source == "override" }
+
 // emailWanted decides whether this member's verified address gets the outcome.
 // Email-off means "no routine confirmations", never "no safety alerts": an
 // action-needed failure ("change the plate yourself now or someone gets a fine")
@@ -750,7 +758,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	body += s.firstApplyLine(ctx, o)
 	now := time.Now()
 	for _, d := range dels {
-		if o.OK && d.pref.FailuresOnly {
+		if o.OK && d.pref.FailuresOnly && o.fromSchedule() {
 			continue
 		}
 		m := outMessage{
@@ -799,7 +807,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	due := 0 // members with at least one channel that should have received this
 	now := time.Now()
 	for _, d := range dels {
-		if o.OK && d.pref.FailuresOnly {
+		if o.OK && d.pref.FailuresOnly && o.fromSchedule() {
 			continue
 		}
 		wantEmail := s.emailWanted(d.pref, o)
