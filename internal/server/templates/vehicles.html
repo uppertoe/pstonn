@@ -35,7 +35,7 @@
         </form>
         <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
           <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none">
-          Email this driver when their car goes on the permit
+          <span>Email this driver when their car goes on the permit</span>
         </label>
       {{else}}
       <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
