@@ -15,7 +15,7 @@ func TestHTMLDocument(t *testing.T) {
 		"",
 		"-- p.stonn",
 	}, "\n")
-	got := htmlDocument("Permit updated", body, "Not affiliated with the City of Stonnington.")
+	got := htmlDocument("Permit updated", body, "Not affiliated with the City of Stonnington.", "You received this at you@example.com because you hold the permit.", "https://p.stonn.org/u/addr/tok")
 
 	checks := []string{
 		`p<span style="color:#0d9488;">.</span>stonn`,          // wordmark with teal dot

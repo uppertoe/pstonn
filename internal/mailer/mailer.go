@@ -140,20 +140,23 @@ func (m *Mailer) send(to, subject, body string, o Options) error {
 		"MIME-Version: 1.0",
 		`Content-Type: multipart/alternative; boundary="`+emailBoundary+`"`,
 	)
-	// Footer: who we are, why this address got it, and how to stop. Appended to the
-	// plain text so it flows into the HTML part too (htmlDocument derives from it),
-	// and so a text-only client sees it identically.
+	// Footer: who we are, why this address got it, and how to stop. The TEXT part
+	// gets it appended with blank-line spacing (no terse "--" rule, no wall-of-URL);
+	// the HTML part keeps the real message clean and renders these in its own styled
+	// footer instead — so the branded email shows one footer, not the text footer
+	// baked into the body AND a second styled one under it.
+	textBody := body
 	if o.Provenance != "" || o.UnsubscribeURL != "" {
 		var f strings.Builder
 		f.WriteString(body)
-		f.WriteString("\r\n\r\n--\r\n")
+		f.WriteString("\r\n\r\n")
 		if o.Provenance != "" {
-			f.WriteString(o.Provenance + "\r\n")
+			f.WriteString(o.Provenance + "\r\n\r\n")
 		}
 		if o.UnsubscribeURL != "" {
-			f.WriteString("To stop emails to " + to + ": " + o.UnsubscribeURL + "\r\n")
+			f.WriteString("Unsubscribe: " + o.UnsubscribeURL + "\r\n")
 		}
-		body = f.String()
+		textBody = f.String()
 	}
 	// multipart/alternative: a plain-text part (the source of truth, always shown
 	// by text-only clients) plus a branded HTML part. Both base64-encoded so long
@@ -164,11 +167,11 @@ func (m *Mailer) send(to, subject, body string, o Options) error {
 	b.WriteString("--" + emailBoundary + "\r\n")
 	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(b64Wrap(body) + "\r\n")
+	b.WriteString(b64Wrap(textBody) + "\r\n")
 	b.WriteString("--" + emailBoundary + "\r\n")
 	b.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
-	b.WriteString(b64Wrap(htmlDocument(subject, body, o.Footer)) + "\r\n")
+	b.WriteString(b64Wrap(htmlDocument(subject, body, o.Footer, o.Provenance, o.UnsubscribeURL)) + "\r\n")
 	b.WriteString("--" + emailBoundary + "--\r\n")
 	return m.deliver(to, []byte(b.String()))
 }

@@ -35,7 +35,7 @@ var (
 )
 
 // htmlDocument renders the branded HTML alternative for a plain-text email body.
-func htmlDocument(subject, body, footer string) string {
+func htmlDocument(subject, body, footer, provenance, unsubURL string) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html><head><meta charset="utf-8">`)
 	b.WriteString(`<meta name="viewport" content="width=device-width,initial-scale=1">`)
@@ -49,11 +49,20 @@ func htmlDocument(subject, body, footer string) string {
 	b.WriteString(`<div style="height:3px;width:46px;background:` + colPrimary + `;border-radius:2px;margin:14px 0 22px;"></div>`)
 	b.WriteString(bodyToHTML(body))
 	b.WriteString(`</td></tr>`)
-	// Footer
-	b.WriteString(`<tr><td style="padding:18px 30px;text-align:center;font-family:` + emailFont + `;font-size:12px;line-height:1.5;color:` + colMuted + `;">`)
-	b.WriteString(`p<span style="color:` + colPrimary + `;">.</span>stonn — a free, unofficial tool.`)
+	// Footer: provenance (why you got this), the affiliation line, and a plain
+	// Unsubscribe link — rendered once here, well-spaced and muted, rather than
+	// dumped into the message body.
+	b.WriteString(`<tr><td style="padding:20px 30px 4px;text-align:center;font-family:` + emailFont + `;font-size:12px;line-height:1.6;color:` + colMuted + `;">`)
+	if provenance != "" {
+		b.WriteString(`<div style="margin-bottom:12px;">` + template.HTMLEscapeString(provenance) + `</div>`)
+	}
+	b.WriteString(`<div>p<span style="color:` + colPrimary + `;">.</span>stonn — a free, unofficial tool.`)
 	if footer != "" {
 		b.WriteString(` ` + template.HTMLEscapeString(footer))
+	}
+	b.WriteString(`</div>`)
+	if unsubURL != "" {
+		b.WriteString(`<div style="margin-top:12px;"><a href="` + html.EscapeString(unsubURL) + `" style="color:` + colMuted + `;text-decoration:underline;">Unsubscribe</a></div>`)
 	}
 	b.WriteString(`</td></tr>`)
 	b.WriteString(`</table></td></tr></table></body></html>`)

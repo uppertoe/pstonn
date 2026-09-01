@@ -1145,6 +1145,11 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 		"",
 		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee \u2014 if you're unsure, check with them.",
 	}
+	if s.appURL != "" {
+		lines = append(lines, "",
+			fmt.Sprintf("If you have your own %s visitor parking permit, p.stonn can schedule it for you too \u2014 free.", c.Short),
+			s.appURL)
+	}
 	if !s.driverAddedTo.allow(to) {
 		log.Printf("notify: driver-added notice to %s throttled (per-recipient cap)", RedactEmail(to))
 		return nil
