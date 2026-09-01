@@ -108,7 +108,15 @@ func (c *capture) outbox(it store.OutboxItem) {
 // Signed links: /u/<addr>/<token> and /r/<id>/<addr>/<token> embed an expiry.
 var tokenRe = regexp.MustCompile(`(/u/[^/\s]+/|/r/[0-9]+/[^/\s]+/)[A-Za-z0-9_.-]+`)
 
-func mask(s string) string { return tokenRe.ReplaceAllString(s, "${1}TOKEN") }
+// driverOnDateRe normalizes the calendar date in the "driver-on|to|plate|DATE"
+// dedup key (once-per-day semantics use time.Now()), so the golden does not
+// churn across a date boundary.
+var driverOnDateRe = regexp.MustCompile(`(driver-on\|[^|\n]+\|[^|\n]+\|)\d{4}-\d{2}-\d{2}`)
+
+func mask(s string) string {
+	s = tokenRe.ReplaceAllString(s, "${1}TOKEN")
+	return driverOnDateRe.ReplaceAllString(s, "${1}DATE")
+}
 
 type rig struct {
 	t   *testing.T
