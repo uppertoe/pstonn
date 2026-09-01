@@ -515,8 +515,8 @@
   .vmain { display:flex; align-items:center; gap:10px; }
   .vmain .veh { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14.5px; font-weight:550; }
   .vmain .plate { flex:0 0 auto; }
-  .vemail { display:flex; gap:6px; margin-top:8px; max-width:360px; }
-  .vemail input { font-size:13.5px; padding:7px 10px; flex:1; min-width:0; }
+  .vemail { display:flex; align-items:center; gap:8px; margin-top:4px; }
+  .vemail input { font-size:13.5px; padding:7px 10px; width:250px; max-width:100%; flex:none; }
   .vemail button { padding:7px 12px; font-size:13.5px; }
    
   .vaddform input { font-size:13.5px; }
@@ -541,8 +541,7 @@
      
     .chip { font-size:11.5px; gap:5px; padding:9px 4px; }
      
-    .vemail { max-width:none; }
-    .vemail input { min-width:0; }
+    .vemail input { flex:1; width:auto; min-width:0; }
      
     table.mtable, table.mtable tbody, table.mtable td { display:block; }
     table.mtable tr { display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:10px 0; border-bottom:1px solid var(--line); }
@@ -763,8 +762,11 @@
   .pslot .pok svg { width:13px; height:13px; stroke-width:2.4; }
    
   .phint { color:var(--muted); font-size:12px; white-space:nowrap; display:inline-block; min-width:19ch; }
-  .vemail { display:flex; align-items:center; gap:8px; }
-  .vsaved { color:var(--ok); font-size:12px; font-weight:600; white-space:nowrap; }
+  .vstatus { display:inline-flex; align-items:center; min-width:3.5em; font-size:12px; }
+  .vsaved { color:var(--ok); font-weight:600; white-space:nowrap; }
+  .vrevert { background:none; border:0; box-shadow:none; padding:0; color:var(--primary); font:inherit; font-size:12px; font-weight:600; cursor:pointer; text-decoration:underline; }
+  .vnotify { display:flex; align-items:center; gap:7px; margin-top:10px; cursor:pointer; }
+  .vnotify input { flex:none; }
    
   @media (max-width:560px){
     .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"plate label" "icon hint"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }

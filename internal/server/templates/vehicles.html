@@ -5,7 +5,12 @@
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
       {{range .Vehicles}}
-      <div class="vrow" x-data="{email: {{printf "%q" .Email}}, saved: false}">
+      {{/* saved = the value on the server; email = what's in the box. The Save
+           button enables only when they differ, so "Unsaved" / "Saved" tells the
+           user exactly where they stand. It posts via htmx (handler replies 204,
+           no reload; a 422 validation error surfaces via the global toast). The
+           notify tick appears the moment the field has an email (x-show). */}}
+      <div class="vrow" x-data="{saved: {{printf "%q" .Email}}, email: {{printf "%q" .Email}}, flash: false}">
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}{{if .State}} <span class="vstate-chip" title="{{T "vehicle.state_label" .}}">&middot; {{.State}}</span>{{end}}</span>
           <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
@@ -13,23 +18,25 @@
             <button class="danger icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button>
           </form>
         </div>
-        {{/* Live save: the email posts on change (blur) with no reload, and the
-             "notify this driver" tick appears the moment the field has a value
-             (Alpine x-show), so the two controls feel like one. hx-swap="none"
-             because the handler replies 204; a validation error arrives as 422
-             and the global toast shows it. */}}
-        <div class="vemail">
-          <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off"
-                 x-model="email"
-                 hx-post="/vehicles/{{.ID}}/email" hx-trigger="change" hx-swap="none"
-                 @htmx:after-request="if($event.detail.successful){saved=true; setTimeout(()=>saved=false, 1600)}">
-          <span class="vsaved" x-show="saved" x-cloak x-transition>Saved</span>
-        </div>
-        <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak style="display:flex;align-items:center;gap:7px;margin-top:6px;cursor:pointer">
-          <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none" style="flex:none">
+        {{/* Fixed-width input so it never resizes as the state controls come and go.
+             The Save button IS the dirty signal (disabled = nothing to save,
+             enabled = unsaved changes), so no "Unsaved" label is needed. The
+             trailing slot holds either "revert" (dirty) or a brief "Saved"
+             (after a save), reserved-width so nothing to its left shifts. Saves
+             via htmx (204, no reload); a 422 surfaces as the global toast. */}}
+        <form class="vemail" method="post" action="/vehicles/{{.ID}}/email" hx-post="/vehicles/{{.ID}}/email" hx-swap="none"
+              @htmx:after-request="if($event.detail.successful){saved=email; flash=true; setTimeout(()=>flash=false, 1800)}">
+          <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off" x-model="email">
+          <button type="submit" class="ghost sm" :disabled="email === saved">Save</button>
+          <span class="vstatus">
+            <span class="vsaved" x-show="flash" x-cloak x-transition>Saved</span>
+            <button type="button" class="vrevert" x-show="email !== saved && !flash" x-cloak @click="email = saved" title="Discard this change">revert</button>
+          </span>
+        </form>
+        <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
+          <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none">
           Email this driver when their car goes on the permit
         </label>
-      </div>
       {{else}}
       <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
       {{end}}
