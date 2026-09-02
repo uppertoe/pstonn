@@ -86,6 +86,16 @@ SELECT EXISTS(SELECT 1 FROM account_log
 	return exists == 1, err
 }
 
+// CountChanges reports how many times an account has recorded one action.
+// Bounded by the log's 90-day window, so it measures recent habit, not history.
+func (s *Store) CountChanges(ctx context.Context, owner, action string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM account_log WHERE owner = ? AND action = ?`,
+		owner, action).Scan(&n)
+	return n, err
+}
+
 // ListChanges returns an account's most recent changes, newest first.
 func (s *Store) ListChanges(ctx context.Context, owner string, limit int) ([]Change, error) {
 	rows, err := s.db.QueryContext(ctx, `

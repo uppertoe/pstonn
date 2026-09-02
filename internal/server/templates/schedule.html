@@ -96,6 +96,16 @@
             @click="hide=true; localStorage.setItem('pstonn-share-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
+  {{if .ShowGuestHint}}
+  {{/* Behaviour-gated (3+ one-off bookings, no guest activity — see schedule.go):
+       this household is manually doing what a guest link automates. */}}
+  <p class="share-hint" x-data="{hide: localStorage.getItem('pstonn-guest-hint')==='1'}" x-show="!hide" x-cloak>
+    {{template "ic-users"}}
+    <span>Booking one-offs for the same visitor each time? A guest pass gives them a link to put their car on the permit themselves &mdash; set one up on the <a href="/guests">Guests</a> page.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-guest-hint','1')">{{template "ic-x"}}</button>
+  </p>
+  {{end}}
   {{if .ShowInstallHint}}
   {{/* Hidden when already running from the home screen (display-mode: standalone,
        or iOS's navigator.standalone), and dismissed per browser like the share

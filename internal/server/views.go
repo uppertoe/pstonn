@@ -182,6 +182,11 @@ type dashboardData struct {
 	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
 	// template; hidden by the template when already running standalone.
 	ShowInstallHint bool
+	// ShowGuestHint points a household at guest passes once its behaviour proves
+	// the need: several one-off bookings and no guest activity means someone is
+	// manually doing exactly what a guest link automates. Server-gated on the
+	// change log, dismissed per-browser in the template like the other hints.
+	ShowGuestHint bool
 	// Share page (State "share" / "share-card").
 	ShareEmailAvailable bool         // the invite form only makes sense with SMTP configured
 	ShareQR             template.URL // data URI of the QR for the printable card (typed: html/template neuters a data: src otherwise)

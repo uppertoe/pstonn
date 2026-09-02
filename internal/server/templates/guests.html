@@ -107,6 +107,11 @@
   </section>
   {{end}}
 
+  {{/* Nothing to pause on a first visit: an account with no passes, printed QRs
+       or requests sees an admin toggle as its first card, for a feature it has
+       never used. Shown once anything exists — and always when paused, so the
+       Resume switch can never disappear. */}}
+  {{if or .Guests .DoorGrants .PendingRequests .RecentRequests (not .GuestsEnabled)}}
   <section class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
@@ -119,6 +124,7 @@
       </form>
     </div>
   </section>
+  {{end}}
 
   {{if .PermitOpts}}
   <section class="card" style="--hue:var(--sec-schedule)">

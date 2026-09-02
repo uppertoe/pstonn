@@ -35,3 +35,30 @@ func TestHasGuestActivity(t *testing.T) {
 		t.Fatal("guest activity leaked across accounts")
 	}
 }
+
+// TestCountChanges: the guest-pass hint's trigger counts one action for one
+// owner — other actions and other households must not inflate it.
+func TestCountChanges(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	const owner = "a@b.com"
+
+	if n, err := st.CountChanges(ctx, owner, ActionOverrideAdd); err != nil || n != 0 {
+		t.Fatalf("fresh account: got (%d, %v), want (0, nil)", n, err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := st.RecordChange(ctx, owner, owner, ActionOverrideAdd, "VPP-1", "one-off"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A different action and a different owner both stay out of the count.
+	if err := st.RecordChange(ctx, owner, owner, ActionRosterSet, "Mon", "Van"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordChange(ctx, "other@b.com", "other@b.com", ActionOverrideAdd, "VPP-2", ""); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.CountChanges(ctx, owner, ActionOverrideAdd); err != nil || n != 3 {
+		t.Fatalf("after three one-offs: got (%d, %v), want (3, nil)", n, err)
+	}
+}

@@ -1697,13 +1697,14 @@ window.popClamp = window.popClamp || function (el) {
   <a class="link-quiet" href="/permits/new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Manage another permit</a>
   
   
-  <p class="share-hint" x-data="{hide: localStorage.getItem('pstonn-share-hint')==='1'}" x-show="!hide" x-cloak>
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
-    <span>Want another member of your household to manage this permit too? Invite them in <a href="/settings">Settings &rarr; Shared access</a> &mdash; they sign in with their own email, and no passwords change hands.</span>
-    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
-            @click="hide=true; localStorage.setItem('pstonn-share-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </p>
   
+  
+  <p class="share-hint" x-data="{hide: localStorage.getItem('pstonn-guest-hint')==='1'}" x-show="!hide" x-cloak>
+    <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg>
+    <span>Booking one-offs for the same visitor each time? A guest pass gives them a link to put their car on the permit themselves &mdash; set one up on the <a href="/guests">Guests</a> page.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-guest-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </p>
   
   
   

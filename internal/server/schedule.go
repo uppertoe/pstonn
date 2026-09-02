@@ -16,6 +16,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
+// guestHintAfterOverrides is how many one-off bookings a household makes before
+// the Schedule page points it at guest passes. Three within the change log's
+// 90-day window reads as a habit; one or two could be a single visit.
+const guestHintAfterOverrides = 3
+
 // schedule is the primary day-to-day page: permit status, weekly roster, 14-day
 // calendar, and the chronological one-offs.
 func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +112,17 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if len(pvs) > 0 {
 		if n, cerr := s.store.CountSuccessfulApplies(ctx, owner); cerr == nil && n > 0 {
 			base.ShowInstallHint = true
+		}
+	}
+	// Guest-pass pointer, gated on proven need: a household that keeps making
+	// one-off bookings but has never touched a guest surface is doing by hand
+	// what a guest link automates. The activity check runs only once the booking
+	// habit is established, so set-up households cost nothing extra here.
+	if len(pvs) > 0 {
+		if n, cerr := s.store.CountChanges(ctx, owner, store.ActionOverrideAdd); cerr == nil && n >= guestHintAfterOverrides {
+			if ga, gerr := s.store.HasGuestActivity(ctx, owner); gerr == nil && !ga {
+				base.ShowGuestHint = true
+			}
 		}
 	}
 	s.render(w, base)
