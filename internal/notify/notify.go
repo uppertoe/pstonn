@@ -106,6 +106,16 @@ type Service struct {
 	// cap is a backstop against a plate flapping. 3/day leaves room for a driver
 	// who covers two households.
 	driverAddedTo *sendLimiter
+	// failureTo and urgentFailureTo cap the apply-FAILURE notices one person can
+	// receive in a day, across every permit they hear about. The scheduler's
+	// durable key dedups an outcome per permit, but it remembers only the LAST
+	// delivered key, so an outage whose outcome ping-pongs between families
+	// (unreachable, then busy, then unreachable) could email on every capped retry.
+	// A council outage must never become a stream of mail. Urgent notices (a
+	// confirmed block, an expired sign-in: "change it yourself now") have their
+	// own small budget so the soft notices cannot crowd them out.
+	failureTo       *sendLimiter
+	urgentFailureTo *sendLimiter
 	// unrecorded holds bookkeeping the store refused for rows the drain has ALREADY
 	// acted on. Touched only by the single RunOutbox goroutine, so it needs no lock.
 	unrecorded map[int64]outboxUpdate
@@ -193,7 +203,11 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		// under the rate that earns a spam complaint against the whole domain.
 		displacedTo:   newSendLimiter(6, 24*time.Hour),
 		driverAddedTo: newSendLimiter(3, 24*time.Hour),
-		unrecorded:    map[int64]outboxUpdate{},
+		// Three soft failure notices a day is already one more than a person can
+		// act on; two urgent ones covers "act now" and its escalation.
+		failureTo:       newSendLimiter(3, 24*time.Hour),
+		urgentFailureTo: newSendLimiter(2, 24*time.Hour),
+		unrecorded:      map[int64]outboxUpdate{},
 	}
 }
 
@@ -909,6 +923,21 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			seenKey = fmt.Sprintf("%s|%d|%s|%s", o.Owner, o.PermitID, o.Key, d.email)
 			seenKeys = append(seenKeys, seenKey)
 			if s.reached(seenKey, now) {
+				delivered++
+				continue
+			}
+		}
+
+		// A failure notice past this person's daily budget is dropped, and counted
+		// as delivered so the scheduler records the outcome and stops retrying it:
+		// they have been told enough today, and the activity page has the rest.
+		if !o.OK {
+			lim := s.failureTo
+			if o.Urgent {
+				lim = s.urgentFailureTo
+			}
+			if !lim.allow(d.email) {
+				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
 				delivered++
 				continue
 			}

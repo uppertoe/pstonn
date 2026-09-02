@@ -384,11 +384,18 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	// re-attempted, so it cannot re-alarm — except across a restart, which forgets
 	// the parking, retries once, is refused again and would, on a dated key, tell
 	// the household a second time. Undated: told once per distinct refusal.
-	key := "error|" + want + "|" + reason + "|" + s.failureKeyDay(p)
+	//
+	// The reason is deliberately NOT part of the key. It names the operation that
+	// failed, and during a council outage that flaps between attempts (a timeout
+	// keeping the sign-in warm, then one writing the plate), so a key carrying it
+	// minted a fresh "we couldn't update your permit" on every swap — up to one
+	// per capped retry, ~48 a day. One family of failure, one plate, one day: one
+	// notice. The notifier's per-recipient cap is the backstop behind this.
+	key := "error|" + want + "|" + s.failureKeyDay(p)
 	if kind == parking.FailRejected {
 		threshold = 1
 		s.parkRetry(p.ID, want)
-		key = "rejected|" + want + "|" + reason
+		key = "rejected|" + want
 		action += " p.stonn will not retry this change until you edit the schedule or re-link."
 	} else {
 		s.deferRetry(p.ID, n)

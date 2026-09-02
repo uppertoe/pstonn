@@ -1,0 +1,69 @@
+package notify
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/mailer"
+	"github.com/uppertoe/pstonn/internal/store"
+)
+
+// TestFailureNoticesAreCappedPerRecipient: the scheduler dedups an outcome per
+// permit but remembers only the last delivered key, so an outage whose outcome
+// ping-pongs between families could email on every capped retry. A council
+// outage must never become a stream of mail: a person gets at most three soft
+// failure notices a day across every permit, urgent ones have their own small
+// budget so they cannot be crowded out, and successes are never throttled.
+func TestFailureNoticesAreCappedPerRecipient(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const owner = "primary@example.com"
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	sent := 0
+	m.SetSendHook(func(_, _, _ string, _ mailer.Options) error { sent++; return nil })
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+
+	fail := func(i int, urgent bool) ApplyOutcome {
+		// Distinct keys and permits: every one is a legitimately new outcome to the
+		// scheduler, which is exactly the shape the cap exists for.
+		return ApplyOutcome{Owner: owner, PermitID: int64(i), PermitLabel: fmt.Sprintf("VPP%d", i), Reg: "ABC123",
+			OK: false, CurrentReg: "OLD1", Reason: "r", Action: "a", Transient: true, Urgent: urgent,
+			Key: fmt.Sprintf("error|ABC123|day|%d", i)}
+	}
+	for i := 0; i < 6; i++ {
+		if n, err := svc.NotifyApply(ctx, fail(i, false)); n != 1 || err != nil {
+			t.Fatalf("soft failure %d = (%d, %v); a throttled notice must still count as delivered so the scheduler stops retrying it", i, n, err)
+		}
+	}
+	if sent != 3 {
+		t.Fatalf("soft failure emails = %d, want 3 (the daily cap)", sent)
+	}
+	// Urgent notices ride their own budget.
+	for i := 10; i < 13; i++ {
+		if n, err := svc.NotifyApply(ctx, fail(i, true)); n != 1 || err != nil {
+			t.Fatalf("urgent failure %d = (%d, %v)", i, n, err)
+		}
+	}
+	if sent != 5 {
+		t.Fatalf("emails after three urgent notices = %d, want 5 (two urgent allowed)", sent)
+	}
+	// A success is never throttled: it is the news the person is waiting for.
+	ok := ApplyOutcome{Owner: owner, PermitID: 99, PermitLabel: "VPP", Reg: "ABC123", OK: true, Key: "success|ABC123"}
+	if n, err := svc.NotifyApply(ctx, ok); n != 1 || err != nil {
+		t.Fatalf("success = (%d, %v)", n, err)
+	}
+	if sent != 6 {
+		t.Fatalf("emails after a success = %d, want 6", sent)
+	}
+}

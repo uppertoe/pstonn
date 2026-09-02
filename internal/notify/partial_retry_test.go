@@ -47,6 +47,9 @@ func TestPartialDeliveryRetrySkipsReachedMembers(t *testing.T) {
 		return nil
 	})
 	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+	// This test is about dedup, and sends more failure notices to one person than
+	// the daily cap allows; the cap has its own test (failure_cap_test.go).
+	svc.failureTo = newSendLimiter(100, 24*time.Hour)
 	o := ApplyOutcome{Owner: primary, PermitLabel: "VPP1", Reg: "ABC123", OK: false, CurrentReg: "OLD1", Reason: "r", Action: "a", Key: "error|ABC123|r|2026-09-02"}
 
 	// First attempt: the primary is reached, the secondary is not.
