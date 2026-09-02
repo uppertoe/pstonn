@@ -47,7 +47,7 @@ type authCircuit struct {
 // until the next attempt is permitted, for the caller's fast-fail message.
 //
 //	closed              → (false, true, 0)
-//	open, probe in-flight→ (false, false, remaining)   [only one probe at a time]
+//	open, probe in-flight→ (false, false, ~backoff)     [only one probe at a time]
 //	open, waiting        → (false, false, remaining)
 //	open, probe due      → (true,  true, 0)             [admit the probe]
 func (a *authCircuit) allow(now time.Time) (probe, ok bool, retry time.Duration) {
@@ -57,7 +57,13 @@ func (a *authCircuit) allow(now time.Time) (probe, ok bool, retry time.Duration)
 		return false, true, 0
 	}
 	if a.probing {
-		return false, false, a.remainingLocked(now)
+		// A probe is in flight and, being past openUntil, remaining is ~0 — reporting
+		// "retry in 0s" would wrongly invite an immediate retry. Surface the cycle
+		// length instead: the caller should check back after the probe resolves.
+		if r := a.remainingLocked(now); r > 0 {
+			return false, false, r
+		}
+		return false, false, a.backoff
 	}
 	if now.Before(a.openUntil) {
 		return false, false, a.openUntil.Sub(now)

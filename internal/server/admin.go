@@ -363,16 +363,22 @@ type tenantStatus struct {
 	LastSuccessAt       string `json:"last_success_at,omitempty"`
 	ConsecutiveFailures int    `json:"consecutive_failures"`
 
-	Requests1m         int    `json:"requests_1m"`
-	Requests5m         int    `json:"requests_5m"`
-	PushbacksTotal     uint64 `json:"pushbacks_total"`
-	BreakerOpen        bool   `json:"breaker_open"`
-	BreakerRemainingS  int    `json:"breaker_remaining_seconds,omitempty"`
-	LastPushbackAt     string `json:"last_pushback_at,omitempty"`
-	LastPushbackStatus int    `json:"last_pushback_status,omitempty"`
-	LastPushbackRef    string `json:"last_pushback_ref,omitempty"`
-	PersistOK          bool   `json:"breaker_persist_ok"`
-	PersistError       string `json:"breaker_persist_error,omitempty"`
+	Requests1m        int    `json:"requests_1m"`
+	Requests5m        int    `json:"requests_5m"`
+	PushbacksTotal    uint64 `json:"pushbacks_total"`
+	BreakerOpen       bool   `json:"breaker_open"`
+	BreakerRemainingS int    `json:"breaker_remaining_seconds,omitempty"`
+	// AuthGated is the auth-surface circuit: the council's sign-in is failing and the
+	// app is fast-failing renews/stale-token ops (a still-valid cached token keeps
+	// serving) rather than hammering. Distinct from breaker_open (the fleet edge
+	// breaker); the watchdog can tell an auth-only outage that we are shedding cleanly.
+	AuthGated           bool   `json:"auth_gated,omitempty"`
+	AuthGatedRemainingS int    `json:"auth_gated_remaining_seconds,omitempty"`
+	LastPushbackAt      string `json:"last_pushback_at,omitempty"`
+	LastPushbackStatus  int    `json:"last_pushback_status,omitempty"`
+	LastPushbackRef     string `json:"last_pushback_ref,omitempty"`
+	PersistOK           bool   `json:"breaker_persist_ok"`
+	PersistError        string `json:"breaker_persist_error,omitempty"`
 	// LastPushbackSurface says whether the refusal hit login, auth or API traffic —
 	// the difference between "our credentials are being throttled" and "our reads are".
 	LastPushbackSurface string `json:"last_pushback_surface,omitempty"`
@@ -533,6 +539,8 @@ func tenantStatusFrom(st parking.Stats) tenantStatus {
 		PushbacksTotal:      st.Pushback,
 		BreakerOpen:         st.BreakerOpen,
 		BreakerRemainingS:   int(st.BreakerFor.Round(time.Second) / time.Second),
+		AuthGated:           st.AuthGated,
+		AuthGatedRemainingS: int(st.AuthGatedFor.Round(time.Second) / time.Second),
 		LastPushbackStatus:  st.LastPushbackStatus,
 		LastPushbackRef:     st.LastPushbackRef,
 		PersistOK:           st.PersistOK,

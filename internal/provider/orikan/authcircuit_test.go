@@ -3,6 +3,7 @@ package orikan
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -11,6 +12,33 @@ import (
 
 	"github.com/uppertoe/pstonn/internal/provider"
 )
+
+// TestRecordAuthorizeOutcomeClassification pins how each authorize result is routed:
+// only a plain origin 5xx (or a transport failure) is "upstream down". Edge push-back
+// (a typed *provider.Unavailable, which includes 503) belongs to the fleet breaker, and
+// our own cancellation is not an upstream signal — neither may open the auth circuit.
+func TestRecordAuthorizeOutcomeClassification(t *testing.T) {
+	openAfter := func(status int, err error) bool {
+		c := &Client{authCircuit: &authCircuit{}}
+		for i := 0; i < authTripThreshold+2; i++ {
+			c.recordAuthorizeOutcome(false, status, err)
+		}
+		open, _ := c.authCircuit.state(time.Now())
+		return open
+	}
+	if openAfter(503, &provider.Unavailable{Status: 503}) {
+		t.Error("a 503 edge push-back (fleet breaker's job) must not open the auth circuit")
+	}
+	if openAfter(0, fmt.Errorf("get: %w", context.Canceled)) {
+		t.Error("our own cancellation must not open the auth circuit")
+	}
+	if !openAfter(500, fmt.Errorf("authorize: http 500")) {
+		t.Error("a sustained origin 500 should open the auth circuit")
+	}
+	if !openAfter(0, fmt.Errorf("dial tcp: connection refused")) {
+		t.Error("a sustained transport failure should open the auth circuit")
+	}
+}
 
 // TestAuthorizeCircuitTripsOn5xxAndFastFails: a sustained council auth 500 trips the
 // circuit after the threshold, and further authorizes then fast-fail WITHOUT touching

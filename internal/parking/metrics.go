@@ -127,6 +127,21 @@ type Stats struct {
 	LastSuccessAt       time.Time
 	ConsecutiveFailures int
 	State               string
+
+	// AuthGated reports the provider's auth-surface circuit: when open, renews and
+	// stale-token ops are fast-failing (the council's sign-in is down) while a
+	// still-valid cached token keeps serving. AuthGatedFor is the wait until the next
+	// recovery probe. Distinct from BreakerOpen, which is the fleet edge breaker.
+	// Zero value (not gated) when the provider exposes no auth circuit.
+	AuthGated    bool
+	AuthGatedFor time.Duration
+}
+
+// authGater is the optional provider capability that exposes its auth-surface
+// circuit for /status (orikan implements it). Type-asserted, like legacyImporter,
+// so a provider without one simply reports not-gated.
+type authGater interface {
+	AuthGate() (open bool, retry time.Duration)
 }
 
 // Blocked reports whether the fleet circuit breaker is currently open — a
@@ -162,11 +177,18 @@ func (c *Client) Stats() Stats {
 		persistError = pErr.Error()
 	}
 	lastAttempt, lastSuccess, consecFails := c.health.clock()
+	var authGated bool
+	var authGatedFor time.Duration
+	if ag, ok := c.p.(authGater); ok {
+		authGated, authGatedFor = ag.AuthGate()
+	}
 	return Stats{
 		LastAttemptAt:       lastAttempt,
 		LastSuccessAt:       lastSuccess,
 		ConsecutiveFailures: consecFails,
 		State:               c.health.state(now, open, pb),
+		AuthGated:           authGated,
+		AuthGatedFor:        authGatedFor,
 		Login:               c.traffic.login.Load(),
 		Auth:                c.traffic.auth.Load(),
 		API:                 c.traffic.api.Load(),

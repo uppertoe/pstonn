@@ -380,14 +380,34 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 // that opens it (or escalates a failed probe). Everything else — edge push-back, an
 // odd 4xx, an unrecognised redirect — is not upstream-down, so it neither opens nor
 // closes the circuit (the fleet breaker owns the edge case).
+// AuthGate reports whether the auth-surface circuit is currently open (renews and
+// stale-token ops are fast-failing) and how long until the next recovery probe. The
+// parking client surfaces it on /status so the operator/watchdog can tell an
+// auth-only council outage that the app is already shedding from a healthy connector.
+func (c *Client) AuthGate() (open bool, retry time.Duration) {
+	return c.authCircuit.state(time.Now())
+}
+
 func (c *Client) recordAuthorizeOutcome(probe bool, status int, err error) {
 	now := time.Now()
+	var unavail *provider.Unavailable
 	switch {
 	case err == nil, errors.Is(err, provider.ErrSessionExpired):
+		// A code, or a genuine expiry — the upstream served us. Close.
 		c.authCircuit.onSuccess(probe)
+	case errors.As(err, &unavail):
+		// Edge push-back (429/403/503) or a WAF challenge — routed by TYPE, not status,
+		// so a 503 the fleet breaker owns is not double-counted here. Inconclusive.
+		c.authCircuit.onInconclusive(now, probe)
+	case errors.Is(err, context.Canceled):
+		// Our own cancellation (a shutdown, a superseded request) is not an upstream
+		// signal — mirror health.noteAt, which also ignores it.
+		c.authCircuit.onInconclusive(now, probe)
 	case status == 0, status >= 500:
+		// A transport failure (no response) or an origin 5xx: the upstream is down.
 		c.authCircuit.onUpstreamFailure(now, probe)
 	default:
+		// An odd 4xx or an unrecognised redirect — not upstream-down.
 		c.authCircuit.onInconclusive(now, probe)
 	}
 }
