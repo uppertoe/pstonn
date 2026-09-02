@@ -181,6 +181,12 @@ func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
 }`)
 }
 
+// publicContentRev is the <lastmod> stamped on every sitemap entry: the date the
+// public pages last changed in a way a search engine should re-crawl for. Bump
+// it by hand with such a change — an automatic stamp (build time, process start)
+// would move on every deploy and teach crawlers the field is noise.
+const publicContentRev = "2026-09-02"
+
 // sitemapXML lists the indexable public pages so a search engine discovers them
 // without guessing. Only the four content pages plus the FAQ — nothing behind auth.
 func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
@@ -189,10 +195,10 @@ func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 	for _, p := range []string{"/", "/how", "/security", "/contact", "/faq"} {
-		fmt.Fprintf(&b, "  <url><loc>%s%s</loc></url>\n", base, p)
+		fmt.Fprintf(&b, "  <url><loc>%s%s</loc><lastmod>%s</lastmod></url>\n", base, p, publicContentRev)
 	}
 	for _, g := range guidesFor(s.tenantViewFor(r.Context(), "")) {
-		fmt.Fprintf(&b, "  <url><loc>%s/guide/%s</loc></url>\n", base, g.Slug)
+		fmt.Fprintf(&b, "  <url><loc>%s/guide/%s</loc><lastmod>%s</lastmod></url>\n", base, g.Slug, publicContentRev)
 	}
 	b.WriteString("</urlset>\n")
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")

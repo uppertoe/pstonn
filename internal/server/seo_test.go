@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
 )
@@ -103,6 +104,14 @@ func TestRobotsAndSitemap(t *testing.T) {
 	}
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/xml") {
 		t.Errorf("sitemap Content-Type = %q, want application/xml", ct)
+	}
+	// Every entry carries the content-revision lastmod, and the constant stays a
+	// real date — a malformed value would have crawlers ignore the field site-wide.
+	if _, err := time.Parse("2006-01-02", publicContentRev); err != nil {
+		t.Errorf("publicContentRev %q is not a YYYY-MM-DD date: %v", publicContentRev, err)
+	}
+	if got, want := strings.Count(sitemap, "<lastmod>"+publicContentRev+"</lastmod>"), strings.Count(sitemap, "<loc>"); got != want {
+		t.Errorf("sitemap has %d lastmod entries for %d locs:\n%s", got, want, sitemap)
 	}
 }
 
