@@ -30,6 +30,7 @@
 <link rel="apple-touch-icon" href="{{asset "icon-180.png"}}">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
+<link rel="stylesheet" href="{{asset "app.css"}}">
 {{if eq .State "guest"}}{{/* Make a bookmarked/installed guest link feel like an app on the home screen (PNG icons + per-recipient manifest so it opens straight to their menu). */}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/{{.Guest.Token}}">{{else}}<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">{{end}}
 <script{{with .Nonce}} nonce="{{.}}"{{end}}>
   // Apply the saved theme before first paint (no flash), and wire the toggle.
@@ -143,7 +144,6 @@
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "alpine.min.js"}}"></script>
 {{if or (eq .State "landing") (eq .State "how") (eq .State "guide")}}<link rel="stylesheet" href="{{asset "demos.css"}}">
 <script{{with .Nonce}} nonce="{{.}}"{{end}} defer src="{{asset "demos.js"}}"></script>{{end}}
-{{template "styles" .}}
 {{/* These live in the head, NOT in the body: the body is hx-boost="true", so htmx
      swaps its innerHTML on every boosted navigation and RE-CREATES any script
      element it finds there. A re-created one cannot inherit the nonce (browsers
