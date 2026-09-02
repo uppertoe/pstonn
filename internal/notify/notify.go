@@ -943,21 +943,6 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			}
 		}
 
-		// A failure notice past this person's daily budget is dropped, and counted
-		// as delivered so the scheduler records the outcome and stops retrying it:
-		// they have been told enough today, and the activity page has the rest.
-		if !o.OK {
-			lim := s.failureTo
-			if o.Urgent {
-				lim = s.urgentFailureTo
-			}
-			if !lim.allow(d.email) {
-				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
-				delivered++
-				continue
-			}
-		}
-
 		// Quiet hours: hold this member's notice and deliver it via the durable
 		// outbox at the window's end, so a midnight roster change lands as a 6am
 		// confirmation rather than a 12:01am ping. Queuing counts as reached.
@@ -983,6 +968,25 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				}
 			}
 			continue
+		}
+
+		// A failure notice past this person's daily budget is dropped, and counted
+		// as delivered so the scheduler records the outcome and stops retrying it:
+		// they have been told enough today, and the activity page has the rest.
+		// Checked here, AFTER the quiet-hours deferral, so only an inline send
+		// spends the budget: a deferred notice is deduped in the outbox, and an
+		// overnight outage re-attempting every half hour used to burn the whole
+		// day's allowance on notices that never went anywhere.
+		if !o.OK {
+			lim := s.failureTo
+			if o.Urgent {
+				lim = s.urgentFailureTo
+			}
+			if !lim.allow(d.email) {
+				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
+				delivered++
+				continue
+			}
 		}
 
 		reached := false

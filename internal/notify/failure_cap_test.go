@@ -67,3 +67,55 @@ func TestFailureNoticesAreCappedPerRecipient(t *testing.T) {
 		t.Fatalf("emails after a success = %d, want 6", sent)
 	}
 }
+
+// TestDeferredFailureNoticesDoNotSpendTheCap: the cap is checked after the
+// quiet-hours deferral, so a notice that goes to the outbox (where it is deduped)
+// costs nothing. An overnight outage re-attempting every half hour used to burn
+// the whole day's allowance on notices that never went anywhere, so the first
+// daytime failure was already throttled.
+func TestDeferredFailureNoticesDoNotSpendTheCap(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const owner = "primary@example.com"
+	// A quiet window that covers "now" in the service's zone (UTC below).
+	h := time.Now().UTC().Hour()
+	quiet := store.NotifyPref{Owner: owner, EmailEnabled: true, QuietFrom: (h + 23) % 24, QuietUntil: (h + 2) % 24}
+	if err := st.SetNotifyPref(ctx, quiet); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	sent := 0
+	m.SetSendHook(func(_, _, _ string, _ mailer.Options) error { sent++; return nil })
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+
+	fail := func(i int) ApplyOutcome {
+		return ApplyOutcome{Owner: owner, PermitID: int64(i), PermitLabel: fmt.Sprintf("VPP%d", i), Reg: "ABC123",
+			OK: false, CurrentReg: "OLD1", Reason: "r", Action: "a", Transient: true, Key: fmt.Sprintf("error|ABC123|day|%d", i)}
+	}
+	// Six overnight attempts: all deferred to the outbox, none sent, none throttled.
+	for i := 0; i < 6; i++ {
+		if n, err := svc.NotifyApply(ctx, fail(i)); n != 1 || err != nil {
+			t.Fatalf("deferred failure %d = (%d, %v), want (1, nil)", i, n, err)
+		}
+	}
+	if sent != 0 {
+		t.Fatalf("emails during quiet hours = %d, want 0", sent)
+	}
+	// Morning: quiet hours off. The day's budget is still whole.
+	quiet.QuietFrom, quiet.QuietUntil = 0, 0
+	if err := st.SetNotifyPref(ctx, quiet); err != nil {
+		t.Fatal(err)
+	}
+	for i := 10; i < 14; i++ {
+		if n, err := svc.NotifyApply(ctx, fail(i)); n != 1 || err != nil {
+			t.Fatalf("daytime failure %d = (%d, %v)", i, n, err)
+		}
+	}
+	if sent != 3 {
+		t.Fatalf("daytime failure emails = %d, want 3: the deferred ones must not have spent the cap", sent)
+	}
+}
