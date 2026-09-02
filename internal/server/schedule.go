@@ -37,6 +37,11 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	case "expired":
 		base.Warn = s.say(r.Context(), base.Owner, "schedule.added_expired")
 	}
+	// addPermit sets ?more=1 (on either added landing) when the account still holds
+	// another unmanaged visitor permit, so the nudge rides the post-add landing only —
+	// like the flash above, a manual refresh of this URL re-shows it, but any normal
+	// navigation to /schedule (no query) drops it.
+	base.MoreToSetUp = r.URL.Query().Get("more") == "1"
 	ctx := r.Context()
 	owner := base.Owner
 	now := time.Now().In(s.locFor(ctx, owner))

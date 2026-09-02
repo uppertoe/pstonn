@@ -191,7 +191,9 @@ func TestAddPermitOverHTTP(t *testing.T) {
 
 	t.Run("a visitor permit is adopted from the council record", func(t *testing.T) {
 		rr := add("90001")
-		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/schedule?added=1" {
+		// The fake portal offers a second visitor permit (90002) still unmanaged, so
+		// the landing carries the set-up-another nudge (see TestAddPermitNudges...).
+		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/schedule?added=1&more=1" {
 			t.Fatalf("code=%d location=%q body=%s", rr.Code, rr.Header().Get("Location"), excerpt(rr.Body.String()))
 		}
 		ps, _ := r.st.ListPermitsFor(r.ctx, rigUser)
@@ -499,5 +501,104 @@ func TestTenantSwitcherOverHTTP(t *testing.T) {
 	}
 	if rr := post("/tenant/select", url.Values{"tenant_id": {"nowhere"}}); rr.Code != http.StatusBadRequest {
 		t.Fatalf("unknown tenant: %d", rr.Code)
+	}
+}
+
+// After adding a permit, addPermit nudges toward a second one — but only while the
+// council list still holds another unmanaged visitor permit (?more=1). The fake
+// portal offers two visitor permits (90001, 90002).
+func TestAddPermitNudgesWhileAnotherRemains(t *testing.T) {
+	r := newTenantRig(t)
+	r.consent(t, rigUser)
+	r.link(t, rigUser)
+
+	// First add: the other visitor permit is still unmanaged → nudge.
+	rr := r.post("/permits", rigUser, url.Values{
+		"council_permit_id": {"90001"}, "permit_type_id": {"14"}, "label": {"VPP-SANDBOX"}})
+	if rr.Code != http.StatusSeeOther || !strings.Contains(rr.Header().Get("Location"), "more=1") {
+		t.Fatalf("first add should nudge for the second: code=%d loc=%q", rr.Code, rr.Header().Get("Location"))
+	}
+	// Second add: nothing schedulable remains → no nudge.
+	rr = r.post("/permits", rigUser, url.Values{
+		"council_permit_id": {"90002"}, "permit_type_id": {"15"}, "label": {"VPP-SANDBOX-2"}})
+	if rr.Code != http.StatusSeeOther || strings.Contains(rr.Header().Get("Location"), "more=1") {
+		t.Fatalf("second add should not nudge: code=%d loc=%q", rr.Code, rr.Header().Get("Location"))
+	}
+}
+
+// The set-up-another nudge must not point at a permit another account in the same
+// tenant already manages — the picker would offer it but the add would 409, a
+// dead-end. anotherSchedulableUnmanaged excludes it via a tenant-scoped check.
+func TestAddPermitDoesNotNudgeForAnotherAccountsPermit(t *testing.T) {
+	r := newTenantRig(t)
+	const other = "housemate@example.com"
+	r.consent(t, rigUser)
+	r.link(t, rigUser)
+	r.consent(t, other)
+	r.link(t, other)
+
+	// The housemate sets up the tenant's second visitor permit (90002).
+	rr := r.post("/permits", other, url.Values{
+		"council_permit_id": {"90002"}, "permit_type_id": {"15"}, "label": {"VPP-SANDBOX-2"}})
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("housemate setup add failed: code=%d", rr.Code)
+	}
+	// rigUser adds 90001; 90002 is taken, so no nudge toward it.
+	rr = r.post("/permits", rigUser, url.Values{
+		"council_permit_id": {"90001"}, "permit_type_id": {"14"}, "label": {"VPP-SANDBOX"}})
+	if rr.Code != http.StatusSeeOther || strings.Contains(rr.Header().Get("Location"), "more=1") {
+		t.Fatalf("must not nudge toward another account's permit: code=%d loc=%q", rr.Code, rr.Header().Get("Location"))
+	}
+}
+
+// A visitor permit another household account already manages is shown greyed with a
+// reason, not offered as addable — so the picker never dangles a "Set up" that would
+// 409, and the "more than one visitor permit" plural copy stays honest (only one is
+// actually set-up-able here).
+func TestPickerGreysAnotherAccountsPermit(t *testing.T) {
+	r := newTenantRig(t)
+	const other = "housemate@example.com"
+	r.consent(t, rigUser)
+	r.link(t, rigUser)
+	r.consent(t, other)
+	r.link(t, other)
+
+	// The housemate sets up 90002; the tenant now holds it under another account.
+	if rr := r.post("/permits", other, url.Values{
+		"council_permit_id": {"90002"}, "permit_type_id": {"15"}, "label": {"VPP-SANDBOX-2"}}); rr.Code != http.StatusSeeOther {
+		t.Fatalf("housemate setup add failed: code=%d", rr.Code)
+	}
+
+	body := r.get("/schedule", rigUser).Body.String()
+	if !strings.Contains(body, `name="council_permit_id" value="90001"`) {
+		t.Error("90001 should be offered to this account")
+	}
+	if strings.Contains(body, `name="council_permit_id" value="90002"`) {
+		t.Error("90002 is managed by another account — it must be greyed, not offered as addable")
+	}
+	if !strings.Contains(body, "Someone else at your address manages this one") {
+		t.Errorf("missing the cross-account reason:\n%s", excerpt(body))
+	}
+	if strings.Contains(body, "more than one visitor permit") {
+		t.Error("only one permit is truly set-up-able, so the plural guidance must not show")
+	}
+}
+
+// Adding an EXPIRED permit (kept addable for copy-onto-renewal) must still nudge
+// toward a live, unmanaged visitor permit — that permit is exactly what to surface.
+func TestAddExpiredPermitStillNudges(t *testing.T) {
+	r := newTenantRig(t)
+	r.consent(t, rigUser)
+	r.link(t, rigUser)
+	r.fake.Extra = []provider.Permit{{
+		CouncilPermitID: "88", PermitTypeID: "14", PermitNumber: "VPP-OLD",
+		PermitType: "(A) 1st Visitor Permit", Status: "Cancelled", CanChangeVehicle: true,
+		EndDate: time.Now().AddDate(0, 0, -30)}}
+	defer func() { r.fake.Extra = nil }()
+
+	rr := r.post("/permits", rigUser, url.Values{
+		"council_permit_id": {"88"}, "permit_type_id": {"14"}, "label": {"VPP-OLD"}})
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/schedule?added=expired&more=1" {
+		t.Fatalf("expired add should nudge toward the live permits: code=%d loc=%q", rr.Code, rr.Header().Get("Location"))
 	}
 }

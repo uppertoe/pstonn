@@ -783,6 +783,18 @@
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
    
+  .setup-more { display:inline-flex; align-items:center; gap:7px; padding:9px 15px; border-radius:11px;
+    font-size:14px; font-weight:650; text-decoration:none; color:var(--ink);
+    background:var(--accent-soft); border:2px solid var(--accent); align-self:flex-start;
+    animation:setup-pulse 1.6s ease-out 4; }
+  .setup-more svg { color:var(--accent-fill); }
+  .setup-more:hover { background:color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+  @keyframes setup-pulse {
+    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+    70%  { box-shadow:0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent); }
+    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  }
+   
    
   .share-hint { color:var(--muted); font-size:13.5px; display:flex; align-items:center; gap:10px; margin:0; padding:9px 8px 9px 12px; background:var(--surface-2); border:1px solid var(--line); border-left:3px solid color-mix(in srgb, var(--hue,var(--primary)) 55%, var(--surface-2)); border-radius:11px; }
   .share-hint > svg { flex:none; width:16px; height:16px; align-self:center; color:var(--hue,var(--primary)); }
@@ -1116,7 +1128,9 @@ window.popClamp = window.popClamp || function (el) {
   
 
   
+  
   <a class="link-quiet" href="/permits/new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Manage another permit</a>
+  
   
   
   

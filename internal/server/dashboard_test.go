@@ -510,10 +510,16 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, LinkThrottled: true, Loc: loc},
 			"your ePermits account must be under"},
 		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc}, "Waiting for the account owner"},
-		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
+		{"picker", dashboardData{User: user, State: "picker", Loc: loc, OfferedCount: 1, Pick: []pickView{
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},
 			{CouncilPermitID: "9001", PermitTypeID: "3", PermitNumber: "RPP5", PermitType: "(B) Resident Permit", Addable: false, Reason: "Only visitor permits can be scheduled."},
 		}}, "Only visitor permits can be scheduled."},
+		// Two offered visitor permits: the guidance acknowledges both rather than
+		// saying "your visitor permit" (singular) over a two-choice screen.
+		{"picker two visitor permits", dashboardData{User: user, State: "picker", Loc: loc, OfferedCount: 2, Pick: []pickView{
+			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},
+			{CouncilPermitID: "14577", PermitTypeID: "15", PermitNumber: "VPP24715", PermitType: "(A) 2nd Visitor Permit", CurrentRego: "DEF456", Addable: true},
+		}}, "You have more than one visitor permit"},
 		// A dead permit is grouped under its own heading with a status pill and a
 		// button that says what adding it is for — never the live card's "Manage".
 		{"picker groups dead permits", dashboardData{User: user, State: "picker", Loc: loc, Pick: []pickView{
@@ -550,6 +556,12 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:  []permitView{samplePermitViewAt(loc, now)},
 		}, "Weekly roster"},
+		// Right after adding a permit while another visitor permit is still unmanaged:
+		// the "manage another" control becomes the highlighted "set up your other permit".
+		{"schedule-more-to-set-up", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc, MoreToSetUp: true,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitViewAt(loc, now)},
+		}, "Set up your other permit"},
 		{"schedule-expired-section", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:        []permitView{samplePermitViewAt(loc, now)},

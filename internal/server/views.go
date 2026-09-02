@@ -182,6 +182,18 @@ type dashboardData struct {
 	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
 	// template; hidden by the template when already running standalone.
 	ShowInstallHint bool
+	// OfferedCount is how many live, schedulable (visitor) permits the picker is
+	// offering. The picker tailors its guidance on it: more than one means the
+	// "this is usually your visitor permit" (singular) line would contradict the
+	// two-or-more shown, so a "you can set up both" line is used instead.
+	OfferedCount int
+	// MoreToSetUp puts a one-time nudge on the Schedule page right after a permit is
+	// added, when the council list still holds another schedulable visitor permit
+	// this account hasn't set up — surfacing the "add the other whenever you like"
+	// offer at the moment it is most relevant. Detected free in addPermit (it already
+	// read the list); passed via ?more=1 so it rides the post-add landing, not every
+	// later visit (a manual refresh of that URL re-shows it, like the added=1 flash).
+	MoreToSetUp bool
 	// ShowGuestHint points a household at guest passes once its behaviour proves
 	// the need: several one-off bookings and no guest activity means someone is
 	// manually doing exactly what a guest link automates. Server-gated on the

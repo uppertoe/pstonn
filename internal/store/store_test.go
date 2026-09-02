@@ -3607,3 +3607,32 @@ func TestFortnightNudgeCandidates(t *testing.T) {
 		t.Fatalf("after mark: candidates = %v, want none", got)
 	}
 }
+
+// ManagedPermitIDsInTenant returns the council permit ids managed by ANY account in
+// a tenant, and an empty set for an unknown or empty tenant.
+func TestManagedPermitIDsInTenant(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	s.DefaultTenant = "stonnington"
+
+	if _, err := s.UpsertPermit(ctx, "alice@example.com", "14576", "14", "Alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertPermit(ctx, "bob@example.com", "99999", "14", "Bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.ManagedPermitIDsInTenant(ctx, "stonnington")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["14576"] || !got["99999"] || len(got) != 2 {
+		t.Fatalf("managed set = %v, want both 14576 and 99999 (across accounts)", got)
+	}
+	if empty, _ := s.ManagedPermitIDsInTenant(ctx, ""); len(empty) != 0 {
+		t.Fatalf("empty tenant should yield an empty set, got %v", empty)
+	}
+	if other, _ := s.ManagedPermitIDsInTenant(ctx, "elsewhere"); len(other) != 0 {
+		t.Fatalf("a tenant with no permits should be empty, got %v", other)
+	}
+}

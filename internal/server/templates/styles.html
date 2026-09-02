@@ -738,6 +738,21 @@
   .pnote { color:var(--warn); font-size:12px; white-space:nowrap; }
   .tag { font-size:11px; font-weight:650; color:var(--on-primary); background:var(--primary); padding:2px 9px; border-radius:999px; }
   .link-quiet { color:var(--muted); font-size:13.5px; display:inline-flex; align-items:center; gap:6px; position:relative; }
+  /* Attention state for the "set up your other permit" control: amber-bordered,
+     with a glow ring that pulses a few times to catch the eye, then rests. Motion
+     is disabled under prefers-reduced-motion by the global rule above; the border
+     and fill still mark it out. */
+  .setup-more { display:inline-flex; align-items:center; gap:7px; padding:9px 15px; border-radius:11px;
+    font-size:14px; font-weight:650; text-decoration:none; color:var(--ink);
+    background:var(--accent-soft); border:2px solid var(--accent); align-self:flex-start;
+    animation:setup-pulse 1.6s ease-out 4; }
+  .setup-more svg { color:var(--accent-fill); }
+  .setup-more:hover { background:color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+  @keyframes setup-pulse {
+    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+    70%  { box-shadow:0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent); }
+    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  }
   /* A tip is a contained strip, so its dismiss belongs to it: icon, text and ×
      all centred on the strip. No margin of its own — the page grid's gap spaces
      the link above and the strips evenly. */

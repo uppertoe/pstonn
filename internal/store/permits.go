@@ -129,6 +129,34 @@ func (s *Store) PermitInTenant(ctx context.Context, tenantID, tenantPermitID str
 	return p, err
 }
 
+// ManagedPermitIDsInTenant returns the set of council permit ids that ANY account
+// manages within one tenant. One query answers "is this permit already taken (by
+// me or a housemate)" for a whole picker render or add, instead of a lookup per
+// permit. Empty tenantID yields an empty set (nothing to scope to).
+func (s *Store) ManagedPermitIDsInTenant(ctx context.Context, tenantID string) (map[string]bool, error) {
+	if tenantID == "" {
+		return map[string]bool{}, nil
+	}
+	if err := s.ensurePermitSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT council_permit_id FROM permit WHERE council_id = ?`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		set[id] = true
+	}
+	return set, rows.Err()
+}
+
 // UpsertPermit inserts a permit, or refreshes the type of one the SAME owner
 // already holds. It never reassigns ownership: the ON CONFLICT update is guarded
 // by owner, so one user can never take over another user's permit row by

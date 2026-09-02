@@ -1082,82 +1082,66 @@ window.popClamp = window.popClamp || function (el) {
   </div>
 </header>
 
-<div class="navwrap">
-  <nav class="nav">
-    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
-    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
-    <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
-    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
-    <a href="/settings" class="nav-item active" style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
-  </nav>
-</div>
 <main id="main" tabindex="-1">
   
   
-
   
   
-  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></span> Settings</div>
-  <p class="subtitle">Your council connection and account.</p>
-  <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span> Council connection</h2>
+  <section class="card">
+    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"/><path d="M13 6v12"/></svg></span> Choose a permit to set up</div>
     
     
-    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, it would stop around <strong>15 Oct 2026</strong> &mdash; we'd email a one-click link first.</p>
+    <p class="subtitle">You have more than one visitor permit &mdash; each one holds a car. You can set up both; pick either to start, and add the other whenever you like.</p>
     
     
-    <div class="row" style="margin-top:14px" x-data="{del:false}">
-      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
-        <button type="submit" class="ghost"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Unlink account</button>
-      </form>
-      <button type="button" class="danger" @click="del=!del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Delete all my data</button>
-      <form method="post" action="/account/delete" class="row" x-show="del" x-cloak style="gap:8px">
-        <input name="confirm" placeholder="Type DELETE" autocomplete="off" style="width:130px">
-        <button type="submit" class="danger">Confirm</button>
-      </form>
-    </div>
-    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything from the live database straight away; backup copies age out afterwards.</p>
     
-  </section>
-  
-  <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span> Shared access</h2>
-    
-    <p class="subtitle">Let up to two other people help manage this account. They sign in with their own email, so there is nothing to share but the access itself.</p>
-    
-    <p class="empty-note" style="margin-top:12px">No one else has access yet.</p>
+    <p class="subtitle">Choosing a permit changes nothing at the council. You set up the schedule next. <a href="/how" hx-boost="false">How it works</a></p>
     
     
-    <form method="post" action="/account/members" class="row" style="margin-top:14px;gap:8px">
-      <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Add person</button>
-    </form>
-    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do. Once they accept they can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
     
-    
-  </section>
-  <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span> Notifications</h2>
-    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
-    
-    <p class="empty-note">No notification channels are set up by the operator. Configure <code>SMTP_*</code> (email) or <code>NTFY_BASE_URL</code> (push) to enable this.</p>
-    
-  </section>
-  <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span> Account</h2>
-    <div class="row" style="justify-content:space-between">
-      <span class="muted">Signed in as <strong style="color:var(--ink)">a@b.com</strong></span>
+    <div class="pick">
+      
+      <div class="pick-item ">
+        <div>
+          <div style="font-weight:650">VPP24714</div>
+          <div class="muted" style="font-size:13px;margin-top:2px">(A) 1st Visitor Permit · currently <span class="reg">ABC123</span></div>
+        </div>
+        
+        <form method="post" action="/permits">
+          <input type="hidden" name="council_permit_id" value="14576">
+          <input type="hidden" name="permit_type_id" value="14">
+          <input type="hidden" name="label" value="VPP24714">
+          <input type="hidden" name="current_rego" value="ABC123">
+          <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Set up</button>
+        </form>
+        
+        
+      </div>
+      
+      <div class="pick-item ">
+        <div>
+          <div style="font-weight:650">VPP24715</div>
+          <div class="muted" style="font-size:13px;margin-top:2px">(A) 2nd Visitor Permit · currently <span class="reg">DEF456</span></div>
+        </div>
+        
+        <form method="post" action="/permits">
+          <input type="hidden" name="council_permit_id" value="14577">
+          <input type="hidden" name="permit_type_id" value="15">
+          <input type="hidden" name="label" value="VPP24715">
+          <input type="hidden" name="current_rego" value="DEF456">
+          <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Set up</button>
+        </form>
+        
+        
+      </div>
       
     </div>
-    <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
     
     
     
   </section>
-
-
-
 </main>
+
 
 
 

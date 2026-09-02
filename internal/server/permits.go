@@ -176,7 +176,23 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	base.HasManaged = len(managed) > 0
 	already := map[string]bool{}
 	for _, p := range managed {
-		already[p.CouncilPermitID] = true
+		// Scope to THIS council: a council permit id is unique only within its
+		// tenant, so an id the owner manages at another council must not shadow a
+		// different permit of the same id here (multi-council).
+		if p.TenantID == tid {
+			already[p.CouncilPermitID] = true
+		}
+	}
+	// Which permits ANY account in this tenant already manages — one read, so the
+	// cross-account greying below is O(1) per permit, not a lookup each. On error we
+	// leave it empty: the picker then degrades to its long-standing behaviour of
+	// offering the permit and letting addPermit's own guard refuse it — strictly no
+	// worse than before this change, and never wrongly greying a permit the user
+	// could actually take.
+	tenantManaged, err := s.store.ManagedPermitIDsInTenant(ctx, tid)
+	if err != nil {
+		log.Printf("picker: tenant-managed set for %s: %v", redact.Email(owner), err)
+		tenantManaged = map[string]bool{}
 	}
 	fallback := s.visitorNameFallback(ctx, owner, permits)
 	if fallback && complete {
@@ -240,6 +256,16 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		case !p.CanChangeVehicle:
 			reason = "Your council account can't change this permit's vehicle."
 		}
+		// A permit another p.stonn account at this address already manages is visible
+		// here but cannot be taken (addPermit refuses it, claimedByAnotherAccount).
+		// Grey it with the reason rather than offer a Set-up that dead-ends on a 409 —
+		// this also keeps OfferedCount, and so the "set up both" guidance, honest. The
+		// owner's OWN managed permits never reach here (skipped above), so any hit in
+		// the tenant-managed set at this point belongs to another account.
+		if addable && tenantManaged[p.CouncilPermitID] {
+			addable = false
+			reason = "Someone else at your address manages this one on p.stonn. Ask them to share access with you from their Settings."
+		}
 		// An expired/cancelled permit is still listed and still addable (a user may
 		// be reconstructing a schedule to copy onto a renewal), but say so plainly:
 		// nothing will ever be applied to it, and silently accepting it looks to the
@@ -298,6 +324,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		}
 		log.Printf("picker for %s: %d council permit(s), %d already managed, %d offered live: %s",
 			redact.Email(owner), len(permits), len(permits)-len(base.Pick), offered, detail)
+		base.OfferedCount = offered // drives the picker's one-vs-many guidance
 	}
 	// Live permits first, dead ones last; the tenant's own order within each
 	// group. The template renders the dead group under its own heading.
@@ -450,7 +477,8 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// gate (the greyed-out picker button is only a UI hint) — it shares
 	// visitorSchedulable with the picker so the two can't drift and offer a
 	// permit this gate then refuses.
-	if !s.visitorSchedulable(ctx, owner, *match, s.visitorNameFallback(ctx, owner, permits)) {
+	fallback := s.visitorNameFallback(ctx, owner, permits) // computed once; reused by the nudge check below
+	if !s.visitorSchedulable(ctx, owner, *match, fallback) {
 		s.message(w, http.StatusForbidden, "p.stonn only manages visitor permits.")
 		return
 	}
@@ -503,17 +531,60 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		target = cpid
 	}
 	s.logChange(ctx, owner, user, store.ActionPermitAdd, target, "")
-	// Land with the outcome said out loud. An EXPIRED permit is deliberately
-	// addable (its schedule can be copied onto a renewal), but it renders inside
-	// the collapsed "Expired permits" section — so the picker's "Manage" press
-	// used to land on a page where the just-added permit was nowhere visible and
-	// nothing acknowledged it. The active case gets a first-steps nudge instead.
+	// Nudge toward a second permit: the council list we already read may still hold
+	// another schedulable visitor permit this account hasn't set up. Surface it on
+	// the landing so "add the other whenever you like" is acted on, not just stated
+	// — including when the permit just added was itself expired (added for its old
+	// schedule), since the still-unmanaged LIVE permit is exactly what to point at.
+	more := ""
+	if s.anotherSchedulableUnmanaged(ctx, owner, tenantID, permits, cpid, fallback) {
+		more = "&more=1"
+	}
+	// Land with the outcome said out loud. An EXPIRED permit is deliberately addable
+	// (its schedule can be copied onto a renewal), but it renders inside the collapsed
+	// "Expired permits" section — so its own "added" acknowledgement differs from the
+	// active case, which gets a first-steps nudge.
 	meta := model.Permit{Status: match.Status, EndDate: match.EndDate}
 	if meta.Inactive(time.Now(), s.locFor(ctx, owner)) {
-		http.Redirect(w, r, "/schedule?added=expired", http.StatusSeeOther)
+		http.Redirect(w, r, "/schedule?added=expired"+more, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/schedule?added=1", http.StatusSeeOther)
+	http.Redirect(w, r, "/schedule?added=1"+more, http.StatusSeeOther)
+}
+
+// anotherSchedulableUnmanaged reports whether permits (the council list already
+// read by the caller) holds a LIVE, changeable visitor permit — other than justAdded
+// — that NO account yet manages, so the "set up another" nudge only points where an
+// add can actually succeed. No extra council call: it reuses the caller's list and,
+// per candidate, one indexed read scoped to the tenant. The tenant scope matters —
+// a shared household permit already managed by another account would be OFFERED by
+// the picker but refused by addPermit (claimedByAnotherAccount), a dead-end nudge.
+func (s *Server) anotherSchedulableUnmanaged(ctx context.Context, owner, tenantID string, permits []parking.PermitInfo, justAdded string, fb bool) bool {
+	// One read of the tenant's managed set answers "does any account already have
+	// this" for every candidate. On error, fail CLOSED — suppress the nudge rather
+	// than risk pointing at a permit that dead-ends on the add; the persistent
+	// "manage another permit" link still lets them find it.
+	managed, err := s.store.ManagedPermitIDsInTenant(ctx, tenantID)
+	if err != nil {
+		log.Printf("nudge: tenant-managed set for %s: %v", redact.Email(owner), err)
+		return false
+	}
+	now := time.Now()
+	loc := s.locFor(ctx, owner)
+	for i := range permits {
+		p := &permits[i]
+		if p.CouncilPermitID == justAdded || managed[p.CouncilPermitID] {
+			continue
+		}
+		if !p.CanChangeVehicle || !s.visitorSchedulable(ctx, owner, *p, fb) {
+			continue
+		}
+		if (model.Permit{Status: p.Status, EndDate: p.EndDate}).Inactive(now, loc) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // deletePermit stops p.stonn administering a permit: it drops the permit and its
