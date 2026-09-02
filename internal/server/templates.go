@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/i18n"
 	"html/template"
 	"io/fs"
+	"net/http"
 	"time"
 )
 
@@ -49,6 +51,27 @@ func computeStaticVersion() string {
 
 // asset builds a cache-busted URL for a vendored static file.
 func asset(path string) string { return "/static/" + path + "?v=" + staticVersion }
+
+// appCSS is static/app.css with its one cross-reference stamped: the stylesheet
+// pulls the wordmark font, and a plain relative url() would be held by the
+// browser's immutable cache for a year even after the font file changed. The
+// placeholder becomes the same ?v= every other static URL carries, so a new
+// font ships with a new stylesheet that points at a new font URL.
+var appCSS = renderAppCSS()
+
+func renderAppCSS() []byte {
+	b, err := staticFS.ReadFile("static/app.css")
+	if err != nil {
+		panic(err)
+	}
+	return bytes.ReplaceAll(b, []byte("__STATIC_V__"), []byte(staticVersion))
+}
+
+// serveAppCSS serves the stamped stylesheet in place of the embedded file.
+func serveAppCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	http.ServeContent(w, r, "app.css", time.Time{}, bytes.NewReader(appCSS))
+}
 
 // weekdaysDisplay is the roster order shown in the UI (Sunday first), matching
 // the fortnight calendar's weekday columns so the same day lines up in both.

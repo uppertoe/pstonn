@@ -144,3 +144,28 @@ func TestCSRFRefererFallback(t *testing.T) {
 		t.Errorf("a cross-origin Referer = %d, want 403", code)
 	}
 }
+
+// The stylesheet is the one static file that references another (the wordmark
+// font). Served through serveAppCSS so that reference carries the same ?v= as
+// every other static URL: without it the browser's immutable cache would hold a
+// replaced font for a year while the new stylesheet still pointed at it.
+func TestAppCSSStampsTheFontVersion(t *testing.T) {
+	s := newAuthzServer(t)
+	w := s.doReq("GET", "/static/app.css?v="+staticVersion, "", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
+		t.Errorf("Content-Type = %q, want text/css", ct)
+	}
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Errorf("Cache-Control = %q, want immutable", cc)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "spacegrotesk-wordmark.woff2?v="+staticVersion) {
+		t.Errorf("font URL is not stamped with the static version")
+	}
+	if strings.Contains(body, "__STATIC_V__") {
+		t.Errorf("placeholder survived into the served stylesheet")
+	}
+}

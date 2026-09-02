@@ -2,7 +2,7 @@
    immutable cache; every full page links it, so it survives boosted swaps. */
 @font-face {
   font-family:'Space Grotesk'; font-style:normal; font-weight:600; font-display:swap;
-  src:url('spacegrotesk-wordmark.woff2') format('woff2');
+  src:url('spacegrotesk-wordmark.woff2?v=__STATIC_V__') format('woff2'); /* __STATIC_V__ is stamped at startup (templates.go) so a replaced font busts the immutable cache */
   /* Subset covers only the wordmark glyphs (p . s t o n); scope the font to them
      so it is never partially applied to arbitrary headings. */
   unicode-range:U+002E, U+006E, U+006F, U+0070, U+0073, U+0074;

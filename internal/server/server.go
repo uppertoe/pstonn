@@ -256,6 +256,7 @@ func (s *Server) throttlePerIP(rl *rateLimiter, h http.HandlerFunc) http.Handler
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.Handle("GET /static/app.css", cacheStatic(http.HandlerFunc(serveAppCSS)))
 	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(staticSub))))
 
 	if s.auth != nil {

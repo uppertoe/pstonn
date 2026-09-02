@@ -51,9 +51,9 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	// (nothing to validate) and used to be dropped on the floor, so a member who
 	// pressed Approve was shown the guests page with no word on what happened.
 	case q.Get("alreadydecided") != "":
-		base.Flash = "Someone else already answered that request."
+		base.Flash = "That request has already been answered, or it expired before anyone answered it."
 	case q.Get("revoked") != "":
-		base.Warn = "That request wasn't approved: its printed QR code has been removed, or guest passes are paused."
+		base.Warn = "That request couldn't be put on the permit: its printed QR code may have been removed, or guest passes paused."
 	case looksLikeEmail(q.Get("resent")):
 		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
 	}
