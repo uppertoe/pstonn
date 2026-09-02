@@ -163,6 +163,29 @@ func (s *Scheduler) NoteSessionExpired(owner, tenantID string, gen int64) {
 	s.enqueueReconnect(context.Background(), owner, tenantID, gen)
 }
 
+// reconnectActiveWindow bounds how long a queued reconnect reads as "actively in
+// progress" for a caller that shows an in-progress page. One attempt is portal
+// time plus the governor's hold (tens of seconds); beyond this window a still-queued
+// item is stuck in backoff — or deferred indefinitely by a login-shape break — and a
+// caller must stop showing a spinner and offer the manual path instead. A var so a
+// test can shrink it. See the picker's use in internal/server/reconnect.go.
+var reconnectActiveWindow = 90 * time.Second
+
+// ReconnectActive reports whether a saved-password reconnect for THIS (owner,
+// tenant) is queued AND still plausibly in progress (queued within
+// reconnectActiveWindow). The picker consults it to show its in-progress page
+// instead of spending a tenant read on a session that cannot work yet — while a
+// reconnect that has aged out (stuck in backoff, or a login-shape defer) reads as
+// inactive, so the picker falls back to the re-link form rather than trapping the
+// user on a self-refreshing page. Tenant-scoped: a reconnect queued for one council
+// must not gate a different, healthy council's picker.
+func (s *Scheduler) ReconnectActive(owner, tenantID string) bool {
+	s.reconnectMu.Lock()
+	defer s.reconnectMu.Unlock()
+	it, ok := s.reconnectQ[sessionKey{owner, tenantID}]
+	return ok && time.Since(it.queuedAt) < reconnectActiveWindow
+}
+
 // CancelReconnect drops any queued reconnect for owner. Called after a manual link,
 // unlink or account deletion so stale recovery work is discarded promptly (the
 // generation check is the hard safety; this is the fast path).

@@ -45,6 +45,9 @@ type Provider struct {
 	ListErr  error
 	Extra    []provider.Permit
 	Partial  bool
+	// Logins counts Login attempts (rejected ones included), so a test can prove
+	// an automatic reconnect tried exactly one login — or none at all.
+	Logins int
 	// Regions, when set, replaces the canned Australian state set — so a test can
 	// give two fake tenants different jurisdictions and prove routing by tenant.
 	Regions []provider.Region
@@ -84,6 +87,9 @@ type session struct {
 }
 
 func (f *Provider) Login(ctx context.Context, creds provider.Credentials) (provider.Session, error) {
+	f.mu.Lock()
+	f.Logins++
+	f.mu.Unlock()
 	if f.LoginErr != nil {
 		return nil, f.LoginErr
 	}

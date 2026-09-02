@@ -96,6 +96,7 @@
     "menu.area_connect": "Connect {{.Name}}…",
     "menu.area_add": "Connect another area…",
     "settings.area_connection": "{{.Name}} connection",
-    "picker.connect_first": "Connect your {{.Tenant.Name}} account to add a permit from there."
+    "picker.connect_first": "Connect your {{.Tenant.Name}} account to add a permit from there.",
+    "picker.reconnecting": "Your council sign-in had expired, so p.stonn is signing back in with your saved password. This page refreshes itself — you should be through in a few seconds."
   }
 }

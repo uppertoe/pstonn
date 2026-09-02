@@ -176,3 +176,43 @@ func genOf(t *testing.T, st *store.Store, owner string) int64 {
 	}
 	return cs.Generation
 }
+
+// ReconnectActive is tenant-scoped and ages out: it reports true only for THIS
+// (owner, tenant) while the queued item is still within reconnectActiveWindow, so
+// a caller's in-progress page can't gate a different council's page and can't trap
+// a user on a spinner once the reconnect is stuck in backoff.
+func TestReconnectActiveScopeAndWindow(t *testing.T) {
+	st := newStore(t)
+	s := New(st, &fakeTenant{}, time.UTC, Options{})
+	const owner = "a@example.com"
+
+	s.NoteSessionExpired(owner, "councilA", 1)
+	if !s.ReconnectActive(owner, "councilA") {
+		t.Fatal("a freshly queued reconnect should be active for its tenant")
+	}
+	// A different tenant, and a different owner, must not read as active.
+	if s.ReconnectActive(owner, "councilB") {
+		t.Fatal("a reconnect queued for councilA must not gate councilB")
+	}
+	if s.ReconnectActive("other@example.com", "councilA") {
+		t.Fatal("another owner's picker must not be gated")
+	}
+
+	// Age the queued item past the active window (as a stuck-in-backoff item would):
+	// still queued, but no longer "in flight", so the caller falls back to the form.
+	s.reconnectMu.Lock()
+	it := s.reconnectQ[sessionKey{owner, "councilA"}]
+	it.queuedAt = time.Now().Add(-2 * reconnectActiveWindow)
+	s.reconnectQ[sessionKey{owner, "councilA"}] = it
+	s.reconnectMu.Unlock()
+	if s.ReconnectActive(owner, "councilA") {
+		t.Fatal("a reconnect aged past the window must read as inactive")
+	}
+	// It is still queued — the item was not dropped, only aged.
+	s.reconnectMu.Lock()
+	_, stillQueued := s.reconnectQ[sessionKey{owner, "councilA"}]
+	s.reconnectMu.Unlock()
+	if !stillQueued {
+		t.Fatal("aging must not dequeue the item")
+	}
+}

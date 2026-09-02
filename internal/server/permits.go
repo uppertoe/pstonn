@@ -47,6 +47,18 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	owner := base.Owner
+	// A saved-password reconnect is actively in flight for THIS tenant's session:
+	// answer with the pending page rather than spend a tenant read (or a throttle
+	// slot) on a session that cannot work yet. Scoped to the current tenant, and
+	// only when a saved password actually exists to reconnect with — the scheduler
+	// also queues reconnects for permit-holders with no saved password, and those
+	// must not be told "signing back in with your saved password". A reconnect that
+	// has aged out of the active window (stuck in backoff) is not short-circuited
+	// here: the read proceeds and the expired branch offers the re-link form.
+	if s.sched.ReconnectActive(owner, s.tenantIDOf(ctx, owner)) && s.hasSavedPassword(ctx, owner) {
+		s.renderReconnecting(w, r, owner)
+		return
+	}
 	// This page makes an uncached, synchronous tenant read, so one HTTP request
 	// is one tenant request. Throttled per account: opening the picker a few
 	// times is normal, hammering it is not, and the tenant's opinion of us is
@@ -74,25 +86,51 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	permits, complete, err := s.tenant.ListPermitsComplete(ctx, owner, "")
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) {
-			// A dead session on THIS page is diagnostic, never routine ageing: only a
-			// linked account reaches the picker, and in the ?linked=1 case the session
-			// was established seconds ago. This branch used to be fully silent, which
-			// hid a whole failure mode (observed live 2026-08-22): a signup whose
-			// tenant password was accepted four times in a row was bounced back to
-			// the link form after each success — under a green "Tenant account
-			// linked." flash — because the fresh session failed this very read, until
-			// the password throttle stopped them with advice about wrong passwords.
-			freshLink := r.URL.Query().Get("linked") == "1"
-			log.Printf("picker: council permit read for %s failed as session-expired (fresh link: %v)", redact.Email(owner), freshLink)
-			if freshLink {
-				// The one thing this person must NOT be shown is the password form
-				// again: their password already worked, and every resubmit is a real
-				// tenant login. Say what actually happened and where to look.
+			// One read of the current tenant's session backs every decision below —
+			// its tenant, whether the link is recent, and whether a password is
+			// saved — so this hot, throttled error path touches the store once, and
+			// every choice is made against the SAME session (in multi-council, the
+			// one whose read just failed, never a different default tenant's).
+			tid := s.tenantIDOf(ctx, owner)
+			cs, cserr := s.store.GetTenantSessionIn(ctx, owner, tid)
+			// A first read that fails right after linking is the "council account
+			// isn't set up yet" case (their password just worked, so re-submitting it
+			// or reconnecting cannot help) — say what happened and where to look. An
+			// old /schedule?linked=1 reopened from history days later is just an
+			// ordinary lapse and must reach auto-reconnect, so require the link to be
+			// genuinely recent. On a session read error we cannot rule freshness out,
+			// so keep the diagnostic (the safe answer for a just-linked user) rather
+			// than queue a pointless reconnect. This whole branch was once silent,
+			// which hid a live failure mode (2026-08-22): a signup whose password was
+			// accepted was bounced to the link form after each success.
+			if r.URL.Query().Get("linked") == "1" && (cserr != nil || (!cs.LinkedAt.IsZero() && time.Since(cs.LinkedAt) < freshLinkWindow)) {
+				log.Printf("picker: council permit read for %s failed as session-expired right after linking", redact.Email(owner))
 				s.message(w, http.StatusBadGateway, s.say(ctx, owner, "picker.session_rejected"))
 				return
 			}
+			// The one thing a saved password is FOR: reconnect without making the
+			// person retype it. The scheduler proactively warms only sessions with a
+			// permit, so a permitless account's lapse surfaces exactly here on return.
+			// Hand the expiry to the scheduler's audited reconnect queue (it dedups,
+			// guards the session generation, retires-and-notifies on a bad or absent
+			// password, and paces the login). Show the pending page only while that
+			// reconnect is actively in flight; if it is already queued but stuck in
+			// backoff (or a login-shape defer), ReconnectActive is false and we fall
+			// through to the re-link form — the escape hatch, never a trapped spinner.
+			hasSaved := cserr == nil && cs.Password != ""
+			if gen, ok := parking.SessionGenOf(err); ok && hasSaved {
+				s.sched.NoteSessionExpired(owner, tid, gen)
+				if s.sched.ReconnectActive(owner, tid) {
+					log.Printf("picker: council session for %s expired; saved-password reconnect in flight", redact.Email(owner))
+					s.renderReconnecting(w, r, owner)
+					return
+				}
+				log.Printf("picker: council session for %s expired; reconnect not progressing, showing re-link", redact.Email(owner))
+			} else {
+				log.Printf("picker: council permit read for %s failed as session-expired; no saved password, showing re-link", redact.Email(owner))
+			}
 			base.State = "onboarding"
-			base.AutoReconnect = s.hasSavedPassword(ctx, owner)
+			base.AutoReconnect = hasSaved
 			base.Relink = true
 			s.render(w, base)
 			return
