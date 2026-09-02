@@ -104,6 +104,17 @@ type Client struct {
 	homeToken   string            // that state's portal FKVehicleStateID ("1")
 	http        *http.Client      // redirects handled manually; cookies passed per call
 	transport   http.RoundTripper // the governed/counted base, shared with the login-flow client
+	authCircuit *authCircuit      // per-tenant breaker for the authorize (token-mint) surface
+}
+
+// authBackoffErr is the fast-fail returned while the auth circuit is open. It wraps
+// the ErrUnavailable SENTINEL — so callers that already handle a busy portal
+// (errors.Is(err, ErrCouncilBusy)) get the right "the council's sign-in is busy, not
+// your password" treatment — but is NOT a *provider.Unavailable STRUCT, so the
+// parking client's classify() does not `errors.As` it and therefore does NOT feed
+// the blunt fleet breaker. This keeps the backoff surface-scoped to auth.
+func authBackoffErr(retry time.Duration) error {
+	return fmt.Errorf("%w: council sign-in is temporarily unavailable, backing off (retry in %s)", provider.ErrUnavailable, retry.Round(time.Second))
 }
 
 // New builds the provider. base is the transport the generic client governs and
@@ -132,6 +143,7 @@ func New(cfg Config, base http.RoundTripper) *Client {
 		homeCode:    homeCode,
 		homeToken:   homeToken,
 		transport:   tr,
+		authCircuit: &authCircuit{},
 		http: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: tr,
@@ -347,15 +359,53 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	}
 	authQuery.Set("prompt", "none")
 
+	// AUTH-surface circuit: a council auth outage (5xx) is otherwise re-hit by every
+	// keep-warm renew AND every API op whose cached token has gone stale, at each
+	// path's own rate, for the whole outage. When the circuit is open, fast-fail here
+	// WITHOUT touching the council — except for the single, escalating-backoff probe
+	// that tests recovery. A valid-token API op never reaches this (accessToken
+	// returns the cached token), so due schedule changes still apply.
+	probe, ok, retry := c.authCircuit.allow(time.Now())
+	if !ok {
+		return "", "", "", authBackoffErr(retry)
+	}
+	code, newCookie, status, err := c.doAuthorize(ctx, cookie, verifier, authQuery)
+	c.recordAuthorizeOutcome(probe, status, err)
+	return code, verifier, newCookie, err
+}
+
+// recordAuthorizeOutcome feeds the auth circuit the result of one authorize.
+// A code or a genuine session-expiry both mean the upstream SERVED us, so the
+// circuit closes. A transport error or an HTTP 5xx is the "upstream is down" signal
+// that opens it (or escalates a failed probe). Everything else — edge push-back, an
+// odd 4xx, an unrecognised redirect — is not upstream-down, so it neither opens nor
+// closes the circuit (the fleet breaker owns the edge case).
+func (c *Client) recordAuthorizeOutcome(probe bool, status int, err error) {
+	now := time.Now()
+	switch {
+	case err == nil, errors.Is(err, provider.ErrSessionExpired):
+		c.authCircuit.onSuccess(probe)
+	case status == 0, status >= 500:
+		c.authCircuit.onUpstreamFailure(now, probe)
+	default:
+		c.authCircuit.onInconclusive(now, probe)
+	}
+}
+
+// doAuthorize is the network half of authorizeWithCookie: the prompt=none authorize
+// GET and its response classification, returning the HTTP status so the caller can
+// drive the auth circuit. Behaviour is otherwise identical to before the circuit was
+// added.
+func (c *Client) doAuthorize(ctx context.Context, cookie, verifier string, authQuery url.Values) (code, newCookie string, status int, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.authURL+"?"+authQuery.Encode(), nil)
 	if err != nil {
-		return "", "", "", err
+		return "", "", 0, err
 	}
 	req.Header.Set("Cookie", cookie)
 	c.navHeaders(req) // iframe-style silent authorize
 	resp, err := c.do(req)
 	if err != nil {
-		return "", "", "", err
+		return "", "", 0, err
 	}
 	// Keep a bounded prefix of the body: it is the only way to tell an
 	// IdentityServer page from any other 200, and the classification below turns
@@ -370,7 +420,7 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	newCookie = mergeSetCookie(cookie, resp.Cookies())
 
 	if busy := pushback(resp); busy != nil {
-		return "", "", "", busy
+		return "", "", resp.StatusCode, busy
 	}
 	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
 		// A prompt=none authorize has exactly two honest answers, and both are
@@ -390,14 +440,14 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 			// that positive marker, treat it as a transient unexpected response rather
 			// than retiring the session.
 			if bytes.Contains(head, []byte(fieldAntiforgery)) {
-				return "", "", "", provider.ErrSessionExpired
+				return "", "", resp.StatusCode, provider.ErrSessionExpired
 			}
 			// An edge (WAF/challenge) interstitial. Typed as push-back so it feeds
 			// the per-owner cooldown, the fleet breaker and the /status connector
 			// state exactly like a 403-HTML would — an untyped error here degraded
 			// to an unclassifiable transient that nothing counted, so a challenge
 			// rollout was invisible until a user reported it.
-			return "", "", "", &provider.Unavailable{
+			return "", "", resp.StatusCode, &provider.Unavailable{
 				RetryAfter:  parseRetryAfter(resp),
 				Status:      resp.StatusCode,
 				Surface:     provider.SurfaceAuth,
@@ -405,17 +455,17 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 				Ref:         safeExcerpt(resp.Header.Get("X-Azure-Ref")),
 			}
 		}
-		return "", "", "", fmt.Errorf("orikan: silent-renew authorize: unexpected status %d", resp.StatusCode)
+		return "", "", resp.StatusCode, fmt.Errorf("orikan: silent-renew authorize: unexpected status %d", resp.StatusCode)
 	}
 	loc, err := url.Parse(resp.Header.Get("Location"))
 	if err != nil {
 		// Not %w-wrapped: a *url.Error's message embeds the whole raw URL, query
 		// and all, and a login-style bounce can carry a return URL or state there.
-		return "", "", "", fmt.Errorf("orikan: silent-renew: unparseable redirect (%d)", resp.StatusCode)
+		return "", "", resp.StatusCode, fmt.Errorf("orikan: silent-renew: unparseable redirect (%d)", resp.StatusCode)
 	}
 	loc = req.URL.ResolveReference(loc) // a relative Location resolves against the authorize URL
 	if code = loc.Query().Get("code"); code != "" {
-		return code, verifier, newCookie, nil
+		return code, newCookie, resp.StatusCode, nil
 	}
 	// No code. The 200-HTML branch above demands a positive marker (the antiforgery
 	// field) before it declares the session dead, and a redirect needs the same
@@ -430,9 +480,9 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	// portal behaving in a way we do not recognise: an unexpected, retried
 	// transient, exactly like a non-redirect status would be.
 	if loc.Query().Get("error") != "" && c.isRedirectURI(loc) {
-		return "", "", "", provider.ErrSessionExpired
+		return "", "", resp.StatusCode, provider.ErrSessionExpired
 	}
-	return "", "", "", fmt.Errorf("orikan: silent-renew authorize: unexpected redirect (%d) to %s", resp.StatusCode, redirectTarget(loc.String()))
+	return "", "", resp.StatusCode, fmt.Errorf("orikan: silent-renew authorize: unexpected redirect (%d) to %s", resp.StatusCode, redirectTarget(loc.String()))
 }
 
 // isRedirectURI reports whether a Location is the client's registered redirect_uri
