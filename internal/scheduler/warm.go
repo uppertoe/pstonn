@@ -16,6 +16,76 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
+// warmRetryInterval is how long a session's silent-renew waits after an unexpected
+// transient before it is re-attempted. It is DERIVED FROM THE RECOVERY RUNWAY, not a
+// free choice: when an idle window is known (the production config sets
+// COUNCIL_IDLE_WINDOW; a provider may also declare one), warmThresholdFor clamps the
+// warm threshold to idleWindow-warmSafetyMargin, so a stale session lapses at most
+// warmSafetyMargin after that threshold. A quarter of that margin fits ~4 attempts
+// inside the guaranteed runway — never letting the backoff push the next try past the lapse
+// boundary and force the very reconnect keep-warm exists to avoid — while still
+// collapsing the 3-minute fast-tick to a much gentler rate during an outage.
+// Clamped so it is neither trivially short nor unsafely long. A fixed interval, not
+// an escalating ladder: the runway is the hard ceiling, so there is no headroom to
+// escalate into.
+func (s *Scheduler) warmRetryInterval() time.Duration {
+	d := s.warmSafetyMargin / 4
+	if d < 5*time.Minute {
+		d = 5 * time.Minute
+	}
+	if d > 30*time.Minute {
+		d = 30 * time.Minute
+	}
+	// The floor/clamp must never exceed the runway itself under a pathologically
+	// small safety margin (config only requires margin < idle window): keep the
+	// interval strictly inside the margin so an attempt still fits before a lapse.
+	if s.warmSafetyMargin > 0 && d >= s.warmSafetyMargin {
+		d = s.warmSafetyMargin / 2
+	}
+	return d
+}
+
+// noteWarmFailure backs a session's silent-renew off after an unexpected transient
+// (e.g. a council-side 5xx), so a fixed 3-minute pass does not keep knocking on a
+// failing upstream. Cleared by noteWarmSuccess on the next good renew.
+func (s *Scheduler) noteWarmFailure(owner, tenant string) {
+	k := sessionKey{owner, tenant}
+	s.warmMu.Lock()
+	if s.warmRetryAt == nil { // lazily created: some tests construct a Scheduler literally
+		s.warmRetryAt = make(map[sessionKey]time.Time)
+	}
+	s.warmRetryAt[k] = time.Now().Add(s.warmRetryInterval())
+	s.warmMu.Unlock()
+}
+
+func (s *Scheduler) noteWarmSuccess(owner, tenant string) {
+	s.clearWarmBackoff(func(k sessionKey) bool { return k == sessionKey{owner, tenant} })
+}
+
+// clearWarmBackoff drops warm-backoff entries matching the predicate, so unlink,
+// retire and re-link leave no per-session bookkeeping behind (the leak the reconnect
+// cleanup exists to prevent).
+func (s *Scheduler) clearWarmBackoff(match func(sessionKey) bool) {
+	s.warmMu.Lock()
+	for k := range s.warmRetryAt {
+		if match(k) {
+			delete(s.warmRetryAt, k)
+		}
+	}
+	s.warmMu.Unlock()
+}
+
+// warmBackedOff reports whether a session's renewal is inside its failure backoff,
+// so the pass skips re-attempting it (leaving the API path, which uses a cached
+// token, untouched).
+func (s *Scheduler) warmBackedOff(owner, tenant string, now time.Time) bool {
+	k := sessionKey{owner, tenant}
+	s.warmMu.Lock()
+	defer s.warmMu.Unlock()
+	at, ok := s.warmRetryAt[k]
+	return ok && now.Before(at)
+}
+
 // warmLoop runs the keep-warm pass on its own cadence, often enough to catch a
 // session crossing the (jittered) warm threshold, but far cheaper than the
 // per-minute reconcile.
@@ -172,6 +242,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		case err != nil:
 			log.Printf("scheduler: retire session %s: %v", redact.Email(cs.Owner), err)
 		case retired:
+			s.noteWarmSuccess(cs.Owner, cs.TenantID) // session gone; drop any warm backoff so it can't leak
 			log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", redact.Email(cs.Owner))
 			// The renewal reminder (maybeRemind) is email-only and best-effort, so
 			// it must not be the sole signal: tell the user their permit just
@@ -191,6 +262,12 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 	// touches, so this keeps the cookie alive and the saved password dormant rather
 	// than replaying a login on each cold use).
 	if has, err := s.ownerHasPermitIn(ctx, cs.Owner, cs.TenantID); err != nil || !has {
+		if err == nil && !has {
+			// No permit to act on: this session is left to lapse, so a renewal
+			// backoff it happens to carry is moot — drop it rather than leak the
+			// entry (this path never reaches the clear below or cancelReconnectWhere).
+			s.noteWarmSuccess(cs.Owner, cs.TenantID)
+		}
 		return
 	}
 
@@ -204,6 +281,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		// reason this pass still visits it. (The warm clock never advances for such
 		// a session, so the branch is taken every pass; that is the cheap outcome.)
 		alive = true
+		s.noteWarmSuccess(cs.Owner, cs.TenantID) // durable session; drop any stale renewal backoff
 	} else if action == warmRenew && s.reconnectQueued(cs.Owner, cs.TenantID) {
 		// Already known dead and queued for recovery. Nothing marks a session
 		// known-dead in the store, so without this every recovery tick issued a real
@@ -211,10 +289,21 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		// backoff. The queue answers instead: the worker re-warms via a kick when it
 		// recovers, or the item leaves the queue and the next pass probes afresh.
 		// alive stays false; there is no session to serve a drift read.
+	} else if action == warmRenew && s.warmBackedOff(cs.Owner, cs.TenantID, now) {
+		// A recent renew failed with an unexpected transient (e.g. a council-side
+		// 5xx); wait out the backoff interval rather than re-hit a failing upstream
+		// every pass. alive stays false — but the owner's API path is NOT gated by
+		// this, so a due write can still be applied on a cached token. alive=false
+		// also skips the drift read below, which is deliberate: a drift read whose
+		// cached token has expired would itself trigger the very silent-renew we are
+		// backing off, and while the council's auth is down external permit changes
+		// aren't happening anyway, so the freshness cost is nil. A pass past the
+		// deadline probes afresh, and a good renew clears the backoff.
 	} else if action == warmRenew {
 		switch err := s.tenant.Refresh(ctx, cs.Owner, cs.TenantID); {
 		case err == nil:
 			alive = true
+			s.noteWarmSuccess(cs.Owner, cs.TenantID)
 			log.Printf("scheduler: kept session for %s warm", redact.Email(cs.Owner))
 		case errors.Is(err, parking.ErrSessionExpired):
 			// Hand recovery to the reconnect worker and move on — never reconnect inline
@@ -231,7 +320,13 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		case errors.Is(err, parking.ErrCouncilBusy):
 			// Portal pushing back; the client is already backing off. Stay quiet.
 		default:
-			log.Printf("scheduler: keep-warm %s: %v", redact.Email(cs.Owner), err)
+			// An unexpected transient (a council-side 5xx, a malformed response, a
+			// network blip). Back this session's renewal off (a runway-bounded fixed
+			// interval) so a sustained upstream failure is not re-attempted every pass
+			// — a good citizen during the other side's outage, and it self-clears on
+			// recovery.
+			s.noteWarmFailure(cs.Owner, cs.TenantID)
+			log.Printf("scheduler: keep-warm %s: %v (backing off)", redact.Email(cs.Owner), err)
 		}
 	}
 

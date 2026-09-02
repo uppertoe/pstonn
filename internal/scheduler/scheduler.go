@@ -281,6 +281,13 @@ type Scheduler struct {
 	driftMu      sync.Mutex
 	driftRetryAt map[string]time.Time
 	driftFails   map[string]int
+	// warmMu guards the per-session keep-warm renewal backoff. A silent-renew that
+	// fails with an unexpected transient (a council-side 5xx, say) must not be
+	// re-attempted every 3-minute pass: that is a fixed-rate knock on a struggling
+	// upstream. Scoped to the RENEWAL only (not the owner's API path, which still
+	// works on a cached token), so a permit change can still be applied meanwhile.
+	warmMu      sync.Mutex
+	warmRetryAt map[sessionKey]time.Time
 	// driftAsap holds owners whose next drift read should run on the next warm
 	// pass rather than the 6h cadence (see RequestDriftSoon). Lazily initialised:
 	// tests construct Schedulers literally.
@@ -404,6 +411,7 @@ func New(st *store.Store, tenant Tenant, loc *time.Location, opts Options) *Sche
 		notifyConc:       make(chan struct{}, maxNotifyConcurrency),
 		reconnectQ:       make(map[sessionKey]reconnectItem),
 		driftRetryAt:     make(map[string]time.Time),
+		warmRetryAt:      make(map[sessionKey]time.Time),
 		driftFails:       make(map[string]int),
 		notifyInFlight:   make(map[string]struct{}),
 		notifyRetryAt:    make(map[string]time.Time),

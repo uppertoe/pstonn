@@ -1781,3 +1781,134 @@ func seedPermitAt(t *testing.T, st *store.Store, owner, tenantID, councilPermitI
 	}
 	return pid
 }
+
+// TestWarmRetryIntervalRespectsRunway: the renewal retry interval is margin/4,
+// clamped, so it always fits several attempts inside the guaranteed recovery runway
+// (warmSafetyMargin) and never exceeds it — the invariant that stops a backed-off
+// session from lapsing before its next attempt.
+func TestWarmRetryIntervalRespectsRunway(t *testing.T) {
+	for _, c := range []struct{ margin, want time.Duration }{
+		{0, 15 * time.Minute},               // unset → New defaults the margin to 1h → 1h/4
+		{4 * time.Minute, 2 * time.Minute},  // pathological: floor 5m would exceed it → margin/2
+		{10 * time.Minute, 5 * time.Minute}, // 10m/4=2.5m → the 5m floor
+		{time.Hour, 15 * time.Minute},       // 1h/4
+		{4 * time.Hour, 30 * time.Minute},   // clamped to the 30m ceiling
+	} {
+		s := New(newStore(t), &fakeTenant{}, time.UTC, Options{WarmSafetyMargin: c.margin})
+		if got := s.warmRetryInterval(); got != c.want {
+			t.Errorf("margin %s: interval %s, want %s", c.margin, got, c.want)
+		}
+		// The interval must fit inside the guaranteed runway (the effective margin,
+		// which New floors at 1h) so a backed-off session never lapses first.
+		if s.warmRetryInterval() >= s.warmSafetyMargin {
+			t.Errorf("margin %s: interval %s must stay inside the runway %s", c.margin, s.warmRetryInterval(), s.warmSafetyMargin)
+		}
+	}
+}
+
+// TestNoteWarmFailureBacksOffAndClears: a failure arms the backoff for one interval;
+// success clears it.
+func TestNoteWarmFailureBacksOffAndClears(t *testing.T) {
+	s := New(newStore(t), &fakeTenant{}, time.UTC, Options{WarmSafetyMargin: time.Hour}) // → 15m interval
+	const owner = "x@example.com"
+	now := time.Now()
+	if s.warmBackedOff(owner, "", now) {
+		t.Fatal("a fresh session is not backed off")
+	}
+	s.noteWarmFailure(owner, "")
+	if !s.warmBackedOff(owner, "", now.Add(10*time.Minute)) {
+		t.Fatal("within the interval the renewal is backed off")
+	}
+	if s.warmBackedOff(owner, "", now.Add(16*time.Minute)) {
+		t.Fatal("past the ~15m interval it is retried")
+	}
+	s.noteWarmSuccess(owner, "")
+	if s.warmBackedOff(owner, "", now.Add(time.Minute)) {
+		t.Fatal("a good renew clears the backoff")
+	}
+}
+
+// TestCancelReconnectClearsWarmBackoff: the reconnect cleanup drops warm-backoff
+// entries too, so unlink/re-link leaves nothing behind (no stale backoff, no leak).
+func TestCancelReconnectClearsWarmBackoff(t *testing.T) {
+	s := New(newStore(t), &fakeTenant{}, time.UTC, Options{WarmSafetyMargin: time.Hour})
+	const owner = "x@example.com"
+	s.noteWarmFailure(owner, "")
+	if !s.warmBackedOff(owner, "", time.Now()) {
+		t.Fatal("armed")
+	}
+	s.CancelReconnect(owner)
+	if s.warmBackedOff(owner, "", time.Now()) {
+		t.Fatal("CancelReconnect must clear the warm backoff")
+	}
+	s.warmMu.Lock()
+	n := len(s.warmRetryAt)
+	s.warmMu.Unlock()
+	if n != 0 {
+		t.Fatalf("warm-backoff map leaked %d entries", n)
+	}
+}
+
+// TestKeepWarmBacksOffOnTransientRenewFailure: a silent-renew that fails with an
+// unexpected transient (a council-side 5xx) is attempted once, then skipped on the
+// next passes — not re-hit every 3-minute pass — and resumes when it recovers.
+func TestKeepWarmBacksOffOnTransientRenewFailure(t *testing.T) {
+	st := newStore(t)
+	seedSession(t, st, "flaky@example.com")
+	seedSchedule(t, st, "flaky@example.com")
+	fc := &fakeTenant{refreshErr: errors.New("orikan: silent-renew authorize: unexpected status 500")}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond})
+	time.Sleep(2 * time.Millisecond)
+
+	s.keepWarm(context.Background())
+	if len(fc.refreshed) != 1 {
+		t.Fatalf("first pass should attempt one renew, got %v", fc.refreshed)
+	}
+	s.keepWarm(context.Background()) // immediately: backed off, no new council call
+	if len(fc.refreshed) != 1 {
+		t.Fatalf("a backed-off renewal must not be re-attempted every pass, got %d", len(fc.refreshed))
+	}
+	if _, err := st.GetTenantSession(context.Background(), "flaky@example.com"); err != nil {
+		t.Fatalf("a backed-off session must not be retired: %v", err)
+	}
+
+	// Recovery: upstream heals and the backoff window passes.
+	fc.refreshErr = nil
+	s.warmMu.Lock()
+	s.warmRetryAt[sessionKey{"flaky@example.com", ""}] = time.Now().Add(-time.Second)
+	s.warmMu.Unlock()
+	s.keepWarm(context.Background())
+	if len(fc.refreshed) != 2 {
+		t.Fatalf("once the backoff lapses the session is renewed again, got %d", len(fc.refreshed))
+	}
+	s.warmMu.Lock()
+	_, still := s.warmRetryAt[sessionKey{"flaky@example.com", ""}]
+	s.warmMu.Unlock()
+	if still {
+		t.Fatal("a successful renew clears the backoff")
+	}
+}
+
+// TestReconnectRetireClearsWarmBackoff: when the reconnect worker retires a session
+// (no saved password), it must also drop that session's warm backoff — otherwise the
+// entry leaks for a deleted key that no warm pass ever revisits.
+func TestReconnectRetireClearsWarmBackoff(t *testing.T) {
+	st := newStore(t)
+	seedSession(t, st, "gone@example.com") // seeded without a saved password
+	s := New(st, &fakeTenant{}, time.UTC, Options{WarmSafetyMargin: time.Hour})
+	s.noteWarmFailure("gone@example.com", "")
+	if !s.warmBackedOff("gone@example.com", "", time.Now()) {
+		t.Fatal("armed")
+	}
+
+	s.NoteSessionExpired("gone@example.com", "", genOf(t, st, "gone@example.com"))
+	if !s.drainOneReconnect(context.Background()) {
+		t.Fatal("expected the queued reconnect to process")
+	}
+	s.warmMu.Lock()
+	n := len(s.warmRetryAt)
+	s.warmMu.Unlock()
+	if n != 0 {
+		t.Fatalf("warm backoff leaked after a reconnect-worker retire: %d entries", n)
+	}
+}

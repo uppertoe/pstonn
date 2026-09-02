@@ -253,6 +253,10 @@ func (s *Scheduler) cancelReconnectWhere(owner string, match func(sessionKey) bo
 	// tenant-scoped cancel clears it as well; a fresh session there is a fine
 	// reason to let drift look again.)
 	s.noteDriftSuccess(owner)
+	// Same for the keep-warm renewal backoff (sessionKey-keyed, so honour the
+	// same predicate): a re-linked or recovered session must not inherit a stale
+	// backoff, and an unlinked one must not leak a map entry.
+	s.clearWarmBackoff(func(k sessionKey) bool { return k.owner == owner && match(k) })
 }
 
 // reconnectQueued reports whether a reconnect for THIS session is queued at all —
@@ -391,14 +395,21 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 			s.backoffReconnect(key, item)
 		}
 	}()
+	// Either terminal outcome ends this session's warm-backoff bookkeeping: a
+	// recovered session is fresh and must not inherit a stale backoff, and a retired
+	// one is deleted, so its entry would otherwise leak (this worker never calls
+	// cancelReconnectWhere). A deferred item stays queued and keeps its backoff.
+	clearWarm := func() { s.clearWarmBackoff(func(k sessionKey) bool { return k == key }) }
 	switch s.recoverOrRetire(ctx, owner, key.tenant, item.gen, item.countsChurn) {
 	case reconnectRecovered:
 		s.dequeueReconnect(key, item)
+		clearWarm()
 		// The session that recovered is THIS tenant's; the account's other
 		// councils' backoffs are their own business.
 		s.KickOwnerIn(ctx, owner, key.tenant)
 	case reconnectRetired:
 		s.dequeueReconnect(key, item)
+		clearWarm()
 	case reconnectDeferred:
 		s.backoffReconnect(key, item)
 	}
