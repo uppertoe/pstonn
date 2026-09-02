@@ -154,6 +154,20 @@ func (c *Client) Blocked() bool {
 	return open
 }
 
+// AuthGated reports whether the provider's auth-surface circuit is open — the
+// council's sign-in is failing and renews/stale-token ops are being shed. Like
+// Blocked (the fleet edge breaker), it is a CONFIRMED "the change won't apply
+// until this clears" signal, so the scheduler escalates a stuck permit's warning
+// to act-now instead of the reassuring "still updating". False when the provider
+// exposes no auth circuit.
+func (c *Client) AuthGated() bool {
+	if ag, ok := c.p.(authGater); ok {
+		open, _ := ag.AuthGate()
+		return open
+	}
+	return false
+}
+
 // LoginBudget is the worst-case time this client's governor may hold a full
 // credential login waiting for rate tokens (0 when ungoverned). The scheduler adds
 // it to its reconnect deadline so a governed wait can never be what expires it.

@@ -709,6 +709,22 @@ func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, loc *time.Loc
 	return s.quietDefer(pref, now, loc)
 }
 
+// heldApplyKey is the base outbox dedup key a quiet-hours hold of THIS outcome to
+// THIS member is queued under. enqueueSplit then suffixes it per channel
+// ("|email|<addr>", "|ntfy"), so heldApplyTwins returns the exact keys to cancel.
+func heldApplyKey(email string, o ApplyOutcome) string {
+	return fmt.Sprintf("apply|%s|%s|%s|%s|%t", email, o.Owner, o.PermitLabel, o.Reg, o.OK)
+}
+
+// heldApplyTwins returns the concrete per-channel dedup keys under which a held
+// soft notice for this outcome+member sits — the ones an inline act-now send must
+// supersede. Kept beside enqueueSplit, whose suffix scheme it mirrors; the
+// supersede test drives the real deferred path so the two cannot silently drift.
+func heldApplyTwins(email string, o ApplyOutcome) []string {
+	base := heldApplyKey(email, o)
+	return []string{base + "|email|" + email, base + "|ntfy"}
+}
+
 // firstApplyLine is the once-ever referral ask, appended to the confirmation of
 // the household's FIRST successful tenant write: the moment the product has just
 // proven itself. RecordApply runs before notification, so a count of exactly one
@@ -950,7 +966,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			m := outMessage{
 				Account: o.Owner, Subject: subject, Body: emailBody,
 				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,
-				DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
+				DedupKey: heldApplyKey(d.email, o),
 				Reason:   reasonAccount,
 			}
 			if wantEmail {
@@ -998,6 +1014,20 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			delivered++
 			if seenKey != "" {
 				s.markReached(seenKey, now)
+			}
+			// This member just got the act-now notice inline (quiet hours were
+			// bypassed). Cancel the softer "still updating" twin of it that a quiet-
+			// hours hold may have queued for 06:00, so the same person is not told
+			// twice in reverse order. Only for an action-needed failure — the only
+			// case a held soft twin of an inline send exists (an escalation).
+			if o.actionNeeded() && s.store != nil {
+				for _, twin := range heldApplyTwins(d.email, o) {
+					if n, e := s.store.SupersedePendingOutbox(ctx, twin); e != nil {
+						log.Printf("notify: superseding held notice for %s: %v", RedactEmail(d.email), e)
+					} else if n > 0 {
+						log.Printf("notify: act-now notice superseded a held soft notice for %s", RedactEmail(d.email))
+					}
+				}
 			}
 		}
 	}

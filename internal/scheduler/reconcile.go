@@ -690,10 +690,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// fail_streak is shared with real failures — both mean "consecutive ticks we
 		// could not apply" — and a success clears it either way.
 		n := s.bumpFailStreak(ctx, p.ID)
-		// A CONFIRMED fleet block (breaker open) is not a blip: the change will not
-		// apply until it clears, so warn sooner and firmly (act now), not with the
-		// reassuring "still updating" a brief single-owner hiccup gets.
-		confirmed := s.tenant.Blocked(p.TenantID)
+		// A CONFIRMED block is not a blip: the change will not apply until it clears,
+		// so warn sooner and firmly (act now), not with the reassuring "still
+		// updating" a brief single-owner hiccup gets. Two things confirm it: the
+		// fleet edge breaker (the portal is refusing our address), and the auth
+		// circuit being open (the council's sign-in itself is down). Both mean a
+		// sustained failure the household cannot wait out — an auth outage is exactly
+		// the "still 500ing" case that used to only ever get the soft notice.
+		confirmed := s.tenant.Blocked(p.TenantID) || s.tenant.AuthGated(p.TenantID)
 		threshold := busyNotifyThreshold
 		reason, action := describeFailure(parking.FailTransient, provider.OpUnknown)
 		if confirmed {

@@ -58,6 +58,10 @@ type fakeTenant struct {
 	// the scheduler asks about the PERMIT's portal rather than the fleet.
 	blockedIn    string
 	blockedAsked []string
+	// authGated simulates the auth-surface circuit being open (a confirmed sign-in
+	// outage), which escalates the busy warning exactly as blocked does.
+	authGated   bool
+	authGatedIn string
 	// caps, when set, is what Capabilities reports per tenant id; a tenant with no
 	// entry (and a nil map) reports the Orikan-like default: keep warm, 0 window.
 	caps map[string]provider.Capabilities
@@ -250,6 +254,12 @@ func (f *fakeTenant) Blocked(tenantID string) bool {
 	defer f.mu.Unlock()
 	f.blockedAsked = append(f.blockedAsked, tenantID)
 	return f.blocked && (f.blockedIn == "" || f.blockedIn == tenantID)
+}
+
+func (f *fakeTenant) AuthGated(tenantID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.authGated && (f.authGatedIn == "" || f.authGatedIn == tenantID)
 }
 
 func (f *fakeTenant) blockedAskedSnap() []string {

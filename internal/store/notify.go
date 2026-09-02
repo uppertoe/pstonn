@@ -178,6 +178,27 @@ WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
 	return err
 }
 
+// SupersedePendingOutbox drops any still-pending row whose dedup key matches
+// rawKey, returning how many were removed. It is how an inline, act-now notice
+// cancels the softer twin of itself that quiet hours are holding for later: an
+// auth outage escalates a stuck permit to "change it yourself now", and the "still
+// updating" version already queued for 06:00 must not also arrive — that reversed
+// pair (urgent now, reassuring later) is exactly the confusion to avoid. A
+// delivered (sent) row is left untouched: a soft notice already read, then an
+// escalation, is a legitimate sequence.
+func (s *Store) SupersedePendingOutbox(ctx context.Context, rawKey string) (int, error) {
+	if rawKey == "" {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM outbox WHERE status = 'pending' AND dedup_key = ?`, HashDedupKey(rawKey))
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // DueOutbox returns pending notifications whose next attempt is due, oldest first.
 // DedupKey comes back in its stored (hashed) form.
 func (s *Store) DueOutbox(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) {

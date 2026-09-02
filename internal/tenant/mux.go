@@ -251,6 +251,23 @@ func (m *Mux) Blocked(tenantID string) bool {
 	return false
 }
 
+// AuthGated reports whether the named tenant's auth-surface circuit is open — a
+// confirmed sign-in outage at THAT portal. Scoped per tenant for the same reason
+// as Blocked: one council's sign-in being down must not escalate another's
+// households. "" asks about any tenant (the status page's fleet view).
+func (m *Mux) AuthGated(tenantID string) bool {
+	if tenantID != "" {
+		c, ok := m.clients[tenantID]
+		return ok && c.AuthGated()
+	}
+	for _, c := range m.clients {
+		if c.AuthGated() {
+			return true
+		}
+	}
+	return false
+}
+
 // LoginBudget is the worst-case governor wait for one credential login at the
 // named tenant (see parking.Client.LoginBudget); 0 for a tenant not served.
 func (m *Mux) LoginBudget(tenantID string) time.Duration {
@@ -370,6 +387,9 @@ func (s Single) Capabilities(_ context.Context, _, tenantID string) provider.Cap
 // here, it is simply not served.
 func (s Single) Blocked(tenantID string) bool {
 	return s.mine(tenantID) && s.Client.Blocked()
+}
+func (s Single) AuthGated(tenantID string) bool {
+	return s.mine(tenantID) && s.Client.AuthGated()
 }
 
 func (s Single) LoginBudget(tenantID string) time.Duration {

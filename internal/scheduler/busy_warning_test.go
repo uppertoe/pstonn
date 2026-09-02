@@ -65,6 +65,45 @@ func TestBusyWarningEscalatesOnConfirmedBlock(t *testing.T) {
 	}
 }
 
+// TestBusyWarningEscalatesOnAuthGated: an open auth circuit (the council's sign-in
+// is confirmed down) escalates a stuck change to the urgent, act-now warning at the
+// same short threshold as a fleet block — even though the edge breaker is CLOSED (a
+// 5xx sign-in outage never trips it). This is the exact "still 500ing" outage that
+// used to only ever get the soft, quiet-hours-held notice.
+func TestBusyWarningEscalatesOnAuthGated(t *testing.T) {
+	ctx := context.Background()
+	const owner, cid = "authgated@example.com", "ag-1"
+
+	run := func(gated bool, ticks int) []notify.ApplyOutcome {
+		st := newStore(t)
+		seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
+		fc := &fakeTenant{setErr: parking.ErrCouncilBusy, authGated: gated} // breaker CLOSED
+		nf := &fakeNotifier{on: true, admin: true}
+		s := New(st, fc, time.UTC, Options{Notifier: nf})
+		for i := 0; i < ticks; i++ {
+			s.reconcileAll(ctx)
+		}
+		time.Sleep(15 * time.Millisecond)
+		return nf.outcomeSnap()
+	}
+
+	// Gated: silent just before the block threshold, then urgent AT it.
+	if got := run(true, blockNotifyThreshold-1); len(got) != 0 {
+		t.Fatalf("warned before the block threshold under an auth outage: %d outcomes", len(got))
+	}
+	got := run(true, blockNotifyThreshold)
+	if len(got) == 0 {
+		t.Fatalf("no warning at the block threshold under an auth outage")
+	}
+	if o := got[len(got)-1]; o.OK || !o.Urgent {
+		t.Fatalf("auth-gated escalation was not an urgent failure: %+v", o)
+	}
+	// Neither gated nor blocked: still the softer, longer window — quiet at this tick.
+	if got := run(false, blockNotifyThreshold); len(got) != 0 {
+		t.Fatalf("an ungated, unblocked hiccup escalated early: %d outcomes", len(got))
+	}
+}
+
 // TestBusyEscalationSurvivesEarlierSoftNotice pins the common REAL ordering: the
 // tenant starts refusing, the household gets the soft "still updating, we'll
 // keep trying" notice, and only THEN does the fleet breaker confirm the block.

@@ -49,6 +49,10 @@ type Tenant interface {
 	// clears. Per tenant, because a breaker opens on ONE portal's push-back: the
 	// households of a portal that is answering fine must not be told to act.
 	Blocked(tenantID string) bool
+	// AuthGated is the auth-surface companion to Blocked: the named tenant's
+	// sign-in is confirmed down (the auth circuit is open), so a stuck change is
+	// escalated the same way a fleet block is — it will not apply until it clears.
+	AuthGated(tenantID string) bool
 	// Capabilities is what the named tenant's provider declares it supports —
 	// whether its sessions need keeping warm and how long they may idle. A tenant
 	// this process does not serve reports the zero value (nothing supported).
