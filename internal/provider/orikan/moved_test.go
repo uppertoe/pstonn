@@ -2,6 +2,7 @@ package orikan
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -123,6 +124,91 @@ func TestTokenShapeFailuresAreUnexpectedNotTransient(t *testing.T) {
 			}
 			if kind, _ := provider.FailureOf(err); kind != provider.FailUnexpected {
 				t.Fatalf("%s classified as %v, want provider.FailUnexpected (transient would retry forever)", name, kind)
+			}
+		})
+	}
+}
+
+// A 3xx from the permit API is the edge talking (a WAF interstitial, a
+// maintenance bounce, a portal move), never the council refusing THIS permit. It
+// must classify as transient: the generic "< 500 is a refusal" rule would park
+// the permit for good and tell the household the council would not allow it.
+func TestAPIRedirectIsTransientNotRefusal(t *testing.T) {
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", "https://edge.example/maintenance?return=SECRET-RETURN-URL")
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			c := New(Config{Issuer: srv.URL + "/idm", APIBase: srv.URL + "/ssp-svc", ClientID: "t", RedirectURI: srv.URL + "/ssp/callback"}, nil)
+			ss := &session{Cookie: "c=1", AccessToken: "tok", TokenExpiry: time.Now().Add(time.Hour)}
+			_, err := c.managedVehicle(context.Background(), ss, provider.PermitRef{ID: "1"}, provider.OpSetVehicle)
+			if err == nil {
+				t.Fatal("a redirect is not a permit record")
+			}
+			if kind, op := provider.FailureOf(err); kind != provider.FailTransient || op != provider.OpSetVehicle {
+				t.Fatalf("classified %v/%v, want FailTransient/%v (a refusal is parked and blamed on the household)", kind, op, provider.OpSetVehicle)
+			}
+			if !strings.Contains(err.Error(), "edge.example/maintenance") || strings.Contains(err.Error(), "SECRET-RETURN-URL") {
+				t.Fatalf("error should name the redirect target but not its query: %v", err)
+			}
+		})
+	}
+}
+
+// A silent renew's redirect only means "session expired" when it is
+// IdentityServer's own answer: an error= delivered back to the registered
+// redirect_uri. Any other code-less redirect — an edge challenge, a login page we
+// never asked for, a bare callback — is unexpected and transient, because
+// ErrSessionExpired triggers fleet-wide reconnects and unlinks every owner
+// without a saved password.
+func TestSilentRenewRedirectExpiryNeedsRedirectURIAndError(t *testing.T) {
+	cases := []struct {
+		name, location string
+		wantExpired    bool
+		wantCode       string
+	}{
+		{"error back to redirect_uri", "{redirect}?error=login_required&state=s", true, ""},
+		{"relative error back to redirect_uri", "/ssp/callback?error=interaction_required", true, ""},
+		{"code back to redirect_uri", "{redirect}?code=abc&state=s", false, "abc"},
+		{"edge challenge with no code", "https://edge.example/challenge?ref=1", false, ""},
+		{"error on another host", "https://edge.example/ssp/callback?error=login_required", false, ""},
+		{"error on another path", "{base}/elsewhere?error=login_required", false, ""},
+		{"bounce to a login page", "{base}/idm/Account/Login?ReturnUrl=SECRET-RETURN-URL", false, ""},
+		{"redirect_uri with neither code nor error", "{redirect}?state=s", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var base string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				loc := strings.NewReplacer("{redirect}", base+"/ssp/callback", "{base}", base).Replace(tc.location)
+				w.Header().Set("Location", loc)
+				w.WriteHeader(http.StatusFound)
+			}))
+			defer srv.Close()
+			base = srv.URL
+			c := New(Config{Issuer: base + "/idm", APIBase: base + "/ssp-svc", ClientID: "t", RedirectURI: base + "/ssp/callback"}, nil)
+			code, _, _, err := c.authorizeWithCookie(context.Background(), "c=1")
+			switch {
+			case tc.wantCode != "":
+				if err != nil || code != tc.wantCode {
+					t.Fatalf("code = %q, err = %v; want %q", code, err, tc.wantCode)
+				}
+			case tc.wantExpired:
+				if !errors.Is(err, provider.ErrSessionExpired) {
+					t.Fatalf("err = %v, want ErrSessionExpired", err)
+				}
+			default:
+				if err == nil || errors.Is(err, provider.ErrSessionExpired) {
+					t.Fatalf("err = %v; an unrecognised redirect must not retire the session", err)
+				}
+				if kind, _ := provider.FailureOf(err); kind != provider.FailTransient {
+					t.Fatalf("classified %v, want FailTransient (retry, don't alarm)", kind)
+				}
+				if strings.Contains(err.Error(), "SECRET-RETURN-URL") {
+					t.Fatalf("error leaks the redirect query: %v", err)
+				}
 			}
 		})
 	}

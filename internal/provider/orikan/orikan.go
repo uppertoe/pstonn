@@ -411,14 +411,53 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	if err != nil {
 		return "", "", "", fmt.Errorf("orikan: silent-renew: bad redirect: %w", err)
 	}
-	if loc.Query().Get("error") != "" {
-		return "", "", "", provider.ErrSessionExpired // login_required / interaction_required
+	loc = req.URL.ResolveReference(loc) // a relative Location resolves against the authorize URL
+	if code = loc.Query().Get("code"); code != "" {
+		return code, verifier, newCookie, nil
 	}
-	code = loc.Query().Get("code")
-	if code == "" {
+	// No code. The 200-HTML branch above demands a positive marker (the antiforgery
+	// field) before it declares the session dead, and a redirect needs the same
+	// discipline: ErrSessionExpired triggers a fleet-wide reconnect and UNLINKS
+	// every owner without a saved password, so it must never be raised on a
+	// redirect that merely lacks a code. IdentityServer's only no-code answer to a
+	// prompt=none authorize is an error (login_required / interaction_required)
+	// delivered to the registered redirect_uri, so that — same host and path,
+	// carrying error= — is the one redirect that means expiry. Anything else (an
+	// edge bounce to a challenge or maintenance page, a redirect to a login page
+	// we never asked for, a bare redirect_uri with neither code nor error) is the
+	// portal behaving in a way we do not recognise: an unexpected, retried
+	// transient, exactly like a non-redirect status would be.
+	if loc.Query().Get("error") != "" && c.isRedirectURI(loc) {
 		return "", "", "", provider.ErrSessionExpired
 	}
-	return code, verifier, newCookie, nil
+	return "", "", "", fmt.Errorf("orikan: silent-renew authorize: unexpected redirect (%d) to %s", resp.StatusCode, redirectTarget(loc.String()))
+}
+
+// isRedirectURI reports whether a Location is the client's registered redirect_uri
+// (scheme, host and path; the query is where the code or error lives).
+func (c *Client) isRedirectURI(loc *url.URL) bool {
+	want, err := url.Parse(c.redirectURI)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(loc.Scheme, want.Scheme) &&
+		strings.EqualFold(loc.Host, want.Host) &&
+		strings.TrimRight(loc.Path, "/") == strings.TrimRight(want.Path, "/")
+}
+
+// redirectTarget renders a Location for an error message: scheme, host and path
+// only, so the query — which on a login-style bounce can carry a return URL or a
+// state value — never lands in a log line.
+func redirectTarget(loc string) string {
+	if loc == "" {
+		return "(no Location)"
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		return safeExcerpt(loc)
+	}
+	u.RawQuery, u.Fragment, u.User = "", "", nil
+	return safeExcerpt(u.String())
 }
 
 // looksLikeHTML reports whether a response is a rendered page rather than the
@@ -811,6 +850,20 @@ func (c *Client) apiRequest(ctx context.Context, ss *session, method, path strin
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return resp, nil
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// The client never follows redirects, and the permit API never issues one:
+		// a bearer-authenticated JSON endpoint answers with data or an error. A 3xx
+		// here is therefore the EDGE speaking — a WAF interstitial, a maintenance
+		// bounce, a portal relocation — and says nothing about this household's
+		// permit. Left to the generic rule below it would classify as a refusal
+		// (a 4xx-like "< 500"), which the scheduler parks for good and reports to
+		// the household as the council not letting p.stonn make the change.
+		// Transient instead: retried on the backoff path, and if the redirect
+		// persists it surfaces as a degraded connector, not a parked permit.
+		loc := resp.Header.Get("Location")
+		drainClose(resp)
+		return nil, provider.Fail(provider.FailTransient, op, fmt.Errorf("portal redirected (%d) to %s: edge interstitial or portal moved?", resp.StatusCode, redirectTarget(loc)))
 	}
 	// Other non-2xx: 5xx is a server-side blip (transient); 4xx is a refusal.
 	// A refusal usually carries the portal's OWN reason, and it is the only thing
