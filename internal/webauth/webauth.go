@@ -48,8 +48,8 @@ type Authenticator struct {
 // The victim notices nothing — and the next thing this app asks a signed-in user
 // for is their tenant password, which would be typed into an account they do not
 // control.
-// stateCookie is the legacy (unprefixed) name, still READ during the rename. When
-// cookies are secure the state cookie is written under the __Host- name instead, which
+// stateCookie is the plain (unprefixed) name, used only over plain HTTP (local dev).
+// When cookies are secure the state cookie is written under the __Host- name instead, which
 // a browser only honours when it is Secure, Path=/ and Domain-less — the properties
 // that stop a sibling subdomain planting a same-named state cookie to seed a login-CSRF.
 // The prefix requires Secure and Path=/, so it is used only over HTTPS; the path moves
@@ -106,16 +106,16 @@ func (a *Authenticator) clearStateCookie(w http.ResponseWriter) {
 
 // stateMatchesBrowser reports whether the callback's state was issued to THIS
 // browser. Constant-time, though the value is 256 bits of crypto/rand so the
-// comparison is not the weak link. It accepts EITHER cookie name so a login started
-// before the __Host- rename still completes.
-func stateMatchesBrowser(r *http.Request, state string) bool {
+// comparison is not the weak link. It reads ONLY the name this authenticator
+// issues: the fallback to the plain name that carried logins across the __Host-
+// rename outlived every 15-minute state cookie it was for, and while it stood, a
+// sibling subdomain could satisfy the check with a plain-named cookie of its own —
+// the login-CSRF the prefix exists to prevent.
+func (a *Authenticator) stateMatchesBrowser(r *http.Request, state string) bool {
 	if state == "" {
 		return false
 	}
-	c, err := r.Cookie(hostStateCookie)
-	if err != nil || c.Value == "" {
-		c, err = r.Cookie(stateCookie)
-	}
+	c, err := r.Cookie(a.stateCookieName())
 	if err != nil || c.Value == "" {
 		return false
 	}
@@ -196,7 +196,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 	// issued to THIS browser (the cookie). The second half is what stops an attacker
 	// completing their own login in someone else's browser; check it first so a
 	// replayed callback cannot even consume the stored state.
-	if !stateMatchesBrowser(r, q.Get("state")) {
+	if !a.stateMatchesBrowser(r, q.Get("state")) {
 		a.clearStateCookie(w)
 		http.Error(w, "this sign-in link was not started in this browser; please sign in again", http.StatusBadRequest)
 		return

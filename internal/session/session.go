@@ -17,8 +17,11 @@ import (
 	"github.com/uppertoe/pstonn/internal/identity"
 )
 
-// cookieName is the legacy (unprefixed) session cookie name. It is still READ so a
-// session issued before the __Host- rename keeps working until it renews.
+// cookieName is the plain (unprefixed) session cookie name, used only over plain
+// HTTP (local dev). It was the production name until the __Host- rename shipped on
+// 2026-08-04; a secure manager no longer reads it, because every cookie issued under
+// it has long outlived the 7-day session ceiling and a same-named cookie planted by
+// a sibling subdomain is exactly what the prefix exists to keep out.
 //
 // hostCookieName carries the __Host- prefix, which a browser only honours when the
 // cookie is Secure, Path=/ and carries no Domain — exactly the properties that stop a
@@ -88,9 +91,10 @@ func (m *Manager) epochFor(email string) int64 {
 
 func normalise(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
-// issuedCookieName is the name new cookies are written under: the __Host--prefixed
-// name when cookies are secure (HTTPS), else the plain legacy name (a __Host- cookie
-// without Secure is rejected by the browser, which would break local dev over HTTP).
+// issuedCookieName is the name cookies are written under AND read from: the
+// __Host--prefixed name when cookies are secure (HTTPS), else the plain name (a
+// __Host- cookie without Secure is rejected by the browser, which would break local
+// dev over HTTP).
 func (m *Manager) issuedCookieName() string {
 	if m.secure {
 		return hostCookieName
@@ -98,14 +102,13 @@ func (m *Manager) issuedCookieName() string {
 	return cookieName
 }
 
-// readCookie returns the session cookie, preferring the name new cookies use and
-// falling back to the legacy unprefixed name so a session issued before the __Host-
-// rename keeps working until it renews.
+// readCookie returns the session cookie under the one name this manager issues.
+// There is deliberately no fallback to the plain name on a secure manager: the
+// pre-rename fallback outlived every cookie it was for, and while it stood, a
+// cookie under the unprefixed name — which any sibling subdomain can set — was
+// accepted as readily as the __Host- one.
 func (m *Manager) readCookie(r *http.Request) (*http.Cookie, error) {
-	if c, err := r.Cookie(m.issuedCookieName()); err == nil {
-		return c, nil
-	}
-	return r.Cookie(cookieName)
+	return r.Cookie(m.issuedCookieName())
 }
 
 type payload struct {
@@ -156,9 +159,9 @@ func (m *Manager) issue(w http.ResponseWriter, u identity.User, iat int64) error
 	return nil
 }
 
-// Clear removes the session cookie. It expires BOTH names, so a sign-out clears the
-// cookie whether the browser holds a new __Host- one or a legacy unprefixed one from
-// before the rename.
+// Clear removes the session cookie. It expires BOTH names: the plain one is no
+// longer read, but a browser still holding a stale one from before the rename should
+// not keep carrying it once the person signs out.
 func (m *Manager) Clear(w http.ResponseWriter) {
 	names := []string{m.issuedCookieName()}
 	if cookieName != names[0] { // only a second header when the names actually differ

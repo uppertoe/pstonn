@@ -32,10 +32,30 @@ func (m *Manager) mint(t *testing.T, p payload) string {
 // returns the identity plus any cookie the manager wrote back (the renewal).
 func (m *Manager) decodeValue(value string) (identity.User, bool, []*http.Cookie) {
 	r := httptest.NewRequest("GET", "/schedule", nil)
-	r.AddCookie(&http.Cookie{Name: cookieName, Value: value})
+	r.AddCookie(&http.Cookie{Name: m.issuedCookieName(), Value: value})
 	w := httptest.NewRecorder()
 	u, ok := m.Decode(w, r)
 	return u, ok, w.Result().Cookies()
+}
+
+// A secure manager reads ONLY the __Host- name. The plain name is what a sibling
+// subdomain can plant, and the fallback that once read it (for cookies issued
+// before the rename) has no cookies left to serve.
+func TestSecureManagerIgnoresUnprefixedCookie(t *testing.T) {
+	m := testManager()
+	v := m.mint(t, payload{Email: "user@example.com", Exp: time.Now().Add(time.Minute).Unix(), Iat: time.Now().Unix()})
+	r := httptest.NewRequest("GET", "/schedule", nil)
+	r.AddCookie(&http.Cookie{Name: cookieName, Value: v})
+	if u, ok := m.Decode(httptest.NewRecorder(), r); ok {
+		t.Fatalf("a validly signed cookie under the plain name must not authenticate on a secure manager, got %+v", u)
+	}
+	// Over plain HTTP (local dev) the plain name IS the issued name and still works.
+	dev := New(bytes.Repeat([]byte{3}, 32), false)
+	r = httptest.NewRequest("GET", "/schedule", nil)
+	r.AddCookie(&http.Cookie{Name: cookieName, Value: dev.mint(t, payload{Email: "user@example.com", Exp: time.Now().Add(time.Minute).Unix(), Iat: time.Now().Unix()})})
+	if _, ok := dev.Decode(httptest.NewRecorder(), r); !ok {
+		t.Fatal("an insecure (dev) manager must still read the plain name it issues")
+	}
 }
 
 func TestIssueThenDecode(t *testing.T) {
@@ -219,8 +239,8 @@ func TestClearExpiresTheCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 	m.Clear(w)
 	cookies := w.Result().Cookies()
-	// A secure manager expires BOTH the __Host- name and the legacy name, so a sign-out
-	// clears whichever the browser is still holding across the rename.
+	// A secure manager expires BOTH the __Host- name and the plain name, so a sign-out
+	// also drops a stale pre-rename cookie the browser may still be carrying.
 	if len(cookies) != 2 {
 		t.Fatalf("Clear must expire both cookie names, got %+v", cookies)
 	}
@@ -251,7 +271,7 @@ func TestDecodeWithNilWriter(t *testing.T) {
 	m := testManager()
 	v := m.mint(t, payload{Email: "user@example.com", Exp: time.Now().Add(time.Hour).Unix(), Iat: time.Now().Add(-11 * time.Hour).Unix()})
 	r := httptest.NewRequest("GET", "/schedule", nil)
-	r.AddCookie(&http.Cookie{Name: cookieName, Value: v})
+	r.AddCookie(&http.Cookie{Name: m.issuedCookieName(), Value: v})
 	if _, ok := m.Decode(nil, r); !ok {
 		t.Fatal("Decode must work without a ResponseWriter")
 	}

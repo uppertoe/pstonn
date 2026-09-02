@@ -91,7 +91,7 @@ func TestRevokedSessionIsNotRenewed(t *testing.T) {
 	m.RevokeTo(email, 1)
 
 	r := httptest.NewRequest("GET", "/schedule", nil)
-	r.AddCookie(&http.Cookie{Name: cookieName, Value: v})
+	r.AddCookie(&http.Cookie{Name: m.issuedCookieName(), Value: v})
 	w := httptest.NewRecorder()
 	if _, ok := m.Decode(w, r); ok {
 		t.Fatal("a revoked session decoded")

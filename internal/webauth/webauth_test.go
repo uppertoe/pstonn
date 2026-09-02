@@ -133,7 +133,7 @@ func TestCallbackRefusesMismatchedCookie(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/auth/callback?code=c&state="+url.QueryEscape(state), nil)
-	r.AddCookie(&http.Cookie{Name: stateCookie, Value: "some-other-flow"})
+	r.AddCookie(&http.Cookie{Name: hostStateCookie, Value: "some-other-flow"})
 	a.Callback(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("callback status = %d, want 400 for a cookie that names a different flow", w.Code)
@@ -144,7 +144,7 @@ func TestCallbackRefusesMissingState(t *testing.T) {
 	a, _ := testAuthenticator(t)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/auth/callback?code=c", nil)
-	r.AddCookie(&http.Cookie{Name: stateCookie, Value: "anything"})
+	r.AddCookie(&http.Cookie{Name: hostStateCookie, Value: "anything"})
 	a.Callback(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("callback status = %d, want 400 when the state param is absent", w.Code)
@@ -162,6 +162,7 @@ func TestCallbackReportsProviderError(t *testing.T) {
 }
 
 func TestStateMatchesBrowser(t *testing.T) {
+	a, _ := testAuthenticator(t)
 	cases := []struct {
 		name   string
 		state  string
@@ -180,12 +181,29 @@ func TestStateMatchesBrowser(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "/auth/callback", nil)
 			if c.set {
-				r.AddCookie(&http.Cookie{Name: stateCookie, Value: c.cookie})
+				r.AddCookie(&http.Cookie{Name: hostStateCookie, Value: c.cookie})
 			}
-			if got := stateMatchesBrowser(r, c.state); got != c.want {
+			if got := a.stateMatchesBrowser(r, c.state); got != c.want {
 				t.Errorf("stateMatchesBrowser = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// A secure authenticator reads ONLY the __Host- state cookie. The plain name is
+// what a sibling subdomain can plant to seed a login-CSRF, and the fallback that
+// once read it (for logins started before the rename) has nothing left to serve.
+func TestStateMatchesBrowserIgnoresUnprefixedCookieWhenSecure(t *testing.T) {
+	a, _ := testAuthenticator(t)
+	r := httptest.NewRequest("GET", "/auth/callback", nil)
+	r.AddCookie(&http.Cookie{Name: stateCookie, Value: "abc"})
+	if a.stateMatchesBrowser(r, "abc") {
+		t.Fatal("a matching state under the plain cookie name must not satisfy a secure authenticator")
+	}
+	// Over plain HTTP (local dev) the plain name IS the issued name and still works.
+	a.cookieSecure = false
+	if !a.stateMatchesBrowser(r, "abc") {
+		t.Fatal("an insecure (dev) authenticator must still read the plain name it issues")
 	}
 }
 
