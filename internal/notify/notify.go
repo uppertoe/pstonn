@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/i18n"
@@ -31,6 +32,11 @@ type mailTenant struct {
 	Name, Short string
 	Links       tenant.Links
 	Terms       map[string]string
+	// Loc is the tenant's own timezone when the resolver named one, else nil —
+	// the zone a member's quiet hours are read in (quietDefer). nil keeps the
+	// service's display zone, which is what every message used before tenants
+	// had zones of their own.
+	Loc *time.Location
 }
 
 // tenantOf resolves the tenant a message is about. tenantID names it exactly when
@@ -40,14 +46,17 @@ type mailTenant struct {
 // tenant when the resolver is unset or the id is unknown.
 func (s *Service) tenantOf(ctx context.Context, owner, tenantID string) mailTenant {
 	var c *tenant.Tenant
+	var loc *time.Location
 	if s.TenantFor != nil {
-		c = s.TenantFor(ctx, owner, tenantID)
+		if c = s.TenantFor(ctx, owner, tenantID); c != nil {
+			loc = c.Location()
+		}
 	}
 	if c == nil {
 		c = tenant.Default()
 	}
 	return mailTenant{Name: c.Name, Short: c.Short, Links: c.Links,
-		Terms: i18n.Default().For(i18n.DefaultLocale).Terms(c.Terms)}
+		Terms: i18n.Default().For(i18n.DefaultLocale).Terms(c.Terms), Loc: loc}
 }
 
 // say renders a catalog message as text for a tenant with extra fields.
@@ -107,6 +116,44 @@ type Service struct {
 	// dedup key. Tests only: the golden files lock the plaintext key composition,
 	// which the stored (digest) form cannot show. nil in production.
 	enqueueHook func(store.OutboxItem)
+	// applySeen remembers which members an inline NotifyApply reached, keyed by
+	// the caller's outcome Key, so the retry of a PARTIAL delivery (one member
+	// reached, another not) goes only to those who were missed. The scheduler's
+	// durable per-permit key cannot say that — it is written only once everyone
+	// is reached — and without this memory the reached member got the same notice
+	// on every retry. In-memory: after a restart the worst case is one repeat to
+	// someone already told. Guarded by applySeenMu; entries expire (applySeenTTL).
+	applySeenMu sync.Mutex
+	applySeen   map[string]time.Time
+}
+
+// applySeenTTL bounds how long a reached member is remembered. Far longer than
+// any retry sequence (the scheduler stops once its durable key is written), and
+// pruned as new entries land so the map tracks recent outcomes, not history.
+const applySeenTTL = 24 * time.Hour
+
+// reached reports whether the member was already reached for this outcome key.
+func (s *Service) reached(seenKey string, now time.Time) bool {
+	s.applySeenMu.Lock()
+	defer s.applySeenMu.Unlock()
+	t, ok := s.applySeen[seenKey]
+	return ok && now.Sub(t) < applySeenTTL
+}
+
+// markReached records a member as reached for this outcome key, sweeping
+// expired entries as it goes.
+func (s *Service) markReached(seenKey string, now time.Time) {
+	s.applySeenMu.Lock()
+	defer s.applySeenMu.Unlock()
+	if s.applySeen == nil {
+		s.applySeen = map[string]time.Time{} // literal-constructed test services
+	}
+	for k, t := range s.applySeen {
+		if now.Sub(t) >= applySeenTTL {
+			delete(s.applySeen, k)
+		}
+	}
+	s.applySeen[seenKey] = now
 }
 
 // New builds a Service. mail may be nil (email disabled); ntfyBase may be empty
@@ -197,7 +244,12 @@ const MaxQuietHours = 12
 // Messages generated outside the window — and all messages when quiet hours are
 // off (QuietFrom == QuietUntil) — deliver immediately (zero time). now is passed
 // in for testability.
-func (s *Service) quietDefer(pref store.NotifyPref, now time.Time) time.Time {
+//
+// loc is the zone "22:00" is read in: the tenant's (mailTenant.Loc), because a
+// household's night is the night where their permit is, and the service's single
+// display zone is wrong for every tenant outside it. nil falls back to that
+// display zone — the behaviour before tenants carried zones of their own.
+func (s *Service) quietDefer(pref store.NotifyPref, now time.Time, loc *time.Location) time.Time {
 	from, until := pref.QuietFrom, pref.QuietUntil
 	if from == until || from < 0 || from > 23 || until < 0 || until > 23 {
 		return time.Time{} // disabled or malformed → immediate
@@ -205,7 +257,10 @@ func (s *Service) quietDefer(pref store.NotifyPref, now time.Time) time.Time {
 	if span := ((until - from) + 24) % 24; span > MaxQuietHours {
 		until = (from + MaxQuietHours) % 24
 	}
-	lt := now.In(s.loc)
+	if loc == nil {
+		loc = s.loc
+	}
+	lt := now.In(loc)
 	h := lt.Hour()
 	var inQuiet bool
 	if from < until {
@@ -216,7 +271,7 @@ func (s *Service) quietDefer(pref store.NotifyPref, now time.Time) time.Time {
 	if !inQuiet {
 		return time.Time{}
 	}
-	target := time.Date(lt.Year(), lt.Month(), lt.Day(), until, 0, 0, 0, s.loc)
+	target := time.Date(lt.Year(), lt.Month(), lt.Day(), until, 0, 0, 0, loc)
 	if !target.After(lt) {
 		target = target.AddDate(0, 0, 1)
 	}
@@ -433,7 +488,8 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permi
 	if s.appURL != "" {
 		body += "\n\nOpen p.stonn: " + s.appURL
 	}
-	body += "\nRenew with the council: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
+	c := s.tenantOf(ctx, owner, tenantID)
+	body += "\nRenew with the council: " + c.Links.Portal
 	dels, err := s.accountDeliveries(ctx, owner)
 	if err != nil {
 		return 0
@@ -454,7 +510,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permi
 		// expiry-sync runs on the keep-warm cadence at arbitrary times, and a
 		// 14-days-ahead warning must not ping anyone at 3am. Queuing counts as
 		// reached (the outbox retries it from here).
-		if nb := s.quietDefer(d.pref, now); !nb.IsZero() {
+		if nb := s.quietDefer(d.pref, now, c.Loc); !nb.IsZero() {
 			m := outMessage{
 				Account: owner, Subject: subject, Body: body,
 				NtfyPriority: "default", NtfyTag: "calendar", NotBefore: nb,
@@ -568,6 +624,13 @@ type ApplyOutcome struct {
 	// the underlying failure is technically transient.
 	Urgent bool
 
+	// Key is the caller's identity for this outcome: the same Key means the same
+	// message, retried. When set, NotifyApply remembers which members it reached
+	// inline, so a retry after a partial delivery skips them (still counting them
+	// as delivered) and goes only to the members who were missed. "" means no
+	// memory — a one-shot caller.
+	Key string
+
 	// DisplacedReg is the plate of a still-live third-party booking this change
 	// bumped off the permit ("" when nothing of note was displaced), and
 	// DisplacedTold whether its driver got their own heads-up email. When they
@@ -608,12 +671,13 @@ func (s *Service) emailWanted(pref store.NotifyPref, o ApplyOutcome) bool {
 }
 
 // deferUntil returns the quiet-hours delivery time for this outcome, or the zero
-// time (send now) when the outcome is a hard action-needed failure.
-func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, o ApplyOutcome) time.Time {
+// time (send now) when the outcome is a hard action-needed failure. loc is the
+// zone the member's quiet hours are read in (see quietDefer).
+func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, loc *time.Location, o ApplyOutcome) time.Time {
 	if o.actionNeeded() {
 		return time.Time{}
 	}
-	return s.quietDefer(pref, now)
+	return s.quietDefer(pref, now, loc)
 }
 
 // firstApplyLine is the once-ever referral ask, appended to the confirmation of
@@ -751,7 +815,8 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	if err != nil {
 		return err
 	}
-	subject, body, priority, tags := composeApply(o, s.tenantOf(ctx, o.Owner, o.TenantID).Links.Portal)
+	c := s.tenantOf(ctx, o.Owner, o.TenantID)
+	subject, body, priority, tags := composeApply(o, c.Links.Portal)
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
@@ -765,7 +830,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 			Account: o.Owner,
 			Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
-			NotBefore: s.deferUntil(d.pref, now, o),
+			NotBefore: s.deferUntil(d.pref, now, c.Loc, o),
 			Reason:    reasonAccount,
 			// The queued twin of NotifyApply's inline choice of sendEmailCritical.
 			Critical: o.actionNeeded(),
@@ -797,7 +862,8 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if err != nil {
 		return 0, err
 	}
-	subject, body, priority, tags := composeApply(o, s.tenantOf(ctx, o.Owner, o.TenantID).Links.Portal)
+	c := s.tenantOf(ctx, o.Owner, o.TenantID)
+	subject, body, priority, tags := composeApply(o, c.Links.Portal)
 	emailBody := body
 	if s.appURL != "" {
 		emailBody += "\n\n" + s.appURL
@@ -817,10 +883,24 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		}
 		due++
 
+		// A retry of a partial delivery: this member was reached last time, so
+		// they still count as delivered, and only the members who were missed are
+		// sent to again. Keyed on the caller's outcome identity, so two different
+		// notices about the same plate (the soft busy notice and the urgent
+		// confirmed-block escalation) are never mistaken for each other.
+		seenKey := ""
+		if o.Key != "" {
+			seenKey = o.Owner + "|" + o.Key + "|" + d.email
+			if s.reached(seenKey, now) {
+				delivered++
+				continue
+			}
+		}
+
 		// Quiet hours: hold this member's notice and deliver it via the durable
 		// outbox at the window's end, so a midnight roster change lands as a 6am
 		// confirmation rather than a 12:01am ping. Queuing counts as reached.
-		if nb := s.deferUntil(d.pref, now, o); !nb.IsZero() {
+		if nb := s.deferUntil(d.pref, now, c.Loc, o); !nb.IsZero() {
 			m := outMessage{
 				Account: o.Owner, Subject: subject, Body: emailBody,
 				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,
@@ -837,6 +917,9 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				errs = append(errs, "queue "+RedactEmail(d.email)+": "+errText(e, d.email))
 			} else {
 				delivered++
+				if seenKey != "" {
+					s.markReached(seenKey, now)
+				}
 			}
 			continue
 		}
@@ -867,6 +950,9 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		}
 		if reached {
 			delivered++
+			if seenKey != "" {
+				s.markReached(seenKey, now)
+			}
 		}
 	}
 	if due == 0 {
@@ -1261,6 +1347,8 @@ func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary
 		return err
 	}
 	now := time.Now()
+	// Account-level: the household's night is the night at their current tenant.
+	loc := s.tenantOf(ctx, owner, "").Loc
 	var errs []string
 	for _, d := range dels {
 		if strings.EqualFold(d.email, actor) {
@@ -1268,7 +1356,7 @@ func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary
 		}
 		m := outMessage{
 			Account: owner, Subject: subject, Body: body, Reason: reasonAccount,
-			NotBefore: s.quietDefer(d.pref, now),
+			NotBefore: s.quietDefer(d.pref, now, loc),
 			// Per-member and per-summary, so two members each hear once and a repeated
 			// identical action inside the dedup window doesn't double up.
 			DedupKey: fmt.Sprintf("acctchange|%s|%s|%s", d.email, owner, summary),

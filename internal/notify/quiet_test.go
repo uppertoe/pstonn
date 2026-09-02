@@ -1,11 +1,13 @@
 package notify
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/store"
+	"github.com/uppertoe/pstonn/internal/tenant"
 )
 
 func TestQuietDefer(t *testing.T) {
@@ -39,7 +41,7 @@ func TestQuietDefer(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := svc.quietDefer(store.NotifyPref{QuietFrom: c.from, QuietUntil: c.till}, c.now)
+			got := svc.quietDefer(store.NotifyPref{QuietFrom: c.from, QuietUntil: c.till}, c.now, nil)
 			if !got.Equal(c.want) {
 				t.Fatalf("quietDefer = %v, want %v", got, c.want)
 			}
@@ -68,7 +70,7 @@ func TestDeferUntilActionNeeded(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := svc.deferUntil(pref, at2am, c.o); !got.Equal(c.want) {
+			if got := svc.deferUntil(pref, at2am, nil, c.o); !got.Equal(c.want) {
 				t.Fatalf("deferUntil = %v, want %v", got, c.want)
 			}
 		})
@@ -162,15 +164,58 @@ func TestUrgentOutcomeIsNotHeldByQuietHours(t *testing.T) {
 	pref := store.NotifyPref{QuietFrom: 22, QuietUntil: 6}
 	at2330 := time.Date(2026, 8, 2, 23, 30, 0, 0, loc)
 	urgent := ApplyOutcome{OK: false, Transient: true, Urgent: true}
-	if got := s.deferUntil(pref, at2330, urgent); !got.IsZero() {
+	if got := s.deferUntil(pref, at2330, nil, urgent); !got.IsZero() {
 		t.Fatalf("an urgent fine-risk notice was deferred to %v; it must send immediately", got)
 	}
 	// A soft transient failure is still allowed to wait for morning.
 	soft := ApplyOutcome{OK: false, Transient: true}
-	if got := s.deferUntil(pref, at2330, soft); got.IsZero() {
+	if got := s.deferUntil(pref, at2330, nil, soft); got.IsZero() {
 		t.Fatal("a non-urgent transient failure should still respect quiet hours")
 	}
 }
 
 // testPortal is the tenant portal link the composed notices point at.
 const testPortal = "https://parkingpermits.stonnington.vic.gov.au/"
+
+// Quiet hours are a household's NIGHT, and their night is where their permit is:
+// a single service-wide zone reads "22:00" in the operator's city for every
+// tenant. quietDefer takes the tenant's zone from the resolver, falling back to
+// the service zone only when no tenant was resolved (the old behaviour).
+func TestQuietHoursUseTheTenantZone(t *testing.T) {
+	perth, err := time.LoadLocation("Australia/Perth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{loc: time.UTC}
+	pref := store.NotifyPref{QuietFrom: 22, QuietUntil: 6}
+	// 02:00 in Perth is 18:00 UTC the evening before: quiet in Perth, not in UTC.
+	at := time.Date(2026, 7, 21, 2, 0, 0, 0, perth)
+	if got := svc.quietDefer(pref, at, perth); !got.Equal(time.Date(2026, 7, 21, 6, 0, 0, 0, perth)) {
+		t.Fatalf("in the tenant's zone 02:00 must hold until 06:00 there, got %v", got)
+	}
+	if got := svc.quietDefer(pref, at, nil); !got.IsZero() {
+		t.Fatalf("with no tenant zone the service zone (UTC, 18:00) applies and sends now, got %v", got)
+	}
+	if got := svc.deferUntil(pref, at, perth, ApplyOutcome{OK: true}); got.IsZero() {
+		t.Fatal("deferUntil must pass the tenant zone through")
+	}
+
+	// The resolver supplies the zone; without one, or when it names no tenant,
+	// tenantOf reports none so the fallback applies.
+	ctx := context.Background()
+	if loc := svc.tenantOf(ctx, "a@example.com", "perth").Loc; loc != nil {
+		t.Fatalf("no resolver: Loc = %v, want nil (service zone)", loc)
+	}
+	svc.TenantFor = func(_ context.Context, _, tenantID string) *tenant.Tenant {
+		if tenantID == "perth" {
+			return &tenant.Tenant{ID: "perth", Timezone: "Australia/Perth"}
+		}
+		return nil
+	}
+	if loc := svc.tenantOf(ctx, "a@example.com", "perth").Loc; loc == nil || loc.String() != "Australia/Perth" {
+		t.Fatalf("resolved tenant: Loc = %v, want Australia/Perth", loc)
+	}
+	if loc := svc.tenantOf(ctx, "a@example.com", "unknown").Loc; loc != nil {
+		t.Fatalf("unresolved tenant: Loc = %v, want nil (service zone)", loc)
+	}
+}
