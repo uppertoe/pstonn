@@ -186,12 +186,19 @@ WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
 // pair (urgent now, reassuring later) is exactly the confusion to avoid. A
 // delivered (sent) row is left untouched: a soft notice already read, then an
 // escalation, is a legitimate sequence.
-func (s *Store) SupersedePendingOutbox(ctx context.Context, rawKey string) (int, error) {
-	if rawKey == "" {
+func (s *Store) SupersedePendingOutbox(ctx context.Context, rawKeys ...string) (int, error) {
+	args := make([]any, 0, len(rawKeys))
+	for _, k := range rawKeys {
+		if k != "" {
+			args = append(args, HashDedupKey(k))
+		}
+	}
+	if len(args) == 0 {
 		return 0, nil
 	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM outbox WHERE status = 'pending' AND dedup_key = ?`, HashDedupKey(rawKey))
+		`DELETE FROM outbox WHERE status = 'pending' AND dedup_key IN (`+ph+`)`, args...)
 	if err != nil {
 		return 0, err
 	}

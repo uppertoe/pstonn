@@ -725,6 +725,23 @@ func heldApplyTwins(email string, o ApplyOutcome) []string {
 	return []string{base + "|email|" + email, base + "|ntfy"}
 }
 
+// supersedeHeldTwins cancels any quiet-hours-held soft twin of an act-now notice
+// for this member+permit+plate, so the reassuring "still updating" version never
+// arrives AFTER the urgent one. Called the moment a member is on the action-needed
+// path — whether the urgent then sends, is past their daily urgent cap, or the send
+// fails and will retry — because the soft twin is stale as soon as the outcome is a
+// confirmed act-now, not only once delivery succeeds.
+func (s *Service) supersedeHeldTwins(ctx context.Context, email string, o ApplyOutcome) {
+	if s.store == nil {
+		return
+	}
+	if n, err := s.store.SupersedePendingOutbox(ctx, heldApplyTwins(email, o)...); err != nil {
+		log.Printf("notify: superseding held notice for %s: %v", RedactEmail(email), err)
+	} else if n > 0 {
+		log.Printf("notify: act-now notice superseded a held soft notice for %s", RedactEmail(email))
+	}
+}
+
 // firstApplyLine is the once-ever referral ask, appended to the confirmation of
 // the household's FIRST successful tenant write: the moment the product has just
 // proven itself. RecordApply runs before notification, so a count of exactly one
@@ -929,6 +946,15 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		}
 		due++
 
+		// An act-now escalation bypasses quiet hours and sends inline; the softer
+		// twin a quiet-hours hold may have queued for 06:00 is now stale. Cancel it
+		// here — before the reached-memory and per-recipient-cap gates below can
+		// short-circuit this member — so a throttled or retrying urgent still
+		// prevents the reassuring notice arriving in confusing reverse order.
+		if o.actionNeeded() {
+			s.supersedeHeldTwins(ctx, d.email, o)
+		}
+
 		// A retry of a partial delivery: this member was reached last time, so
 		// they still count as delivered, and only the members who were missed are
 		// sent to again. Keyed on the caller's outcome identity, so two different
@@ -1014,20 +1040,6 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			delivered++
 			if seenKey != "" {
 				s.markReached(seenKey, now)
-			}
-			// This member just got the act-now notice inline (quiet hours were
-			// bypassed). Cancel the softer "still updating" twin of it that a quiet-
-			// hours hold may have queued for 06:00, so the same person is not told
-			// twice in reverse order. Only for an action-needed failure — the only
-			// case a held soft twin of an inline send exists (an escalation).
-			if o.actionNeeded() && s.store != nil {
-				for _, twin := range heldApplyTwins(d.email, o) {
-					if n, e := s.store.SupersedePendingOutbox(ctx, twin); e != nil {
-						log.Printf("notify: superseding held notice for %s: %v", RedactEmail(d.email), e)
-					} else if n > 0 {
-						log.Printf("notify: act-now notice superseded a held soft notice for %s", RedactEmail(d.email))
-					}
-				}
 			}
 		}
 	}

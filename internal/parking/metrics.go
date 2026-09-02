@@ -161,11 +161,17 @@ func (c *Client) Blocked() bool {
 // to act-now instead of the reassuring "still updating". False when the provider
 // exposes no auth circuit.
 func (c *Client) AuthGated() bool {
+	open, _ := c.authGate()
+	return open
+}
+
+// authGate is the single place the provider's optional auth circuit is read (open,
+// and the wait until the next probe); AuthGated and Stats both go through it.
+func (c *Client) authGate() (open bool, retry time.Duration) {
 	if ag, ok := c.p.(authGater); ok {
-		open, _ := ag.AuthGate()
-		return open
+		return ag.AuthGate()
 	}
-	return false
+	return false, 0
 }
 
 // LoginBudget is the worst-case time this client's governor may hold a full
@@ -191,11 +197,7 @@ func (c *Client) Stats() Stats {
 		persistError = pErr.Error()
 	}
 	lastAttempt, lastSuccess, consecFails := c.health.clock()
-	var authGated bool
-	var authGatedFor time.Duration
-	if ag, ok := c.p.(authGater); ok {
-		authGated, authGatedFor = ag.AuthGate()
-	}
+	authGated, authGatedFor := c.authGate()
 	return Stats{
 		LastAttemptAt:       lastAttempt,
 		LastSuccessAt:       lastSuccess,

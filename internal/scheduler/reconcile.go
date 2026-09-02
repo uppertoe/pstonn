@@ -712,9 +712,18 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			// after — left the urgent "act now to avoid a fine" escalation deduped
 			// by the reassuring notice it was supposed to override, so the one
 			// message blockNotifyThreshold exists for was unreachable.
-			key := "busy|" + want + "|" + s.failureKeyDay(p)
+			day := s.failureKeyDay(p)
+			key := "busy|" + want + "|" + day
 			if confirmed {
-				key = "busy-blocked|" + want + "|" + s.failureKeyDay(p)
+				key = "busy-blocked|" + want + "|" + day
+			} else if k, _, _ := s.store.PermitNotify(ctx, p.ID); k == "busy-blocked|"+want+"|"+day {
+				// The urgent act-now escalation already went out for this permit+plate
+				// today (the block was confirmed, then cleared while the permit kept
+				// failing for another reason). The urgent sends inline, so it leaves no
+				// held row to supersede — but it did record itself as the permit's last
+				// notified key. A later soft "still updating" would be a confusing
+				// downgrade from that, so skip it.
+				return false
 			}
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
