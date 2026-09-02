@@ -5,7 +5,7 @@
   <nav class="nav">
     <a href="/schedule" class="nav-item {{if eq .Page "schedule"}}active{{end}}" style="--hue:var(--sec-schedule)">{{template "ic-calendar"}}<span>Schedule</span></a>
     <a href="/vehicles" class="nav-item {{if eq .Page "vehicles"}}active{{end}}" style="--hue:var(--sec-vehicles)">{{template "ic-cars"}}<span>Vehicles</span></a>
-    <a href="/guests" class="nav-item {{if eq .Page "guests"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-users"}}<span>Guests</span></a>
+    <a href="/guests" class="nav-item {{if eq .Page "guests"}}active{{end}}" style="--hue:var(--sec-guests)">{{template "ic-users"}}<span>Guests</span></a>
     <a href="/activity" class="nav-item {{if eq .Page "activity"}}active{{end}}" style="--hue:var(--sec-activity)">{{template "ic-activity"}}<span>Activity</span></a>
     <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-gear"}}<span>Settings</span></a>
   </nav>

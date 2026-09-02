@@ -1,6 +1,6 @@
 {{define "page-guests"}}
   {{/* ---------- GUEST PASSES ---------- */}}
-  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
+  <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
   <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
   {{if .QR}}
   {{/* ---- ON-SCREEN VISITOR QR ---- */}}
@@ -172,7 +172,7 @@
   {{if .Guests}}
   {{/* The list of passes had no heading: a card titled "Cleaner" with cars and
        people under it did not say what it was. */}}
-  <div class="sectitle" style="--hue:var(--sec-settings);margin-top:6px"><span class="ic">{{template "ic-link"}}</span> Passes you&rsquo;ve sent</div>
+  <div class="sectitle" style="--hue:var(--sec-guests);margin-top:6px"><span class="ic">{{template "ic-link"}}</span> Passes you&rsquo;ve sent</div>
   <div class="grants">
     {{range .Guests}}
     <section class="card">
