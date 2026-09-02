@@ -65,12 +65,12 @@ func TestBusyWarningEscalatesOnConfirmedBlock(t *testing.T) {
 	}
 }
 
-// TestBusyWarningEscalatesOnAuthGated: an open auth circuit (the council's sign-in
-// is confirmed down) escalates a stuck change to the urgent, act-now warning at the
-// same short threshold as a fleet block — even though the edge breaker is CLOSED (a
-// 5xx sign-in outage never trips it). This is the exact "still 500ing" outage that
-// used to only ever get the soft, quiet-hours-held notice.
-func TestBusyWarningEscalatesOnAuthGated(t *testing.T) {
+// TestAuthOutageStaysSoftWithCouncilDownCopy: an open auth circuit (the council's
+// sign-in is down for the household too) must NOT escalate to the act-now warning —
+// there is nothing they can do at the council. It stays on the soft tier and timing
+// (busyNotifyThreshold, not urgent), but the outcome is flagged CouncilDown so the
+// copy says plainly the council is down rather than the vague "still updating".
+func TestAuthOutageStaysSoftWithCouncilDownCopy(t *testing.T) {
 	ctx := context.Background()
 	const owner, cid = "authgated@example.com", "ag-1"
 
@@ -87,20 +87,23 @@ func TestBusyWarningEscalatesOnAuthGated(t *testing.T) {
 		return nf.outcomeSnap()
 	}
 
-	// Gated: silent just before the block threshold, then urgent AT it.
-	if got := run(true, blockNotifyThreshold-1); len(got) != 0 {
-		t.Fatalf("warned before the block threshold under an auth outage: %d outcomes", len(got))
+	// An auth outage does NOT escalate: silent at the block threshold, like an
+	// ordinary hiccup — it must wait for the soft threshold.
+	if got := run(true, blockNotifyThreshold); len(got) != 0 {
+		t.Fatalf("an auth outage escalated early instead of staying soft: %d outcomes", len(got))
 	}
-	got := run(true, blockNotifyThreshold)
+	// At the soft threshold it delivers a SOFT notice (not urgent), flagged
+	// CouncilDown so the copy names the outage.
+	got := run(true, busyNotifyThreshold)
 	if len(got) == 0 {
-		t.Fatalf("no warning at the block threshold under an auth outage")
+		t.Fatalf("no soft notice at the busy threshold under an auth outage")
 	}
-	if o := got[len(got)-1]; o.OK || !o.Urgent {
-		t.Fatalf("auth-gated escalation was not an urgent failure: %+v", o)
+	o := got[len(got)-1]
+	if o.OK || o.Urgent {
+		t.Fatalf("auth-outage notice must be soft, not urgent: %+v", o)
 	}
-	// Neither gated nor blocked: still the softer, longer window — quiet at this tick.
-	if got := run(false, blockNotifyThreshold); len(got) != 0 {
-		t.Fatalf("an ungated, unblocked hiccup escalated early: %d outcomes", len(got))
+	if !o.CouncilDown {
+		t.Fatalf("auth-outage soft notice must be flagged CouncilDown for the clearer copy: %+v", o)
 	}
 }
 

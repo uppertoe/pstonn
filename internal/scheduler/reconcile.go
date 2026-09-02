@@ -690,20 +690,26 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// fail_streak is shared with real failures — both mean "consecutive ticks we
 		// could not apply" — and a success clears it either way.
 		n := s.bumpFailStreak(ctx, p.ID)
-		// A CONFIRMED block is not a blip: the change will not apply until it clears,
-		// so warn sooner and firmly (act now), not with the reassuring "still
-		// updating" a brief single-owner hiccup gets. Two things confirm it: the
-		// fleet edge breaker (the portal is refusing our address), and the auth
-		// circuit being open (the council's sign-in itself is down). Both mean a
-		// sustained failure the household cannot wait out — an auth outage is exactly
-		// the "still 500ing" case that used to only ever get the soft notice.
-		confirmed := s.tenant.Blocked(p.TenantID) || s.tenant.AuthGated(p.TenantID)
+		// A CONFIRMED fleet block is not a blip: the portal is refusing OUR address,
+		// but the household can still reach the council themselves — so warn sooner
+		// and firmly (act now). An auth outage is different: the council's own sign-in
+		// is down for everyone, so there is nothing the household can do at the council
+		// either. It stays on the soft tier and timing, but the copy says plainly the
+		// council is down rather than the vague "still updating".
+		confirmed := s.tenant.Blocked(p.TenantID)
+		councilDown := !confirmed && s.tenant.AuthGated(p.TenantID)
 		threshold := busyNotifyThreshold
 		reason, action := describeFailure(parking.FailTransient, provider.OpUnknown)
-		if confirmed {
+		switch {
+		case confirmed:
 			threshold = blockNotifyThreshold
 			reason = "The council is refusing p.stonn's connection right now, so your permit cannot be updated."
 			action = "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn will resume automatically once the block clears."
+		case councilDown:
+			// Neutral "the council" (not a hard-coded council name) to satisfy the
+			// multi-council guard, matching the confirmed-block copy above.
+			reason = "The council's parking system is down right now, so p.stonn couldn't update your permit."
+			action = "Nothing you need to do — p.stonn keeps trying and will apply your change automatically as soon as the council's system is back."
 		}
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		if n >= threshold {
@@ -717,18 +723,9 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			if confirmed {
 				key = "busy-blocked|" + want + "|" + day
 			}
-			// Note a narrow residual: if `confirmed` was true (an urgent act-now notice
-			// went out), then clears while the permit keeps failing for another reason,
-			// the soft "busy|" notice can follow the urgent as a downgrade. It needs the
-			// confirmed state to toggle off mid-streak AND the permit to keep failing to
-			// busyNotifyThreshold — after an auth outage that leaves no per-owner
-			// cooldown, a recovered council simply succeeds and clears the streak, so
-			// this requires a second, independent block. Suppressing it reliably would
-			// need durable per-permit "already escalated" state (the shared notified key
-			// is overwritten by other notices), which that narrow case does not warrant.
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
-				OK: false, CurrentReg: p.ActiveRegistration,
+				OK: false, CurrentReg: p.ActiveRegistration, CouncilDown: councilDown,
 				Reason: reason, Action: action, Transient: true, Urgent: confirmed,
 			}, key)
 		}

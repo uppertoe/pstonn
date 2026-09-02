@@ -643,6 +643,11 @@ type ApplyOutcome struct {
 	Reason      string // one plain sentence: why it failed
 	Action      string // one plain sentence: what the user should do
 	Transient   bool   // failure expected to self-heal → soften wording
+	// CouncilDown says we KNOW the council's own sign-in is down (the auth circuit is
+	// open) — so the household cannot reach the council either. It keeps the soft tier
+	// but names the cause plainly and drops the "do it yourself at the council" line,
+	// which would be impossible advice during a council-wide outage.
+	CouncilDown bool
 	// Urgent overrides the transient softening for a CONFIRMED, ongoing block: the
 	// change genuinely will not apply until the block clears, so the household must
 	// act now (change the plate manually) rather than be reassured it is "still
@@ -709,40 +714,6 @@ func (s *Service) deferUntil(pref store.NotifyPref, now time.Time, loc *time.Loc
 	return s.quietDefer(pref, now, loc)
 }
 
-// heldApplyKey is the base outbox dedup key a quiet-hours hold of THIS outcome to
-// THIS member is queued under. enqueueSplit then suffixes it per channel
-// ("|email|<addr>", "|ntfy"), so heldApplyTwins returns the exact keys to cancel.
-func heldApplyKey(email string, o ApplyOutcome) string {
-	return fmt.Sprintf("apply|%s|%s|%s|%s|%t", email, o.Owner, o.PermitLabel, o.Reg, o.OK)
-}
-
-// heldApplyTwins returns the concrete per-channel dedup keys under which a held
-// soft notice for this outcome+member sits — the ones an inline act-now send must
-// supersede. Kept beside enqueueSplit, whose suffix scheme it mirrors; the
-// supersede test drives the real deferred path so the two cannot silently drift.
-func heldApplyTwins(email string, o ApplyOutcome) []string {
-	base := heldApplyKey(email, o)
-	return []string{base + "|email|" + email, base + "|ntfy"}
-}
-
-// supersedeHeldTwins cancels any quiet-hours-held soft twin of an act-now notice
-// for this member+permit+plate, so the reassuring "still updating" version never
-// arrives AFTER the urgent one. Called only once the urgent has actually REACHED the
-// member inline — the sole case where the soft would be a true reverse-order double.
-// A send that failed keeps the soft as a fallback (a bounce mustn't leave the
-// household with nothing); a send dropped by the daily cap keeps it as the permit's
-// sole notice (the urgent never went out).
-func (s *Service) supersedeHeldTwins(ctx context.Context, email string, o ApplyOutcome) {
-	if s.store == nil {
-		return
-	}
-	if n, err := s.store.SupersedePendingOutbox(ctx, heldApplyTwins(email, o)...); err != nil {
-		log.Printf("notify: superseding held notice for %s: %v", RedactEmail(email), err)
-	} else if n > 0 {
-		log.Printf("notify: act-now notice superseded a held soft notice for %s", RedactEmail(email))
-	}
-}
-
 // firstApplyLine is the once-ever referral ask, appended to the confirmation of
 // the household's FIRST successful tenant write: the moment the product has just
 // proven itself. RecordApply runs before notification, so a count of exactly one
@@ -803,6 +774,11 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		// fire once we KNOW the change will not apply until the block clears.
 		soft := o.Transient && !o.Urgent
 		switch {
+		case o.CouncilDown:
+			// The council itself is down; name that, and don't promise it "shows X for
+			// now" as if a quick retry will fix it. Neutral "council" (not a hard-coded
+			// name) for the multi-council guard.
+			subject = fmt.Sprintf("The council's system is down — your %s change is waiting", o.PermitLabel)
 		case o.CurrentReg != "" && soft:
 			subject = fmt.Sprintf("Still updating your %s — it shows %s for now", o.PermitLabel, o.CurrentReg)
 		case o.CurrentReg != "":
@@ -824,8 +800,13 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		if o.Action != "" {
 			lines = append(lines, o.Action)
 		}
-		// A failure is a "sort it yourself" moment: link the tenant portal.
-		lines = append(lines, "", "You can set the vehicle on your permit yourself at the council:", portalURL)
+		// A failure is normally a "sort it yourself" moment: link the tenant portal.
+		// But when the council's own system is down, the portal is unreachable too, so
+		// pointing them at it would be impossible advice — the honest Action already
+		// stands on its own.
+		if !o.CouncilDown {
+			lines = append(lines, "", "You can set the vehicle on your permit yourself at the council:", portalURL)
+		}
 		body = strings.Join(lines, "\n")
 	}
 	priority, tags = "default", "white_check_mark"
@@ -972,9 +953,6 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			}
 			if !lim.allow(d.email) {
 				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
-				// Dropped by the cap — deliberately NOT superseding the held soft here
-				// (see supersedeHeldTwins: a throttled urgent leaves the soft as this
-				// permit's sole notice).
 				delivered++
 				continue
 			}
@@ -987,7 +965,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			m := outMessage{
 				Account: o.Owner, Subject: subject, Body: emailBody,
 				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,
-				DedupKey: heldApplyKey(d.email, o),
+				DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 				Reason:   reasonAccount,
 			}
 			if wantEmail {
@@ -1035,14 +1013,6 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			delivered++
 			if seenKey != "" {
 				s.markReached(seenKey, now)
-			}
-			// The act-now notice reached this member inline (quiet hours bypassed);
-			// cancel the softer twin a hold may have queued for 06:00 so they aren't
-			// told twice in reverse order. Only on a reach — a failed send keeps the
-			// held soft as a fallback, since a bounce here would otherwise leave the
-			// household with nothing.
-			if o.actionNeeded() {
-				s.supersedeHeldTwins(ctx, d.email, o)
 			}
 		}
 	}
