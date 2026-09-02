@@ -392,7 +392,18 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 			if bytes.Contains(head, []byte(fieldAntiforgery)) {
 				return "", "", "", provider.ErrSessionExpired
 			}
-			return "", "", "", fmt.Errorf("orikan: silent-renew authorize: 200 HTML without a login-form marker (edge challenge?)")
+			// An edge (WAF/challenge) interstitial. Typed as push-back so it feeds
+			// the per-owner cooldown, the fleet breaker and the /status connector
+			// state exactly like a 403-HTML would — an untyped error here degraded
+			// to an unclassifiable transient that nothing counted, so a challenge
+			// rollout was invisible until a user reported it.
+			return "", "", "", &provider.Unavailable{
+				RetryAfter:  parseRetryAfter(resp),
+				Status:      resp.StatusCode,
+				Surface:     provider.SurfaceAuth,
+				ContentType: safeExcerpt(resp.Header.Get("Content-Type")),
+				Ref:         safeExcerpt(resp.Header.Get("X-Azure-Ref")),
+			}
 		}
 		return "", "", "", fmt.Errorf("orikan: silent-renew authorize: unexpected status %d", resp.StatusCode)
 	}

@@ -103,6 +103,11 @@ type Client struct {
 	strikes       sync.Map   // owner -> int, consecutive soft blocks (backoff growth)
 	strikeMu      sync.Mutex // serialises the strike read-modify-write in penalize
 
+	// health is the tenant-wide connector success clock (last attempt/success,
+	// consecutive failures, breadth-gated failure signals), derived from the same
+	// classify choke point as the backoff — see health.go and /status.
+	health connectorHealth
+
 	// breaker is the FLEET-level counterpart to the per-owner cooldown: it pauses
 	// ALL traffic to this provider when several distinct owners are pushed back at
 	// once, the signature of an edge block on our shared egress IP (see breaker.go).
@@ -353,9 +358,13 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 	return nil
 }
 
-// classify applies the outcome of a provider call to the owner's backoff and the
-// fleet breaker.
+// classify applies the outcome of a provider call to the owner's backoff, the
+// fleet breaker, and the connector success clock. Every real provider operation
+// passes through here (withSession and Link), and nothing else does — the
+// short-circuits above them (not linked, cooldown, breaker pause) never reach it,
+// so the clock counts only genuine wire attempts.
 func (c *Client) classify(owner string, permit breakerPermit, err error) {
+	c.health.note(owner, err)
 	var u *provider.Unavailable
 	switch {
 	case err == nil:

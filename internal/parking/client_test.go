@@ -518,7 +518,7 @@ func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 	}{
 		{"200 login form (antiforgery marker) is an expiry", 200, "text/html; charset=utf-8", loginForm, ErrSessionExpired},
 		{"200 login form with a mislabelled content-type is still detected", 200, "application/octet-stream", loginForm, ErrSessionExpired},
-		{"200 edge challenge (no marker) stays transient", 200, "text/html; charset=utf-8", edgePage, nil},
+		{"200 edge challenge (no marker) is push-back, never an expiry", 200, "text/html; charset=utf-8", edgePage, ErrCouncilBusy},
 		{"500 with an html error page", 500, "text/html", edgePage, nil},
 		{"503 push-back", 503, "text/html", edgePage, ErrCouncilBusy},
 	}
@@ -543,6 +543,9 @@ func TestSilentRenewClassifiesAuthorizeAnswers(t *testing.T) {
 			default:
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+				if tc.wantErr != ErrSessionExpired && errors.Is(err, ErrSessionExpired) {
+					t.Fatalf("a %d must not retire the session: %v", tc.code, err)
 				}
 			}
 		})
@@ -717,7 +720,7 @@ func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
 		}
 	})
 
-	t.Run("edge challenge is transient, not an expiry", func(t *testing.T) {
+	t.Run("edge challenge is push-back, not an expiry", func(t *testing.T) {
 		f := newFakeTenant(t)
 		c, st, box := testClient(t, f)
 		linkOwner(t, c, st, box, owner)
@@ -725,6 +728,21 @@ func TestAuthorize200HTMLDistinguishesLoginFormFromEdgeChallenge(t *testing.T) {
 		err := c.Refresh(context.Background(), owner)
 		if err == nil || errors.Is(err, provider.ErrSessionExpired) {
 			t.Fatalf("an edge challenge must not read as expired, got %v", err)
+		}
+		// Typed as *provider.Unavailable so it feeds the cooldown, the breaker and
+		// the /status connector clock — an untyped transient here made a challenge
+		// rollout invisible to every counter.
+		var u *provider.Unavailable
+		if !errors.As(err, &u) || u.Surface != provider.SurfaceAuth || u.Status != 200 {
+			t.Fatalf("want *provider.Unavailable on the auth surface, got %v", err)
+		}
+		st2 := c.Stats()
+		if st2.Pushback == 0 || st2.ConsecutiveFailures != 1 || st2.LastAttemptAt.IsZero() {
+			t.Fatalf("the challenge never reached the connector clock: %+v", st2)
+		}
+		// One challenge is below every alarm threshold: no spurious state flip.
+		if st2.State != StateHealthy {
+			t.Fatalf("state = %q after a single challenge, want %q", st2.State, StateHealthy)
 		}
 	})
 }

@@ -20,6 +20,9 @@ func TestTenantStatusFrom(t *testing.T) {
 		PersistOK: false, PersistError: "disk full",
 		LastPushbackSurface: "api",
 		TruncatedGridAt:     at.Add(-time.Hour), TruncatedGridGot: 7, TruncatedGridWant: 12,
+		State:         parking.StateBlocked,
+		LastAttemptAt: at.Add(-time.Minute), LastSuccessAt: at.Add(-2 * time.Hour),
+		ConsecutiveFailures: 4,
 	})
 	if cs.Requests1m != 5 || cs.Requests5m != 20 || cs.PushbacksTotal != 3 {
 		t.Errorf("rate/pushback totals mismapped: %+v", cs)
@@ -46,6 +49,16 @@ func TestTenantStatusFrom(t *testing.T) {
 			cs.TruncatedGridAt, cs.TruncatedGridGot, cs.TruncatedGridWant)
 	}
 
+	// The connector success clock — what lets the watchdog tell "scheduler alive"
+	// from "scheduler's dependency usable". Dropping any of these regresses the
+	// upstream-failure alert to user reports.
+	if cs.State != parking.StateBlocked || cs.ConsecutiveFailures != 4 {
+		t.Errorf("connector state mismapped: state=%q consec=%d", cs.State, cs.ConsecutiveFailures)
+	}
+	if cs.LastAttemptAt != "2026-08-01T08:59:00Z" || cs.LastSuccessAt != "2026-08-01T07:00:00Z" {
+		t.Errorf("connector clock mismapped: attempt=%q success=%q", cs.LastAttemptAt, cs.LastSuccessAt)
+	}
+
 	// Healthy defaults: no pushback seen, persistence intact, breaker closed.
 	clean := tenantStatusFrom(parking.Stats{PersistOK: true})
 	if clean.BreakerOpen || clean.LastPushbackAt != "" || !clean.PersistOK {
@@ -53,6 +66,9 @@ func TestTenantStatusFrom(t *testing.T) {
 	}
 	if clean.TruncatedGridAt != "" || clean.LastPushbackSurface != "" {
 		t.Errorf("a clean snapshot must not report truncation or a pushback surface: %+v", clean)
+	}
+	if clean.LastAttemptAt != "" || clean.LastSuccessAt != "" || clean.ConsecutiveFailures != 0 {
+		t.Errorf("a clean snapshot must not invent a success clock: %+v", clean)
 	}
 }
 

@@ -117,6 +117,16 @@ type Stats struct {
 	TruncatedGridAt   time.Time
 	TruncatedGridGot  int
 	TruncatedGridWant int
+
+	// Connector success clock, from the real operations the app performs (see
+	// health.go): when we last tried the portal, when it last worked, how many
+	// operations have failed since, and the coarse derived State the watchdog
+	// alerts on. Distinguishes "the scheduler is alive" from "the scheduler's
+	// dependency is usable".
+	LastAttemptAt       time.Time
+	LastSuccessAt       time.Time
+	ConsecutiveFailures int
+	State               string
 }
 
 // Blocked reports whether the fleet circuit breaker is currently open — a
@@ -151,7 +161,12 @@ func (c *Client) Stats() Stats {
 	if pErr != nil {
 		persistError = pErr.Error()
 	}
+	lastAttempt, lastSuccess, consecFails := c.health.clock()
 	return Stats{
+		LastAttemptAt:       lastAttempt,
+		LastSuccessAt:       lastSuccess,
+		ConsecutiveFailures: consecFails,
+		State:               c.health.state(now, open, pb),
 		Login:               c.traffic.login.Load(),
 		Auth:                c.traffic.auth.Load(),
 		API:                 c.traffic.api.Load(),

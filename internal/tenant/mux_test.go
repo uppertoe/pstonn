@@ -162,6 +162,17 @@ func TestMuxAggregatesHealth(t *testing.T) {
 	if s.Pushback != 3 || !s.BreakerOpen || s.LastPushbackRef != "ref-x" || s.LastPushbackStatus != 429 {
 		t.Fatalf("aggregate stats = %+v", s)
 	}
+	// The connector state aggregates worst-wins: one council's confirmed block is
+	// the fleet's headline state, and the failed logins are its failure streak.
+	if s.State != parking.StateBlocked {
+		t.Fatalf("aggregate state = %q, want %q", s.State, parking.StateBlocked)
+	}
+	if s.ConsecutiveFailures != 3 || s.LastAttemptAt.IsZero() || !s.LastSuccessAt.IsZero() {
+		t.Fatalf("aggregate success clock = %+v", s)
+	}
+	if c, _ := m.Client("stonnington"); c.Stats().State != parking.StateIdle {
+		t.Fatalf("an untouched council should read idle, got %q", c.Stats().State)
+	}
 	if c, _ := m.Client("stonnington"); c.Blocked() {
 		t.Fatal("the other council's breaker must stay closed")
 	}

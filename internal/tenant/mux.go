@@ -265,6 +265,10 @@ func (m *Mux) LoginBudget(tenantID string) time.Duration {
 func (m *Mux) Stats() parking.Stats {
 	var out parking.Stats
 	out.PersistOK = true
+	// Connector state aggregates worst-wins (see WorseConnectorState): the
+	// top-level key exists so the watchdog can alert without knowing tenants,
+	// and an alarm on ANY tenant is an alarm.
+	out.State = parking.StateIdle
 	for _, id := range m.ids {
 		s := m.clients[id].Stats()
 		out.Login += s.Login
@@ -290,6 +294,16 @@ func (m *Mux) Stats() parking.Stats {
 		if s.TruncatedGridAt.After(out.TruncatedGridAt) {
 			out.TruncatedGridAt, out.TruncatedGridGot, out.TruncatedGridWant = s.TruncatedGridAt, s.TruncatedGridGot, s.TruncatedGridWant
 		}
+		if s.LastAttemptAt.After(out.LastAttemptAt) {
+			out.LastAttemptAt = s.LastAttemptAt
+		}
+		if s.LastSuccessAt.After(out.LastSuccessAt) {
+			out.LastSuccessAt = s.LastSuccessAt
+		}
+		if s.ConsecutiveFailures > out.ConsecutiveFailures {
+			out.ConsecutiveFailures = s.ConsecutiveFailures // the worst tenant's streak
+		}
+		out.State = parking.WorseConnectorState(out.State, s.State)
 	}
 	return out
 }

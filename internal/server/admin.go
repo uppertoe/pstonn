@@ -350,6 +350,19 @@ func tenantSessionCounts(sessions []store.TenantSession, now time.Time, warmInte
 // fields say WHICH control fired; the breaker fields say whether we are paused; and
 // persist_ok says whether a restart would still honour that pause.
 type tenantStatus struct {
+	// The connector success clock, from the real council operations the app
+	// performs (keep-warm, reads, writes, logins): production traffic is the
+	// probe. State is the coarse word the watchdog keys its reasoning on —
+	// healthy / idle / degraded / rate_limited / upstream_changed / auth_failed
+	// / blocked (see internal/parking/health.go for exact semantics). It lets
+	// the watchdog tell "scheduler is alive" from "the scheduler's dependency
+	// is usable": a council-side CAPTCHA/auth change shows up here after the
+	// first failed real operation, while every other field stays green.
+	State               string `json:"state"`
+	LastAttemptAt       string `json:"last_attempt_at,omitempty"`
+	LastSuccessAt       string `json:"last_success_at,omitempty"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+
 	Requests1m         int    `json:"requests_1m"`
 	Requests5m         int    `json:"requests_5m"`
 	PushbacksTotal     uint64 `json:"pushbacks_total"`
@@ -503,7 +516,7 @@ func (s *Server) tenantBreakdowns(sessions []store.TenantSession) map[string]ten
 // construct a Server without a tenant client (production always has one).
 func (s *Server) tenantSnapshot() tenantStatus {
 	if s.tenant == nil {
-		return tenantStatus{PersistOK: true}
+		return tenantStatus{PersistOK: true, State: parking.StateIdle}
 	}
 	return tenantStatusFrom(s.tenant.Stats())
 }
@@ -513,6 +526,8 @@ func (s *Server) tenantSnapshot() tenantStatus {
 // timestamps as RFC3339.
 func tenantStatusFrom(st parking.Stats) tenantStatus {
 	cs := tenantStatus{
+		State:               st.State,
+		ConsecutiveFailures: st.ConsecutiveFailures,
 		Requests1m:          st.LastMinute,
 		Requests5m:          st.Last5Min,
 		PushbacksTotal:      st.Pushback,
@@ -531,6 +546,12 @@ func tenantStatusFrom(st parking.Stats) tenantStatus {
 	}
 	if !st.LastPushbackAt.IsZero() {
 		cs.LastPushbackAt = st.LastPushbackAt.UTC().Format(time.RFC3339)
+	}
+	if !st.LastAttemptAt.IsZero() {
+		cs.LastAttemptAt = st.LastAttemptAt.UTC().Format(time.RFC3339)
+	}
+	if !st.LastSuccessAt.IsZero() {
+		cs.LastSuccessAt = st.LastSuccessAt.UTC().Format(time.RFC3339)
 	}
 	return cs
 }
