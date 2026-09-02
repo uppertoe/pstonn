@@ -303,6 +303,12 @@ func (m *Mux) Stats() parking.Stats {
 		if s.ConsecutiveFailures > out.ConsecutiveFailures {
 			out.ConsecutiveFailures = s.ConsecutiveFailures // the worst tenant's streak
 		}
+		if s.AuthGated { // any tenant's auth circuit open is an alarm; carry the longest wait
+			out.AuthGated = true
+			if s.AuthGatedFor > out.AuthGatedFor {
+				out.AuthGatedFor = s.AuthGatedFor
+			}
+		}
 		out.State = parking.WorseConnectorState(out.State, s.State)
 	}
 	return out

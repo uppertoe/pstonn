@@ -54,6 +54,17 @@ type Provider struct {
 	// NoClear declares a portal that cannot leave a permit with no vehicle
 	// (CanClearVehicle=false), so the UI's adaptation to that can be exercised.
 	NoClear bool
+	// AuthGateOpen / AuthGateFor let a test present a provider whose auth-surface
+	// circuit is open, so the /status wiring and the mux's aggregation of it can be
+	// exercised (mirrors *orikan.Client.AuthGate).
+	AuthGateOpen bool
+	AuthGateFor  time.Duration
+}
+
+// AuthGate mirrors the optional provider capability the parking client reads for
+// /status; the fake reports whatever the test set.
+func (f *Provider) AuthGate() (open bool, retry time.Duration) {
+	return f.AuthGateOpen, f.AuthGateFor
 }
 
 // New builds a fake portal seeded with a plate on each canned permit, like a real

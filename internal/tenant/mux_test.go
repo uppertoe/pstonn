@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/parking"
@@ -141,6 +142,22 @@ func TestMuxTenantIsolationAcrossASwitch(t *testing.T) {
 	_ = st.SetAccountTenant(ctx, "ghost@example.com", "gone")
 	if err := m.Refresh(ctx, "ghost@example.com", ""); !errors.Is(err, parking.ErrNotLinked) {
 		t.Fatalf("unavailable tenant = %v, want ErrNotLinked", err)
+	}
+}
+
+// One tenant's auth-surface circuit being open must surface on the aggregate
+// /status (auth_gated), with the longest wait carried — the operator sees the
+// council sign-in is being shed without knowing which tenant.
+func TestMuxAggregatesAuthGated(t *testing.T) {
+	m, _, fakes := muxRig(t, "stonnington", "othertown")
+	if s := m.Stats(); s.AuthGated {
+		t.Fatal("no tenant gated: aggregate must not report auth_gated")
+	}
+	fakes["othertown"].AuthGateOpen = true
+	fakes["othertown"].AuthGateFor = 3 * time.Minute
+	s := m.Stats()
+	if !s.AuthGated || s.AuthGatedFor != 3*time.Minute {
+		t.Fatalf("one tenant gated: aggregate = {gated:%v, for:%s}, want {true, 3m0s}", s.AuthGated, s.AuthGatedFor)
 	}
 }
 
