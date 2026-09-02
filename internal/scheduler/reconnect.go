@@ -44,6 +44,12 @@ type reconnectItem struct {
 	queuedAt time.Time
 	gen      int64
 	attempts int
+	// countsChurn records whether this expiry fed the churn EXPIRY counter, so its
+	// eventual successful reconnect feeds the RECONNECT counter to match. Background
+	// discovery counts (true); a foreground interactive return does not (false), and
+	// must stay out of BOTH counters — otherwise /status would show a reconnect with
+	// no matching expiry, and the two sides would disagree.
+	countsChurn bool
 }
 
 // reconnectResult is what one reconnect attempt did, so the drain worker knows
@@ -134,25 +140,57 @@ func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h in
 // task is discarded, and the next keep-warm pass rediscovers within ~3 min); a
 // too-new one is what destroys a valid session.
 func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, tenantID string, gen int64) {
-	now := time.Now()
-	key := sessionKey{owner, tenantID}
-	s.reconnectMu.Lock()
-	_, already := s.reconnectQ[key]
-	if !already {
-		s.reconnectQ[key] = reconnectItem{next: now, queuedAt: now, gen: gen}
-	}
-	s.reconnectMu.Unlock()
-	if already {
+	if !s.queueReconnectItem(owner, tenantID, gen, true) {
 		return
 	}
 	// Several different owners re-authing within the hour is the fingerprint of a
 	// tenant-side session-lifetime/idle-window/cookie change rather than user
 	// activity, and it changes no response SHAPE, so nothing else would catch it.
+	// The churn picture (both this expiry count and the later reconnect count) is
+	// fed ONLY from background/observed expiries — this path and the client's plate
+	// refresh — NOT from a foreground interactive return (QueueReconnect), where a
+	// handful of ordinary users coming back after an idle lapse is not a fleet signal.
 	if distinct := s.noteSessionExpiry(owner); distinct >= sessionChurnAlertOwners {
 		s.systemAlert(ctx, "session-churn",
 			"Council sessions are expiring unusually often",
 			fmt.Sprintf("%d different accounts have had their council session expire within the last hour. A healthy fleet almost never re-authenticates, so this points at a council-side change — a shortened session/idle window, cookie rotation, or silent-renew disabled — not user activity. If /status shows no breaker/pushback, the edge is not refusing us, which narrows it to a session-lifetime change. Investigate before it becomes a reconnect backlog.", distinct))
 	}
+}
+
+// queueReconnectItem inserts the queue entry, deduplicated by (owner, tenant), and
+// reports whether it was newly added. countsChurn is stamped on the item so its
+// eventual reconnect feeds the churn counter only if this expiry did; the callers
+// set it (background discovery true, interactive false). It does NOT itself feed the
+// churn canary — enqueueReconnect does that for the counted path.
+func (s *Scheduler) queueReconnectItem(owner, tenantID string, gen int64, countsChurn bool) bool {
+	now := time.Now()
+	key := sessionKey{owner, tenantID}
+	s.reconnectMu.Lock()
+	defer s.reconnectMu.Unlock()
+	if it, already := s.reconnectQ[key]; already {
+		// A genuine BACKGROUND expiry (countsChurn=true) arriving for an item first
+		// queued INTERACTIVELY (false) upgrades it and is reported as newly countable,
+		// so an interactive visit can't erase a real fleet-signal data point for that
+		// owner while the item sits in backoff. Never the reverse (interactive after
+		// background must not downgrade). The generation stays the one already queued.
+		if countsChurn && !it.countsChurn {
+			it.countsChurn = true
+			s.reconnectQ[key] = it
+			return true
+		}
+		return false
+	}
+	s.reconnectQ[key] = reconnectItem{next: now, queuedAt: now, gen: gen, countsChurn: countsChurn}
+	return true
+}
+
+// QueueReconnect enqueues a saved-password reconnect for (owner, tenant) at gen for
+// a FOREGROUND, interactive expiry (the picker's returning user), without feeding
+// the session-churn canary — one person coming back is not the many-distinct-owners
+// fleet signal that canary watches for. Recovery itself (dedup, generation guard,
+// retire-and-notify, pacing) is identical to a background enqueue.
+func (s *Scheduler) QueueReconnect(owner, tenantID string, gen int64) {
+	s.queueReconnectItem(owner, tenantID, gen, false)
 }
 
 // NoteSessionExpired queues recovery for a session some OTHER component proved
@@ -203,8 +241,9 @@ func (s *Scheduler) CancelReconnect(owner string) {
 }
 
 // nextDueReconnect returns the queued owner with the earliest next-attempt time (ties
-// broken by owner for determinism), its generation, and how long until it is due.
-func (s *Scheduler) nextDueReconnect() (key sessionKey, gen int64, wait time.Duration, ok bool) {
+// broken by owner for determinism), its generation, whether it feeds the churn
+// counters, and how long until it is due.
+func (s *Scheduler) nextDueReconnect() (key sessionKey, gen int64, countsChurn bool, wait time.Duration, ok bool) {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
 	var best reconnectItem
@@ -215,12 +254,12 @@ func (s *Scheduler) nextDueReconnect() (key sessionKey, gen int64, wait time.Dur
 		}
 	}
 	if !found {
-		return sessionKey{}, 0, 0, false
+		return sessionKey{}, 0, false, 0, false
 	}
 	if now := time.Now(); best.next.After(now) {
-		return key, best.gen, best.next.Sub(now), true
+		return key, best.gen, best.countsChurn, best.next.Sub(now), true
 	}
-	return key, best.gen, 0, true
+	return key, best.gen, best.countsChurn, 0, true
 }
 
 func (s *Scheduler) dequeueReconnect(key sessionKey) {
@@ -299,7 +338,7 @@ func (s *Scheduler) reconnectLoop(ctx context.Context) {
 // returning false if none is due (so the caller idles). Shared by reconnectLoop and
 // tests. A recovered owner is kicked so any due change applies at once.
 func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
-	key, gen, wait, ok := s.nextDueReconnect()
+	key, gen, countsChurn, wait, ok := s.nextDueReconnect()
 	if !ok || wait > 0 {
 		return false
 	}
@@ -313,7 +352,7 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 			s.backoffReconnect(key)
 		}
 	}()
-	switch s.recoverOrRetire(ctx, owner, key.tenant, gen) {
+	switch s.recoverOrRetire(ctx, owner, key.tenant, gen, countsChurn) {
 	case reconnectRecovered:
 		s.dequeueReconnect(key)
 		s.KickOwner(ctx, owner)
@@ -332,8 +371,11 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 // this work is never deleted (reconnectRetired; the re-link prompt is sent only when a
 // row was actually removed). Anything transient (tenant busy, a network blip, a
 // systemic login-shape break, or a FAILED delete) keeps the task and retries later
-// (reconnectDeferred).
-func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string, gen int64) reconnectResult {
+// (reconnectDeferred). countsChurn says whether a success should feed the churn
+// reconnect counter — true only if this expiry fed the churn expiry counter, so the
+// two /status sides stay balanced and a foreground interactive return counts on
+// neither.
+func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string, gen int64, countsChurn bool) reconnectResult {
 	// Skip stale work: if the session was relinked, reconnected, renewed, or unlinked
 	// since this was queued, its generation no longer matches (or it is gone) — this
 	// recovery task is not ours to act on.
@@ -360,7 +402,9 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string,
 	defer cancel()
 	switch rerr := s.tenant.Reconnect(rctx, owner, tenantID); {
 	case rerr == nil:
-		s.noteReconnect(owner)
+		if countsChurn { // balance the churn counters: only a counted expiry's reconnect counts
+			s.noteReconnect(owner)
+		}
 		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", redact.Email(owner))
 		return reconnectRecovered
 	case errors.Is(rerr, store.ErrSessionSuperseded):

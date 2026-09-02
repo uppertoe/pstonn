@@ -93,7 +93,7 @@ func TestLoginShapeChangeAlertsAndKeepsSession(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: fn})
 
 	cs, _ := st.GetTenantSession(ctx, owner)
-	if got := s.recoverOrRetire(ctx, owner, "", cs.Generation); got != reconnectDeferred {
+	if got := s.recoverOrRetire(ctx, owner, "", cs.Generation, true); got != reconnectDeferred {
 		t.Fatalf("a login-shape failure should defer (keep the session), got %v", got)
 	}
 	if _, err := st.GetTenantSession(ctx, owner); err != nil {
@@ -123,5 +123,48 @@ func TestReconnectCounted(t *testing.T) {
 	}
 	if exp != 1 {
 		t.Errorf("expiries_1h = %d, want 1 (the expiry that triggered the reconnect)", exp)
+	}
+}
+
+// A FOREGROUND interactive reconnect (the picker's returning user, QueueReconnect)
+// must count on NEITHER churn surface: not the expiry side (an ordinary idle lapse
+// is not the many-distinct-owners fleet signal), and — to keep the two sides
+// balanced — not the reconnect side on success either. Mirrors TestReconnectCounted,
+// which shows the background path DOES count both.
+func TestInteractiveReconnectCountsOnNeitherSide(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	seedSession(t, st, "back@example.com")
+	fc := &fakeTenant{reconnectSet: true} // reconnectErr nil = success
+	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+
+	s.QueueReconnect("back@example.com", "", genOf(t, st, "back@example.com")) // interactive, no churn
+	if !s.drainOneReconnect(ctx) {
+		t.Fatal("expected the queued interactive reconnect to process")
+	}
+	exp, reconns, owners := s.SessionChurn()
+	if exp != 0 || reconns != 0 || owners != 0 {
+		t.Fatalf("interactive reconnect fed churn: expiries=%d reconnects=%d owners=%d, want all 0", exp, reconns, owners)
+	}
+}
+
+// A background expiry arriving for an owner already queued interactively must still
+// be counted — the interactive item is upgraded so one picker visit can't erase a
+// real fleet-signal data point while the reconnect sits in backoff.
+func TestBackgroundExpiryUpgradesInteractiveItem(t *testing.T) {
+	st := newStore(t)
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+	const owner = "both@example.com"
+
+	s.QueueReconnect(owner, "councilA", 1) // interactive first: countsChurn=false
+	if exp, _, _ := s.SessionChurn(); exp != 0 {
+		t.Fatalf("interactive queue should not count an expiry yet, got %d", exp)
+	}
+	s.NoteSessionExpired(owner, "councilA", 1) // genuine background expiry, same owner
+	if exp, _, owners := s.SessionChurn(); exp != 1 || owners != 1 {
+		t.Fatalf("background expiry of an already-queued owner must count once: expiries=%d owners=%d", exp, owners)
+	}
+	if !s.ReconnectActive(owner, "councilA") {
+		t.Fatal("the item should still be queued and active")
 	}
 }

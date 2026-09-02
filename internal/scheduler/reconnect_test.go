@@ -101,7 +101,7 @@ func TestStaleReconnectDoesNotTouchAFreshSession(t *testing.T) {
 	s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
 
 	stale := cur.Generation + 1 // a generation that no longer matches (a session change happened)
-	if got := s.recoverOrRetire(ctx, owner, "", stale); got != reconnectRetired {
+	if got := s.recoverOrRetire(ctx, owner, "", stale, true); got != reconnectRetired {
 		t.Fatalf("a stale-generation task should be discarded, got %v", got)
 	}
 	if len(fc.reconnected) != 0 {
@@ -214,5 +214,28 @@ func TestReconnectActiveScopeAndWindow(t *testing.T) {
 	s.reconnectMu.Unlock()
 	if !stillQueued {
 		t.Fatal("aging must not dequeue the item")
+	}
+}
+
+// QueueReconnect (the picker's foreground path) must recover the session WITHOUT
+// feeding the session-churn canary — ordinary returning users are not the
+// many-distinct-owners fleet signal that canary watches for. NoteSessionExpired
+// (background discovery) still feeds it.
+func TestQueueReconnectDoesNotFeedChurn(t *testing.T) {
+	st := newStore(t)
+	s := New(st, &fakeTenant{}, time.UTC, Options{})
+
+	s.QueueReconnect("a@example.com", "councilA", 1)
+	s.QueueReconnect("b@example.com", "councilA", 1)
+	if exp, _, owners := s.SessionChurn(); exp != 0 || owners != 0 {
+		t.Fatalf("interactive QueueReconnect fed the churn canary: expiries=%d owners=%d", exp, owners)
+	}
+	if !s.ReconnectActive("a@example.com", "councilA") {
+		t.Fatal("QueueReconnect must still queue the recovery")
+	}
+	// Background discovery of a genuine expiry does feed it.
+	s.NoteSessionExpired("c@example.com", "councilA", 1)
+	if exp, _, owners := s.SessionChurn(); exp != 1 || owners != 1 {
+		t.Fatalf("NoteSessionExpired should feed the canary once: expiries=%d owners=%d", exp, owners)
 	}
 }

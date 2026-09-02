@@ -42,7 +42,10 @@ func (s *Server) tenantIDOf(ctx context.Context, owner string) string {
 
 // renderReconnecting answers a picker load while a background reconnect is in
 // flight: an honest in-progress page that refreshes itself back into the picker.
+// The refresh targets the bare page PATH (no query), so a reconnect reached from a
+// stale /schedule?linked=1 bookmark drops the parameter on the next tick — its
+// refreshes then hit the read-avoiding gate instead of spending a throttle slot each.
 func (s *Server) renderReconnecting(w http.ResponseWriter, r *http.Request, owner string) {
-	w.Header().Set("Refresh", "4")
+	w.Header().Set("Refresh", "4; url="+r.URL.Path)
 	s.message(w, http.StatusOK, s.say(r.Context(), owner, "picker.reconnecting"))
 }
