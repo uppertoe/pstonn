@@ -85,16 +85,27 @@ func TestConnectorHealthStates(t *testing.T) {
 		}
 	})
 
-	t.Run("one unexpected response is a glitch; two are a change", func(t *testing.T) {
+	t.Run("one owner's unexpected responses are a glitch; two owners' are a change", func(t *testing.T) {
 		h := &connectorHealth{}
 		h.noteAt("a@x", nil, now)
 		h.noteAt("a@x", tUnexpected, now.Add(time.Minute))
 		if got := healthState(h, now.Add(2*time.Minute)); got == StateUpstreamChanged {
 			t.Fatal("a single unexpected shape must not flip the state")
 		}
-		h.noteAt("b@x", tUnexpected, now.Add(3*time.Minute))
-		if got := healthState(h, now.Add(4*time.Minute)); got != StateUpstreamChanged {
-			t.Fatalf("state = %q, want upstream_changed after %d unexpected shapes", got, healthUnexpectedMin)
+		// The same household again — a retry of the same odd permit record — is
+		// still one household, however many times it is attempted.
+		h.noteAt("a@x", tUnexpected, now.Add(2*time.Minute))
+		h.noteAt("a@x", tUnexpected, now.Add(3*time.Minute))
+		if got := healthState(h, now.Add(4*time.Minute)); got == StateUpstreamChanged {
+			t.Fatal("repeated unexpected shapes from ONE owner must not flip the state (no breadth)")
+		}
+		h.noteAt("b@x", tUnexpected, now.Add(5*time.Minute))
+		if got := healthState(h, now.Add(6*time.Minute)); got != StateUpstreamChanged {
+			t.Fatalf("state = %q, want upstream_changed once %d distinct owners hit unexpected shapes", got, healthUnexpectedOwners)
+		}
+		// And the signal ages out per owner.
+		if got := healthState(h, now.Add(5*time.Minute).Add(healthSignalWindow+time.Minute)); got == StateUpstreamChanged {
+			t.Fatal("aged-out unexpected shapes must not keep the alarm up")
 		}
 	})
 

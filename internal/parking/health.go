@@ -59,15 +59,16 @@ const (
 	// healthAuthRejectOwners: distinct owners whose login must be rejected
 	// within the window before the CONNECTOR (not their password) is suspect.
 	healthAuthRejectOwners = 2
-	// healthUnexpectedMin: unexpected-shape responses within the window before
-	// "possibly a glitch" becomes "possibly a changed API" — the same bar as
-	// the scheduler's multi-user-fail operator alert.
-	healthUnexpectedMin = 2
+	// healthUnexpectedOwners: distinct owners whose operations must return an
+	// unexpected shape within the window before "possibly a glitch" becomes
+	// "possibly a changed API" — the same bar as the scheduler's multi-user-fail
+	// operator alert. Owners, not events: one household's odd permit record can
+	// answer unreadably on every attempt, and the retry cadence alone would then
+	// clear an event count within minutes.
+	healthUnexpectedOwners = 2
 	// healthDegradedAfter: consecutive failures (with no success in between,
 	// across ALL owners) before the state reads degraded.
 	healthDegradedAfter = 3
-	// healthUnexpectedCap bounds the unexpected-events list.
-	healthUnexpectedCap = 16
 )
 
 // connectorStateRank orders states for aggregation; worse (more alarming) is
@@ -106,8 +107,10 @@ type connectorHealth struct {
 	// owners, because one rejection is a wrong password and several are not.
 	// An owner's entry clears on any success of theirs (their credentials work).
 	authRejects map[string]time.Time
-	// unexpected: recent FailUnexpected classifications (shape we could not read).
-	unexpected []time.Time
+	// unexpected: owner -> when their operation last returned a shape we could
+	// not read (FailUnexpected). Keyed by owner for the same reason authRejects
+	// is: the alarm needs breadth, and the same permit failing twice is not it.
+	unexpected map[string]time.Time
 	// loginShapeAt: the last structurally-unrecognisable sign-in page
 	// (ErrLoginFormUnrecognised / ErrLoginOffHost) — deterministic, owner-
 	// independent evidence the portal changed, so one occurrence is enough.
@@ -143,9 +146,10 @@ func (h *connectorHealth) noteAt(owner string, err error, now time.Time) {
 		h.authRejects[owner] = now
 	default:
 		if kind, _ := provider.FailureOf(err); kind == provider.FailUnexpected {
-			if len(h.unexpected) < healthUnexpectedCap {
-				h.unexpected = append(h.unexpected, now)
+			if h.unexpected == nil {
+				h.unexpected = map[string]time.Time{}
 			}
+			h.unexpected[owner] = now
 		}
 	}
 	h.pruneLocked(now)
@@ -158,13 +162,11 @@ func (h *connectorHealth) pruneLocked(now time.Time) {
 			delete(h.authRejects, owner)
 		}
 	}
-	kept := h.unexpected[:0]
-	for _, at := range h.unexpected {
-		if now.Sub(at) <= healthSignalWindow {
-			kept = append(kept, at)
+	for owner, at := range h.unexpected {
+		if now.Sub(at) > healthSignalWindow {
+			delete(h.unexpected, owner)
 		}
 	}
-	h.unexpected = kept
 }
 
 // clock returns the raw success clock for Stats.
@@ -189,7 +191,7 @@ func (h *connectorHealth) state(now time.Time, breakerOpen bool, lastPB Pushback
 	case len(h.authRejects) >= healthAuthRejectOwners:
 		return StateAuthFailed
 	case !h.loginShapeAt.IsZero() && now.Sub(h.loginShapeAt) <= healthSignalWindow,
-		len(h.unexpected) >= healthUnexpectedMin:
+		len(h.unexpected) >= healthUnexpectedOwners:
 		return StateUpstreamChanged
 	case recentPB && lastPB.Status == http.StatusTooManyRequests:
 		return StateRateLimited
