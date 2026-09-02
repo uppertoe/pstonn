@@ -465,8 +465,15 @@ func Load() (*Config, error) {
 		cfg.PublicBaseURL = base
 	}
 
-	if cfg.AppOIDC.Enabled() && len(cfg.SessionSecret) < 16 {
+	if cfg.AppOIDC.Enabled() && len(cfg.SessionSecret) == 0 {
 		return nil, fmt.Errorf("SESSION_SECRET must be set (>=16 bytes) when APP_OIDC_ISSUER is configured")
+	}
+	// The floor applies whenever a secret is present, not only under OIDC: any
+	// non-empty value builds a session manager, and in forward-auth mode its
+	// cookie is consulted for every request the proxy did not identify. A
+	// guessable key there is a forgeable session, whichever login mode is on.
+	if n := len(cfg.SessionSecret); n > 0 && n < 16 {
+		return nil, fmt.Errorf("SESSION_SECRET must be at least 16 bytes when set")
 	}
 
 	// PUBLIC_BASE_URL is how every link the app mints leaves the machine: the

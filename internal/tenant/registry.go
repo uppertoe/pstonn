@@ -86,6 +86,13 @@ func Load(cfg config.CouncilConfig, path string) (*Registry, error) {
 	}
 	if c, ok := reg.byID["stonnington"]; ok {
 		applyConfig(c, cfg)
+		// The overlay lands AFTER parse validated the file, so it must be checked
+		// on its own: an http:// COUNCIL_ISSUER in the environment would otherwise
+		// send residents' plaintext portal passwords over a scheme the registry
+		// rule exists to forbid.
+		if err := validateEndpoints(c.Endpoints); err != nil {
+			return nil, fmt.Errorf("tenants: %s (COUNCIL_* override): %w", c.ID, err)
+		}
 	}
 	if cfg.Sandbox {
 		// The sandbox fakes ONE tenant in memory; it is what dev/demo runs against.
@@ -155,17 +162,8 @@ func validate(c *Tenant) error {
 	if spec.portal && e.Issuer == "" && e.APIBase == "" && e.ClientID == "" && e.RedirectURI == "" {
 		return fmt.Errorf("%s talks to a portal and needs endpoints", c.Connector)
 	}
-	// The login flow carries a resident's plaintext tenant password; the scheme it
-	// may travel over is decided here and nowhere else. Any endpoint given — for
-	// any connector — must be https.
-	for name, raw := range map[string]string{"issuer": e.Issuer, "api_base": e.APIBase, "redirect_uri": e.RedirectURI} {
-		if raw == "" {
-			continue
-		}
-		u, err := url.Parse(raw)
-		if err != nil || u.Scheme != "https" || u.Host == "" {
-			return fmt.Errorf("%s must be an https URL, got %q", name, raw)
-		}
+	if err := validateEndpoints(e); err != nil {
+		return err
 	}
 	if c.Timezone == "" {
 		return fmt.Errorf("timezone is required")
@@ -206,6 +204,23 @@ func validate(c *Tenant) error {
 		}
 		if u, err := url.Parse(raw); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 			return fmt.Errorf("links.%s must be an http(s) URL, got %q", name, raw)
+		}
+	}
+	return nil
+}
+
+// validateEndpoints applies the one rule that must hold wherever endpoints come
+// from — the registry file or a COUNCIL_* override. The login flow carries a
+// resident's plaintext tenant password; the scheme it may travel over is decided
+// here and nowhere else. Any endpoint given — for any connector — must be https.
+func validateEndpoints(e Endpoints) error {
+	for name, raw := range map[string]string{"issuer": e.Issuer, "api_base": e.APIBase, "redirect_uri": e.RedirectURI} {
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("%s must be an https URL, got %q", name, raw)
 		}
 	}
 	return nil

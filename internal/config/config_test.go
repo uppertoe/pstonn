@@ -216,6 +216,26 @@ func TestStartupErrorsKeepSecretsOut(t *testing.T) {
 		}
 	})
 
+	// A short SESSION_SECRET is a forgeable session cookie in EVERY login mode:
+	// forward-auth builds a session manager from any non-empty value and consults
+	// its cookie for requests the proxy did not identify.
+	t.Run("a short session secret is refused without OIDC too", func(t *testing.T) {
+		t.Setenv("DOMAIN", "example.com")
+		t.Setenv("APP_OIDC_ISSUER", "")
+		t.Setenv("SESSION_SECRET", "short")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "SESSION_SECRET") {
+			t.Fatalf("want a SESSION_SECRET error in forward-auth mode, got %v", err)
+		}
+		if strings.Contains(err.Error(), "short") || strings.Contains(err.Error(), "5") {
+			t.Fatalf("error reports the rejected secret or its length: %v", err)
+		}
+		t.Setenv("SESSION_SECRET", "sixteen-byte-key")
+		if _, err := Load(); err != nil {
+			t.Fatalf("a 16-byte secret should load, got %v", err)
+		}
+	})
+
 	t.Run("a short status token error does not report its length", func(t *testing.T) {
 		t.Setenv("DOMAIN", "example.com")
 		t.Setenv("STATUS_TOKEN", "short")

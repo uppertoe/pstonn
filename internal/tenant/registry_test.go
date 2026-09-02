@@ -47,6 +47,25 @@ func TestLoadAppliesConfigAndSandbox(t *testing.T) {
 	}
 }
 
+// The COUNCIL_* overlay is applied after the file was validated, so the https
+// rule must be re-applied to it: a plain-http issuer from the environment would
+// otherwise carry residents' portal passwords in clear.
+func TestLoadRefusesInsecureConfigOverride(t *testing.T) {
+	for name, cfg := range map[string]config.CouncilConfig{
+		"issuer":       {Issuer: "http://x/idm"},
+		"api_base":     {APIBase: "http://x/ssp-svc"},
+		"redirect_uri": {RedirectURI: "http://x/ssp/callback"},
+		"no host":      {Issuer: "https:///idm"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(cfg, "")
+			if err == nil || !strings.Contains(err.Error(), "https") {
+				t.Fatalf("an insecure COUNCIL_* override must be refused with an https error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestLoadFromFileAndValidation(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {
