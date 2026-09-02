@@ -727,10 +727,10 @@ func heldApplyTwins(email string, o ApplyOutcome) []string {
 
 // supersedeHeldTwins cancels any quiet-hours-held soft twin of an act-now notice
 // for this member+permit+plate, so the reassuring "still updating" version never
-// arrives AFTER the urgent one. Called the moment a member is on the action-needed
-// path — whether the urgent then sends, is past their daily urgent cap, or the send
-// fails and will retry — because the soft twin is stale as soon as the outcome is a
-// confirmed act-now, not only once delivery succeeds.
+// arrives AFTER the urgent one. Called once the member has been HANDLED on the
+// action-needed path — reached inline, or deliberately dropped by their daily
+// urgent cap (told enough) — but NOT when the send merely failed: there the held
+// soft stays as a fallback so a bounce can't leave the household with nothing.
 func (s *Service) supersedeHeldTwins(ctx context.Context, email string, o ApplyOutcome) {
 	if s.store == nil {
 		return
@@ -946,15 +946,6 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		}
 		due++
 
-		// An act-now escalation bypasses quiet hours and sends inline; the softer
-		// twin a quiet-hours hold may have queued for 06:00 is now stale. Cancel it
-		// here — before the reached-memory and per-recipient-cap gates below can
-		// short-circuit this member — so a throttled or retrying urgent still
-		// prevents the reassuring notice arriving in confusing reverse order.
-		if o.actionNeeded() {
-			s.supersedeHeldTwins(ctx, d.email, o)
-		}
-
 		// A retry of a partial delivery: this member was reached last time, so
 		// they still count as delivered, and only the members who were missed are
 		// sent to again. Keyed on the caller's outcome identity, so two different
@@ -980,6 +971,12 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			}
 			if !lim.allow(d.email) {
 				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
+				// Told enough today — but an act-now escalation still supersedes the
+				// softer twin quiet hours may be holding for 06:00, so the reassuring
+				// notice can't arrive after the urgent ones that used up the budget.
+				if o.actionNeeded() {
+					s.supersedeHeldTwins(ctx, d.email, o)
+				}
 				delivered++
 				continue
 			}
@@ -1040,6 +1037,14 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			delivered++
 			if seenKey != "" {
 				s.markReached(seenKey, now)
+			}
+			// The act-now notice reached this member inline (quiet hours bypassed);
+			// cancel the softer twin a hold may have queued for 06:00 so they aren't
+			// told twice in reverse order. Only on a reach — a failed send keeps the
+			// held soft as a fallback, since a bounce here would otherwise leave the
+			// household with nothing.
+			if o.actionNeeded() {
+				s.supersedeHeldTwins(ctx, d.email, o)
 			}
 		}
 	}

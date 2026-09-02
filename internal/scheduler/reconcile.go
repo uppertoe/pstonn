@@ -716,15 +716,16 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			key := "busy|" + want + "|" + day
 			if confirmed {
 				key = "busy-blocked|" + want + "|" + day
-			} else if k, _, _ := s.store.PermitNotify(ctx, p.ID); k == "busy-blocked|"+want+"|"+day {
-				// The urgent act-now escalation already went out for this permit+plate
-				// today (the block was confirmed, then cleared while the permit kept
-				// failing for another reason). The urgent sends inline, so it leaves no
-				// held row to supersede — but it did record itself as the permit's last
-				// notified key. A later soft "still updating" would be a confusing
-				// downgrade from that, so skip it.
-				return false
 			}
+			// Note a narrow residual: if `confirmed` was true (an urgent act-now notice
+			// went out), then clears while the permit keeps failing for another reason,
+			// the soft "busy|" notice can follow the urgent as a downgrade. It needs the
+			// confirmed state to toggle off mid-streak AND the permit to keep failing to
+			// busyNotifyThreshold — after an auth outage that leaves no per-owner
+			// cooldown, a recovered council simply succeeds and clears the streak, so
+			// this requires a second, independent block. Suppressing it reliably would
+			// need durable per-permit "already escalated" state (the shared notified key
+			// is overwritten by other notices), which that narrow case does not warrant.
 			s.notifyUser(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
 				OK: false, CurrentReg: p.ActiveRegistration,

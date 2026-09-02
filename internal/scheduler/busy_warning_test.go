@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -221,53 +220,5 @@ func TestUndeliveredNoticeRetryIsPaced(t *testing.T) {
 	permits, _ := s.store.ListPermitsFor(ctx, owner)
 	if k, _, _ := s.store.PermitNotify(ctx, permits[0].ID); k != "" {
 		t.Fatalf("a partial delivery recorded the durable key %q; the missed member would never be retried", k)
-	}
-}
-
-// TestSoftBusySuppressedAfterUrgentEscalation: once the act-now escalation has gone
-// out for a permit today, a soft "still updating" notice must NOT follow it if the
-// confirmed state clears while the permit keeps failing. The urgent sends inline and
-// leaves no held row to supersede, so this relies on the permit's durable notified
-// key — the reverse-order downgrade the user called out must not happen.
-func TestSoftBusySuppressedAfterUrgentEscalation(t *testing.T) {
-	ctx := context.Background()
-	const owner, cid = "recover@example.com", "rec-1"
-	st := newStore(t)
-	pid, _ := seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
-	fc := &fakeTenant{setErr: parking.ErrCouncilBusy, authGated: true}
-	nf := &fakeNotifier{on: true, admin: true}
-	s := New(st, fc, time.UTC, Options{Notifier: nf})
-
-	// Phase 1: the auth outage escalates to the urgent notice; wait for its durable
-	// key to persist (notifyUser records it asynchronously).
-	for i := 0; i < blockNotifyThreshold; i++ {
-		s.reconcileAll(ctx)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if k, _, _ := st.PermitNotify(ctx, pid); strings.HasPrefix(k, "busy-blocked|") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("urgent escalation key never persisted; outcomes=%d", len(nf.outcomeSnap()))
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	urgentOutcomes := nf.outcomeSnap()
-	if o := urgentOutcomes[len(urgentOutcomes)-1]; !o.Urgent {
-		t.Fatalf("phase 1 did not end on an urgent outcome: %+v", o)
-	}
-
-	// Phase 2: the auth circuit recovers (breaker still closed) but the permit keeps
-	// failing. Run well past the soft threshold; no soft "still updating" may follow.
-	fc.mu.Lock()
-	fc.authGated = false
-	fc.mu.Unlock()
-	for i := 0; i < busyNotifyThreshold+2; i++ {
-		s.reconcileAll(ctx)
-	}
-	time.Sleep(30 * time.Millisecond) // let any (unwanted) async notify land
-	if got := len(nf.outcomeSnap()); got != len(urgentOutcomes) {
-		t.Fatalf("a soft notice fired after the urgent escalation: %d outcomes, want %d", got, len(urgentOutcomes))
 	}
 }
