@@ -87,3 +87,49 @@ func TestPartialDeliveryRetrySkipsReachedMembers(t *testing.T) {
 		t.Fatalf("keyless outcomes must not be deduped: primary sends = %d, want 4", sent[primary])
 	}
 }
+
+// TestReachedMemoryIsPerPermitAndForgottenOnceComplete: the reached-member memory
+// exists to finish a PARTIAL delivery. Once everyone is reached it must be
+// forgotten, so a later outcome that legitimately carries the same key (the
+// roster re-applying A>B after the resident reverted the plate at the portal)
+// is delivered again rather than swallowed. And it is scoped to a permit: two
+// permits on one account can share an outcome key (a tenant-wide "council
+// unavailable") and each is its own notice.
+func TestReachedMemoryIsPerPermitAndForgottenOnceComplete(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const primary = "primary@example.com"
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: primary, EmailEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	sent := 0
+	m.SetSendHook(func(_, _, _ string, _ mailer.Options) error { sent++; return nil })
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+
+	o := ApplyOutcome{Owner: primary, PermitID: 1, PermitLabel: "VPP1", Reg: "ABC123", OK: true, Key: "success|OLD1>ABC123"}
+	if n, err := svc.NotifyApply(ctx, o); n != 1 || err != nil {
+		t.Fatalf("first delivery = (%d, %v), want (1, nil)", n, err)
+	}
+	// The same outcome recurs as a genuinely new event (the drift revert case).
+	if n, err := svc.NotifyApply(ctx, o); n != 1 || err != nil {
+		t.Fatalf("repeat after a complete delivery = (%d, %v), want (1, nil)", n, err)
+	}
+	if sent != 2 {
+		t.Fatalf("sends after a completed delivery and a genuine repeat = %d, want 2", sent)
+	}
+	// A second permit with the identical key is its own notice.
+	o2 := o
+	o2.PermitID = 2
+	o2.PermitLabel = "VPP2"
+	if n, err := svc.NotifyApply(ctx, o2); n != 1 || err != nil {
+		t.Fatalf("other permit = (%d, %v), want (1, nil)", n, err)
+	}
+	if sent != 3 {
+		t.Fatalf("sends = %d, want 3: a different permit must not be deduped against the first", sent)
+	}
+}

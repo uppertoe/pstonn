@@ -142,6 +142,18 @@ func (s *Service) reached(seenKey string, now time.Time) bool {
 
 // markReached records a member as reached for this outcome key, sweeping
 // expired entries as it goes.
+// forgetReached drops the reached-memory entries of a completed delivery.
+func (s *Service) forgetReached(keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	s.applySeenMu.Lock()
+	defer s.applySeenMu.Unlock()
+	for _, k := range keys {
+		delete(s.applySeen, k)
+	}
+}
+
 func (s *Service) markReached(seenKey string, now time.Time) {
 	s.applySeenMu.Lock()
 	defer s.applySeenMu.Unlock()
@@ -624,6 +636,9 @@ type ApplyOutcome struct {
 	// the underlying failure is technically transient.
 	Urgent bool
 
+	// PermitID scopes Key: two permits on one account can produce the identical
+	// outcome key (a tenant-wide "council unavailable"), and each is its own notice.
+	PermitID int64
 	// Key is the caller's identity for this outcome: the same Key means the same
 	// message, retried. When set, NotifyApply remembers which members it reached
 	// inline, so a retry after a partial delivery skips them (still counting them
@@ -870,7 +885,8 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	}
 	emailBody += s.firstApplyLine(ctx, o)
 	var errs []string
-	due := 0 // members with at least one channel that should have received this
+	due := 0
+	var seenKeys []string // every reached-memory key consulted by this delivery // members with at least one channel that should have received this
 	now := time.Now()
 	for _, d := range dels {
 		if o.OK && d.pref.FailuresOnly && o.fromSchedule() {
@@ -890,7 +906,8 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		// confirmed-block escalation) are never mistaken for each other.
 		seenKey := ""
 		if o.Key != "" {
-			seenKey = o.Owner + "|" + o.Key + "|" + d.email
+			seenKey = fmt.Sprintf("%s|%d|%s|%s", o.Owner, o.PermitID, o.Key, d.email)
+			seenKeys = append(seenKeys, seenKey)
 			if s.reached(seenKey, now) {
 				delivered++
 				continue
@@ -961,6 +978,13 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	if len(errs) > 0 {
 		return delivered, fmt.Errorf("notify %s: %s", RedactEmail(o.Owner), strings.Join(errs, "; "))
 	}
+	// Everyone due was reached, so this delivery is complete and the memory of it
+	// must go: it exists only to finish a PARTIAL delivery without repeating
+	// itself. Kept past this point it would swallow the next legitimate notice
+	// with the same key — the roster re-applying A>B after a resident reverted
+	// the plate at the portal, or an urgent session notice that recurs the same
+	// day — while the scheduler recorded it as delivered.
+	s.forgetReached(seenKeys)
 	return delivered, nil
 }
 

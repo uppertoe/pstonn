@@ -266,6 +266,7 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	// The outcome's identity travels with it, so the notifier can remember which
 	// members a PARTIAL delivery reached and not repeat itself to them on retry.
 	o.Key = key
+	o.PermitID = p.ID
 	notifiedKey, adminKey, _ := s.store.PermitNotify(ctx, p.ID)
 	if notifiedKey == key {
 		return // already successfully told about this exact outcome
