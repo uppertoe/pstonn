@@ -12,9 +12,24 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
+
+// councilTroubled reports whether a connector state is a SUSTAINED council-side
+// problem worth telling the user about — degraded (repeated failures) or worse
+// (rate-limited, upstream changed, auth failing, blocked). Healthy and idle are not
+// trouble. The state itself already encodes "sustained" (degraded needs repeated
+// consecutive failures), so this needs no separate debounce.
+func councilTroubled(state string) bool {
+	switch state {
+	case parking.StateDegraded, parking.StateRateLimited, parking.StateUpstreamChanged,
+		parking.StateAuthFailed, parking.StateBlocked:
+		return true
+	}
+	return false
+}
 
 // guestHintAfterOverrides is how many one-off bookings a household makes before
 // the Schedule page points it at guest passes. Three within the change log's
@@ -109,6 +124,20 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	}
 	base.Permits = pvs
 	base.ExpiredPermits = expired
+	// Sustained council-side trouble: say plainly that changes may be delayed rather
+	// than let a user wonder why "on permit now" is stale or a booking hasn't landed.
+	// Only when the connector is degraded-or-worse (already a sustained signal, not a
+	// blip); a healthy or idle connector shows nothing. LIMITATIONS, benign in the
+	// single-council production config but noted for multi-council: Stats().State is
+	// the worst state across ALL tenants (a second council's outage would show here
+	// too), and StateDegraded rides a shared consecutive-failure counter (a single
+	// broken account, with no other owner's success intervening, could read as a
+	// council-wide problem). Both need per-tenant / distinct-owner health to fix; the
+	// name below is the account's own tenant so at least the label is right.
+	if len(pvs) > 0 && s.tenant != nil && councilTroubled(s.tenant.Stats().State) {
+		base.CouncilTrouble = true
+		base.CouncilName = s.tenantViewFor(ctx, owner).Name
+	}
 	// Shared-access hint: only for a primary far enough along to have a live
 	// permit card on screen, with no members yet. A pending invite counts as a
 	// member here — that household has already found the feature.

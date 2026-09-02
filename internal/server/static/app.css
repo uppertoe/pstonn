@@ -187,6 +187,11 @@ main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap
 .banner.ok { background:var(--ok-soft); border:1px solid color-mix(in srgb,var(--ok) 30%,transparent); color:var(--ok); }
 .banner.warn { background:var(--warn-soft); border:1px solid color-mix(in srgb,var(--warn) 35%,transparent); color:var(--warn); }
 .banner.info { background:var(--info-soft); border:1px solid color-mix(in srgb,var(--info) 35%,transparent); color:var(--info); }
+/* Council-side outage status: the amber caution palette (class="banner warn
+   council-down") plus a heavier left rule, marking it out as a standing
+   system-status note rather than a one-off prompt. */
+.banner.council-down { border-left:4px solid var(--warn); align-items:flex-start; }
+.banner.council-down > svg { flex:none; margin-top:1px; }
 .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .muted { color:var(--muted); }
 .grow { flex:1 1 auto; }

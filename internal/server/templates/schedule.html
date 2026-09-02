@@ -33,6 +33,12 @@
 
 
 {{define "page-schedule"}}
+  {{if .CouncilTrouble}}
+  {{/* Sustained council-side problem (connector degraded+): say so plainly. Not a
+       thing the user can fix (unlike the re-link prompt), so it reassures rather
+       than asks for action. */}}
+  <div class="banner warn council-down">{{template "ic-alert"}} <span><strong>{{.CouncilName}}&rsquo;s parking system is having problems right now.</strong> Changes might be delayed &mdash; p.stonn keeps trying and will catch up as soon as the council is back.</span></div>
+  {{end}}
   {{/* ---------- SCHEDULE ---------- */}}
   {{if .Vehicles}}
   {{template "legend" .}}

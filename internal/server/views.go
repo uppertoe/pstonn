@@ -164,7 +164,15 @@ type dashboardData struct {
 	InAppBrowser bool
 	Flash        string // success (green)
 	Warn         string // problem / caution (amber)
-	Loc          *time.Location
+	// CouncilTrouble marks a SUSTAINED council-side problem (the connector state is
+	// degraded or worse — see councilTroubled), so the Schedule page can say plainly
+	// that changes may be delayed. Distinct from Relink, which is a per-account
+	// re-link the user must act on; this is the council's system, and nothing the
+	// user can do about it. CouncilName is the account's own tenant's name for the
+	// copy (the state signal is currently the account-wide worst — see schedule.go).
+	CouncilTrouble bool
+	CouncilName    string
+	Loc            *time.Location
 	// shared access
 	Owner      string       // effective account owner (email) that scopes the data
 	IsPrimary  bool         // whether the signed-in user owns this account

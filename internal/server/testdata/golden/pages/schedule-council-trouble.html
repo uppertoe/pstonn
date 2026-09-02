@@ -325,6 +325,9 @@ window.popClamp = window.popClamp || function (el) {
   
   
   
+  <div class="banner warn council-down"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span><strong>City of Stonnington&rsquo;s parking system is having problems right now.</strong> Changes might be delayed &mdash; p.stonn keeps trying and will catch up as soon as the council is back.</span></div>
+  
+  
   
   
 
@@ -940,13 +943,6 @@ window.popClamp = window.popClamp || function (el) {
   <a class="link-quiet" href="/permits/new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Manage another permit</a>
   
   
-  
-  <p class="share-hint" style="--hue:var(--sec-settings)" x-data="{hide: localStorage.getItem('pstonn-share-hint')==='1'}" x-show="!hide" x-cloak>
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
-    <span>Want another member of your household to manage this permit too? Invite them in <a href="/settings">Settings &rarr; Shared access</a> &mdash; they sign in with their own email, and no passwords change hands.</span>
-    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
-            @click="hide=true; localStorage.setItem('pstonn-share-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </p>
   
   
   

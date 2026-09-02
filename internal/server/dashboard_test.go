@@ -562,6 +562,12 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:  []permitView{samplePermitViewAt(loc, now)},
 		}, "Set up your other permit"},
+		// Sustained council-side trouble: a plain, reassuring status banner.
+		{"schedule-council-trouble", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			CouncilTrouble: true, CouncilName: "City of Stonnington",
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			Permits:  []permitView{samplePermitViewAt(loc, now)},
+		}, "parking system is having problems"},
 		{"schedule-expired-section", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles:       []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			Permits:        []permitView{samplePermitViewAt(loc, now)},
