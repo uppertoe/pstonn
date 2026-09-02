@@ -727,10 +727,11 @@ func heldApplyTwins(email string, o ApplyOutcome) []string {
 
 // supersedeHeldTwins cancels any quiet-hours-held soft twin of an act-now notice
 // for this member+permit+plate, so the reassuring "still updating" version never
-// arrives AFTER the urgent one. Called once the member has been HANDLED on the
-// action-needed path — reached inline, or deliberately dropped by their daily
-// urgent cap (told enough) — but NOT when the send merely failed: there the held
-// soft stays as a fallback so a bounce can't leave the household with nothing.
+// arrives AFTER the urgent one. Called only once the urgent has actually REACHED the
+// member inline — the sole case where the soft would be a true reverse-order double.
+// A send that failed keeps the soft as a fallback (a bounce mustn't leave the
+// household with nothing); a send dropped by the daily cap keeps it as the permit's
+// sole notice (the urgent never went out).
 func (s *Service) supersedeHeldTwins(ctx context.Context, email string, o ApplyOutcome) {
 	if s.store == nil {
 		return
@@ -971,12 +972,11 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			}
 			if !lim.allow(d.email) {
 				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
-				// Told enough today — but an act-now escalation still supersedes the
-				// softer twin quiet hours may be holding for 06:00, so the reassuring
-				// notice can't arrive after the urgent ones that used up the budget.
-				if o.actionNeeded() {
-					s.supersedeHeldTwins(ctx, d.email, o)
-				}
+				// Dropped by the cap — do NOT supersede the held soft twin here. This
+				// permit's urgent never went out (the per-permit+day dedup means no
+				// earlier one did either), so the 06:00 soft is this permit's SOLE
+				// notice, not a reverse-order double. Cancelling it would leave the
+				// household with nothing but the activity page.
 				delivered++
 				continue
 			}

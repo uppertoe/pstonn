@@ -73,11 +73,11 @@ func TestUrgentInlineSupersedesHeldSoftNotice(t *testing.T) {
 	}
 }
 
-// TestThrottledUrgentStillSupersedesHeldSoft: the supersede must run even when the
-// urgent escalation is dropped by the per-recipient daily cap. Otherwise a member
-// who has hit their urgent budget keeps the held soft twin, which then delivers the
-// reassuring notice after the (earlier) urgents — the reverse-order double again.
-func TestThrottledUrgentStillSupersedesHeldSoft(t *testing.T) {
+// TestThrottledUrgentKeepsHeldSoft: when the urgent escalation is DROPPED by the
+// per-recipient daily cap, the held soft twin must survive — this permit's urgent
+// never went out, so the 06:00 soft is its sole notice, not a reverse-order double.
+// Superseding it would leave the household with only the activity page.
+func TestThrottledUrgentKeepsHeldSoft(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
 	if err != nil {
@@ -115,7 +115,7 @@ func TestThrottledUrgentStillSupersedesHeldSoft(t *testing.T) {
 	sentBefore := sent
 
 	// The urgent escalation for THIS permit is now past the cap → throttled (not
-	// sent), but it must STILL supersede the held soft twin.
+	// sent). The held soft must REMAIN as this permit's sole notice.
 	urg := soft
 	urg.Urgent = true
 	urg.Key = "busy-blocked|WANT1|day"
@@ -125,7 +125,7 @@ func TestThrottledUrgentStillSupersedesHeldSoft(t *testing.T) {
 	if sent != sentBefore {
 		t.Fatalf("urgent should have been throttled by the cap, but sent %d->%d", sentBefore, sent)
 	}
-	if due, _ := st.DueOutbox(ctx, time.Now().Add(24*time.Hour), 10); len(due) != 0 {
-		t.Fatalf("a throttled urgent did not supersede the held soft twin: %d rows remain", len(due))
+	if due, _ := st.DueOutbox(ctx, time.Now().Add(24*time.Hour), 10); len(due) != 1 {
+		t.Fatalf("a throttled urgent wrongly cancelled the held soft (this permit's only notice): %d rows remain", len(due))
 	}
 }
