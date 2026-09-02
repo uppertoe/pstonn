@@ -648,6 +648,10 @@ type ApplyOutcome struct {
 	// but names the cause plainly and drops the "do it yourself at the council" line,
 	// which would be impossible advice during a council-wide outage.
 	CouncilDown bool
+	// ResolvesFailure marks a success that closes a failure episode the household
+	// was told about. It reaches members on "only tell me about problems" too:
+	// they heard the problem, so they hear that it is over.
+	ResolvesFailure bool
 	// Urgent overrides the transient softening for a CONFIRMED, ongoing block: the
 	// change genuinely will not apply until the block clears, so the household must
 	// act now (change the plate manually) rather than be reassured it is "still
@@ -867,7 +871,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	body += s.firstApplyLine(ctx, o)
 	now := time.Now()
 	for _, d := range dels {
-		if o.OK && d.pref.FailuresOnly && o.fromSchedule() {
+		if o.OK && d.pref.FailuresOnly && o.fromSchedule() && !o.ResolvesFailure {
 			continue
 		}
 		m := outMessage{
@@ -918,7 +922,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	var seenKeys []string // every reached-memory key consulted by this delivery
 	now := time.Now()
 	for _, d := range dels {
-		if o.OK && d.pref.FailuresOnly && o.fromSchedule() {
+		if o.OK && d.pref.FailuresOnly && o.fromSchedule() && !o.ResolvesFailure {
 			continue
 		}
 		wantEmail := s.emailWanted(d.pref, o)

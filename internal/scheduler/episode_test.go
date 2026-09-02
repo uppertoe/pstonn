@@ -88,8 +88,8 @@ func TestOutageIsOneEpisodeOneNotice(t *testing.T) {
 	fc.setErr = nil
 	tick(1)
 	got = outcomesAfter(fn, 3)
-	if len(got) != 3 || !got[2].OK {
-		t.Fatalf("recovery: outcomes = %+v, want a third, OK success", got)
+	if len(got) != 3 || !got[2].OK || !got[2].ResolvesFailure {
+		t.Fatalf("recovery: outcomes = %+v, want a third, OK, resolving success", got)
 	}
 	if plate, _, _ := st.FailureEpisode(ctx, pid); plate != "" {
 		t.Fatalf("episode still open after success: told plate %q", plate)

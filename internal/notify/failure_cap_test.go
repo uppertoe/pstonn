@@ -119,3 +119,38 @@ func TestDeferredFailureNoticesDoNotSpendTheCap(t *testing.T) {
 		t.Fatalf("daytime failure emails = %d, want 3: the deferred ones must not have spent the cap", sent)
 	}
 }
+
+// TestResolvingSuccessReachesFailuresOnlyMembers: a member on "only tell me about
+// problems" heard the problem, so they hear that it is over — a success flagged
+// as resolving a failure episode is not muted for them; an ordinary roster
+// success still is.
+func TestResolvingSuccessReachesFailuresOnlyMembers(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const owner = "primary@example.com"
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, FailuresOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	sent := 0
+	m.SetSendHook(func(_, _, _ string, _ mailer.Options) error { sent++; return nil })
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+
+	plain := ApplyOutcome{Owner: owner, PermitID: 1, PermitLabel: "VPP", Reg: "ABC123", Source: "roster", OK: true, Key: "success|A>B"}
+	if n, err := svc.NotifyApply(ctx, plain); n != -1 || err != nil {
+		t.Fatalf("plain roster success to a failures-only member = (%d, %v), want (-1, nil): muted", n, err)
+	}
+	resolving := plain
+	resolving.ResolvesFailure = true
+	resolving.Key = "success|A>B|resolved"
+	if n, err := svc.NotifyApply(ctx, resolving); n != 1 || err != nil {
+		t.Fatalf("resolving success = (%d, %v), want (1, nil)", n, err)
+	}
+	if sent != 1 {
+		t.Fatalf("emails = %d, want exactly the resolving one", sent)
+	}
+}
