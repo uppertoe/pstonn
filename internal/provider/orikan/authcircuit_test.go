@@ -122,6 +122,37 @@ func TestAuthCircuitOpensAfterThresholdAndProbes(t *testing.T) {
 	}
 }
 
+// TestAuthCircuitInconclusiveIsNeutralNotResetting pins the streak contract: an
+// inconclusive result (edge push-back / odd redirect) is neutral — it does not advance
+// the count toward opening AND does not reset it — whereas a success does reset. So an
+// edge 503 interleaved with genuine origin 500s must not keep us hammering a down origin.
+func TestAuthCircuitInconclusiveIsNeutralNotResetting(t *testing.T) {
+	now := time.Now()
+
+	a := &authCircuit{}
+	a.onUpstreamFailure(now, false) // fails=1
+	a.onUpstreamFailure(now, false) // fails=2
+	a.onInconclusive(now, false)    // neutral: neither counts nor resets
+	if open, _ := a.state(now); open {
+		t.Fatal("two failures + an inconclusive should not open yet")
+	}
+	a.onUpstreamFailure(now, false) // the third upstream failure -> open
+	if open, _ := a.state(now); !open {
+		t.Fatal("an inconclusive between failures must be neutral, not reset the streak")
+	}
+
+	// A success, by contrast, resets the streak.
+	b := &authCircuit{}
+	b.onUpstreamFailure(now, false)
+	b.onUpstreamFailure(now, false)
+	b.onSuccess(false) // proof the IdP served -> reset
+	b.onUpstreamFailure(now, false)
+	b.onUpstreamFailure(now, false)
+	if open, _ := b.state(now); open {
+		t.Fatal("a success must reset the streak; two more failures should not reopen")
+	}
+}
+
 func TestAuthCircuitProbeSuccessCloses(t *testing.T) {
 	a := &authCircuit{}
 	now := time.Now()

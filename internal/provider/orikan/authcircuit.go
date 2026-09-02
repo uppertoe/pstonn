@@ -25,9 +25,14 @@ import (
 // the first short probe. A successful authorize (the upstream is serving again, or
 // it served a genuine session-expiry — which is itself proof it is up) resets it.
 const (
-	// authTripThreshold is how many consecutive upstream authorize failures open the
-	// circuit. >1 so a single transient 5xx does not gate the fleet; low so a real
-	// outage (many owners' renews failing in seconds) opens promptly.
+	// authTripThreshold is how many upstream authorize failures SINCE THE LAST SUCCESS
+	// open the circuit. A success (a code, or a genuine expiry — proof the IdP served)
+	// resets the count; an inconclusive result (edge push-back / an odd redirect) is
+	// deliberately NEUTRAL — it neither counts nor resets. Neutral, not resetting,
+	// because an edge 503 interleaved with genuine origin 500s must not keep re-arming
+	// the count and leave us hammering a down origin; the edge is the fleet breaker's
+	// job. >1 so a single transient 5xx does not gate; low so a real outage (many
+	// owners' renews failing in seconds) opens promptly.
 	authTripThreshold = 3
 	authProbeBase     = 1 * time.Minute
 	authProbeMax      = 15 * time.Minute
@@ -35,7 +40,7 @@ const (
 
 type authCircuit struct {
 	mu        sync.Mutex
-	fails     int       // consecutive upstream failures while closed (→ open at the threshold)
+	fails     int       // upstream failures since the last success while closed (→ open at the threshold); inconclusive results are neutral
 	openUntil time.Time // when open, the earliest the next probe may go; zero = closed
 	backoff   time.Duration
 	probing   bool // a half-open probe is in flight; no other authorize may proceed
