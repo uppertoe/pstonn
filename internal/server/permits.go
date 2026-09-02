@@ -213,6 +213,36 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			Addable: addable, Reason: reason, Warn: warn, Dead: dead, Status: status,
 		})
 	}
+	// One redacted line per picker render, so a signup who stalls here is
+	// diagnosable afterwards (observed 2026-09-02: an account linked, reloaded
+	// the picker five times, never picked — and nothing recorded what it saw).
+	// Type names are tenant catalog labels shared by every holder of the type —
+	// never log permit numbers or regos here.
+	{
+		offered := 0
+		parts := make([]string, 0, len(base.Pick))
+		for _, pv := range base.Pick {
+			d := "offered"
+			switch {
+			case pv.Dead:
+				d = "offered, inactive"
+			case !pv.Addable:
+				d = "not offered"
+			default:
+				offered++
+			}
+			parts = append(parts, fmt.Sprintf("%q (%s)", pv.PermitType, d))
+		}
+		detail := strings.Join(parts, ", ")
+		if detail == "" {
+			detail = "nothing to show"
+		}
+		if !complete {
+			detail += " — partial council read"
+		}
+		log.Printf("picker for %s: %d council permit(s), %d already managed, %d offered live: %s",
+			redact.Email(owner), len(permits), len(permits)-len(base.Pick), offered, detail)
+	}
 	// Live permits first, dead ones last; the tenant's own order within each
 	// group. The template renders the dead group under its own heading.
 	slices.SortStableFunc(base.Pick, func(a, b pickView) int {
