@@ -177,6 +177,9 @@ func TestSilentRenewRedirectExpiryNeedsRedirectURIAndError(t *testing.T) {
 		{"error on another path", "{base}/elsewhere?error=login_required", false, ""},
 		{"bounce to a login page", "{base}/idm/Account/Login?ReturnUrl=SECRET-RETURN-URL", false, ""},
 		{"redirect_uri with neither code nor error", "{redirect}?state=s", false, ""},
+		// A Location url.Parse rejects (bad escape) still carries its query verbatim;
+		// the error must not hand it to the log.
+		{"unparseable Location", "{base}/ch%zz?ReturnUrl=SECRET-RETURN-URL", false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

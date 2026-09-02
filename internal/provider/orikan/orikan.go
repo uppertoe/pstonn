@@ -353,7 +353,7 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	}
 	req.Header.Set("Cookie", cookie)
 	c.navHeaders(req) // iframe-style silent authorize
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -409,7 +409,9 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	}
 	loc, err := url.Parse(resp.Header.Get("Location"))
 	if err != nil {
-		return "", "", "", fmt.Errorf("orikan: silent-renew: bad redirect: %w", err)
+		// Not %w-wrapped: a *url.Error's message embeds the whole raw URL, query
+		// and all, and a login-style bounce can carry a return URL or state there.
+		return "", "", "", fmt.Errorf("orikan: silent-renew: unparseable redirect (%d)", resp.StatusCode)
 	}
 	loc = req.URL.ResolveReference(loc) // a relative Location resolves against the authorize URL
 	if code = loc.Query().Get("code"); code != "" {
@@ -445,6 +447,25 @@ func (c *Client) isRedirectURI(loc *url.URL) bool {
 		strings.TrimRight(loc.Path, "/") == strings.TrimRight(want.Path, "/")
 }
 
+// do is c.http.Do with its failure sanitised. A *url.Error names the request URL
+// in full — for the authorize step that is the state, nonce and PKCE challenge —
+// and when a 3xx carries a Location url.Parse rejects, net/http quotes that raw
+// header (query and all, so on a login-style bounce a return URL or state) before
+// any redirect policy runs. Neither belongs in a log line, so keep the operation
+// and the target's scheme/host/path and drop the rest.
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	resp, err := c.http.Do(req)
+	var ue *url.Error
+	if err == nil || !errors.As(err, &ue) {
+		return resp, err
+	}
+	inner := ue.Err
+	if inner != nil && strings.Contains(inner.Error(), "failed to parse Location header") {
+		inner = errors.New("unparseable Location header on a redirect")
+	}
+	return resp, fmt.Errorf("%s %s: %w", ue.Op, redirectTarget(ue.URL), inner)
+}
+
 // redirectTarget renders a Location for an error message: scheme, host and path
 // only, so the query — which on a login-style bounce can carry a return URL or a
 // state value — never lands in a log line.
@@ -454,7 +475,9 @@ func redirectTarget(loc string) string {
 	}
 	u, err := url.Parse(loc)
 	if err != nil {
-		return safeExcerpt(loc)
+		// The raw string is the one thing this function exists to keep out of the
+		// log: an unparseable Location still carries its query verbatim.
+		return "(unparseable Location)"
 	}
 	u.RawQuery, u.Fragment, u.User = "", "", nil
 	return safeExcerpt(u.String())
@@ -509,7 +532,7 @@ func (c *Client) exchangeCode(ctx context.Context, code, verifier string) (*toke
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	c.xhrHeaders(req) // fetch-style token exchange
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -899,7 +922,7 @@ func (c *Client) doAPI(ctx context.Context, at, method, path string, query url.V
 	req.Header.Set("Authorization", "Bearer "+at)
 	req.Header.Set("Content-Type", "application/json")
 	c.xhrHeaders(req)
-	return c.http.Do(req)
+	return c.do(req)
 }
 
 // managedVehicleResp is the response of GET /ssp-svc/api/permits/managedVehicle.
