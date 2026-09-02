@@ -179,6 +179,13 @@
     <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to manage</div>
     <p class="subtitle">Pick the permit whose plate you want to schedule. This is usually your visitor permit.</p>
     {{if .Pick}}
+    {{/* A first-timer with a full picker had no reassurance here and no way to
+         read up (the "How it works" link only appears in the empty states below).
+         Observed 2026-09-02: a household linked, reloaded this page seven times over
+         two and a half hours, read /how on another device, and never tapped Manage.
+         Say plainly that choosing is a local, reversible step — nothing touches the
+         council until a schedule is set. */}}
+    <p class="subtitle">Choosing a permit changes nothing at the council. You set up the schedule next. <a href="/how" hx-boost="false">How it works</a></p>
     {{/* Two groups: live permits (the ones a resident is here for), then dead
          ones under their own heading. A dead permit is still addable — its old
          schedule can be copied onto a renewal — but it must not look like the
