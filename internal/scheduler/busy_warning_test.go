@@ -130,25 +130,43 @@ func TestUndeliveredNoticeRetryIsPaced(t *testing.T) {
 		seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
 		fc := &fakeTenant{setErr: parking.ErrCouncilBusy, blocked: true} // confirmed: warns at blockNotifyThreshold
 		s := New(st, fc, time.UTC, Options{Notifier: fn})
-		s.notifyRetry = 80 * time.Millisecond
+		// Far longer than the ticks below can take even under -race on a slow
+		// runner: the test pins that the hold is honoured, and expires it by hand.
+		s.notifyRetry = time.Hour
 		for i := 0; i < blockNotifyThreshold+5; i++ {
 			s.reconcileAll(ctx)
 			time.Sleep(3 * time.Millisecond) // let each tick's async delivery land before the next
 		}
 		return s
 	}
+	// attempts waits for the async deliveries to settle at n, or reports how many.
+	attempts := func(fn *fakeNotifier, n int) int {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if got := len(fn.appliedSnap()); got == n || time.Now().After(deadline) {
+				return got
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	expireHolds := func(s *Scheduler) {
+		s.notifyMu.Lock()
+		for k := range s.notifyRetryAt {
+			s.notifyRetryAt[k] = time.Now().Add(-time.Second)
+		}
+		s.notifyMu.Unlock()
+	}
 
 	// Nobody reached: one attempt, then held — not one per tick.
 	fn := &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 0}
 	s := run(fn)
-	if n := len(fn.appliedSnap()); n != 1 {
+	if n := attempts(fn, 1); n != 1 {
 		t.Fatalf("delivery attempts = %d across %d failing ticks, want 1 (held)", n, blockNotifyThreshold+5)
 	}
-	// ...and the hold expires: the next tick retries.
-	time.Sleep(100 * time.Millisecond)
+	// ...and once the hold expires, the next tick retries.
+	expireHolds(s)
 	s.reconcileAll(ctx)
-	time.Sleep(10 * time.Millisecond)
-	if n := len(fn.appliedSnap()); n != 2 {
+	if n := attempts(fn, 2); n != 2 {
 		t.Fatalf("delivery attempts = %d after the hold expired, want 2 (retried)", n)
 	}
 
@@ -157,7 +175,7 @@ func TestUndeliveredNoticeRetryIsPaced(t *testing.T) {
 	// paced the same way.
 	fn = &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 1, applyErr: errors.New("email member: dial tcp: refused")}
 	s = run(fn)
-	if n := len(fn.appliedSnap()); n != 1 {
+	if n := attempts(fn, 1); n != 1 {
 		t.Fatalf("delivery attempts = %d after a partial delivery, want 1 (held)", n)
 	}
 	permits, _ := s.store.ListPermitsFor(ctx, owner)
