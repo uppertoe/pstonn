@@ -696,8 +696,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// is down for everyone, so there is nothing the household can do at the council
 		// either. It stays on the soft tier and timing, but the copy says plainly the
 		// council is down rather than the vague "still updating".
-		confirmed := s.tenant.Blocked(p.TenantID)
-		councilDown := !confirmed && s.tenant.AuthGated(p.TenantID)
+		//
+		// authDown takes precedence: if the sign-in is down, "act now at the council"
+		// is impossible even when the edge breaker is ALSO open, so a fleet block only
+		// escalates while the sign-in is up.
+		authDown := s.tenant.AuthGated(p.TenantID)
+		confirmed := !authDown && s.tenant.Blocked(p.TenantID)
+		councilDown := authDown
 		threshold := busyNotifyThreshold
 		reason, action := describeFailure(parking.FailTransient, provider.OpUnknown)
 		switch {

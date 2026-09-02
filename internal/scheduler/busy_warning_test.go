@@ -107,6 +107,41 @@ func TestAuthOutageStaysSoftWithCouncilDownCopy(t *testing.T) {
 	}
 }
 
+// TestAuthOutageWinsOverBreaker: when BOTH the fleet breaker and the auth circuit
+// are open, the auth outage takes precedence — the household is told the council is
+// down (soft, CouncilDown), never "change it yourself at the council now", which
+// they cannot do while the council's sign-in is down.
+func TestAuthOutageWinsOverBreaker(t *testing.T) {
+	ctx := context.Background()
+	const owner, cid = "both@example.com", "both-1"
+	st := newStore(t)
+	seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
+	fc := &fakeTenant{setErr: parking.ErrCouncilBusy, blocked: true, authGated: true}
+	nf := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+
+	// It must NOT escalate early (that would be the act-now path); it waits for the
+	// soft threshold and then delivers the council-down copy.
+	for i := 0; i < blockNotifyThreshold; i++ {
+		s.reconcileAll(ctx)
+	}
+	time.Sleep(15 * time.Millisecond)
+	if got := nf.outcomeSnap(); len(got) != 0 {
+		t.Fatalf("both breaker+auth open escalated early instead of staying soft: %+v", got)
+	}
+	for i := blockNotifyThreshold; i < busyNotifyThreshold; i++ {
+		s.reconcileAll(ctx)
+	}
+	time.Sleep(15 * time.Millisecond)
+	got := nf.outcomeSnap()
+	if len(got) == 0 {
+		t.Fatal("no soft notice fired at the busy threshold")
+	}
+	if o := got[len(got)-1]; o.Urgent || !o.CouncilDown {
+		t.Fatalf("with both breaker and auth open, expected a soft CouncilDown notice, got %+v", o)
+	}
+}
+
 // TestBusyEscalationSurvivesEarlierSoftNotice pins the common REAL ordering: the
 // tenant starts refusing, the household gets the soft "still updating, we'll
 // keep trying" notice, and only THEN does the fleet breaker confirm the block.
