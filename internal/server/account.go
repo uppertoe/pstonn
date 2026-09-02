@@ -177,11 +177,11 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	// Drop any queued auto-reconnect for the OLD session: the user just established a
 	// fresh one, and stale recovery work must not act on it (the scheduler's generation
 	// check is the hard guard; this is the fast path).
-	s.sched.CancelReconnect(user)
+	s.sched.CancelReconnectIn(user, linkedTenant)
 	// A fresh link plausibly fixes every permit on this account, so clear their
 	// failure backoffs and reconcile now rather than making the user wait out a
 	// stretched retry window they just made obsolete. Scoped to this owner.
-	s.sched.KickOwner(r.Context(), user)
+	s.sched.KickOwnerIn(r.Context(), user, linkedTenant)
 	// ?linked=1 turns into the "Council account linked." flash — after a first
 	// link the user lands on the permit picker, so this is the only confirmation
 	// the sign-in worked.
@@ -279,7 +279,7 @@ func (s *Server) tenantUnlink(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	s.sched.CancelReconnect(user) // no session to reconnect; drop any queued attempt
+	s.sched.CancelReconnectIn(user, tenant) // no session to reconnect there; drop any queued attempt
 	s.logChange(r.Context(), user, user, store.ActionCouncilUnlink, "", "")
 	log.Printf("council unlinked for %s", redact.Email(user)) // operator milestone (churn)
 	redirectHome(w, r)
@@ -331,7 +331,7 @@ func (s *Server) tenantForgetPassword(w http.ResponseWriter, r *http.Request) {
 	// ClearTenantPassword also bumped the session generation, so an ALREADY-running
 	// reconnect's generation-conditioned save lands nowhere and can't restore the
 	// password — this only cancels not-yet-started work.
-	s.sched.CancelReconnect(user)
+	s.sched.CancelReconnectIn(user, tenant)
 	s.logChange(r.Context(), user, user, store.ActionCouncilForget, "", "")
 	if r.Header.Get("HX-Request") != "" {
 		s.settingsPage(w, r)
