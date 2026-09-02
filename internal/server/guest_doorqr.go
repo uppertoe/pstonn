@@ -348,7 +348,11 @@ func (s *Server) showPrintedQR(w http.ResponseWriter, r *http.Request) {
 // viewDoorQR renders the durable, printable poster for an existing door QR. It never
 // rotates the token, so it can be reopened and reprinted as often as needed.
 func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
-	noStore(w) // the poster embeds the durable door-QR token; keep it out of caches
+	// The poster embeds the durable door-QR token, so it must stay out of caches —
+	// via the app helper, not the guest routes' noStore, because this is a signed-in
+	// page and noStore's Referrer-Policy: no-referrer would weaken the CSRF Referer
+	// fallback on every link out of it (see noStoreCache).
+	noStoreCache(w)
 	_, owner, _ := s.resolveAccount(r.Context())
 	g, err := s.store.PrintedGrantByID(r.Context(), owner, atoi64(r.PathValue("id")))
 	if err != nil {
@@ -450,7 +454,7 @@ const (
 	decideGone           // approve: request/permit gone, not ours, or raced
 	decideCapFull        // permit at its guest-booking sub-cap
 	decidePermitInactive // approve: the permit itself is cancelled or expired
-	decideRevoked        // door QR revoked between approval and apply
+	decideRevoked        // door QR revoked, or guest passes paused, before the plate went on
 	decideApplied        // approved and the tenant confirmed the plate
 	decideApproving
 )
@@ -593,9 +597,19 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	// override (what the scheduler applies) and the write below agree with it.
 	ovID, cerr := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, req.Plate, req.State, now, &end, "visitor (printed QR)", doorToken)
 	if errors.Is(cerr, store.ErrGuestOverrideRefused) {
-		// The permit is at its guest-booking sub-cap. Tell the owner plainly instead of
-		// returning a 500 — approving a door-QR request must not look like the app is
-		// broken.
+		// Refused for one of two reasons the store folds into one error: the door
+		// QR's authority is gone (revoked, its grant disabled, or every pass paused),
+		// or the permit is at its guest-booking sub-cap. Tell the two apart, because
+		// "too many bookings" is the wrong thing to tell a household that just paused
+		// its passes. The request stays pending either way — nothing was set up for
+		// the scheduler, so nothing may say "approved". Told plainly instead of
+		// returning a 500 — approving a door-QR request must not look like the app
+		// is broken.
+		if doorToken != 0 {
+			if live, lerr := s.store.GuestTokenStillLive(r.Context(), doorToken); lerr == nil && !live {
+				return decideOutcome{kind: decideRevoked}
+			}
+		}
 		return decideOutcome{kind: decideCapFull}
 	}
 	if cerr != nil {

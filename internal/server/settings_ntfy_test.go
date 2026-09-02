@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -61,7 +62,12 @@ func newNtfyServer(t *testing.T) (*Server, *fakeNtfy, string) {
 	s.cfg.PublicBaseURL = "https://app.example.com"
 	s.confirmLimit = newRateLimiter(100, time.Minute)
 	s.testNotifyLimit = newRateLimiter(100, time.Minute)
-	s.notify = notify.New(s.store, nil, ts.URL, "", "https://app.example.com", "", "", time.UTC, nil,
+	// A mailer that delivers nowhere: these flows are about a deployment that
+	// OFFERS email (the checkbox is rendered, so "email off" is a choice the guard
+	// may refuse), and the test push also mails the enabled email channel. The
+	// no-mailer deployment is its own case (TestSettingsSaveWithoutEmailChannel).
+	m := &mailer.Mailer{SendHook: func(string, string, string, mailer.Options) error { return nil }}
+	s.notify = notify.New(s.store, m, ts.URL, "", "https://app.example.com", "", "", time.UTC, nil,
 		notify.DeriveDecideKey(bytes.Repeat([]byte{7}, 32)))
 	const user = "push@example.com"
 	if err := s.store.RecordConsent(context.Background(), user, s.terms.Version, s.terms.Hash()); err != nil {

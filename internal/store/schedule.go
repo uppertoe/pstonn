@@ -219,7 +219,12 @@ func (s *Store) createOverrideGuarded(ctx context.Context, permitID, vehicleID i
 	}
 	// The liveness EXISTS applies ONLY to real guest creates: guest_token_id 0 is a
 	// member-created override (CreateOverride delegates here), which has no token to
-	// check and must not be refused by one. The overall cap applies to both. The GUEST
+	// check and must not be refused by one. It asks the same three questions as
+	// GuestOverrideStillAuthorised — token revoked, grant disabled, and the account's
+	// guest kill-switch — so that a pause-all lands here the way a revoke does. It
+	// used to skip the kill-switch, so an approval while passes were paused wrote the
+	// row, marked the request approved, and only then had the apply refuse it: the
+	// household saw an "approved" request with nothing behind it. The overall cap applies to both. The GUEST
 	// sub-cap (last clause) applies only to guest creates: it counts just guest rows
 	// against a smaller ceiling so a link holder cycling plates cannot fill the whole
 	// per-permit budget and lock the household out of booking their OWN permit — the
@@ -230,7 +235,8 @@ INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, end
 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
 WHERE (? = 0 OR EXISTS (
         SELECT 1 FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
-        WHERE t.id = ? AND t.revoked_at = '' AND g.enabled = 1))
+        WHERE t.id = ? AND t.revoked_at = '' AND g.enabled = 1
+          AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1))
   AND (SELECT COUNT(*) FROM override
        WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)) < ?
   AND (? = 0 OR (SELECT COUNT(*) FROM override

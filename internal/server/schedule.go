@@ -71,13 +71,20 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	var pvs []permitView
 	var expired []expiredPermitView
 	for _, p := range managed {
+		// Each permit's "now" is reckoned in ITS tenant's timezone, the same clock
+		// the htmx card refresh (renderPermitFragment) uses. The page used to pass
+		// the owner's tenant clock here, so a permit in another area could build
+		// its "today" from the wrong calendar date for part of each day and the
+		// card would then jump when the fragment re-rendered it.
+		ploc := s.locForPermit(ctx, p)
+		pnow := now.In(ploc)
 		// Expired/cancelled permits collapse into a compact section — no full card,
 		// no tenant call — but stay available as a copy-schedule source.
-		if p.Inactive(now, s.locFor(ctx, owner)) {
-			expired = append(expired, buildExpiredView(p, now, s.locFor(ctx, owner)))
+		if p.Inactive(pnow, ploc) {
+			expired = append(expired, buildExpiredView(p, pnow, ploc))
 			continue
 		}
-		pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, now)
+		pv, err := s.buildPermitView(ctx, p, vviews, colorByID, regByID, labelByID, pnow)
 		if err != nil {
 			s.serverError(w, err)
 			return
@@ -370,7 +377,12 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		})
 	}
 
+	// "Today" is the permit's calendar day, so the instant is moved into the
+	// permit's zone BEFORE its date parts are read: taking Year/Month/Day from a
+	// clock in some other zone and stamping them onto loc yields a day that is off
+	// by one for part of every day.
 	loc := s.locForPermit(ctx, p)
+	now = now.In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	// Align the fortnight grid to weekday columns (Sunday first) so the same
 	// weekday sits in the same column as the roster above. The grid starts on the
@@ -597,7 +609,19 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	weekday := time.Weekday(wd)
-	vehicleID := atoi64(r.FormValue("vehicle_id"))
+	// The car gets the same strictness: atoi64 mapped anything unparseable to 0,
+	// and 0 is the "clear this day" sentinel, so a mangled id (a stale page, a
+	// hand-edited form) silently emptied the roster day instead of being refused.
+	// Blank and "0" still mean clear; anything else has to be a real id.
+	var vehicleID int64
+	if raw := strings.TrimSpace(r.FormValue("vehicle_id")); raw != "" {
+		v, verr := strconv.ParseInt(raw, 10, 64)
+		if verr != nil || v < 0 {
+			s.formError(w, r, "That car isn't valid. Please reload the page and try again.")
+			return
+		}
+		vehicleID = v
+	}
 	var err error
 	var plate string
 	if vehicleID == 0 {
@@ -663,6 +687,15 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// picker in some mobile browsers). A blank date means "unset"; a date with no
 	// time defaults to the start of that day for "from" and the end of the day for
 	// "until", so choosing only a day still makes a sensible booking.
+	//
+	// A time with NO date is refused rather than dropped: combineDateTime treats a
+	// blank date as "unset", so "from 9:00" with the date left empty used to start
+	// the booking right now and say nothing — the person had asked for a time and
+	// got a different one. The until path already refuses the same shape.
+	if strings.TrimSpace(r.FormValue("from_date")) == "" && strings.TrimSpace(r.FormValue("from_time")) != "" {
+		s.formError(w, r, "Pick a start date to go with that time, or leave both blank to start now.")
+		return
+	}
 	startsAt := time.Now()
 	if raw := combineDateTime(r.FormValue("from_date"), r.FormValue("from_time"), "00:00"); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locForPermit(r.Context(), p))

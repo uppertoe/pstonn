@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"html/template"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -25,8 +27,7 @@ func (s *Server) sharePage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	base := dashboardData{User: u, State: "share", OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation, Contact: s.cfg.ContactEnabled()}
-	base.Owner, _, base.IsPrimary = s.resolveAccount(r.Context())
+	base := s.shareShell(r.Context(), u)
 	switch r.URL.Query().Get("sent") {
 	case "1":
 		base.Flash = "Invitation sent."
@@ -39,6 +40,22 @@ func (s *Server) sharePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.render(w, base)
+}
+
+// shareShell is the Share page's base view: appShell's account resolution
+// without its gates, because this page is reachable before a permit is set up.
+// Owner is the ACCOUNT (a secondary's primary), not the signed-in address — the
+// two were once swapped here, which put a secondary's own email where the nav
+// expects the household — and the tenant switcher is filled the way appShell
+// fills it, so the menu does not lose its areas on this one page.
+func (s *Server) shareShell(ctx context.Context, u identity.User) dashboardData {
+	_, owner, isPrimary := s.resolveAccount(ctx)
+	base := dashboardData{User: u, Owner: owner, IsPrimary: isPrimary, State: "share", OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.locFor(ctx, owner), Contact: s.cfg.ContactEnabled(),
+		Tenants: s.tenantsFor(ctx, owner), CanConnectArea: s.canConnectArea(ctx, owner)}
+	if !isPrimary {
+		base.SharedWith = owner
+	}
+	return base
 }
 
 // shareCard is the printable card: a QR code straight to the landing page.
@@ -82,6 +99,15 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Email isn't set up on this p.stonn, so invitations can't be sent from here.")
 		return
 	}
+	// Resolved BEFORE the send and the write, and fail-closed: the lenient
+	// resolver's fallback is the caller's own address, which would file a
+	// secondary's referral in a phantom account's log — and a 503 is only honest
+	// if nothing has been sent or spent yet. It sat below the invite record for a
+	// while, so a refused request still consumed one of the day's five.
+	_, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
 	n, err := s.store.CountReferralInvitesSince(ctx, u.Email, time.Now().Add(-24*time.Hour))
 	if err != nil {
 		s.serverError(w, err)
@@ -93,14 +119,6 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.RecordReferralInvite(ctx, u.Email, to); err != nil {
 		s.serverError(w, err)
-		return
-	}
-	// Resolved BEFORE the send and the write, and fail-closed: the lenient
-	// resolver's fallback is the caller's own address, which would file a
-	// secondary's referral in a phantom account's log — and a 503 is only honest
-	// if nothing has been sent yet.
-	_, owner, _, ok := s.accountForWrite(w, r)
-	if !ok {
 		return
 	}
 	if err := s.notify.SendReferralInvite(ctx, to, u.Email); err != nil {

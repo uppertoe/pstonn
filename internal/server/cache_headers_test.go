@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -81,11 +83,35 @@ func TestPublicPagesAreStillCacheable(t *testing.T) {
 // that one also sets Referrer-Policy: no-referrer, which would strip the same-origin
 // Referer that sameOrigin falls back on when a request carries no Origin. Fixing a
 // caching bug must not quietly weaken the CSRF check.
+//
+// The two signed-in pages that embed a guest token (the on-screen visitor QR and
+// the printable door poster) once reached for the guest helper because of the
+// token, and so shipped no-referrer to app pages; they are on the list so that
+// cannot come back. Each sets its headers before any check that could 4xx, so
+// the status is not asserted — only the policy that reached the wire.
 func TestAuthenticatedPagesKeepSameOriginReferrerPolicy(t *testing.T) {
 	s := newAuthzServer(t)
-	w := s.doReq("GET", "/settings", "user@example.com", "", nil)
-	if got := w.Header().Get("Referrer-Policy"); got != "same-origin" {
-		t.Fatalf("Referrer-Policy = %q, want same-origin so the CSRF Referer fallback still works", got)
+	const user = "user@example.com"
+	const origin = "https://app.example.com"
+	if err := s.store.RecordConsent(context.Background(), user, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	permitID, grantID, _ := seedDoorQR(t, s, user, "Door")
+	cases := []struct {
+		name, method, path string
+		form               url.Values
+	}{
+		{"settings", "GET", "/settings", nil},
+		{"door poster", "GET", "/guests/door/" + itoa64(grantID) + "/view", nil},
+		{"visitor QR", "POST", "/guests/qr", url.Values{"permit_id": {itoa64(permitID)}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := s.doReq(c.method, c.path, user, origin, c.form)
+			if got := w.Header().Get("Referrer-Policy"); got != "same-origin" {
+				t.Fatalf("Referrer-Policy = %q, want same-origin so the CSRF Referer fallback still works", got)
+			}
+		})
 	}
 }
 

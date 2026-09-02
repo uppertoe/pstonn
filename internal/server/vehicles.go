@@ -18,6 +18,20 @@ import (
 // subjects and bodies, so they want the same bound.
 const maxLabelRunes = 40
 
+// capLabel bounds a cleaned display label at maxLabelRunes. The form's maxlength
+// is a client-side courtesy, not a limit: a crafted POST can carry the whole body,
+// and a label is copied into every apply notification and stored again in each
+// outbox row, so an unbounded one inflates mail and the DB for as long as the
+// thing it names exists. Runes, not bytes, so an emoji or an accented name is not
+// cut mid-character. One helper for cars and permits alike, so a third label
+// cannot again ship without the cap (addPermit did, for a while).
+func capLabel(label string) string {
+	if rs := []rune(label); len(rs) > maxLabelRunes {
+		return string(rs[:maxLabelRunes])
+	}
+	return label
+}
+
 // vehiclesPage manages the owner's plates.
 func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 	base, ok := s.appShell(w, r, "vehicles")
@@ -52,15 +66,8 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	}
 	reg := normalizeReg(r.FormValue("registration"))
 	// Cap the nickname by rune, exactly as renamePermit caps a permit label. The
-	// form's maxlength is a client-side courtesy, not a limit: a crafted POST can
-	// carry the whole body, and this label is copied into every apply notification
-	// and stored again in each outbox row, so an unbounded one inflates mail and
-	// the DB for as long as the car exists. 40 runes (not bytes) so an emoji or an
-	// accented name is not cut mid-character.
-	label := cleanLabel(r.FormValue("label"))
-	if rs := []rune(label); len(rs) > maxLabelRunes {
-		label = string(rs[:maxLabelRunes])
-	}
+	// Bounded server-side (see capLabel for why the form's maxlength is not enough).
+	label := capLabel(cleanLabel(r.FormValue("label")))
 	if !validRego(reg) {
 		s.formError(w, r, plateFormatMsg)
 		return

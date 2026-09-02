@@ -496,8 +496,12 @@ func (s *Server) notifyViewOf(ctx context.Context, user string, pref store.Notif
 		FailuresOnly:  pref.FailuresOnly,
 		NtfyConfirmed: pref.NtfyConfirmed(),
 	}
+	// Shown in the account's own zone like every other date on Settings; the
+	// process zone (time.Local) is UTC in the container, which put the day out by
+	// one for a confirmation tapped in a Melbourne morning.
 	if t, err := time.Parse(time.RFC3339, pref.NtfyConfirmedAt); err == nil {
-		nv.NtfyConfirmedOn = t.In(time.Local).Format("2 Jan 2006")
+		_, owner, _ := s.resolveAccount(ctx)
+		nv.NtfyConfirmedOn = t.In(s.locFor(ctx, owner)).Format("2 Jan 2006")
 	}
 	if bad, why, err := s.store.IsSuppressed(ctx, user); err == nil {
 		nv.SuppressedInfo = true
@@ -709,7 +713,12 @@ func buildExpiredView(p model.Permit, now time.Time, loc *time.Location) expired
 	}
 	var st string
 	switch {
-	case !p.EndDate.IsZero() && now.After(p.EndDate):
+	// Through ExpiryDeadline like every other "has this finished?" question: the
+	// bare EndDate instant is UTC midnight on the LAST valid day, so comparing
+	// against it directly called a permit expired from mid-morning of a day it was
+	// still good for — the row is only reachable once Inactive agrees, but the
+	// wording must not rest on a different clock from the one that put it here.
+	case !p.EndDate.IsZero() && !now.Before(model.ExpiryDeadline(p.EndDate, loc)):
 		st = "Expired " + p.EndDate.In(loc).Format("2 Jan 2006")
 	case p.Status != "":
 		st = p.Status

@@ -239,7 +239,12 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 	// believes it is being told about its permit and never is (observed 2026-08-31:
 	// push on, email off, no device ever subscribed). Once confirmed, either channel
 	// may be turned off, never both (the guard above).
-	if !email && ntfy && !pref.NtfyConfirmed() {
+	//
+	// Only where email is on offer at all: a deployment without a mailer renders
+	// no email checkbox, so "email off" is every save's shape there, and the guard
+	// used to refuse each one (quiet hours, failures-only, the lot) until a push
+	// had been confirmed.
+	if s.notify.EmailAvailable() && !email && ntfy && !pref.NtfyConfirmed() {
 		w.Header().Set("HX-Retarget", "#notify-body")
 		w.Header().Set("HX-Reswap", "innerHTML")
 		s.renderNotify(w, r, user, pref, "", "You can turn off email once you've confirmed push notifications on your phone: tap Send a test to my phone, then Confirm on the notification.")

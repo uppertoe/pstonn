@@ -84,7 +84,10 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	if !s.tenant.Linked(ctx, owner, "") {
 		base.State = "onboarding"
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
-		if enabled := s.registry.Enabled(); s.registry != nil && len(enabled) > 1 {
+		// The nil check has to come first: the init statement runs before the
+		// condition, so calling Enabled() there dereferenced a nil registry
+		// before the guard ever looked at it.
+		if enabled := s.enabledTenants(); len(enabled) > 1 {
 			current := s.tenantFor(ctx, owner)
 			for _, c := range enabled {
 				base.TenantOptions = append(base.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
@@ -389,6 +392,16 @@ func (s *Server) tenantFor(ctx context.Context, owner string) *tenant.Tenant {
 // locFor is the timezone the owner's permit days are reckoned in: their tenant's
 // when the registry knows it, else the process default. Public pages with no
 // owner keep the default.
+// enabledTenants is the registry's enabled list, or nothing on a deployment (or a
+// test rig) with no registry at all — so a caller can ask "how many areas?"
+// without first asking "is there a registry?".
+func (s *Server) enabledTenants() []*tenant.Tenant {
+	if s.registry == nil {
+		return nil
+	}
+	return s.registry.Enabled()
+}
+
 func (s *Server) locFor(ctx context.Context, owner string) *time.Location {
 	if s.registry != nil && owner != "" {
 		if c := s.tenantFor(ctx, owner); c != nil {
@@ -499,8 +512,10 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capped like renamePermit and addVehicle: this was the one label that
+	// reached the store unbounded.
 	pid, err := s.store.UpsertPermit(ctx, owner, cpid, match.PermitTypeID,
-		cleanLabel(r.FormValue("label")))
+		capLabel(cleanLabel(r.FormValue("label"))))
 	if err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
 			// Raced the pre-check above: another account claimed it in between.
@@ -887,9 +902,7 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Give the permit a name.")
 		return
 	}
-	if rs := []rune(label); len(rs) > 40 {
-		label = string(rs[:40])
-	}
+	label = capLabel(label)
 	if err := s.store.SetPermitLabel(r.Context(), owner, p.ID, label); err != nil {
 		s.serverError(w, err)
 		return

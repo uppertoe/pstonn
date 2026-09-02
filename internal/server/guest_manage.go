@@ -47,6 +47,13 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 		base.Flash = "Approved — " + normalizeReg(q.Get("approving")) + " is being put on the permit."
 	case q.Get("declined") != "":
 		base.Flash = "Request declined."
+	// The two refusals decideRequest lands here with. They arrive as bare flags
+	// (nothing to validate) and used to be dropped on the floor, so a member who
+	// pressed Approve was shown the guests page with no word on what happened.
+	case q.Get("alreadydecided") != "":
+		base.Flash = "Someone else already answered that request."
+	case q.Get("revoked") != "":
+		base.Warn = "That request wasn't approved: its printed QR code has been removed, or guest passes are paused."
 	case looksLikeEmail(q.Get("resent")):
 		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
 	}
@@ -695,7 +702,11 @@ func (s *Server) mintVisitorQR(ctx context.Context, owner, user string, permit m
 // Serves a bare card to htmx (the schedule page's modal) and a full page otherwise,
 // so the same action works from the permit card and from the guests page.
 func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
-	noStore(w) // the response embeds a live activation token; keep it out of caches
+	// The response embeds a live activation token, so it must stay out of caches —
+	// but this is a signed-in app page, so it takes the app helper, not the guest
+	// routes' noStore: that one also sets Referrer-Policy: no-referrer, which strips
+	// the same-origin Referer the CSRF check falls back on (see noStoreCache).
+	noStoreCache(w)
 	user, owner, _, ok := s.accountForWrite(w, r)
 	if !ok {
 		return
@@ -860,19 +871,26 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Enter a valid email address, or leave it blank.")
 		return
 	}
-	if err := s.store.SetVehicleEmail(r.Context(), owner, pathInt(r, "id"), email); err != nil && !errors.Is(err, store.ErrNotFound) {
+	switch err := s.store.SetVehicleEmail(r.Context(), owner, pathInt(r, "id"), email); {
+	case errors.Is(err, store.ErrNotFound):
+		// A car that is no longer there (deleted in another tab, a stale page) is
+		// tolerated, but NOT logged: the row below says an address was set or
+		// removed, and nothing was. The Activity page is the household's account of
+		// what happened, so it must not record a change that did not.
+	case err != nil:
 		s.serverError(w, err)
 		return
+	default:
+		// Worth logging precisely because of what it is: the one action that adds
+		// ANOTHER PERSON's email address to the account. It was the only change
+		// missing from the Activity page.
+		detail := "removed"
+		if email != "" {
+			detail = "set"
+		}
+		s.logChange(r.Context(), owner, user, store.ActionVehicleEmail,
+			s.plateOf(r.Context(), owner, pathInt(r, "id")), detail)
 	}
-	// Worth logging precisely because of what it is: the one action that adds
-	// ANOTHER PERSON's email address to the account. It was the only change
-	// missing from the Activity page.
-	detail := "removed"
-	if email != "" {
-		detail = "set"
-	}
-	s.logChange(r.Context(), owner, user, store.ActionVehicleEmail,
-		s.plateOf(r.Context(), owner, pathInt(r, "id")), detail)
 	if r.Header.Get("HX-Request") != "" {
 		w.WriteHeader(http.StatusNoContent) // live save from the Vehicles page; no reload
 		return
