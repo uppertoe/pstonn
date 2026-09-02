@@ -292,6 +292,43 @@ func TestAccountMembers(t *testing.T) {
 }
 
 // TestAccountEmails confirms notifications fan out to the owner plus secondaries.
+// Removing a member purges the mail still queued to them so a quiet-hours-deferred
+// notice does not deliver the household's plates after they lost access. That
+// purge used to match on the address alone, which also swallowed what OTHER
+// households had queued to the same person — a driver-contact notice from a
+// neighbour's account, say — mail this household has no say over.
+func TestRemoveMemberKeepsOtherHouseholdsQueuedMail(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const primary, member, neighbour = "primary@example.com", "member@example.com", "neighbour@example.com"
+	if err := s.AddMemberCapped(ctx, primary, member, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptInvite(ctx, member, primary); err != nil {
+		t.Fatal(err)
+	}
+	// One notice from the household they are leaving, one from a neighbour whose
+	// car lists them as the driver contact.
+	if err := s.EnqueueOutbox(ctx, OutboxItem{Account: primary, DedupKey: "household", Recipients: []string{member}, Subject: "S", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueOutbox(ctx, OutboxItem{Account: neighbour, DedupKey: "neighbour-driver", Recipients: []string{member}, Subject: "S", Body: "B"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, wasActive, err := s.RemoveMember(ctx, primary, member); err != nil || !wasActive {
+		t.Fatalf("remove = active %v, %v", wasActive, err)
+	}
+
+	due, err := s.DueOutbox(ctx, time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].DedupKey != HashDedupKey("neighbour-driver") {
+		t.Fatalf("outbox after removal = %+v; want only the neighbour's notice, with the household's own purged", due)
+	}
+}
+
 func TestAccountEmails(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
@@ -756,6 +793,52 @@ func TestNotifyPrefDefaults(t *testing.T) {
 	got, _ := s.GetNotifyPref(ctx, "u@example.com")
 	if got.EmailEnabled || !got.NtfyEnabled || got.NtfyTopic != "pstonn-abc" || !got.FailuresOnly {
 		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+}
+
+// SetNotifyPref is a whole-row upsert that callers feed from a read-modify-write of
+// the struct, while ConfirmNtfy stamps ntfy_confirmed_at from a different request
+// (the tap on the phone). A settings save that read the row before the tap used to
+// write the stale empty stamp back over it, silently un-confirming the channel.
+// The stamp belongs to the topic: an unchanged topic keeps it, a new topic resets it.
+func TestSetNotifyPrefKeepsConfirmationForUnchangedTopic(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const user = "u@example.com"
+	pref := NotifyPref{Owner: user, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "pstonn-t1"}
+	if err := s.SetNotifyPref(ctx, pref); err != nil {
+		t.Fatal(err)
+	}
+	// The read that a settings form is built from, taken BEFORE the confirmation lands.
+	stale, err := s.GetNotifyPref(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stamped, err := s.ConfirmNtfy(ctx, user, "pstonn-t1", time.Now()); err != nil || !stamped {
+		t.Fatalf("confirm = %v, %v; want stamped", stamped, err)
+	}
+	// The form saves a different setting with the same topic and the stale stamp.
+	stale.FailuresOnly = true
+	if err := s.SetNotifyPref(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNotifyPref(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NtfyConfirmed() {
+		t.Fatal("a settings save with an unchanged topic clobbered the confirmation stamp")
+	}
+	if !got.FailuresOnly {
+		t.Fatal("the setting the save was for did not land")
+	}
+	// A regenerated topic has no subscriber yet, so the caller's reset must win.
+	got.NtfyTopic, got.NtfyConfirmedAt = "pstonn-t2", ""
+	if err := s.SetNotifyPref(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := s.GetNotifyPref(ctx, user); after.NtfyConfirmed() {
+		t.Fatalf("a new topic must start unconfirmed, got %+v", after)
 	}
 }
 
@@ -1712,6 +1795,48 @@ func TestAdminAccountsPlatesSurviveSliceGrowth(t *testing.T) {
 		if len(a.Plates) != 1 {
 			t.Errorf("account %s has plates %v, want exactly one", a.Owner, a.Plates)
 		}
+	}
+}
+
+// council_session became one row per (owner, council) with multi-tenant, and
+// AdminAccounts joined it bare — so an account linked to two councils came back
+// twice, and the plates fold (keyed by owner) landed on whichever copy was last.
+// One account, one row; linked if any of its sessions holds a cookie.
+func TestAdminAccountsOneRowPerMultiTenantOwner(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const owner = "two@example.com"
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, TenantID: "stonnington", Cookie: "c1"}); err != nil {
+		t.Fatal(err)
+	}
+	// The second tenant is known but not (or no longer) holding a cookie.
+	if err := s.SaveTenantSession(ctx, TenantSession{Owner: owner, TenantID: "hume"}); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := s.UpsertPermit(ctx, owner, "CP-1", "type", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPermitActive(ctx, pid, "AAA000"); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err := s.AdminAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("got %d rows for one two-council account, want 1: %+v", len(accounts), accounts)
+	}
+	a := accounts[0]
+	if !a.Linked {
+		t.Error("an account with a cookie on one of its councils must read as linked")
+	}
+	if a.LinkedAt.IsZero() {
+		t.Error("linked_at was lost in the collapse to one row")
+	}
+	if len(a.Plates) != 1 {
+		t.Errorf("plates = %v, want exactly one", a.Plates)
 	}
 }
 

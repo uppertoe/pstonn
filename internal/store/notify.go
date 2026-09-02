@@ -50,6 +50,14 @@ func (s *Store) GetNotifyPref(ctx context.Context, owner string) (NotifyPref, er
 }
 
 // SetNotifyPref upserts a user's notification preferences.
+//
+// ntfy_confirmed_at is the one column the caller does not simply own. Callers
+// read-modify-write the whole struct, and ConfirmNtfy stamps the row from a
+// different request (the tap on the phone) — so a settings save that began before
+// the tap would carry the stale empty stamp back over it, and the household would
+// be told to confirm a channel it had just confirmed. The row keeps its own stamp
+// whenever the topic is unchanged; only a NEW topic takes the caller's value,
+// which is how a regenerated topic resets the confirmation (see NotifyPref).
 func (s *Store) SetNotifyPref(ctx context.Context, p NotifyPref) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO notify_pref (owner, email_enabled, ntfy_enabled, ntfy_topic, failures_only, quiet_from, quiet_until, ntfy_confirmed_at)
@@ -61,7 +69,9 @@ ON CONFLICT(owner) DO UPDATE SET
     failures_only = excluded.failures_only,
     quiet_from    = excluded.quiet_from,
     quiet_until   = excluded.quiet_until,
-    ntfy_confirmed_at = excluded.ntfy_confirmed_at`,
+    ntfy_confirmed_at = CASE WHEN excluded.ntfy_topic = notify_pref.ntfy_topic
+                             THEN notify_pref.ntfy_confirmed_at
+                             ELSE excluded.ntfy_confirmed_at END`,
 		p.Owner, boolInt(p.EmailEnabled), boolInt(p.NtfyEnabled), p.NtfyTopic, boolInt(p.FailuresOnly), p.QuietFrom, p.QuietUntil, p.NtfyConfirmedAt)
 	return err
 }

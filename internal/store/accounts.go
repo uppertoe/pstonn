@@ -40,10 +40,15 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 		return err
 	}
 	// Notification prefs are per-person: drop this account owner's own row AND the
-	// rows of its secondaries (still present in account_member at this point), so a
-	// deleted account leaves no member's channel prefs behind.
+	// rows of its ACCEPTED secondaries (still present in account_member at this
+	// point), so a deleted account leaves no member's channel prefs behind. A pending
+	// invite is excluded for the reason RemoveMember spells out: the invitee never
+	// joined, their notify_pref belongs to their OWN account, and without the gate
+	// deleting an account would wipe the channel config of a stranger who merely
+	// holds an unanswered offer.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM notify_pref WHERE owner = ? OR owner IN (SELECT member_email FROM account_member WHERE owner = ?)`,
+		`DELETE FROM notify_pref WHERE owner = ?
+		 OR owner IN (SELECT member_email FROM account_member WHERE owner = ? AND invite_pending = 0)`,
 		owner, owner); err != nil {
 		return err
 	}
@@ -147,7 +152,22 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 		owner, owner+" (undo)"); err != nil {
 		return err
 	}
-	// Anything still queued to them anywhere.
+	// And the door-QR requests they decided on another household's permit. Their
+	// own account's requests were deleted above; these belong to the household whose
+	// permit was asked for, whose guests page still says who approved or declined
+	// each one. Same treatment as the log and the overrides: the decision stays,
+	// the name goes.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE guest_request SET decided_by = 'a former member' WHERE owner != ? AND decided_by = ?`,
+		owner, owner); err != nil {
+		return err
+	}
+	// Anything still queued to them anywhere. Deliberately NOT scoped to an account,
+	// unlike the purge in revokeGrantsBy: there a household is withdrawing someone's
+	// access and has no business touching what OTHER households queued to that
+	// address. Here the person is deleting themselves, and a notice from a neighbour's
+	// account (a driver-contact bump, a pass they were sent) is exactly the mail they
+	// have asked never to receive.
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM outbox WHERE status = 'pending' AND recipients = ?`, owner); err != nil {
 		return err
@@ -348,7 +368,7 @@ func (s *Store) AdminAccounts(ctx context.Context) ([]AdminAccount, error) {
 SELECT o.owner,
   COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner AND invite_pending = 0 LIMIT 1), ''),
   COALESCE((SELECT owner FROM account_member WHERE member_email = o.owner AND invite_pending = 1 LIMIT 1), ''),
-  COALESCE(cs.cookie_sealed, ''), COALESCE(cs.linked_at, ''), COALESCE(cs.last_active_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
+  COALESCE(cs.linked, 0), COALESCE(cs.linked_at, ''), COALESCE(cs.last_active_at, ''), COALESCE(cs.updated_at, ''), COALESCE(cs.token_expiry, ''),
   COALESCE(np.email_enabled, 1), COALESCE(np.ntfy_enabled, 0), COALESCE(np.ntfy_topic, ''),
   COALESCE((SELECT version FROM consent c WHERE c.owner = o.owner ORDER BY id DESC LIMIT 1), ''),
   (SELECT COUNT(*) FROM permit p WHERE p.owner = o.owner),
@@ -362,7 +382,21 @@ FROM (
   UNION SELECT owner FROM consent
   UNION SELECT owner FROM notify_pref
 ) o
-LEFT JOIN council_session cs ON cs.owner = o.owner
+LEFT JOIN (
+  -- council_session is one row per (owner, council) since multi-tenant, so a bare
+  -- join would repeat a two-council account and the byOwner map below would keep
+  -- only the last copy (CountLinkedAccounts already counts DISTINCT owner for the
+  -- same reason). Collapse to one row per owner: linked if ANY session holds a
+  -- cookie; the clocks are the latest across sessions (RFC3339 UTC sorts as text);
+  -- the expiry is the EARLIEST, since that is the one keep-warm has to beat.
+  SELECT owner,
+    MAX(cookie_sealed != '') AS linked,
+    MAX(linked_at)           AS linked_at,
+    MAX(last_active_at)      AS last_active_at,
+    MAX(updated_at)          AS updated_at,
+    MIN(NULLIF(token_expiry, '')) AS token_expiry
+  FROM council_session GROUP BY owner
+) cs ON cs.owner = o.owner
 LEFT JOIN notify_pref np ON np.owner = o.owner
 ORDER BY o.owner`)
 	if err != nil {
@@ -375,17 +409,17 @@ ORDER BY o.owner`)
 	byOwner := map[string]int{}
 	for rows.Next() {
 		var a AdminAccount
-		var cookie, linked, active, warmed, expiry, lastAt string
-		var emailEn, ntfyEn int
-		if err := rows.Scan(&a.Owner, &a.MemberOf, &a.InvitedBy, &cookie, &linked, &active, &warmed, &expiry,
+		var linkedAt, active, warmed, expiry, lastAt string
+		var linked, emailEn, ntfyEn int
+		if err := rows.Scan(&a.Owner, &a.MemberOf, &a.InvitedBy, &linked, &linkedAt, &active, &warmed, &expiry,
 			&emailEn, &ntfyEn, &a.NtfyTopic, &a.ConsentVersion, &a.PermitCount, &a.MemberCount,
 			&a.LastApplyStatus, &lastAt, &a.MaxFailStreak); err != nil {
 			return nil, err
 		}
-		a.Linked = cookie != ""
+		a.Linked = linked == 1
 		a.EmailEnabled = emailEn == 1
 		a.NtfyEnabled = ntfyEn == 1
-		a.LinkedAt, _ = time.Parse(time.RFC3339, linked)
+		a.LinkedAt, _ = time.Parse(time.RFC3339, linkedAt)
 		a.LastActive, _ = time.Parse(time.RFC3339, active)
 		a.WarmedAt, _ = time.Parse(time.RFC3339, warmed)
 		a.TokenExpiry, _ = time.Parse(time.RFC3339, expiry)
@@ -752,11 +786,16 @@ func revokeGrantsBy(ctx context.Context, tx *sql.Tx, owner, memberEmail string) 
 	if err != nil {
 		return 0, err
 	}
-	// Anything still queued to them goes too. A quiet-hours-deferred notice can sit
-	// for hours, so without this someone who just lost access still receives the
-	// household's plates and permit label (often their address) by email.
+	// Anything still queued to them from THIS account goes too. A quiet-hours-deferred
+	// notice can sit for hours, so without this someone who just lost access still
+	// receives the household's plates and permit label (often their address) by
+	// email. Scoped to the account: a primary removing a member must not swallow
+	// what other households queued to the same address (a driver-contact notice from
+	// a neighbour's car, say) — that mail is between them and the person, and the
+	// person still wants it. Only DeleteAllForOwner purges account-wide, because
+	// there it is the person themselves asking.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM outbox WHERE status = 'pending' AND recipients = ?`, memberEmail); err != nil {
+		`DELETE FROM outbox WHERE status = 'pending' AND recipients = ? AND account = ?`, memberEmail, owner); err != nil {
 		return n, err
 	}
 	return n, nil
