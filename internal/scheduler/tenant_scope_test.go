@@ -224,3 +224,39 @@ func TestUnavailableTenantIsSurfacedOnce(t *testing.T) {
 		t.Fatalf("not-linked should stay quiet: rows=%d notices=%d", len(logs), len(fn2.appliedSnap()))
 	}
 }
+
+// TestKickOwnerInClearsOnlyThatTenantsBackoffs: a re-link with one council
+// plausibly fixes the permits THERE. The other council's parked refusal is
+// still a refusal — clearing it re-runs a write that portal already said no to.
+func TestKickOwnerInClearsOnlyThatTenantsBackoffs(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "twoareas-kick@example.com"
+	if err := st.SetAccountTenant(ctx, owner, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	alphaID, _ := seedActivePermit(t, st, owner, "kick-a", "ROSTER1", "ALPHA1")
+	if err := st.SetAccountTenant(ctx, owner, "beta"); err != nil {
+		t.Fatal(err)
+	}
+	betaID, err := st.UpsertPermit(ctx, owner, "kick-b", "14", "Beta permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, &fakeTenant{}, time.UTC, Options{})
+	s.parkRetry(alphaID, "ROSTER1")
+	s.parkRetry(betaID, "ROSTER1")
+
+	s.KickOwnerIn(ctx, owner, "alpha")
+	if s.retryDeferred(alphaID, time.Now()) {
+		t.Fatal("a re-link at alpha should clear alpha's backoff")
+	}
+	if !s.retryDeferred(betaID, time.Now()) {
+		t.Fatal("a re-link at alpha cleared beta's parked refusal")
+	}
+	// The owner-wide kick still clears everything.
+	s.KickOwner(ctx, owner)
+	if s.retryDeferred(betaID, time.Now()) {
+		t.Fatal("KickOwner must clear every tenant's backoffs")
+	}
+}

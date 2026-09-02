@@ -376,6 +376,18 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 				// them it never applied.
 				reason := fmt.Sprintf("That change is no longer scheduled — the booking ended or the schedule moved on — and it was never applied: the permit showed %s the whole time.", p.ActiveRegistration)
 				s.logApply(ctx, p.ID, last.Registration, last.Source, "error", reason)
+				// "This corrects the earlier notice" is only true if a notice went out.
+				// The streak gate above is failNotifyThreshold, but the council-busy
+				// path does not speak until busyNotifyThreshold and the expired-session
+				// path until sessionNotifyThreshold, so a streak of three could refer
+				// the household to a notice they never got. The durable notified key
+				// records what was actually DELIVERED, so it decides the wording; the
+				// fact itself — the car was never covered — is worth telling either way.
+				action := "Nothing to apply now. If " + last.Registration + " parked there during the booking, it was not covered."
+				if s.failureNoticeSent(ctx, p.ID, last.Registration) {
+					action = "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
+						"If " + last.Registration + " parked there during the booking, it was not covered."
+				}
 				s.notifyUser(ctx, p, notify.ApplyOutcome{
 					Owner:       p.Owner,
 					PermitLabel: permitLabel(p),
@@ -383,8 +395,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 					OK:          false,
 					CurrentReg:  p.ActiveRegistration,
 					Reason:      reason,
-					Action: "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
-						"If " + last.Registration + " parked there during the booking, it was not covered.",
+					Action:      action,
 					// Not transient: this must not sit behind a quiet-hours hold and
 					// arrive as a stale correction long after the next booking started.
 				}, "unapplied|"+last.Registration+"|"+s.failureKeyDay(p))
@@ -529,6 +540,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	if !s.spreadElapsed(p.ID, res, now) {
 		return false // this permit's turn in the rollover window hasn't come up yet
 	}
+	// A parked refusal is about ONE plate. Now that today's target is known, a
+	// different target is not the write the portal refused, so it is not held
+	// behind the parking — checked before the deferral so the window is read
+	// with the target in hand, not blindly.
+	s.unparkIfTargetChanged(p.ID, want)
 	if s.retryDeferred(p.ID, time.Now()) {
 		return false // failing lately; inside its stretched retry window
 	}

@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/redact"
@@ -22,12 +23,17 @@ func (s *Scheduler) warmLoop(ctx context.Context) {
 	// Recovery cadence. A renewal itself still fires only when a session passes its
 	// (per-session, stably-jittered) warmInterval, and a success slides the clock —
 	// so healthy sessions cost no extra tenant calls no matter how fast we tick.
-	// Ticking fast only shortens how long a FAILED or pushback-deferred renew waits
-	// before its next attempt. That is what lets warmInterval sit at ~0.7× the safe
-	// idle window instead of ~0.5× without exposing the narrower margin to a single
-	// missed pass. A renew attempted during a tenant-pushback cooldown is a cheap
-	// local no-op (renewLocked short-circuits before any network call), so fast
-	// ticks never hammer a portal that is already refusing us.
+	// Ticking fast only shortens how long a FAILED renew waits before its next
+	// attempt. That is what lets warmInterval sit at ~0.7× the safe idle window
+	// instead of ~0.5× without exposing the narrower margin to a single missed pass.
+	//
+	// Fast ticks are NOT free for a session that stays past its threshold, so the
+	// two ways that happens are each bounded elsewhere: a portal pushing back is
+	// short-circuited by the client's own cooldown/breaker before any network call,
+	// and a session whose cookie is DEAD is probed once, handed to the reconnect
+	// queue, and then skipped by warmOne while it sits there — otherwise every tick
+	// would send a real Refresh to earn the same 401 for as long as the reconnect
+	// stayed in backoff.
 	const recoveryTick = 3 * time.Minute
 	warmEvery := recoveryTick
 	if warmEvery > s.warmInterval {
@@ -198,6 +204,13 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		// reason this pass still visits it. (The warm clock never advances for such
 		// a session, so the branch is taken every pass; that is the cheap outcome.)
 		alive = true
+	} else if action == warmRenew && s.reconnectQueued(cs.Owner, cs.TenantID) {
+		// Already known dead and queued for recovery. Nothing marks a session
+		// known-dead in the store, so without this every recovery tick issued a real
+		// Refresh — a 401 each time — while the reconnect item waited out its
+		// backoff. The queue answers instead: the worker re-warms via a kick when it
+		// recovers, or the item leaves the queue and the next pass probes afresh.
+		// alive stays false; there is no session to serve a drift read.
 	} else if action == warmRenew {
 		switch err := s.tenant.Refresh(ctx, cs.Owner, cs.TenantID); {
 		case err == nil:
@@ -337,6 +350,15 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 		return
 	}
 	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, cs.TenantID, deadline.In(s.locOf(cs.Owner, cs.TenantID)), url); err != nil {
+		if errors.Is(err, notify.ErrSuppressed) {
+			// Terminal, as sweepOnboardNudges treats it: the address bounced or
+			// complained, and no retry improves that. Keeping the mark is what stops
+			// this from rolling back, alerting and re-trying every recovery tick for
+			// the whole lead window. The retirement path still tells the household
+			// (and, when it cannot, the operator) once the bound is reached.
+			log.Printf("scheduler: renewal reminder to %s skipped (suppressed address); marked done", redact.Email(cs.Owner))
+			return
+		}
 		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the

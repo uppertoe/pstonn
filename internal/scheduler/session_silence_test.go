@@ -81,7 +81,7 @@ func TestStalledReconnectAlertsHouseholdOnce(t *testing.T) {
 
 	s.enqueueReconnect(ctx, owner, "", 1)
 	for i := 0; i < reconnectStalledAlertAttempts-1; i++ {
-		s.backoffReconnect(sessionKey{owner, ""})
+		s.backoffReconnect(sessionKey{owner, ""}, queuedItem(t, s, sessionKey{owner, ""}))
 	}
 	time.Sleep(20 * time.Millisecond) // alerts fire from goroutines
 	if n := len(nf.stalledSnap()); n != 0 {
@@ -90,7 +90,7 @@ func TestStalledReconnectAlertsHouseholdOnce(t *testing.T) {
 	}
 
 	// The attempt that crosses the line alerts...
-	s.backoffReconnect(sessionKey{owner, ""})
+	s.backoffReconnect(sessionKey{owner, ""}, queuedItem(t, s, sessionKey{owner, ""}))
 	deadline := time.Now().Add(2 * time.Second)
 	for len(nf.stalledSnap()) == 0 {
 		if time.Now().After(deadline) {
@@ -100,8 +100,8 @@ func TestStalledReconnectAlertsHouseholdOnce(t *testing.T) {
 	}
 
 	// ...and further deferrals do not repeat it.
-	s.backoffReconnect(sessionKey{owner, ""})
-	s.backoffReconnect(sessionKey{owner, ""})
+	s.backoffReconnect(sessionKey{owner, ""}, queuedItem(t, s, sessionKey{owner, ""}))
+	s.backoffReconnect(sessionKey{owner, ""}, queuedItem(t, s, sessionKey{owner, ""}))
 	time.Sleep(20 * time.Millisecond)
 	if got := nf.stalledSnap(); len(got) != 1 || got[0] != owner {
 		t.Fatalf("stalled alert should fire exactly once per queue residency, got %v", got)

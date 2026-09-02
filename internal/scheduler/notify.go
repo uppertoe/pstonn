@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
@@ -32,6 +33,70 @@ func (s *Scheduler) releaseNotify(claim string) {
 	s.notifyMu.Lock()
 	delete(s.notifyInFlight, claim)
 	s.notifyMu.Unlock()
+}
+
+// holdNotify paces the retry of a delivery that reached nobody, or not everyone:
+// no further attempt for this permit+outcome until notifyRetry has elapsed. The
+// durable notified key is deliberately NOT written for such a delivery, so without
+// this the paths that call notifyUser every tick re-dialled SMTP for the same
+// household every minute. Entries that have long expired are swept as we go, so a
+// key that never succeeds (a dated failure key nobody could be reached about)
+// does not accumulate for the life of the process.
+func (s *Scheduler) holdNotify(claim string) {
+	if s.notifyRetry <= 0 {
+		return
+	}
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	if s.notifyRetryAt == nil {
+		s.notifyRetryAt = map[string]time.Time{} // literal-constructed test schedulers
+	}
+	now := time.Now()
+	for k, t := range s.notifyRetryAt {
+		if now.Sub(t) > time.Hour {
+			delete(s.notifyRetryAt, k)
+		}
+	}
+	s.notifyRetryAt[claim] = now.Add(s.notifyRetry)
+}
+
+// notifyHeld reports whether a delivery for claim is inside its retry hold.
+func (s *Scheduler) notifyHeld(claim string, now time.Time) bool {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	t, ok := s.notifyRetryAt[claim]
+	return ok && now.Before(t)
+}
+
+// releaseNotifyHold forgets a hold once the delivery has succeeded.
+func (s *Scheduler) releaseNotifyHold(claim string) {
+	s.notifyMu.Lock()
+	delete(s.notifyRetryAt, claim)
+	s.notifyMu.Unlock()
+}
+
+// failureNoticeSent reports whether the household was successfully told about a
+// failure to put reg on this permit. The durable notified key is the last outcome
+// DELIVERED — not attempted — so it is the honest record: every failure key
+// starts with its kind and then the plate it was about, and a later success or
+// an unrelated notice overwrites it. Used by settle to decide whether a close-out
+// may describe itself as correcting an earlier notice.
+func (s *Scheduler) failureNoticeSent(ctx context.Context, permitID int64, reg string) bool {
+	k, _, err := s.store.PermitNotify(ctx, permitID)
+	if err != nil || k == "" {
+		return false
+	}
+	kind, rest, ok := strings.Cut(k, "|")
+	if !ok {
+		return false
+	}
+	switch kind {
+	case "error", "rejected", "busy", "busy-blocked", "session":
+	default:
+		return false // a success, or a notice not about a target plate
+	}
+	plate, _, _ := strings.Cut(rest, "|")
+	return model.SamePlate(plate, reg)
 }
 
 // alertRelink notifies a user that their tenant connection dropped and they
@@ -198,6 +263,9 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	// The message is about THIS permit: its council's name and portal, whatever
 	// tenant the account currently has selected.
 	o.TenantID = p.TenantID
+	// The outcome's identity travels with it, so the notifier can remember which
+	// members a PARTIAL delivery reached and not repeat itself to them on retry.
+	o.Key = key
 	notifiedKey, adminKey, _ := s.store.PermitNotify(ctx, p.ID)
 	if notifiedKey == key {
 		return // already successfully told about this exact outcome
@@ -209,6 +277,9 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 	// In-memory: a restart drops the claim, which is fine, the durable notified-key
 	// still dedups anything already delivered.
 	claim := fmt.Sprintf("%d|%s", p.ID, key)
+	if s.notifyHeld(claim, time.Now()) {
+		return // a recent attempt reached nobody, or not everyone; its retry is paced
+	}
 	if !s.claimNotify(claim) {
 		return
 	}
@@ -241,11 +312,14 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 			// Some members were reached and some were not. Recording the key here would
 			// mean the ones that failed are never retried — on a shared account that can
 			// be the person who actually parks the car, and for an OK:false outcome that
-			// is the fine. Leave the key unset so the next pass re-delivers.
+			// is the fine. Leave the key unset so a later pass re-delivers: the notifier
+			// remembers who it reached (o.Key), so the retry goes only to the rest.
 			log.Printf("scheduler: partial notify for %s (delivered=%d): %v — not recording, will retry", redact.Email(o.Owner), delivered, err)
+			s.holdNotify(claim)
 			return
 		}
 		if delivered != 0 { // >0 delivered, or -1 intentionally suppressed
+			s.releaseNotifyHold(claim)
 			if e := s.store.SetPermitNotifiedKey(nctx, p.ID, key); e != nil {
 				// The notice went out but recording it as sent failed, so the next pass
 				// would re-send. Surface it rather than discarding: a persistent failure
@@ -256,6 +330,9 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 			}
 			return
 		}
+		// Nobody was reached. The next pass retries — after a hold, not every tick:
+		// the busy branch re-enters here each minute for as long as the block lasts.
+		s.holdNotify(claim)
 		if err != nil {
 			log.Printf("scheduler: notify %s failed (will retry): %v", redact.Email(o.Owner), err)
 		}
@@ -309,7 +386,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	key := "error|" + want + "|" + reason + "|" + s.failureKeyDay(p)
 	if kind == parking.FailRejected {
 		threshold = 1
-		s.parkRetry(p.ID)
+		s.parkRetry(p.ID, want)
 		key = "rejected|" + want + "|" + reason
 		action += " p.stonn will not retry this change until you edit the schedule or re-link."
 	} else {

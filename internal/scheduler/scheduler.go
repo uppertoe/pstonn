@@ -228,6 +228,12 @@ type Scheduler struct {
 	// for notification thresholds).
 	retryMu sync.Mutex
 	nextTry map[int64]time.Time
+	// parkedFor remembers, per PARKED permit, the registration the portal refused,
+	// so a later tick can tell "the same doomed write" from "a different target the
+	// portal has never seen". Without it a Monday refusal of plate A held Tuesday's
+	// perfectly good plate B off the permit until someone edited or re-linked.
+	// Guarded by retryMu and cleared together with nextTry.
+	parkedFor map[int64]string
 
 	// snapshotPath/lastSnapshot drive the daily VACUUM INTO backup snapshot
 	// (only touched from the warm loop, so no lock needed). lastSnapshotAttempt is
@@ -290,6 +296,16 @@ type Scheduler struct {
 	// pass before the first has written its durable dedup key. Guarded by notifyMu.
 	notifyMu       sync.Mutex
 	notifyInFlight map[string]struct{}
+	// notifyRetryAt holds, per permit+outcome claim, the earliest time a delivery
+	// that did NOT fully succeed (nobody reached, or only some members) may be
+	// attempted again. The reconcile paths that call notifyUser every tick — the
+	// council-busy branch has no deferRetry, deliberately — would otherwise open an
+	// SMTP connection per permit per MINUTE for as long as a household stays
+	// unreachable. Guarded by notifyMu; an entry is dropped once delivery succeeds.
+	notifyRetryAt map[string]time.Time
+	// notifyRetry is how long that hold lasts (defaults to notifyRetryBackoff; a
+	// field so tests can shrink it or, at 0, switch the hold off).
+	notifyRetry time.Duration
 }
 
 // failNotifyThreshold is how many consecutive failing ticks a TRANSIENT problem
@@ -323,6 +339,12 @@ const systemAlertThrottle = 30 * time.Minute
 // maxNotifyConcurrency bounds simultaneous user-notification deliveries (SMTP dials
 // + DB reads) so a mass-notification tick paces rather than spikes. See notifyUser.
 const maxNotifyConcurrency = 8
+
+// notifyRetryBackoff is how long notifyUser waits before re-attempting a delivery
+// that reached nobody, or not everyone. Long enough that an unreachable household
+// costs a handful of dials an hour rather than sixty; short enough that a mail
+// blip still gets the fine-risk notice out within minutes.
+const notifyRetryBackoff = 5 * time.Minute
 
 // systemAlertRetry is the short window a systemic alert is suppressed for after a
 // FAILED delivery, so a transient outbound failure retries soon instead of muting
@@ -384,9 +406,12 @@ func New(st *store.Store, tenant Tenant, loc *time.Location, opts Options) *Sche
 		driftRetryAt:     make(map[string]time.Time),
 		driftFails:       make(map[string]int),
 		notifyInFlight:   make(map[string]struct{}),
+		notifyRetryAt:    make(map[string]time.Time),
+		notifyRetry:      notifyRetryBackoff,
 		lastAlert:        make(map[string]time.Time),
 		alertRetry:       systemAlertRetry,
 		nextTry:          make(map[int64]time.Time),
+		parkedFor:        make(map[int64]string),
 		applying:         make(map[int64]chan struct{}),
 		unscheduled:      make(map[int64]string),
 		snapshotPath:     opts.SnapshotPath,
@@ -432,12 +457,28 @@ func (s *Scheduler) KickPermit(permitID int64) {
 	s.Kick()
 }
 
-// KickOwner clears the backoffs for one owner's permits and then kicks. Used
-// after a re-link, which plausibly fixes every permit on that account.
+// KickOwner clears the backoffs for ALL of one owner's permits, at every tenant,
+// and then kicks. Prefer KickOwnerIn where the caller knows which tenant's
+// session changed: a re-link at one council says nothing about a refusal the
+// other council issued, and clearing that one re-runs a write the portal has
+// already said no to. Kept for callers that act on the whole account.
 func (s *Scheduler) KickOwner(ctx context.Context, owner string) {
+	s.kickOwnerWhere(ctx, owner, func(model.Permit) bool { return true })
+}
+
+// KickOwnerIn clears the backoffs for one owner's permits AT ONE TENANT and then
+// kicks. Used after a re-link with that tenant, which plausibly fixes every
+// permit the account holds there — and only there.
+func (s *Scheduler) KickOwnerIn(ctx context.Context, owner, tenantID string) {
+	s.kickOwnerWhere(ctx, owner, func(p model.Permit) bool { return p.TenantID == tenantID })
+}
+
+func (s *Scheduler) kickOwnerWhere(ctx context.Context, owner string, match func(model.Permit) bool) {
 	if permits, err := s.store.ListPermitsFor(ctx, owner); err == nil {
 		for _, p := range permits {
-			s.clearRetry(p.ID)
+			if match(p) {
+				s.clearRetry(p.ID)
+			}
 		}
 	}
 	s.Kick()
@@ -467,10 +508,36 @@ func (s *Scheduler) deferRetry(permitID int64, streak int) {
 // and a fresh "we couldn't update your permit" every morning from the dated
 // failure key. Parking makes the retry cost zero and the message a one-off. It
 // is the same map as the backoff so every existing clear path applies unchanged.
-func (s *Scheduler) parkRetry(permitID int64) {
+//
+// registration is the plate the portal refused. It is what makes the parking
+// specific to THAT write: the schedule moving on to a different plate is a change
+// the portal has never seen, and unparkIfTargetChanged lets it through.
+func (s *Scheduler) parkRetry(permitID int64, registration string) {
 	s.retryMu.Lock()
 	s.nextTry[permitID] = time.Now().Add(parkedRetry)
+	if s.parkedFor == nil {
+		s.parkedFor = map[int64]string{} // literal-constructed test schedulers
+	}
+	s.parkedFor[permitID] = registration
 	s.retryMu.Unlock()
+}
+
+// unparkIfTargetChanged clears a parked refusal once the permit's target is no
+// longer the plate the portal refused. The parking exists so the SAME doomed
+// write is not repeated ~144 times a day; it was never meant to hold a different
+// plate off the permit. It did: reconcilePermit checked the window before knowing
+// what today's target was, so Monday's refused plate A left Tuesday's valid plate
+// B unapplied until an edit, a re-link or a restart. An ordinary (non-parked)
+// backoff is left alone — a transient failure says nothing about the target.
+func (s *Scheduler) unparkIfTargetChanged(permitID int64, want string) {
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	parked, ok := s.parkedFor[permitID]
+	if !ok || model.SamePlate(parked, want) {
+		return
+	}
+	delete(s.nextTry, permitID)
+	delete(s.parkedFor, permitID)
 }
 
 // parkedRetry is the "never, until cleared" deferral parkRetry writes. A year: far
@@ -489,6 +556,7 @@ func (s *Scheduler) retryDeferred(permitID int64, now time.Time) bool {
 func (s *Scheduler) clearRetry(permitID int64) {
 	s.retryMu.Lock()
 	delete(s.nextTry, permitID)
+	delete(s.parkedFor, permitID)
 	s.retryMu.Unlock()
 }
 

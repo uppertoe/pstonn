@@ -68,3 +68,69 @@ func TestRejectedChangeIsParkedUntilKicked(t *testing.T) {
 		t.Fatal("a successful apply must clear the parking")
 	}
 }
+
+// A parked refusal is about ONE plate. Monday's roster car A is refused and
+// parked; Tuesday's roster car B is a write the portal has never seen, and used
+// to sit behind Monday's parking until an edit, a re-link or a restart — a whole
+// day of the wrong car on the permit with the household told nothing new. The
+// park must lift on its own when the target changes, and B's apply must then be
+// logged and notified like any other.
+func TestParkedRefusalDoesNotHoldADifferentTarget(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "moved-on@example.com"
+	pid, _ := seedActivePermit(t, st, owner, "rej-2", "PLATEA", "OLD999")
+	fc := &fakeTenant{setErr: rejectedErr()}
+	fn := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{Notifier: fn})
+
+	// Monday: A is refused and parked.
+	for i := 0; i < 3; i++ {
+		s.reconcileAll(ctx)
+	}
+	if n := len(fc.callSnap()); n != 1 {
+		t.Fatalf("council writes = %d after a rejection, want 1 (parked)", n)
+	}
+
+	// Tuesday: the roster now names B, and the portal is fine with it.
+	vehB, err := st.CreateVehicle(ctx, owner, "PLATEB", "Tuesday car", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), vehB); err != nil {
+		t.Fatal(err)
+	}
+	fc.setErr = nil
+	s.reconcileAll(ctx) // no kick: the next ordinary tick must see it
+	if n, last := len(fc.callSnap()), fc.lastReg(); n != 2 || last != "PLATEB" {
+		t.Fatalf("council writes = %d (last %q) after the target changed, want 2 with PLATEB (the parking must lift)", n, last)
+	}
+	if p, _ := st.GetPermit(ctx, pid); p.ActiveRegistration != "PLATEB" || p.FailStreak != 0 {
+		t.Fatalf("after B applied: active=%q streak=%d, want PLATEB/0", p.ActiveRegistration, p.FailStreak)
+	}
+	if last, err := st.LastApply(ctx, pid); err != nil || last.Status != "success" || last.Registration != "PLATEB" {
+		t.Fatalf("last activity row = %+v (%v), want a success for PLATEB", last, err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		outs := fn.outcomeSnap()
+		if n := len(outs); n >= 2 && outs[n-1].OK && outs[n-1].Reg == "PLATEB" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("B's apply was never notified; outcomes: %+v", fn.outcomeSnap())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The parking was specific to A. An ordinary (non-parked) backoff is not a
+	// statement about the target and still holds whatever the target becomes.
+	if s.retryDeferred(pid, time.Now()) {
+		t.Fatal("a successful apply must leave no deferral behind")
+	}
+	s.deferRetry(pid, 3)
+	s.unparkIfTargetChanged(pid, "SOMETHING-ELSE")
+	if !s.retryDeferred(pid, time.Now()) {
+		t.Fatal("an ordinary transient backoff must not be lifted by a target change")
+	}
+}

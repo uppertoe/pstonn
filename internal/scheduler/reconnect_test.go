@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -237,5 +238,84 @@ func TestQueueReconnectDoesNotFeedChurn(t *testing.T) {
 	s.NoteSessionExpired("c@example.com", "councilA", 1)
 	if exp, _, owners := s.SessionChurn(); exp != 1 || owners != 1 {
 		t.Fatalf("NoteSessionExpired should feed the canary once: expiries=%d owners=%d", exp, owners)
+	}
+}
+
+// queuedItem reads the current queue entry for key — the identity the worker
+// copies out before an attempt.
+func queuedItem(t *testing.T, s *Scheduler, key sessionKey) reconnectItem {
+	t.Helper()
+	s.reconnectMu.Lock()
+	defer s.reconnectMu.Unlock()
+	it, ok := s.reconnectQ[key]
+	if !ok {
+		t.Fatalf("no reconnect queued for %v", key)
+	}
+	return it
+}
+
+// The worker copies (key, generation) out of the queue, attempts the reconnect,
+// and then dequeues or backs off whatever the key holds. A CancelReconnect plus
+// a fresh enqueue inside that window (a manual link landing mid-attempt, then
+// the new session's own expiry being noticed) put a NEW, never-attempted item
+// under the same key, which the old code then deleted — or backed off by five
+// minutes and counted toward the stalled alert. The finished attempt must leave
+// an item it did not attempt alone.
+func TestDrainLeavesAnItemRequeuedDuringTheAttempt(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		err  error // what the in-flight reconnect returns
+	}{
+		{"deferred attempt must not back off the new item", errors.New("council busy 503")},
+		{"recovered attempt must not dequeue the new item", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newStore(t)
+			const owner = "midflight@example.com"
+			seedSession(t, st, owner)
+			gen := genOf(t, st, owner)
+			fc := &fakeTenant{reconnectSet: true, reconnectWait: 150 * time.Millisecond, reconnectErr: tc.err}
+			s := New(st, fc, time.UTC, Options{Notifier: &fakeNotifier{on: true}})
+			key := sessionKey{owner, ""}
+
+			s.enqueueReconnect(ctx, owner, "", gen)
+			done := make(chan struct{})
+			go func() { defer close(done); s.drainOneReconnect(ctx) }()
+			time.Sleep(30 * time.Millisecond) // inside the attempt window
+			s.CancelReconnect(owner)
+			s.QueueReconnect(owner, "", gen+1) // a fresh item the attempt knows nothing about
+			<-done
+
+			it := queuedItem(t, s, key)
+			if it.gen != gen+1 {
+				t.Fatalf("queued gen = %d, want the fresh item's %d", it.gen, gen+1)
+			}
+			if it.attempts != 0 || it.next.After(time.Now()) {
+				t.Fatalf("the never-attempted item was backed off: attempts=%d next in %s", it.attempts, time.Until(it.next))
+			}
+		})
+	}
+}
+
+// CancelReconnectIn drops only the named tenant's item; the owner-wide
+// CancelReconnect still clears every tenant, for the account-deletion callers.
+func TestCancelReconnectInIsTenantScoped(t *testing.T) {
+	st := newStore(t)
+	s := New(st, &fakeTenant{}, time.UTC, Options{})
+	const owner = "twoareas@example.com"
+	s.NoteSessionExpired(owner, "councilA", 1)
+	s.NoteSessionExpired(owner, "councilB", 1)
+
+	s.CancelReconnectIn(owner, "councilA")
+	if s.reconnectQueued(owner, "councilA") {
+		t.Fatal("councilA's reconnect should have been cancelled")
+	}
+	if !s.reconnectQueued(owner, "councilB") {
+		t.Fatal("cancelling councilA's reconnect dropped councilB's — valid recovery work discarded")
+	}
+	s.CancelReconnect(owner)
+	if s.reconnectQueued(owner, "councilB") {
+		t.Fatal("the owner-wide cancel must clear every tenant")
 	}
 }

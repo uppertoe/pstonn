@@ -91,3 +91,43 @@ func TestDriftSuspendedWhileBreakerOpen(t *testing.T) {
 		t.Fatalf("drift did not resume after the block cleared: %d grid reads", n)
 	}
 }
+
+// A session whose cookie is dead is probed ONCE and handed to the reconnect
+// queue. While the item sits there (in backoff, or deferred by a login-shape
+// break) nothing marks the session known-dead in the store, so every recovery
+// tick used to issue a real Refresh and earn the same 401. The queue answers
+// instead; probing resumes once the item leaves it.
+func TestWarmSkipsSessionAlreadyQueuedForReconnect(t *testing.T) {
+	ctx := context.Background()
+	const owner = "dead@example.com"
+	st := newStore(t)
+	seedSession(t, st, owner)
+	seedSchedule(t, st, owner)
+	fc := &fakeTenant{refreshErr: parking.ErrSessionExpired}
+	s := New(st, fc, time.UTC, Options{SessionMaxAge: 90 * 24 * time.Hour, WarmInterval: time.Nanosecond, Notifier: &fakeNotifier{on: true}})
+	time.Sleep(2 * time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		s.keepWarm(ctx)
+	}
+	if n := len(fc.refreshed); n != 1 {
+		t.Fatalf("a session queued for reconnect was probed %d times across 3 passes, want 1", n)
+	}
+	if !s.reconnectQueued(owner, "") {
+		t.Fatal("the dead session should be sitting in the reconnect queue")
+	}
+
+	// The queue empties (here: the worker recovers it), so the next pass may probe
+	// again — and, the fake still reporting it dead, re-queues it.
+	fc.reconnectSet = true
+	if !s.drainOneReconnect(ctx) {
+		t.Fatal("the queued reconnect was not drained")
+	}
+	if s.reconnectQueued(owner, "") {
+		t.Fatal("a recovered session must leave the queue")
+	}
+	s.keepWarm(ctx)
+	if n := len(fc.refreshed); n != 2 {
+		t.Fatalf("probing did not resume once the queue emptied: %d refreshes, want 2", n)
+	}
+}

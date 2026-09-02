@@ -271,8 +271,12 @@ type appliedNote struct {
 type fakeNotifier struct {
 	on         bool
 	admin      bool
-	deliverSet bool // when true, NotifyApply returns deliver; else it returns 1
-	deliver    int  // delivered-channel count to report (0 = user not reached)
+	deliverSet bool  // when true, NotifyApply returns deliver; else it returns 1
+	deliver    int   // delivered-channel count to report (0 = user not reached)
+	applyErr   error // returned alongside deliver (deliver>0 + applyErr models a PARTIAL delivery)
+	// reminderErr is what SendRenewalReminder returns after recording the attempt
+	// (a suppressed address, or a transient SMTP failure).
+	reminderErr error
 
 	mu            sync.Mutex // guards the slices: notifications fire from goroutines
 	sent          []sentMail
@@ -300,7 +304,7 @@ func (f *fakeNotifier) SendRenewalReminder(ctx context.Context, to, tenantID str
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, sentMail{to, url, deadline})
-	return nil
+	return f.reminderErr
 }
 
 func (f *fakeNotifier) NotifyApply(_ context.Context, o notify.ApplyOutcome) (int, error) {
@@ -309,7 +313,7 @@ func (f *fakeNotifier) NotifyApply(_ context.Context, o notify.ApplyOutcome) (in
 	f.outcomes = append(f.outcomes, o)
 	f.mu.Unlock()
 	if f.deliverSet {
-		return f.deliver, nil
+		return f.deliver, f.applyErr
 	}
 	return 1, nil // default: delivered on one channel
 }
@@ -857,6 +861,9 @@ func TestFailureEscalatesWhenUserNotReached(t *testing.T) {
 	p := model.Permit{ID: pid, Owner: "u@example.com", CouncilPermitID: "14576", Label: "Permit"}
 	fn := &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 0} // user not reached
 	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
+	// What this test pins is that the retry HAPPENS; its pacing (an undelivered
+	// notice is not re-dialled every tick) has its own test, so the hold is off here.
+	s.notifyRetry = 0
 
 	// A rejection alarms on the first tick.
 	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
@@ -981,6 +988,55 @@ func TestKeepWarmSendsReminder(t *testing.T) {
 	cs2, _ := st.GetTenantSession(ctx, "soon@example.com")
 	if !cs2.ReminderSent.IsZero() || cs2.ConfirmToken != "" {
 		t.Fatalf("confirm did not reset the cycle: %+v", cs2)
+	}
+}
+
+// TestSuppressedReminderIsTerminal: a renewal reminder to a SUPPRESSED address
+// (a bounce or a complaint) cannot improve by retrying. It used to be treated as
+// a transient failure — mark rolled back, operator alerted, and the whole thing
+// again on the next 3-minute tick for the entire lead window. Like the onboarding
+// nudge, it is now marked done on the first attempt; a transient SMTP failure
+// still rolls back and retries.
+func TestSuppressedReminderIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	run := func(sendErr error) (*fakeNotifier, store.TenantSession) {
+		st := newStore(t)
+		const owner = "soon@example.com"
+		seedSession(t, st, owner)
+		fn := &fakeNotifier{on: true, admin: true, reminderErr: sendErr}
+		s := New(st, &fakeTenant{}, time.UTC, Options{
+			SessionMaxAge: 10 * time.Second, WarmInterval: time.Hour,
+			ReminderLead: 10 * time.Second, PublicBaseURL: "https://pstonn.example", Notifier: fn,
+		})
+		for i := 0; i < 3; i++ {
+			s.keepWarm(ctx)
+		}
+		time.Sleep(20 * time.Millisecond) // operator alerts fire from goroutines
+		cs, err := st.GetTenantSession(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fn, cs
+	}
+
+	fn, cs := run(fmt.Errorf("%w: bounce", notify.ErrSuppressed))
+	if n := len(fn.sentSnap()); n != 1 {
+		t.Fatalf("a suppressed address was attempted %d times across 3 passes, want 1 (terminal)", n)
+	}
+	if cs.ReminderSent.IsZero() {
+		t.Fatal("a suppressed reminder must stay marked done, not be rolled back for retry")
+	}
+	if n := len(fn.adminSnap()); n != 0 {
+		t.Fatalf("a suppressed address raised %d operator alerts, want 0: nothing will improve by retrying", n)
+	}
+
+	// Control: a transient failure keeps the old rollback-and-retry behaviour.
+	fn, cs = run(errors.New("smtp: connection reset"))
+	if n := len(fn.sentSnap()); n != 3 {
+		t.Fatalf("a transient failure was attempted %d times across 3 passes, want 3 (retried)", n)
+	}
+	if !cs.ReminderSent.IsZero() {
+		t.Fatal("a transient failure must roll the mark back so the reminder is retried")
 	}
 }
 

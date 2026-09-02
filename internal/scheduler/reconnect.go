@@ -224,59 +224,98 @@ func (s *Scheduler) ReconnectActive(owner, tenantID string) bool {
 	return ok && time.Since(it.queuedAt) < reconnectActiveWindow
 }
 
-// CancelReconnect drops any queued reconnect for owner. Called after a manual link,
-// unlink or account deletion so stale recovery work is discarded promptly (the
-// generation check is the hard safety; this is the fast path).
+// CancelReconnect drops any queued reconnect for owner, at EVERY tenant. Called
+// after an account deletion or a whole-account disconnect, where no session
+// survives. A caller acting on ONE tenant's session (a link, unlink or
+// password opt-out there) uses CancelReconnectIn: the queue is keyed by
+// (owner, tenant), and dropping the other council's item discards recovery
+// work that is still valid. The generation check is the hard safety either way;
+// these are the fast path.
 func (s *Scheduler) CancelReconnect(owner string) {
+	s.cancelReconnectWhere(owner, func(sessionKey) bool { return true })
+}
+
+// CancelReconnectIn drops a queued reconnect for owner's session with ONE tenant.
+func (s *Scheduler) CancelReconnectIn(owner, tenantID string) {
+	s.cancelReconnectWhere(owner, func(k sessionKey) bool { return k.tenant == tenantID })
+}
+
+func (s *Scheduler) cancelReconnectWhere(owner string, match func(sessionKey) bool) {
 	s.reconnectMu.Lock()
 	for k := range s.reconnectQ {
-		if k.owner == owner {
+		if k.owner == owner && match(k) {
 			delete(s.reconnectQ, k)
 		}
 	}
 	s.reconnectMu.Unlock()
 	// Drop drift bookkeeping too: without this the two maps keep an entry per
-	// unlinked/retired owner until the process restarts.
+	// unlinked/retired owner until the process restarts. (Owner-keyed, so the
+	// tenant-scoped cancel clears it as well; a fresh session there is a fine
+	// reason to let drift look again.)
 	s.noteDriftSuccess(owner)
 }
 
-// nextDueReconnect returns the queued owner with the earliest next-attempt time (ties
-// broken by owner for determinism), its generation, whether it feeds the churn
-// counters, and how long until it is due.
-func (s *Scheduler) nextDueReconnect() (key sessionKey, gen int64, countsChurn bool, wait time.Duration, ok bool) {
+// reconnectQueued reports whether a reconnect for THIS session is queued at all —
+// due now or waiting out a backoff. Keep-warm uses it to skip probing a session
+// the queue already knows is dead.
+func (s *Scheduler) reconnectQueued(owner, tenantID string) bool {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
-	var best reconnectItem
+	_, ok := s.reconnectQ[sessionKey{owner, tenantID}]
+	return ok
+}
+
+// nextDueReconnect returns the queued session with the earliest next-attempt time
+// (ties broken by owner then tenant for determinism), a copy of its queue item,
+// and how long until it is due.
+func (s *Scheduler) nextDueReconnect() (key sessionKey, item reconnectItem, wait time.Duration, ok bool) {
+	s.reconnectMu.Lock()
+	defer s.reconnectMu.Unlock()
 	found := false
 	for k, it := range s.reconnectQ {
-		if !found || it.next.Before(best.next) || (it.next.Equal(best.next) && (k.owner < key.owner || (k.owner == key.owner && k.tenant < key.tenant))) {
-			key, best, found = k, it, true
+		if !found || it.next.Before(item.next) || (it.next.Equal(item.next) && (k.owner < key.owner || (k.owner == key.owner && k.tenant < key.tenant))) {
+			key, item, found = k, it, true
 		}
 	}
 	if !found {
-		return sessionKey{}, 0, false, 0, false
+		return sessionKey{}, reconnectItem{}, 0, false
 	}
-	if now := time.Now(); best.next.After(now) {
-		return key, best.gen, best.countsChurn, best.next.Sub(now), true
+	if now := time.Now(); item.next.After(now) {
+		return key, item, item.next.Sub(now), true
 	}
-	return key, best.gen, best.countsChurn, 0, true
+	return key, item, 0, true
 }
 
-func (s *Scheduler) dequeueReconnect(key sessionKey) {
+// sameQueued reports whether the item now under key is the one the worker copied
+// out before its attempt. A CancelReconnect (a manual link or unlink landing
+// mid-attempt) followed by a fresh enqueue puts a NEW item under the same key;
+// the attempt that just finished knows nothing about it, so its dequeue or
+// backoff must leave it untouched. The generation alone nearly always tells them
+// apart; the enqueue time covers a re-queue at the same generation.
+func sameQueued(cur, attempted reconnectItem) bool {
+	return cur.gen == attempted.gen && cur.queuedAt.Equal(attempted.queuedAt)
+}
+
+// dequeueReconnect removes the attempted item — and only that item — from the
+// queue.
+func (s *Scheduler) dequeueReconnect(key sessionKey, attempted reconnectItem) {
 	s.reconnectMu.Lock()
-	delete(s.reconnectQ, key)
+	if cur, ok := s.reconnectQ[key]; ok && sameQueued(cur, attempted) {
+		delete(s.reconnectQ, key)
+	}
 	s.reconnectMu.Unlock()
 }
 
-// backoffReconnect reschedules owner after an exponential per-owner delay.
-// Once the attempt count says recovery has stalled rather than hiccuped, the
-// household is told — exactly once per queue residency — because every path
+// backoffReconnect reschedules the attempted item after an exponential per-owner
+// delay. Once the attempt count says recovery has stalled rather than hiccuped,
+// the household is told — exactly once per queue residency — because every path
 // that lands here retains the session and would otherwise retry forever with
-// only the operator aware the schedule has stopped applying.
-func (s *Scheduler) backoffReconnect(key sessionKey) {
+// only the operator aware the schedule has stopped applying. An item queued
+// afresh during the attempt is not this attempt's to back off.
+func (s *Scheduler) backoffReconnect(key sessionKey, attempted reconnectItem) {
 	s.reconnectMu.Lock()
 	it, ok := s.reconnectQ[key]
-	if !ok {
+	if !ok || !sameQueued(it, attempted) {
 		s.reconnectMu.Unlock()
 		return
 	}
@@ -338,7 +377,7 @@ func (s *Scheduler) reconnectLoop(ctx context.Context) {
 // returning false if none is due (so the caller idles). Shared by reconnectLoop and
 // tests. A recovered owner is kicked so any due change applies at once.
 func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
-	key, gen, countsChurn, wait, ok := s.nextDueReconnect()
+	key, item, wait, ok := s.nextDueReconnect()
 	if !ok || wait > 0 {
 		return false
 	}
@@ -349,17 +388,19 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 			log.Printf("scheduler: reconnect worker panicked on %s (recovered): %v", redact.Email(owner), r)
 			s.systemAlert(ctx, "panic-reconnect", "Reconnect worker panicked",
 				fmt.Sprintf("Recovering the session for %s panicked and was recovered; it will be retried. %v", owner, r))
-			s.backoffReconnect(key)
+			s.backoffReconnect(key, item)
 		}
 	}()
-	switch s.recoverOrRetire(ctx, owner, key.tenant, gen, countsChurn) {
+	switch s.recoverOrRetire(ctx, owner, key.tenant, item.gen, item.countsChurn) {
 	case reconnectRecovered:
-		s.dequeueReconnect(key)
-		s.KickOwner(ctx, owner)
+		s.dequeueReconnect(key, item)
+		// The session that recovered is THIS tenant's; the account's other
+		// councils' backoffs are their own business.
+		s.KickOwnerIn(ctx, owner, key.tenant)
 	case reconnectRetired:
-		s.dequeueReconnect(key)
+		s.dequeueReconnect(key, item)
 	case reconnectDeferred:
-		s.backoffReconnect(key)
+		s.backoffReconnect(key, item)
 	}
 	return true
 }

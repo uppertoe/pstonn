@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -112,5 +113,55 @@ func TestBusyEscalationSurvivesEarlierSoftNotice(t *testing.T) {
 			t.Fatalf("the urgent confirmed-block escalation was deduped by the earlier soft notice; outcomes: %+v", outs)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestUndeliveredNoticeRetryIsPaced: the council-busy branch deliberately has no
+// deferRetry, so it calls notifyUser on EVERY tick for as long as the block lasts.
+// When the household cannot be reached the durable key is never written, and
+// each of those ticks used to be a fresh delivery attempt — an SMTP dial per
+// permit per minute. The retry must still happen, after a hold, not every tick.
+func TestUndeliveredNoticeRetryIsPaced(t *testing.T) {
+	ctx := context.Background()
+	const owner, cid = "unreachable@example.com", "unr-1"
+
+	run := func(fn *fakeNotifier) *Scheduler {
+		st := newStore(t)
+		seedActivePermit(t, st, owner, cid, "WANT1", "OLD1")
+		fc := &fakeTenant{setErr: parking.ErrCouncilBusy, blocked: true} // confirmed: warns at blockNotifyThreshold
+		s := New(st, fc, time.UTC, Options{Notifier: fn})
+		s.notifyRetry = 80 * time.Millisecond
+		for i := 0; i < blockNotifyThreshold+5; i++ {
+			s.reconcileAll(ctx)
+			time.Sleep(3 * time.Millisecond) // let each tick's async delivery land before the next
+		}
+		return s
+	}
+
+	// Nobody reached: one attempt, then held — not one per tick.
+	fn := &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 0}
+	s := run(fn)
+	if n := len(fn.appliedSnap()); n != 1 {
+		t.Fatalf("delivery attempts = %d across %d failing ticks, want 1 (held)", n, blockNotifyThreshold+5)
+	}
+	// ...and the hold expires: the next tick retries.
+	time.Sleep(100 * time.Millisecond)
+	s.reconcileAll(ctx)
+	time.Sleep(10 * time.Millisecond)
+	if n := len(fn.appliedSnap()); n != 2 {
+		t.Fatalf("delivery attempts = %d after the hold expired, want 2 (retried)", n)
+	}
+
+	// Partial delivery (one member reached, another not): the durable key is not
+	// written — the missed member is still owed the notice — but the retry is
+	// paced the same way.
+	fn = &fakeNotifier{on: true, admin: true, deliverSet: true, deliver: 1, applyErr: errors.New("email member: dial tcp: refused")}
+	s = run(fn)
+	if n := len(fn.appliedSnap()); n != 1 {
+		t.Fatalf("delivery attempts = %d after a partial delivery, want 1 (held)", n)
+	}
+	permits, _ := s.store.ListPermitsFor(ctx, owner)
+	if k, _, _ := s.store.PermitNotify(ctx, permits[0].ID); k != "" {
+		t.Fatalf("a partial delivery recorded the durable key %q; the missed member would never be retried", k)
 	}
 }
