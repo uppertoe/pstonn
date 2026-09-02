@@ -82,21 +82,130 @@ func (s *Scheduler) releaseNotifyHold(claim string) {
 // an unrelated notice overwrites it. Used by settle to decide whether a close-out
 // may describe itself as correcting an earlier notice.
 func (s *Scheduler) failureNoticeSent(ctx context.Context, permitID int64, reg string) bool {
+	if told, _, err := s.store.FailureEpisode(ctx, permitID); err == nil && told != "" {
+		return model.SamePlate(told, reg)
+	}
 	k, _, err := s.store.PermitNotify(ctx, permitID)
-	if err != nil || k == "" {
+	if err != nil {
 		return false
 	}
-	kind, rest, ok := strings.Cut(k, "|")
-	if !ok {
+	_, _, ok := legacyFailureTold(k, reg, "")
+	return ok
+}
+
+// failTier is how loudly a failure is told: soft ("still updating, nothing you
+// need to do") or urgent ("change it yourself now to avoid a fine").
+type failTier int
+
+const (
+	tierSoft failTier = iota
+	tierUrgent
+)
+
+func (t failTier) String() string {
+	if t == tierUrgent {
+		return "urgent"
+	}
+	return "soft"
+}
+
+// notifyFailure is the ONE decision point for telling a household that a change
+// did not land. Every failing path — a transient error, a council refusal, the
+// fleet breaker, an expired sign-in, an unserved council — hands it the tier it
+// has earned and the copy for the cause; nothing else decides whether to send.
+//
+// The decision reads the permit's durable FAILURE EPISODE, not a description of
+// the failure. An outage looks like several different failures in turn (a
+// timeout, then the breaker, then a probe's 500, then the breaker again), and
+// keying notices on those descriptions sent the household a fresh notice on
+// every flip. The episode records only what they have been told: the plate, and
+// whether the urgent tier went out. So: one soft notice per episode per target
+// plate, one urgent escalation per episode, never a downgrade, and the cause
+// text is content, never a trigger. A new target plate mid-episode is a new
+// exposure (a different car uncovered) and earns its own notice — this replaces
+// the day-stamped keys, which re-alarmed by calendar rather than by exposure.
+//
+// The episode closes when the permit applies or its target goes away (see
+// closeFailureEpisode), and the next failure starts a fresh one. It is rows in
+// permit_notify, so a deploy that changes how failures are described cannot make
+// an old notice look new — the 06:23 duplicate of 2026-09-03 was exactly that.
+// An episode that predates the column is inferred once from the last delivered
+// key, in whatever format it was written, so shipping this re-tells nobody.
+func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.ApplyOutcome, tier failTier) {
+	told, urgent, err := s.store.FailureEpisode(ctx, p.ID)
+	if err != nil {
+		// An inconclusive read must not mint a notice; the next pass decides again.
+		log.Printf("scheduler: failure episode for permit %d unreadable, not notifying this pass: %v", p.ID, err)
+		return
+	}
+	if told == "" {
+		if k, _, e := s.store.PermitNotify(ctx, p.ID); e == nil {
+			if lp, lu, ok := legacyFailureTold(k, o.Reg, p.TenantID); ok {
+				told, urgent = lp, lu
+				if e := s.store.MarkFailureTold(ctx, p.ID, lp, lu); e != nil {
+					log.Printf("scheduler: could not adopt the pre-episode notice for permit %d: %v", p.ID, e)
+				}
+			}
+		}
+	}
+	if told != "" && model.SamePlate(told, o.Reg) && (tier == tierSoft || urgent) {
+		return // already told about this plate at this tier, or a higher one
+	}
+	o.Urgent = tier == tierUrgent
+	key := "fail|" + o.Reg + "|" + tier.String()
+	s.notifyUserThen(ctx, p, o, key, func(c context.Context) {
+		if e := s.store.MarkFailureTold(c, p.ID, o.Reg, tier == tierUrgent); e != nil {
+			log.Printf("scheduler: delivered a failure notice for permit %d but could not record it in the episode (may re-send): %v", p.ID, e)
+		}
+	})
+}
+
+// closeFailureEpisode ends the permit's open episode, reporting whether the
+// household had been told anything during it — the caller uses that to make the
+// success that closes it reach even the members who only hear about problems.
+func (s *Scheduler) closeFailureEpisode(ctx context.Context, permitID int64) (wasTold bool) {
+	told, _, err := s.store.FailureEpisode(ctx, permitID)
+	if err != nil {
 		return false
 	}
+	if told == "" {
+		return false
+	}
+	if err := s.store.CloseFailureEpisode(ctx, permitID); err != nil {
+		log.Printf("scheduler: could not close the failure episode for permit %d: %v", permitID, err)
+	}
+	return true
+}
+
+// legacyFailureTold reads a delivered-outcome key from before the episode
+// columns existed (and the current "fail|plate|tier" form) and reports whether it
+// says the household was told about reg not landing, and at which tier. The
+// families all carry the plate as the second field; tenant-unavailable carries
+// the tenant instead, so it matches by tenant.
+func legacyFailureTold(key, reg, tenantID string) (plate string, urgent, ok bool) {
+	kind, rest, found := strings.Cut(key, "|")
+	if !found {
+		return "", false, false
+	}
+	field2, rest2, _ := strings.Cut(rest, "|")
 	switch kind {
-	case "error", "rejected", "busy", "busy-blocked", "session":
+	case "error", "rejected", "busy", "unapplied":
+	case "busy-blocked", "session":
+		urgent = true
+	case "fail":
+		urgent = strings.HasPrefix(rest2, "urgent")
+	case "tenant-unavailable":
+		if tenantID != "" && field2 == tenantID {
+			return reg, false, true
+		}
+		return "", false, false
 	default:
-		return false // a success, or a notice not about a target plate
+		return "", false, false // a success, or a notice not about a target plate
 	}
-	plate, _, _ := strings.Cut(rest, "|")
-	return model.SamePlate(plate, reg)
+	if !model.SamePlate(field2, reg) {
+		return "", false, false
+	}
+	return field2, urgent, true
 }
 
 // alertRelink notifies a user that their tenant connection dropped and they
@@ -257,6 +366,14 @@ func (s *Scheduler) failureKeyDay(p model.Permit) string {
 // retried on the next tick rather than silently suppressed, and if the user
 // cannot be reached the operator is alerted once. key identifies the outcome.
 func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.ApplyOutcome, key string) {
+	s.notifyUserThen(ctx, p, o, key, nil)
+}
+
+// notifyUserThen is notifyUser with a hook that runs once the notice has been
+// delivered and its key recorded — where the failure episode marks what was told.
+// It runs only on a complete delivery: a partial one leaves the key unset and is
+// retried, so the episode must not claim the household was told.
+func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify.ApplyOutcome, key string, after func(context.Context)) {
 	if s.notifier == nil || !s.notifier.Enabled() {
 		return
 	}
@@ -329,6 +446,9 @@ func (s *Scheduler) notifyUser(ctx context.Context, p model.Permit, o notify.App
 				s.systemAlert(nctx, "notify-dedup", "Notification sent but not recorded",
 					fmt.Sprintf("A permit notification for %s was delivered, but saving it as sent failed: %v. If this persists the same notice may be delivered repeatedly.", o.Owner, e))
 			}
+			if after != nil {
+				after(nctx)
+			}
 			return
 		}
 		// Nobody was reached. The next pass retries — after a hold, not every tick:
@@ -379,23 +499,13 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	// is not attempted again until a user action (edit, re-link) clears it.
 	n := s.bumpFailStreak(ctx, p.ID)
 	threshold := failNotifyThreshold
-	// The failure key is dated so a persisting TRANSIENT failure re-alarms each
-	// day (a new day's visitor is a new exposure). A parked refusal is not
-	// re-attempted, so it cannot re-alarm — except across a restart, which forgets
-	// the parking, retries once, is refused again and would, on a dated key, tell
-	// the household a second time. Undated: told once per distinct refusal.
-	//
-	// The reason is deliberately NOT part of the key. It names the operation that
-	// failed, and during a council outage that flaps between attempts (a timeout
-	// keeping the sign-in warm, then one writing the plate), so a key carrying it
-	// minted a fresh "we couldn't update your permit" on every swap — up to one
-	// per capped retry, ~48 a day. One family of failure, one plate, one day: one
-	// notice. The notifier's per-recipient cap is the backstop behind this.
-	key := "error|" + want + "|" + s.failureKeyDay(p)
+	// A refusal is parked (see parkRetry) and alarms at once; anything else backs
+	// off exponentially and alarms once the streak says it is not a blip. Whether
+	// the household actually hears about it is the episode's call (notifyFailure):
+	// one soft notice per episode per plate, whatever the cause does meanwhile.
 	if kind == parking.FailRejected {
 		threshold = 1
 		s.parkRetry(p.ID, want)
-		key = "rejected|" + want
 		action += " p.stonn will not retry this change until you edit the schedule or re-link."
 	} else {
 		s.deferRetry(p.ID, n)
@@ -404,7 +514,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		return
 	}
 
-	s.notifyUser(ctx, p, notify.ApplyOutcome{
+	s.notifyFailure(ctx, p, notify.ApplyOutcome{
 		Owner:       p.Owner,
 		PermitLabel: permitLabel(p),
 		Reg:         want,
@@ -414,7 +524,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Reason:      reason,
 		Action:      action,
 		Transient:   kind != parking.FailRejected,
-	}, key)
+	}, tierSoft)
 }
 
 // describeFailure turns a failure classification into a plain-English reason and

@@ -255,9 +255,15 @@ CREATE INDEX IF NOT EXISTS idx_apply_permit ON apply_log(permit_id, at);
 -- UNDELIVERED notification instead of the apply-log row silently suppressing it,
 -- while still not spamming a repeating identical outcome.
 CREATE TABLE IF NOT EXISTS permit_notify (
-    permit_id    INTEGER PRIMARY KEY,
-    notified_key TEXT NOT NULL DEFAULT '',  -- outcome fingerprint delivered to the user
-    admin_key    TEXT NOT NULL DEFAULT ''   -- outcome fingerprint alerted to the operator
+    permit_id        INTEGER PRIMARY KEY,
+    notified_key     TEXT NOT NULL DEFAULT '',  -- outcome fingerprint delivered to the user
+    admin_key        TEXT NOT NULL DEFAULT '',  -- outcome fingerprint alerted to the operator
+    -- The open FAILURE EPISODE: what the household has already been told while this
+    -- permit has been failing to apply. Cleared when the permit applies or settles.
+    -- Rows, not key strings, so a deploy that changes how a failure is described
+    -- cannot make an old notice look new (see scheduler.notifyFailure).
+    fail_told_plate  TEXT NOT NULL DEFAULT '',  -- the plate the household was told did not land
+    fail_told_urgent INTEGER NOT NULL DEFAULT 0 -- 1 once the "act now" tier has gone out
 );
 
 CREATE TABLE IF NOT EXISTS consent (
@@ -489,6 +495,8 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		`ALTER TABLE notify_pref ADD COLUMN quiet_from INTEGER NOT NULL DEFAULT 22`,
 		`ALTER TABLE notify_pref ADD COLUMN quiet_until INTEGER NOT NULL DEFAULT 6`,
 		`ALTER TABLE notify_pref ADD COLUMN ntfy_confirmed_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit_notify ADD COLUMN fail_told_plate TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE permit_notify ADD COLUMN fail_told_urgent INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE vehicle ADD COLUMN color TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE vehicle ADD COLUMN email TEXT NOT NULL DEFAULT ''`,
 		// Default 1 so existing cars with a driver email start reassuring that

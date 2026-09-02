@@ -402,6 +402,9 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 			}
 		}
 	}
+	// The change this episode was failing to make is gone (or landed): close it,
+	// so the next failure is a fresh episode with its own notice.
+	s.closeFailureEpisode(ctx, p.ID)
 	s.clearFailStreak(ctx, p.ID)
 	s.clearRetry(p.ID)
 }
@@ -470,13 +473,13 @@ func (s *Scheduler) reportTenantUnavailable(ctx context.Context, p model.Permit,
 	const reason = "This permit's council is not currently available in p.stonn, so the change could not be applied."
 	const action = "Change the vehicle on your permit at the council yourself. p.stonn will resume automatically once the council is available again."
 	s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
-	s.notifyUser(ctx, p, notify.ApplyOutcome{
+	s.notifyFailure(ctx, p, notify.ApplyOutcome{
 		Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
 		OK: false, CurrentReg: p.ActiveRegistration,
 		Reason: reason, Action: action,
 		// Not transient: nothing p.stonn does will change this, so it must not be
 		// softened into "still updating" or held for quiet hours.
-	}, "tenant-unavailable|"+p.TenantID)
+	}, tierSoft)
 }
 
 // reconcilePermit applies any needed plate change for one permit. It returns
@@ -654,6 +657,8 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// Symmetric reassurance: tell the driver of the car just put ON the permit
 		// (opt-out per car; roster changes included).
 		s.notifyAddedDriver(ctx, p, want, vehByOwnerID)
+		// This success ends any failure episode.
+		s.closeFailureEpisode(ctx, p.ID)
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), By: res.By, OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: told,
@@ -718,21 +723,20 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		}
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		if n >= threshold {
-			// The confirmed state is part of the key. With a bare "busy|"+want, the
-			// common ordering — soft notice at 15 ticks, breaker confirms the block
-			// after — left the urgent "act now to avoid a fine" escalation deduped
-			// by the reassuring notice it was supposed to override, so the one
-			// message blockNotifyThreshold exists for was unreachable.
-			day := s.failureKeyDay(p)
-			key := "busy|" + want + "|" + day
+			// A confirmed block is the urgent tier ("act now to avoid a fine"); the
+			// rest is soft. The episode lets the urgent escalation through once even
+			// after a soft notice, and never lets a later soft notice (the breaker
+			// closing, a probe failing differently) re-tell what was already told.
+			// CouncilDown shapes the copy only — a copy flip is not a new event.
+			tier := tierSoft
 			if confirmed {
-				key = "busy-blocked|" + want + "|" + day
+				tier = tierUrgent
 			}
-			s.notifyUser(ctx, p, notify.ApplyOutcome{
+			s.notifyFailure(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
 				OK: false, CurrentReg: p.ActiveRegistration, CouncilDown: councilDown,
 				Reason: reason, Action: action, Transient: true, Urgent: confirmed,
-			}, key)
+			}, tier)
 		}
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
@@ -771,13 +775,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		reason := "p.stonn's sign-in to the council expired and signing back in hasn't succeeded yet, so your permit could not be updated."
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		if n := s.bumpFailStreak(ctx, p.ID); n >= sessionNotifyThreshold {
-			s.notifyUser(ctx, p, notify.ApplyOutcome{
+			s.notifyFailure(ctx, p, notify.ApplyOutcome{
 				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
 				OK: false, CurrentReg: p.ActiveRegistration,
 				Reason:    reason,
 				Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
 				Transient: true, Urgent: true,
-			}, "session|"+want+"|"+s.failureKeyDay(p))
+			}, tierUrgent)
 		}
 		s.deferRetry(p.ID, 3)
 		return true

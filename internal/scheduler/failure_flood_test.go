@@ -15,7 +15,7 @@ import (
 // writing the plate). Each has its own reason text, and the failure key used to
 // carry it, so every swap minted a fresh "we couldn't update your permit" — up
 // to one per capped retry, ~48 a day. One family of failure, one plate, one
-// day: one notice, however the reason wobbles.
+// episode: one notice, however the reason wobbles.
 func TestFlappingFailureReasonIsOneNoticeADay(t *testing.T) {
 	ctx := context.Background()
 	st := newStore(t)
@@ -38,10 +38,17 @@ func TestFlappingFailureReasonIsOneNoticeADay(t *testing.T) {
 	if n := len(fn.appliedSnap()); n != 1 {
 		t.Fatalf("notices for one flapping outage = %d, want exactly 1", n)
 	}
-	// A refusal is a different family and plate outcome, so it is still told.
+	// A refusal of the SAME plate is the same episode: the household already knows
+	// this plate is not on the permit, and the cause is content, not a trigger.
 	s.handleApplyFailure(ctx, p, "AVS619", "", "roster", rejectedErr(), nil)
 	time.Sleep(20 * time.Millisecond)
+	if n := len(fn.appliedSnap()); n != 1 {
+		t.Fatalf("a refusal after a transient run = %d notices, want still 1 (same episode, same plate)", n)
+	}
+	// A DIFFERENT plate failing mid-episode is a new exposure, and is told.
+	s.handleApplyFailure(ctx, p, "NEW222", "", "roster", rejectedErr(), nil)
+	time.Sleep(20 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 2 {
-		t.Fatalf("a refusal after a transient run = %d notices, want 2", n)
+		t.Fatalf("a different plate failing = %d notices, want 2", n)
 	}
 }

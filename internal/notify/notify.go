@@ -915,7 +915,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	emailBody += s.firstApplyLine(ctx, o)
 	var errs []string
 	due := 0
-	var seenKeys []string // every reached-memory key consulted by this delivery // members with at least one channel that should have received this
+	var seenKeys []string // every reached-memory key consulted by this delivery
 	now := time.Now()
 	for _, d := range dels {
 		if o.OK && d.pref.FailuresOnly && o.fromSchedule() {

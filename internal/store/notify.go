@@ -288,3 +288,44 @@ INSERT INTO permit_notify (permit_id, admin_key) VALUES (?, ?)
 ON CONFLICT(permit_id) DO UPDATE SET admin_key = excluded.admin_key`, permitID, key)
 	return err
 }
+
+// FailureEpisode returns what the household has been told during the permit's
+// open failure episode: the plate they were told did not land ("" when nothing
+// has been told, or no episode is open) and whether the urgent tier went out.
+func (s *Store) FailureEpisode(ctx context.Context, permitID int64) (plate string, urgent bool, err error) {
+	var u int
+	err = s.db.QueryRowContext(ctx,
+		`SELECT fail_told_plate, fail_told_urgent FROM permit_notify WHERE permit_id = ?`, permitID).
+		Scan(&plate, &u)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return plate, u != 0, err
+}
+
+// MarkFailureTold records that the household was told plate did not land, at the
+// urgent tier when urgent is set. The tier only ever rises within an episode: a
+// soft notice after an urgent one must not read as a downgrade to be re-sent.
+func (s *Store) MarkFailureTold(ctx context.Context, permitID int64, plate string, urgent bool) error {
+	u := 0
+	if urgent {
+		u = 1
+	}
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO permit_notify (permit_id, fail_told_plate, fail_told_urgent) VALUES (?, ?, ?)
+ON CONFLICT(permit_id) DO UPDATE SET
+  fail_told_plate  = excluded.fail_told_plate,
+  fail_told_urgent = CASE WHEN excluded.fail_told_plate = permit_notify.fail_told_plate
+                          THEN MAX(permit_notify.fail_told_urgent, excluded.fail_told_urgent)
+                          ELSE excluded.fail_told_urgent END`, permitID, plate, u)
+	return err
+}
+
+// CloseFailureEpisode forgets the open episode: the permit applied, or the change
+// it was failing to make went away. The next failure is a new episode and earns a
+// new notice.
+func (s *Store) CloseFailureEpisode(ctx context.Context, permitID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE permit_notify SET fail_told_plate = '', fail_told_urgent = 0 WHERE permit_id = ? AND fail_told_plate != ''`, permitID)
+	return err
+}
