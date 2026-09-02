@@ -972,11 +972,9 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			}
 			if !lim.allow(d.email) {
 				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
-				// Dropped by the cap — do NOT supersede the held soft twin here. This
-				// permit's urgent never went out (the per-permit+day dedup means no
-				// earlier one did either), so the 06:00 soft is this permit's SOLE
-				// notice, not a reverse-order double. Cancelling it would leave the
-				// household with nothing but the activity page.
+				// Dropped by the cap — deliberately NOT superseding the held soft here
+				// (see supersedeHeldTwins: a throttled urgent leaves the soft as this
+				// permit's sole notice).
 				delivered++
 				continue
 			}

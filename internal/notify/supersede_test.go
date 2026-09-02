@@ -125,7 +125,12 @@ func TestThrottledUrgentKeepsHeldSoft(t *testing.T) {
 	if sent != sentBefore {
 		t.Fatalf("urgent should have been throttled by the cap, but sent %d->%d", sentBefore, sent)
 	}
-	if due, _ := st.DueOutbox(ctx, time.Now().Add(24*time.Hour), 10); len(due) != 1 {
+	due, _ := st.DueOutbox(ctx, time.Now().Add(24*time.Hour), 10)
+	if len(due) != 1 {
 		t.Fatalf("a throttled urgent wrongly cancelled the held soft (this permit's only notice): %d rows remain", len(due))
+	}
+	// Prove the survivor is THIS permit's held soft twin, not some unrelated row.
+	if want := store.HashDedupKey(heldApplyTwins(owner, soft)[0]); due[0].DedupKey != want {
+		t.Fatalf("surviving row is not this permit's soft twin: key %q, want %q", due[0].DedupKey, want)
 	}
 }
