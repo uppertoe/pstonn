@@ -52,7 +52,7 @@ type authCircuit struct {
 // until the next attempt is permitted, for the caller's fast-fail message.
 //
 //	closed              → (false, true, 0)
-//	open, probe in-flight→ (false, false, ~backoff)     [only one probe at a time]
+//	open, probe in-flight→ (false, false, remaining|~backoff) [one probe at a time]
 //	open, waiting        → (false, false, remaining)
 //	open, probe due      → (true,  true, 0)             [admit the probe]
 func (a *authCircuit) allow(now time.Time) (probe, ok bool, retry time.Duration) {

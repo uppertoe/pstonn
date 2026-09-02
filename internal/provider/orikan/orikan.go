@@ -374,12 +374,6 @@ func (c *Client) authorizeWithCookie(ctx context.Context, cookie string) (code, 
 	return code, verifier, newCookie, err
 }
 
-// recordAuthorizeOutcome feeds the auth circuit the result of one authorize.
-// A code or a genuine session-expiry both mean the upstream SERVED us, so the
-// circuit closes. A transport error or an HTTP 5xx is the "upstream is down" signal
-// that opens it (or escalates a failed probe). Everything else — edge push-back, an
-// odd 4xx, an unrecognised redirect — is not upstream-down, so it neither opens nor
-// closes the circuit (the fleet breaker owns the edge case).
 // AuthGate reports whether the auth-surface circuit is currently open (renews and
 // stale-token ops are fast-failing) and how long until the next recovery probe. The
 // parking client surfaces it on /status so the operator/watchdog can tell an
@@ -388,6 +382,12 @@ func (c *Client) AuthGate() (open bool, retry time.Duration) {
 	return c.authCircuit.state(time.Now())
 }
 
+// recordAuthorizeOutcome feeds the auth circuit the result of one authorize.
+// A code or a genuine session-expiry both mean the upstream SERVED us, so the
+// circuit closes. A transport error or an HTTP 5xx is the "upstream is down" signal
+// that opens it (or escalates a failed probe). Everything else — edge push-back, an
+// odd 4xx, an unrecognised redirect — is not upstream-down, so it neither opens nor
+// closes the circuit (the fleet breaker owns the edge case).
 func (c *Client) recordAuthorizeOutcome(probe bool, status int, err error) {
 	now := time.Now()
 	var unavail *provider.Unavailable

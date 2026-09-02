@@ -372,8 +372,12 @@ type tenantStatus struct {
 	// app is fast-failing renews/stale-token ops (a still-valid cached token keeps
 	// serving) rather than hammering. Distinct from breaker_open (the fleet edge
 	// breaker); the watchdog can tell an auth-only outage that we are shedding cleanly.
-	AuthGated           bool   `json:"auth_gated,omitempty"`
-	AuthGatedRemainingS int    `json:"auth_gated_remaining_seconds,omitempty"`
+	AuthGated bool `json:"auth_gated,omitempty"`
+	// No omitempty: when the circuit is open with a probe in flight the remaining
+	// seconds are legitimately 0 (a probe is happening now), and dropping the field
+	// then would let a consumer misread the absence as "recovered". Present whenever
+	// gated; 0 on a healthy poll alongside auth_gated=false.
+	AuthGatedRemainingS int    `json:"auth_gated_remaining_seconds"`
 	LastPushbackAt      string `json:"last_pushback_at,omitempty"`
 	LastPushbackStatus  int    `json:"last_pushback_status,omitempty"`
 	LastPushbackRef     string `json:"last_pushback_ref,omitempty"`
