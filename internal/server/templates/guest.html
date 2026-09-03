@@ -93,7 +93,7 @@
   <p class="gnow">{{if .Guest.CheckedAgo}}Last known on the permit:{{else}}On the permit now:{{end}} {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="noplate">no car</span>{{end}}{{if .Guest.CheckedAgo}} <span class="gnuntil">&middot; checked {{.Guest.CheckedAgo}}</span>{{end}}{{if and .Guest.UntilText (not .Guest.PendingReg)}} <span class="gnuntil">&middot; {{.Guest.UntilText}}</span>{{end}}</p>
   <p class="gsub">{{if .Guest.PendingReg}}{{if .Guest.PendingOutage}}<span class="gstall">{{template "ic-alert"}} The council&rsquo;s system is down &mdash; <span class="plate">{{.Guest.PendingReg}}</span> may not be on the permit yet. p.stonn keeps trying.</span>{{else if .Guest.Stalled}}<span class="gstall">{{template "ic-alert"}} Changing to {{.Guest.PendingReg}} is taking longer than usual &mdash; check back shortly, or ask the account holder.</span>{{else}}<span class="gspin"></span> <span>Changing to <span class="plate">{{.Guest.PendingReg}}</span>{{if .Guest.UntilText}} ({{.Guest.UntilText}}){{end}}&hellip;</span>{{end}}{{else if .Flash}}<span class="gok">{{template "ic-check"}} {{.Flash}}</span>{{end}}</p>
 </div>
-{{if and .Guest.PendingReg (or .Guest.PendingOutage (not .Guest.Stalled))}}{{/* keep polling through an outage even once it has "stalled", so the page flips to on-the-permit on recovery (the outage copy promises "keeps trying"). .hx-quiet + transition:false: the layout turns on globalViewTransitions, so this 2.5s poll cross-faded the visitor's whole page and flashed the loading bar every tick. */}}<div class="hx-quiet" hx-get="/g/live/{{.Guest.Token}}?fp={{.Guest.FP}}" hx-trigger="every 2500ms" hx-target="#gbody" hx-swap="innerHTML transition:false"></div>{{end}}
+{{if .Guest.PendingReg}}{{/* Poll while ANYTHING is pending — a pending change can still land (or be superseded) whether it's mid-apply, "taking longer", or council-down, so the page must keep checking and flip to on-the-permit when it resolves. Stopping at the "stalled" edge froze the page exactly when a change was about to land, notably as an outage cleared. The spinner itself is still suppressed once stalled/outage (see the message line); this is a quiet poll. .hx-quiet + transition:false: the layout turns on globalViewTransitions, so this 2.5s poll cross-faded the visitor's whole page and flashed the loading bar every tick. */}}<div class="hx-quiet" hx-get="/g/live/{{.Guest.Token}}?fp={{.Guest.FP}}" hx-trigger="every 2500ms" hx-target="#gbody" hx-swap="innerHTML transition:false"></div>{{end}}
 {{end}}
 {{if .Warn}}<div class="banner warn" style="margin-top:14px">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
 {{if .Guest.Req}}
@@ -172,8 +172,10 @@
   <p class="gresult">The resident didn't respond in time, so this request lapsed. Try knocking, or scan the code again to re-send it.</p>
 </div>
 {{else if eq .Status "stalled"}}
-{{/* approved, but the council hasn't confirmed after a while — stop spinning */}}
-<div id="reqstatus">
+{{/* approved, unconfirmed after a while — no spinner, but KEEP polling quietly so it
+     still flips to "on the permit" if it lands (e.g. as a council outage clears)
+     rather than freezing on this note until a manual refresh. */}}
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
   <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
 </div>

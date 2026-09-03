@@ -51,17 +51,21 @@ func TestGuestActivateOutageMessage(t *testing.T) {
 		return s, rp, raw, van
 	}
 
-	// (1) Outage from the start: honest pending on the POST, no optimistic spinner.
+	// (1) Outage from the start: honest pending on BOTH the POST and the poll, and no
+	// optimistic spinner on either.
 	s, _, raw, van := setup(true)
-	body := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}}).Body.String()
-	if !strings.Contains(body, "system is down") || !strings.Contains(body, "may not be on the permit yet") || !strings.Contains(body, "NSW123") {
-		t.Fatalf("outage POST: want the honest 'council down' pending naming NSW123; got:\n%s", excerpt(body))
-	}
-	if strings.Contains(body, "Changing to") {
-		t.Fatalf("outage POST: must not show the optimistic 'Changing to' spinner; got:\n%s", excerpt(body))
-	}
-	if strings.Contains(body, "is now on the permit") {
-		t.Fatalf("outage POST: must not claim the car is on the permit; got:\n%s", excerpt(body))
+	post := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}}).Body.String()
+	pollBody := s.getGuest("/g/live/" + raw).Body.String() // no fp -> forces a render
+	for _, c := range []struct{ name, body string }{{"POST", post}, {"poll", pollBody}} {
+		if !strings.Contains(c.body, "system is down") || !strings.Contains(c.body, "may not be on the permit yet") || !strings.Contains(c.body, "NSW123") {
+			t.Fatalf("outage %s: want the honest 'council down' pending naming NSW123; got:\n%s", c.name, excerpt(c.body))
+		}
+		if strings.Contains(c.body, "Changing to") {
+			t.Fatalf("outage %s: must not show the optimistic 'Changing to' spinner; got:\n%s", c.name, excerpt(c.body))
+		}
+		if strings.Contains(c.body, "is now on the permit") {
+			t.Fatalf("outage %s: must not claim the car is on the permit; got:\n%s", c.name, excerpt(c.body))
+		}
 	}
 
 	// (2) The up→down transition on the POLL carrying the UP fingerprint. Council up:

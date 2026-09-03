@@ -295,7 +295,7 @@ window.popClamp = window.popClamp || function (el) {
     <div aria-live="polite">
 
 
-<div id="reqstatus">
+<div id="reqstatus" hx-get="/g/req/4?n=nn" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gring warn" style="margin:18px auto 12px"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg></div>
   <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
 </div>
