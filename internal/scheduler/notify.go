@@ -148,8 +148,16 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 			}
 		}
 	}
-	if told != "" && model.SamePlate(told, o.Reg) && (tier == tierSoft || urgent) {
-		return // already told about this plate at this tier, or a higher one
+	// During an OUTAGE the plate is incidental: the council's sign-in is down, or
+	// it is refusing our address, whatever car is due. A booking window inside
+	// the outage flips the target plate (A, then B, then A again) without any
+	// new exposure the household can act on, so an outage notice is one per
+	// episode regardless of plate. A plain transient or refused write keeps the
+	// per-plate rule, where a different car not landing IS a new exposure.
+	outage := o.CouncilDown || tier == tierUrgent
+	already := told != "" && (outage || model.SamePlate(told, o.Reg))
+	if already && (tier == tierSoft || urgent) {
+		return // already told this episode at this tier, or a higher one
 	}
 	o.Urgent = tier == tierUrgent
 	key := "fail|" + o.Reg + "|" + tier.String()

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 )
@@ -154,5 +155,42 @@ func TestDeployDoesNotRetellAnOpenEpisode(t *testing.T) {
 		if got := outcomesAfter(fn, 1); len(got) != 1 {
 			t.Fatalf("legacy key about another plate must not suppress: outcomes = %d, want 1", len(got))
 		}
+	}
+}
+
+// TestOutageNoticesArePlateAgnostic: inside an outage the target plate is
+// incidental, so a booking window flipping the want (A, B, A) must not re-notify
+// per plate. Ordinary transient failures keep the per-plate rule.
+func TestOutageNoticesArePlateAgnostic(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	pid, _ := st.UpsertPermit(ctx, "o@example.com", "14576", "14", "Permit")
+	p := model.Permit{ID: pid, Owner: "o@example.com", CouncilPermitID: "14576", Label: "Permit"}
+	fn := &fakeNotifier{on: true, admin: true}
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
+	s.notifyRetry = 0
+	fail := func(reg string, down bool, tier failTier) {
+		s.notifyFailure(ctx, p, notify.ApplyOutcome{Owner: p.Owner, PermitLabel: "Permit", Reg: reg, OK: false, CouncilDown: down, Transient: true}, tier)
+		time.Sleep(20 * time.Millisecond)
+	}
+	fail("AAA111", true, tierSoft) // council down: told once
+	fail("BBB222", true, tierSoft) // booking flips the plate mid-outage: same episode
+	fail("AAA111", true, tierSoft)
+	if n := len(fn.appliedSnap()); n != 1 {
+		t.Fatalf("outage notices across a plate flip = %d, want 1", n)
+	}
+	fail("CCC333", false, tierUrgent) // a confirmed block escalates once, whatever the plate
+	fail("DDD444", false, tierUrgent)
+	if n := len(fn.appliedSnap()); n != 2 {
+		t.Fatalf("urgent escalations = %d total notices, want 2", n)
+	}
+	// A plain transient failure for a plate not yet told is a new exposure.
+	fail("EEE555", false, tierSoft)
+	if n := len(fn.appliedSnap()); n != 3 {
+		t.Fatalf("a plain failure on a new plate = %d total notices, want 3", n)
+	}
+	fail("EEE555", false, tierSoft)
+	if n := len(fn.appliedSnap()); n != 3 {
+		t.Fatalf("repeat of the same plain failure = %d total notices, want still 3", n)
 	}
 }
