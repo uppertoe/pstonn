@@ -116,6 +116,9 @@ type Service struct {
 	// own small budget so the soft notices cannot crowd them out.
 	failureTo       *sendLimiter
 	urgentFailureTo *sendLimiter
+	// driverFailedTo caps the "your car couldn't be put on" driver notice per
+	// recipient, like driverAddedTo: the driver has no account and no settings.
+	driverFailedTo *sendLimiter
 	// unrecorded holds bookkeeping the store refused for rows the drain has ALREADY
 	// acted on. Touched only by the single RunOutbox goroutine, so it needs no lock.
 	unrecorded map[int64]outboxUpdate
@@ -207,6 +210,7 @@ func New(st *store.Store, m *mailer.Mailer, ntfyBase, ntfyToken, appURL, adminEm
 		// act on; two urgent ones covers "act now" and its escalation.
 		failureTo:       newSendLimiter(3, 24*time.Hour),
 		urgentFailureTo: newSendLimiter(2, 24*time.Hour),
+		driverFailedTo:  newSendLimiter(2, 24*time.Hour),
 		unrecorded:      map[int64]outboxUpdate{},
 	}
 }
@@ -1328,6 +1332,89 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
 		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn,
 		HeroPlate: plate, HeroColor: color})
+}
+
+// NotifyDriverFailed tells a car's driver (email only) that their car could not
+// be put on the permit, so they know it may not be covered — the failure twin of
+// NotifyDriverAdded. The cause is adapted like the household's own notice: a
+// council outage says so; anything else stays generic, since the driver can do
+// nothing about the detail. Deduped per plate per day and capped per recipient.
+func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, plate, color string, councilDown bool) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	c := s.tenantOf(ctx, owner, tenantID)
+	cause := "p.stonn couldn't update the permit"
+	if councilDown {
+		cause = "the council's system is down right now"
+	}
+	subject := fmt.Sprintf("%s couldn't be put on a %s visitor parking permit", plate, c.Short)
+	lines := []string{
+		fmt.Sprintf("Your car %s couldn't be put on the %s visitor parking permit — %s. It may not be covered right now; p.stonn keeps trying and will put it on as soon as it can.", plate, c.Name, cause),
+		"",
+		"---",
+		"",
+		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee — if you're unsure, check with them.",
+	}
+	if !s.driverFailedTo.allow(to) {
+		log.Printf("notify: driver-failed notice to %s throttled (per-recipient cap)", RedactEmail(to))
+		return nil
+	}
+	key := fmt.Sprintf("driver-fail|%s|%s|%s", to, plate, time.Now().In(s.loc).Format("2006-01-02"))
+	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
+		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn,
+		HeroPlate: plate, HeroColor: color})
+}
+
+// NotifyDriftChanged tells every member of the household that the plate on
+// their permit was changed at the council directly — a change p.stonn did not
+// make, which may be theirs or may be a surprise. Soft, like a scheduled
+// success: quiet hours hold it, and members who only hear about problems are
+// skipped (it is information, not a fault). Durable via the outbox, deduped per
+// member, permit and plate.
+func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permitLabel, plate string) error {
+	dels, err := s.accountDeliveries(ctx, owner)
+	if err != nil {
+		return err
+	}
+	c := s.tenantOf(ctx, owner, tenantID)
+	var subject, body string
+	if plate == "" {
+		subject = fmt.Sprintf("The car was removed from your %s at the council", permitLabel)
+		body = fmt.Sprintf("The car on your %s was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel)
+	} else {
+		subject = fmt.Sprintf("Your %s was changed to %s at the council", permitLabel, plate)
+		body = fmt.Sprintf("The car on your %s was changed to %s at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel, plate)
+	}
+	if s.appURL != "" {
+		body += "\n\n" + s.appURL
+	}
+	now := time.Now()
+	for _, d := range dels {
+		if d.pref.FailuresOnly {
+			continue
+		}
+		m := outMessage{
+			Account: owner, Subject: subject, Body: body,
+			DedupKey:  fmt.Sprintf("drift|%s|%s|%s|%s", d.email, owner, permitLabel, plate),
+			NotBefore: s.quietDefer(d.pref, now, c.Loc),
+			Reason:    reasonAccount,
+			HeroPlate: plate,
+		}
+		if d.pref.EmailEnabled {
+			m.Recipients = []string{d.email}
+		}
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			m.NtfyTopic = d.pref.NtfyTopic
+		}
+		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
+			continue
+		}
+		if err := s.enqueueSplit(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a

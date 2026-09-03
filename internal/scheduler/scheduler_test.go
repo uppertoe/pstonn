@@ -292,6 +292,8 @@ type fakeNotifier struct {
 	sent          []sentMail
 	applied       []appliedNote
 	outcomes      []notify.ApplyOutcome // full outcomes, for asserting message content
+	driverFailed  []string              // to|plate, from NotifyDriverFailed
+	drifts        []string              // owner|plate, from NotifyDriftChanged
 	adminNotes    []string
 	adminErr      error // when set, NotifyAdmin records the attempt but returns this
 	relinks       []string
@@ -377,6 +379,20 @@ func (f *fakeNotifier) NotifyDriverDisplaced(_ context.Context, owner, to, permi
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.displaced = append(f.displaced, to)
+	return nil
+}
+
+func (f *fakeNotifier) NotifyDriverFailed(_ context.Context, owner, tenantID, to, plate, color string, councilDown bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.driverFailed = append(f.driverFailed, to+"|"+plate)
+	return nil
+}
+
+func (f *fakeNotifier) NotifyDriftChanged(_ context.Context, owner, tenantID, permitLabel, plate string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.drifts = append(f.drifts, owner+"|"+plate)
 	return nil
 }
 

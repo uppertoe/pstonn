@@ -94,6 +94,14 @@ type Notifier interface {
 	// NotifyDriverAdded reassures a car's driver (email only) that their car is
 	// now ON the permit. The permit's tenant supplies the council name.
 	NotifyDriverAdded(ctx context.Context, owner, tenantID, to, plate, color string) error
+	// NotifyDriverFailed tells a car's driver (email only) that their car could
+	// not be put on the permit and may not be covered. Fired once per failure
+	// episode per plate, at the moment the household itself is first told.
+	NotifyDriverFailed(ctx context.Context, owner, tenantID, to, plate, color string, councilDown bool) error
+	// NotifyDriftChanged tells the household that the plate on their permit was
+	// changed at the council directly, not by p.stonn. Soft: quiet hours apply,
+	// and members who only hear about problems are skipped.
+	NotifyDriftChanged(ctx context.Context, owner, tenantID, permitLabel, plate string) error
 	// SendOnboardNudge emails a stalled signup (terms accepted, tenant never
 	// connected) the once-ever recovery note. Email-only, like the renewal
 	// reminder: this person configured no other channel.

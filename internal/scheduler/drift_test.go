@@ -438,3 +438,20 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 		t.Fatal("a complete permit list did not advance last_drift_check")
 	}
 }
+
+// TestDriftTellsTheHousehold: a plate changed at the council directly is news
+// the household must hear, not just an activity row.
+func TestDriftTellsTheHousehold(t *testing.T) {
+	ctx := context.Background()
+	const owner, tenantID = "drift-notice@example.com", "drift-notice"
+	_, _, nf, s, _ := driftSetup(t, owner, tenantID, "BBB222", "BBB222", "AAA111")
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	nf.mu.Lock()
+	got := append([]string(nil), nf.drifts...)
+	nf.mu.Unlock()
+	if len(got) != 1 || got[0] != owner+"|AAA111" {
+		t.Fatalf("drift notices = %v, want one to the household naming AAA111", got)
+	}
+}

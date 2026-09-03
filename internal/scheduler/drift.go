@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/uppertoe/pstonn/internal/redact"
 	"hash/fnv"
 	"log"
 	"slices"
@@ -300,6 +301,14 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		// Whoever's car was on before the portal edit may be parked and now uncovered:
 		// same warning as any other displacement, worded for what actually happened.
 		s.warnExternallyDisplaced(ctx, p, wasActive[p.ID])
+		// And tell the household itself: nothing that changes their permit should be
+		// invisible, least of all a change p.stonn did not make. Durable and soft
+		// (quiet hours apply); a failure to queue it is logged, not fatal.
+		if s.notifier != nil && s.notifier.Enabled() {
+			if e := s.notifier.NotifyDriftChanged(ctx, p.Owner, p.TenantID, permitLabel(p), actual); e != nil {
+				log.Printf("scheduler: enqueue drift notice for %s: %v", redact.Email(p.Owner), e)
+			}
+		}
 		// Clear the delivered-notification fingerprint. The tenant now holds a plate we
 		// did not set, and the reconcile this kicks will re-assert the schedule over it.
 		// If the external edit RESTORED the previous plate, that re-assertion is the same

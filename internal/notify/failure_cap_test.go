@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,5 +155,114 @@ func TestResolvingSuccessReachesFailuresOnlyMembers(t *testing.T) {
 	}
 	if sent != 1 {
 		t.Fatalf("emails = %d, want exactly the resolving one", sent)
+	}
+}
+
+// TestDriftNoticeIsSoft: the "changed at the council directly" notice honours
+// quiet hours and skips members who only hear about problems, and a removal is
+// worded as a removal.
+func TestDriftNoticeIsSoft(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const owner, quietMember, problemsOnly = "primary@example.com", "quiet@example.com", "problems@example.com"
+	for _, m := range []string{quietMember, problemsOnly} {
+		if err := st.AddMember(ctx, owner, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := time.Now().UTC().Hour()
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: quietMember, EmailEnabled: true, QuietFrom: (h + 23) % 24, QuietUntil: (h + 2) % 24}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: problemsOnly, EmailEnabled: true, FailuresOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+	if err := svc.NotifyDriftChanged(ctx, owner, "", "Visitor Permit", "ABC123"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.DueOutbox(ctx, time.Now().Add(48*time.Hour), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var to []string
+	for _, r := range rows {
+		to = append(to, r.Recipients...)
+		if !strings.Contains(r.Body, "changed to ABC123 at the council directly") || !strings.Contains(r.Body, "p.stonn didn't make this change") {
+			t.Fatalf("unexpected body: %q", r.Body)
+		}
+	}
+	sort.Strings(to)
+	if want := []string{owner, quietMember}; !reflect.DeepEqual(to, want) {
+		t.Fatalf("recipients = %v, want %v (problems-only member skipped)", to, want)
+	}
+	// Only the owner's row is due now; the quiet-hours member's waits for the window.
+	dueNow, err := st.DueOutbox(ctx, time.Now(), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dueNow) != 1 || dueNow[0].Recipients[0] != owner {
+		t.Fatalf("rows due now = %d, want just the owner's (the quiet-hours member's is held)", len(dueNow))
+	}
+	// A removal is worded as a removal.
+	if err := svc.NotifyDriftChanged(ctx, owner, "", "Visitor Permit", ""); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = st.DueOutbox(ctx, time.Now().Add(48*time.Hour), 50)
+	found := false
+	for _, r := range rows {
+		if strings.Contains(r.Body, "was removed at the council directly") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("removal wording not queued")
+	}
+}
+
+// TestDriverFailedNoticeCopy: the driver's notice names the cause the way the
+// household's does, and is capped per recipient.
+func TestDriverFailedNoticeCopy(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
+	if err := svc.NotifyDriverFailed(ctx, "o@example.com", "", "nanny@example.com", "AAA111", "#123456", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.NotifyDriverFailed(ctx, "o@example.com", "", "nanny@example.com", "BBB222", "#123456", false); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.DueOutbox(ctx, time.Now().Add(time.Hour), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("queued = %d, want 2", len(rows))
+	}
+	bodies := rows[0].Body + "\n" + rows[1].Body
+	for _, want := range []string{"Your car AAA111 couldn't be put on the", "the council's system is down right now", "Your car BBB222 couldn't be put on the", "p.stonn couldn't update the permit", "It may not be covered right now"} {
+		if !strings.Contains(bodies, want) {
+			t.Fatalf("driver notice missing %q in:\n%s", want, bodies)
+		}
+	}
+	// Third of the day is throttled (cap is 2).
+	if err := svc.NotifyDriverFailed(ctx, "o@example.com", "", "nanny@example.com", "CCC333", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ = st.DueOutbox(ctx, time.Now().Add(time.Hour), 50); len(rows) != 2 {
+		t.Fatalf("queued after the cap = %d, want still 2", len(rows))
 	}
 }

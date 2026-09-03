@@ -159,6 +159,12 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 	if already && (tier == tierSoft || urgent) {
 		return // already told this episode at this tier, or a higher one
 	}
+	// The first word about this plate in the episode also goes to the car's
+	// driver, who may be parked on it right now; the escalation that follows is
+	// for the household, who can act at the council — the driver cannot.
+	if told == "" || !model.SamePlate(told, o.Reg) {
+		s.notifyFailedDriver(ctx, p, o)
+	}
 	o.Urgent = tier == tierUrgent
 	key := "fail|" + o.Reg + "|" + tier.String()
 	s.notifyUserThen(ctx, p, o, key, func(c context.Context) {
@@ -166,6 +172,41 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 			log.Printf("scheduler: delivered a failure notice for permit %d but could not record it in the episode (may re-send): %v", p.ID, e)
 		}
 	})
+}
+
+// notifyFailedDriver emails the driver of the car that could not be put on the
+// permit, if it is one of the owner's saved cars with a contact and the per-car
+// notify toggle on — the failure twin of notifyAddedDriver. Best effort, and
+// durable (the notifier queues it): a suppressed or throttled address is skipped.
+func (s *Scheduler) notifyFailedDriver(ctx context.Context, p model.Permit, o notify.ApplyOutcome) {
+	if o.Reg == "" || s.notifier == nil || !s.notifier.Enabled() {
+		return
+	}
+	vehicles, err := s.store.ListVehiclesFor(ctx, p.Owner)
+	if err != nil {
+		log.Printf("scheduler: driver-failed lookup for %s: %v", redact.Email(p.Owner), err)
+		return
+	}
+	var v model.Vehicle
+	found := false
+	for _, c := range vehicles {
+		if model.SamePlate(c.Registration, o.Reg) {
+			v, found = c, true
+			break
+		}
+	}
+	if !found || v.Email == "" || !v.NotifyDriver {
+		return // an ad-hoc plate, or a car whose driver asked not to hear
+	}
+	if sup, err := s.store.SuppressedAmong(ctx, []string{v.Email}); err != nil || len(sup) > 0 {
+		if err != nil {
+			log.Printf("scheduler: suppression check for %s: %v", notify.RedactEmail(v.Email), err)
+		}
+		return
+	}
+	if err := s.notifier.NotifyDriverFailed(ctx, p.Owner, p.TenantID, v.Email, o.Reg, v.Color, o.CouncilDown); err != nil {
+		log.Printf("scheduler: enqueue driver-failed for %s: %v", notify.RedactEmail(v.Email), err)
+	}
 }
 
 // closeFailureEpisode ends the permit's open episode, reporting whether the

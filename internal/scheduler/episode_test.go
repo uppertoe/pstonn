@@ -194,3 +194,47 @@ func TestOutageNoticesArePlateAgnostic(t *testing.T) {
 		t.Fatalf("repeat of the same plain failure = %d total notices, want still 3", n)
 	}
 }
+
+// TestDriverHearsOnceWhenTheirCarDoesNotLand: the saved car's driver is told the
+// first time the household is told about that plate in an episode, and not on
+// the escalation or on cause flips. An ad-hoc plate has no driver to tell.
+func TestDriverHearsOnceWhenTheirCarDoesNotLand(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	const owner = "o@example.com"
+	pid, _ := st.UpsertPermit(ctx, owner, "14576", "14", "Permit")
+	vid, err := st.CreateVehicle(ctx, owner, "AAA111", "Nanny", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetVehicleEmail(ctx, owner, vid, "nanny@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetVehicleNotifyDriver(ctx, owner, vid, true); err != nil {
+		t.Fatal(err)
+	}
+	p := model.Permit{ID: pid, Owner: owner, CouncilPermitID: "14576", Label: "Permit"}
+	fn := &fakeNotifier{on: true, admin: true}
+	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
+	s.notifyRetry = 0
+	fail := func(reg string, down bool, tier failTier) {
+		s.notifyFailure(ctx, p, notify.ApplyOutcome{Owner: owner, PermitLabel: "Permit", Reg: reg, OK: false, CouncilDown: down, Transient: true}, tier)
+		time.Sleep(20 * time.Millisecond)
+	}
+	fail("AAA111", false, tierSoft)
+	fail("AAA111", true, tierSoft)    // cause flip: nothing new for anyone
+	fail("AAA111", false, tierUrgent) // escalation: household only
+	fn.mu.Lock()
+	got := append([]string(nil), fn.driverFailed...)
+	fn.mu.Unlock()
+	if len(got) != 1 || got[0] != "nanny@example.com|AAA111" {
+		t.Fatalf("driver notices = %v, want exactly one for AAA111", got)
+	}
+	fail("ZZZ999", false, tierSoft) // an ad-hoc plate: no saved car, no driver
+	fn.mu.Lock()
+	n := len(fn.driverFailed)
+	fn.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("an ad-hoc plate produced a driver notice: %d total", n)
+	}
+}
