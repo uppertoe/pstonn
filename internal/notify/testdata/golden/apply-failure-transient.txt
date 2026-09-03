@@ -9,7 +9,7 @@ The council was temporarily unavailable.
 Nothing to do yet — p.stonn keeps trying.
 
 You can set the vehicle on your permit yourself at the council:
-https://parkingpermits.stonnington.vic.gov.au/
+https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 https://p.stonn.org
 
@@ -25,7 +25,7 @@ The council was temporarily unavailable.
 Nothing to do yet — p.stonn keeps trying.
 
 You can set the vehicle on your permit yourself at the council:
-https://parkingpermits.stonnington.vic.gov.au/
+https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === EMAIL to sam@example.com
 Subject: Still updating your Visitor — it shows XYZ789 for now
@@ -38,7 +38,7 @@ The council was temporarily unavailable.
 Nothing to do yet — p.stonn keeps trying.
 
 You can set the vehicle on your permit yourself at the council:
-https://parkingpermits.stonnington.vic.gov.au/
+https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 https://p.stonn.org
 

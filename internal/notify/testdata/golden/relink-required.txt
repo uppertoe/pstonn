@@ -7,7 +7,7 @@ Your council connection has expired, so p.stonn has stopped updating your visito
 Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
 
 Re-link: https://p.stonn.org
-Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === NTFY pstonn-primary
 Title: Action needed: reconnect your p.stonn council account
@@ -19,7 +19,7 @@ Your council connection has expired, so p.stonn has stopped updating your visito
 Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
 
 Re-link: https://p.stonn.org
-Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === EMAIL to sam@example.com
 Subject: Action needed: reconnect your p.stonn council account
@@ -30,5 +30,5 @@ Your council connection has expired, so p.stonn has stopped updating your visito
 Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
 
 Re-link: https://p.stonn.org
-Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 

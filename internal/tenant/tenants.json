@@ -24,7 +24,7 @@
         "home_state": "VIC"
       },
       "links": {
-        "portal": "https://parkingpermits.stonnington.vic.gov.au/",
+        "portal": "https://parkingpermits.stonnington.vic.gov.au/ssp/",
         "register": "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register",
         "reset_password": "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword",
         "apply_visitor": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits",

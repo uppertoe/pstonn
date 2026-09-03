@@ -8,7 +8,7 @@ That means any change your schedule should make will not happen: if a different 
 
 p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
 
-Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 Open p.stonn: https://p.stonn.org
 
 === NTFY pstonn-primary
@@ -22,7 +22,7 @@ That means any change your schedule should make will not happen: if a different 
 
 p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
 
-Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 Open p.stonn: https://p.stonn.org
 
 === EMAIL to sam@example.com
@@ -35,6 +35,6 @@ That means any change your schedule should make will not happen: if a different 
 
 p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
 
-Council portal: https://parkingpermits.stonnington.vic.gov.au/
+Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 Open p.stonn: https://p.stonn.org
 

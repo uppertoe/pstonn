@@ -7,7 +7,7 @@ Your Visitor is due to expire on 24 Aug 2026.
 p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
 
 Open p.stonn: https://p.stonn.org
-Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
+Renew with the council: https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === NTFY pstonn-primary
 Title: Your Visitor expires on 24 Aug 2026
@@ -19,7 +19,7 @@ Your Visitor is due to expire on 24 Aug 2026.
 p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
 
 Open p.stonn: https://p.stonn.org
-Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
+Renew with the council: https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === EMAIL to sam@example.com
 Subject: Your Visitor expires on 24 Aug 2026
@@ -30,5 +30,5 @@ Your Visitor is due to expire on 24 Aug 2026.
 p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
 
 Open p.stonn: https://p.stonn.org
-Renew with the council: https://parkingpermits.stonnington.vic.gov.au/
+Renew with the council: https://parkingpermits.stonnington.vic.gov.au/ssp/
 

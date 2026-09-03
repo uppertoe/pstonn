@@ -9,7 +9,7 @@ The council rejected the change.
 Check the permit on the council's site.
 
 You can set the vehicle on your permit yourself at the council:
-https://parkingpermits.stonnington.vic.gov.au/
+https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 https://p.stonn.org
 
@@ -25,7 +25,7 @@ The council rejected the change.
 Check the permit on the council's site.
 
 You can set the vehicle on your permit yourself at the council:
-https://parkingpermits.stonnington.vic.gov.au/
+https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === EMAIL to sam@example.com
 Subject: Action needed: your Visitor still shows XYZ789
@@ -38,7 +38,7 @@ The council rejected the change.
 Check the permit on the council's site.
 
 You can set the vehicle on your permit yourself at the council:
-https://parkingpermits.stonnington.vic.gov.au/
+https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 https://p.stonn.org
 
