@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,13 +12,15 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// TestGuestActivateOutageMessage: activating during a CONFIRMED council outage, the
-// guest's pending state reads honestly ("the council's system is down, may not be on
-// yet") with NO optimistic "Changing to…" spinner — and it stays honest on the 2.5s
-// poll, not just the initial POST (an earlier fix set a one-off banner the poll
-// reverted). A brief blip (circuit closed) keeps the optimistic pending.
+var guestPollFP = regexp.MustCompile(`/g/live/[^?"]+\?fp=([0-9a-f]+)`)
+
+// TestGuestActivateOutageMessage: the guest pending state reads honestly during a
+// council outage — no optimistic "Changing to…" spinner — on the POST AND, crucially,
+// on the 2.5s poll carrying its fingerprint. The up→down transition is the case the
+// earlier fix missed: PendingOutage wasn't in the fingerprint, so a poll 204'd and
+// the visitor stayed on the stale optimistic message.
 func TestGuestActivateOutageMessage(t *testing.T) {
-	setup := func(gateOpen bool) (*Server, string, int64) {
+	setup := func(gateOpen bool) (*Server, *recordingProvider, string, int64) {
 		s, rp := newApplyRig(t)
 		isolateGuestBounds(t)
 		ctx := context.Background()
@@ -45,34 +48,42 @@ func TestGuestActivateOutageMessage(t *testing.T) {
 		rp.applyErr = parking.ErrCouncilBusy
 		rp.mu.Unlock()
 		rp.AuthGateOpen = gateOpen
-		return s, raw, van
+		return s, rp, raw, van
 	}
 
-	// Confirmed outage: honest pending on the POST AND the poll; no optimistic spinner.
-	s, raw, van := setup(true)
-	post := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}})
-	if post.Code != 200 {
-		t.Fatalf("activate code = %d", post.Code)
+	// (1) Outage from the start: honest pending on the POST, no optimistic spinner.
+	s, _, raw, van := setup(true)
+	body := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}}).Body.String()
+	if !strings.Contains(body, "system is down") || !strings.Contains(body, "may not be on the permit yet") || !strings.Contains(body, "NSW123") {
+		t.Fatalf("outage POST: want the honest 'council down' pending naming NSW123; got:\n%s", excerpt(body))
 	}
-	poll := s.getGuest("/g/live/" + raw)
-	for _, c := range []struct{ name, body string }{{"POST", post.Body.String()}, {"poll", poll.Body.String()}} {
-		if !strings.Contains(c.body, "system is down") || !strings.Contains(c.body, "may not be on the permit yet") || !strings.Contains(c.body, "NSW123") {
-			t.Fatalf("outage %s: want the honest 'council down' pending naming NSW123; got:\n%s", c.name, excerpt(c.body))
-		}
-		if strings.Contains(c.body, "Changing to") {
-			t.Fatalf("outage %s: must not show the optimistic 'Changing to' spinner; got:\n%s", c.name, excerpt(c.body))
-		}
-		if strings.Contains(c.body, "is now on the permit") {
-			t.Fatalf("outage %s: must not claim the car is on the permit; got:\n%s", c.name, excerpt(c.body))
-		}
+	if strings.Contains(body, "Changing to") {
+		t.Fatalf("outage POST: must not show the optimistic 'Changing to' spinner; got:\n%s", excerpt(body))
+	}
+	if strings.Contains(body, "is now on the permit") {
+		t.Fatalf("outage POST: must not claim the car is on the permit; got:\n%s", excerpt(body))
 	}
 
-	// Brief blip (circuit closed): the optimistic "Changing to NSW123" pending stands,
-	// and the outage copy is absent.
-	s2, raw2, van2 := setup(false)
-	blip := s2.postGuest("/g/"+raw2, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van2)}}).Body.String()
-	if !strings.Contains(blip, "Changing to") || strings.Contains(blip, "system is down") {
-		t.Fatalf("brief blip: want the optimistic pending, not the outage copy; got:\n%s", excerpt(blip))
+	// (2) The up→down transition on the POLL carrying the UP fingerprint. Council up:
+	// optimistic pending. Then it goes down; a poll with the stale fp must REPAINT to
+	// the outage copy (not 204). This is exactly the case the fingerprint omission broke.
+	s2, rp2, raw2, van2 := setup(false)
+	up := s2.postGuest("/g/"+raw2, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van2)}}).Body.String()
+	if !strings.Contains(up, "Changing to") || strings.Contains(up, "system is down") {
+		t.Fatalf("brief blip: want the optimistic pending, not the outage copy; got:\n%s", excerpt(up))
+	}
+	m := guestPollFP.FindStringSubmatch(up)
+	if m == nil {
+		t.Fatalf("no poll fingerprint in the up-state body:\n%s", excerpt(up))
+	}
+	rp2.AuthGateOpen = true // the council goes down mid-poll
+	poll := s2.getGuest("/g/live/" + raw2 + "?fp=" + m[1])
+	if poll.Code == 204 {
+		t.Fatal("poll 204'd on the up→down transition — the outage flip was missed (fingerprint bug)")
+	}
+	pb := poll.Body.String()
+	if !strings.Contains(pb, "system is down") || strings.Contains(pb, "Changing to") {
+		t.Fatalf("poll must repaint to the outage copy on the transition; got:\n%s", excerpt(pb))
 	}
 }
 

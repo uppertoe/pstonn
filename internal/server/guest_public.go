@@ -429,7 +429,15 @@ func guestFP(v guestActView) string {
 	if v.Stalled {
 		stalled = "1"
 	}
-	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + v.RevertPlate + "|" + v.UntilText + "|" + v.CheckedAgo))
+	// PendingOutage is part of the fingerprint: the visible pending message flips
+	// between "Changing to…" and "the council is down" on this flag alone (plate
+	// unchanged), so without it a council-down (or recovery) transition hashes the
+	// same and the 2.5s poll 204s, freezing the visitor on the stale message.
+	outage := "0"
+	if v.PendingOutage {
+		outage = "1"
+	}
+	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + outage + "|" + v.RevertPlate + "|" + v.UntilText + "|" + v.CheckedAgo))
 	return hex.EncodeToString(sum[:6])
 }
 

@@ -255,6 +255,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 				// "on the permit" on its own on recovery. Scoped to THIS visitor-facing
 				// poll; the shared requestLiveState (resident's page too) is unchanged.
 				if (v.Status == "approved" || v.Status == "stalled") &&
+					permit.TenantID != "" && s.tenant != nil &&
 					(s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID)) {
 					v.Status = "outage"
 				}
