@@ -59,6 +59,12 @@ type Tenant interface {
 	RegionValid(ctx context.Context, owner, tenantID, code string) bool
 	// Stats is the traffic / breaker snapshot shown on /status.
 	Stats() parking.Stats
+	// Blocked (fleet edge breaker open) and AuthGated (auth circuit open) report a
+	// CONFIRMED, sustained council outage for the named tenant — as opposed to a
+	// brief blip — so a synchronous handler (a guest activating at the kerb) can say
+	// the council is down rather than showing an optimistic "being applied".
+	Blocked(tenantID string) bool
+	AuthGated(tenantID string) bool
 }
 
 // The mux (what main wires) satisfies both interfaces; a mismatch is a compile

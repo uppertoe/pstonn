@@ -245,6 +245,16 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		if req.Status == "approved" {
 			if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil {
 				v.Status, _ = s.requestLiveState(r.Context(), permit, req)
+				// A CONFIRMED council outage (auth circuit open, or the fleet breaker
+				// refusing our connection): tell the visitor honestly rather than the
+				// optimistic "putting it on" spinner or a generic "stalled" — the apply
+				// won't land until the council is back. Kept polling, so it flips to
+				// "on the permit" on its own on recovery. Scoped to THIS visitor-facing
+				// poll; the shared requestLiveState (resident's page too) is unchanged.
+				if (v.Status == "approved" || v.Status == "stalled") &&
+					(s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID)) {
+					v.Status = "outage"
+				}
 			}
 			// A permit lookup error keeps Status "approved": transient — keep polling.
 		}

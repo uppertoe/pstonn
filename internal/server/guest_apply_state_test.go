@@ -33,14 +33,19 @@ import (
 // captured at the provider boundary.
 type recordingProvider struct {
 	*fake.Provider
-	mu   sync.Mutex
-	sets []provider.Vehicle
+	mu       sync.Mutex
+	sets     []provider.Vehicle
+	applyErr error // when set, SetVehicle records the attempt then fails with it (failure-path tests)
 }
 
 func (p *recordingProvider) SetVehicle(ctx context.Context, s *provider.Session, ref provider.PermitRef, v provider.Vehicle) error {
 	p.mu.Lock()
 	p.sets = append(p.sets, v)
+	e := p.applyErr
 	p.mu.Unlock()
+	if e != nil {
+		return e
+	}
 	return p.Provider.SetVehicle(ctx, s, ref, v)
 }
 

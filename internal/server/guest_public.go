@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -631,11 +632,34 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		// The override is saved and the scheduler will apply it shortly; the pending
-		// banner + poller (from renderGuestMenu) track the ACTUAL result — no claim.
+		// A CONFIRMED, sustained council outage (auth circuit open, or the fleet
+		// breaker refusing our connection) will not clear in seconds — so tell the
+		// visitor honestly the car may not be covered, rather than the optimistic
+		// "being applied" pending state that suits a brief blip. The override is still
+		// saved and the poller still runs, so it flips to "on the permit" on its own
+		// if the council comes back while they are looking.
+		if s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID) {
+			s.renderGuestMenu(w, r, gc, permit, current, "",
+				"The council's system is down right now, so we couldn't put "+reg+" on the permit yet. It may not be covered until the council is back — check with the person who gave you this link.")
+			return
+		}
+		// Our sign-in to the council has lapsed (classified transient — a sentinel, not
+		// a *provider.Error). Only the resident can renew it; "try again" would be advice
+		// the visitor can't act on. The override is saved and the poller keeps running,
+		// so it lands on its own once the resident's session reconnects.
+		if errors.Is(err, parking.ErrSessionExpired) {
+			s.renderGuestMenu(w, r, gc, permit, current, "",
+				"We couldn't put "+reg+" on the permit — p.stonn's sign-in to the council needs renewing, and only the person who gave you this link can do that. Check with them; it'll go on once they've reconnected.")
+			return
+		}
+		// A brief blip: the override is saved and the scheduler will apply it shortly;
+		// the pending banner + poller (from renderGuestMenu) track the ACTUAL result.
 		s.renderGuestMenu(w, r, gc, permit, current, "", "")
 		return
 	}
+	// Non-transient: the council REFUSED the plate (FailRejected/FailUnexpected), not a
+	// sign-in problem. (NOTE: this copy still says "reconnect / try again", which is
+	// wrong for a rejection — flagged as a follow-up needing its own approved copy.)
 	s.renderGuestMenu(w, r, gc, permit, current, "", "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
 }
 
@@ -745,7 +769,21 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		// The restore is saved; the pending banner + poller track the actual result.
+		// A confirmed, sustained council outage (see guestActivate): say so rather
+		// than imply the restore is about to land. Calmer than the activate case — no
+		// one is parking a new car — but still honest.
+		if s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID) {
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
+				"The council's system is down right now, so we couldn't change the permit back yet. p.stonn will apply it as soon as the council is back.")
+			return
+		}
+		// Our sign-in has lapsed — only the resident can renew it (see guestActivate).
+		if errors.Is(err, parking.ErrSessionExpired) {
+			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
+				"We couldn't change the permit back — p.stonn's sign-in to the council needs renewing, and only the person who gave you this link can do that. Check with them.")
+			return
+		}
+		// A brief blip: the restore is saved; the pending banner + poller track it.
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
 		return
 	}
