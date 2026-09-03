@@ -49,6 +49,7 @@ type guestActView struct {
 	RevertPlate    string            // pre-existing plate the guest may put back ("" = no revert offered)
 	PendingReg     string            // plate the schedule targets but the tenant doesn't show yet ("" = settled)
 	Stalled        bool              // the pending change has taken suspiciously long; stop polling
+	PendingOutage  bool              // the pending change can't land because the council is down (auth circuit / breaker) — say so honestly instead of the optimistic "Changing to…" spinner. Computed on every render (POST and poll) so the message is consistent.
 	SelectedReg    string            // the schedule's target plate: highlights the chosen car IMMEDIATELY, while "on now" tracks the actual record
 	UntilText      string            // when the winning booking ends ("until the end of today"), "" when open-ended/roster-driven
 	KeepForm       bool              // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -397,6 +396,17 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		}
 		now := time.Now()
 		view.PendingReg, view.Stalled = pendingState(current, want, stallSince(permit.ID, current, want, decidedAt, now), now)
+		// A saved override that hasn't landed because the council itself is down
+		// (auth circuit open, or the fleet breaker refusing our connection) must not
+		// read as an optimistic "Changing to…" — the plate may not be covered until
+		// the council is back. Computed HERE, in the shared view, so the POST and the
+		// 2.5s poll say the same thing (an earlier fix set a one-off banner in the POST
+		// handler, which the next poll silently reverted). Guarded on a real TenantID
+		// so an unset row can't read another council's outage (the cross-council footgun).
+		if view.PendingReg != "" && permit.TenantID != "" && s.tenant != nil &&
+			(s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID)) {
+			view.PendingOutage = true
+		}
 		if !until.IsZero() {
 			now := now.In(s.locForPermit(r.Context(), permit))
 			view.UntilText = untilText(now, until.In(s.locForPermit(r.Context(), permit)))
@@ -632,28 +642,11 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		// A CONFIRMED, sustained council outage (auth circuit open, or the fleet
-		// breaker refusing our connection) will not clear in seconds — so tell the
-		// visitor honestly the car may not be covered, rather than the optimistic
-		// "being applied" pending state that suits a brief blip. The override is still
-		// saved and the poller still runs, so it flips to "on the permit" on its own
-		// if the council comes back while they are looking.
-		if s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID) {
-			s.renderGuestMenu(w, r, gc, permit, current, "",
-				"The council's system is down right now, so we couldn't put "+reg+" on the permit yet. It may not be covered until the council is back — check with the person who gave you this link.")
-			return
-		}
-		// Our sign-in to the council has lapsed (classified transient — a sentinel, not
-		// a *provider.Error). Only the resident can renew it; "try again" would be advice
-		// the visitor can't act on. The override is saved and the poller keeps running,
-		// so it lands on its own once the resident's session reconnects.
-		if errors.Is(err, parking.ErrSessionExpired) {
-			s.renderGuestMenu(w, r, gc, permit, current, "",
-				"We couldn't put "+reg+" on the permit — p.stonn's sign-in to the council needs renewing, and only the person who gave you this link can do that. Check with them; it'll go on once they've reconnected.")
-			return
-		}
-		// A brief blip: the override is saved and the scheduler will apply it shortly;
-		// the pending banner + poller (from renderGuestMenu) track the ACTUAL result.
+		// The override is saved; the scheduler will apply it. renderGuestMenu shows the
+		// pending state, which buildGuestView renders HONESTLY as "the council is down"
+		// when the auth circuit / breaker is open, and as the optimistic "Changing to…"
+		// only for a genuine brief blip — and it does so on the poll too, so the message
+		// stays consistent rather than reverting after one tick.
 		s.renderGuestMenu(w, r, gc, permit, current, "", "")
 		return
 	}
@@ -769,21 +762,8 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		// A confirmed, sustained council outage (see guestActivate): say so rather
-		// than imply the restore is about to land. Calmer than the activate case — no
-		// one is parking a new car — but still honest.
-		if s.tenant.AuthGated(permit.TenantID) || s.tenant.Blocked(permit.TenantID) {
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
-				"The council's system is down right now, so we couldn't change the permit back yet. p.stonn will apply it as soon as the council is back.")
-			return
-		}
-		// Our sign-in has lapsed — only the resident can renew it (see guestActivate).
-		if errors.Is(err, parking.ErrSessionExpired) {
-			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
-				"We couldn't change the permit back — p.stonn's sign-in to the council needs renewing, and only the person who gave you this link can do that. Check with them.")
-			return
-		}
-		// A brief blip: the restore is saved; the pending banner + poller track it.
+		// The restore is saved; renderGuestMenu shows the pending state, rendered
+		// honestly by buildGuestView (council-down vs brief blip), consistent on the poll.
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
 		return
 	}

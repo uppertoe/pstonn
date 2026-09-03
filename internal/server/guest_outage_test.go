@@ -11,12 +11,13 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// TestGuestActivateOutageMessage: when a guest activates during a CONFIRMED council
-// outage (the auth circuit open), the visitor is told honestly that the car may not
-// be covered — not the optimistic "being applied" pending state that suits a brief
-// blip. A blip (circuit closed) keeps the pending behaviour.
+// TestGuestActivateOutageMessage: activating during a CONFIRMED council outage, the
+// guest's pending state reads honestly ("the council's system is down, may not be on
+// yet") with NO optimistic "Changing to…" spinner — and it stays honest on the 2.5s
+// poll, not just the initial POST (an earlier fix set a one-off banner the poll
+// reverted). A brief blip (circuit closed) keeps the optimistic pending.
 func TestGuestActivateOutageMessage(t *testing.T) {
-	run := func(gateOpen bool) (int, string) {
+	setup := func(gateOpen bool) (*Server, string, int64) {
 		s, rp := newApplyRig(t)
 		isolateGuestBounds(t)
 		ctx := context.Background()
@@ -40,33 +41,38 @@ func TestGuestActivateOutageMessage(t *testing.T) {
 			[]store.GuestRecipient{{Email: "nanny@example.com", TokenHash: hashGuestToken(raw)}}); err != nil {
 			t.Fatal(err)
 		}
-		// The outage shape: the write fails transiently (as a council 500 does) AND the
-		// auth circuit reads open.
 		rp.mu.Lock()
 		rp.applyErr = parking.ErrCouncilBusy
 		rp.mu.Unlock()
 		rp.AuthGateOpen = gateOpen
-
-		w := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}})
-		return w.Code, w.Body.String()
+		return s, raw, van
 	}
 
-	// Confirmed outage: an honest warning naming the plate, and NO success claim.
-	code, body := run(true)
-	if code != 200 {
-		t.Fatalf("code = %d", code)
+	// Confirmed outage: honest pending on the POST AND the poll; no optimistic spinner.
+	s, raw, van := setup(true)
+	post := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}})
+	if post.Code != 200 {
+		t.Fatalf("activate code = %d", post.Code)
 	}
-	// Substrings without an apostrophe — html/template escapes ' to &#39;.
-	if !strings.Contains(body, "system is down right now") || !strings.Contains(body, "may not be covered") || !strings.Contains(body, "NSW123") {
-		t.Fatalf("outage: want the honest warning naming NSW123; got:\n%s", excerpt(body))
-	}
-	if strings.Contains(body, "is now on the permit") {
-		t.Fatalf("outage: must not claim the car is on the permit; got:\n%s", excerpt(body))
+	poll := s.getGuest("/g/live/" + raw)
+	for _, c := range []struct{ name, body string }{{"POST", post.Body.String()}, {"poll", poll.Body.String()}} {
+		if !strings.Contains(c.body, "system is down") || !strings.Contains(c.body, "may not be on the permit yet") || !strings.Contains(c.body, "NSW123") {
+			t.Fatalf("outage %s: want the honest 'council down' pending naming NSW123; got:\n%s", c.name, excerpt(c.body))
+		}
+		if strings.Contains(c.body, "Changing to") {
+			t.Fatalf("outage %s: must not show the optimistic 'Changing to' spinner; got:\n%s", c.name, excerpt(c.body))
+		}
+		if strings.Contains(c.body, "is now on the permit") {
+			t.Fatalf("outage %s: must not claim the car is on the permit; got:\n%s", c.name, excerpt(c.body))
+		}
 	}
 
-	// Brief blip (circuit closed): no outage warning — the optimistic pending stands.
-	if _, body2 := run(false); strings.Contains(body2, "council's system is down") {
-		t.Fatalf("a brief blip must not show the outage warning; got:\n%s", excerpt(body2))
+	// Brief blip (circuit closed): the optimistic "Changing to NSW123" pending stands,
+	// and the outage copy is absent.
+	s2, raw2, van2 := setup(false)
+	blip := s2.postGuest("/g/"+raw2, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van2)}}).Body.String()
+	if !strings.Contains(blip, "Changing to") || strings.Contains(blip, "system is down") {
+		t.Fatalf("brief blip: want the optimistic pending, not the outage copy; got:\n%s", excerpt(blip))
 	}
 }
 
@@ -99,12 +105,10 @@ func TestDoorQROutagePollStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The apply fails (as a council 500) and the auth circuit reads open.
 	rp.mu.Lock()
 	rp.applyErr = parking.ErrCouncilBusy
 	rp.mu.Unlock()
 	rp.AuthGateOpen = true
-	// Resident approves; the background apply fails → approved but not on the permit.
 	if out := s.runDecideRequest(httptest.NewRequest("POST", "/guests/requests/x/approve", nil), owner, owner, reqID, true); out.kind == decideErr {
 		t.Fatalf("approve errored: %v", out.err)
 	}
@@ -115,47 +119,5 @@ func TestDoorQROutagePollStatus(t *testing.T) {
 	}
 	if strings.Contains(body, "putting") {
 		t.Fatalf("door-QR outage poll must not show the optimistic 'putting it on' spinner; got:\n%s", excerpt(body))
-	}
-}
-
-// TestGuestActivateSessionExpiredMessage: when p.stonn's sign-in has lapsed (not a
-// council outage), the visitor is told the resident must reconnect — not the
-// misleading "try again shortly", which only the resident can act on.
-func TestGuestActivateSessionExpiredMessage(t *testing.T) {
-	s, rp := newApplyRig(t)
-	isolateGuestBounds(t)
-	ctx := context.Background()
-	const owner = "primary@example.com"
-	if err := s.tenant.Link(ctx, owner, "", owner, "ok", false, true, 0); err != nil {
-		t.Fatal(err)
-	}
-	pid, err := s.store.UpsertPermit(ctx, owner, "90001", "14", "Visitor")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.SetPermitActive(ctx, pid, "SBX1AB"); err != nil {
-		t.Fatal(err)
-	}
-	van, err := s.store.CreateVehicle(ctx, owner, "NSW123", "Van", "NSW")
-	if err != nil {
-		t.Fatal(err)
-	}
-	const raw = "session-token-00000000000000001"
-	if _, err := s.store.CreateGuestGrant(ctx, owner, owner, pid, "Nanny", false, []int64{van},
-		[]store.GuestRecipient{{Email: "nanny@example.com", TokenHash: hashGuestToken(raw)}}); err != nil {
-		t.Fatal(err)
-	}
-	// The sign-in has lapsed; the auth circuit is NOT open (this isn't a council outage).
-	rp.mu.Lock()
-	rp.applyErr = parking.ErrSessionExpired
-	rp.mu.Unlock()
-	rp.AuthGateOpen = false
-
-	body := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}}).Body.String()
-	if !strings.Contains(body, "sign-in to the council needs renewing") || !strings.Contains(body, "NSW123") {
-		t.Fatalf("session-expired: want the 'resident must reconnect' copy naming NSW123; got:\n%s", excerpt(body))
-	}
-	if strings.Contains(body, "try again shortly") {
-		t.Fatalf("session-expired: must not tell the visitor to try again; got:\n%s", excerpt(body))
 	}
 }

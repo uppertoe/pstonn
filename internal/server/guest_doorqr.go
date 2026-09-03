@@ -232,7 +232,10 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		// Status passes through as-is: "expired" (aged out unanswered) renders its
 		// own message, distinct from an actual "denied".
 		v = guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: req.Status, Until: req.Until}
-		if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil {
+		// One permit read for this poll: the referral tenant view AND the live-state
+		// refinement below both need it (this used to fetch it twice per 3s tick).
+		permit, perr := s.store.GetPermit(r.Context(), req.PermitID)
+		if perr == nil {
 			cv := s.tenantViewFor(r.Context(), permit.Owner)
 			v.tenant = &cv
 		}
@@ -243,7 +246,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		// overridden ("superseded") or its window has lapsed ("ended"), instead of
 		// misreading either as a stall.
 		if req.Status == "approved" {
-			if permit, perr := s.store.GetPermit(r.Context(), req.PermitID); perr == nil {
+			if perr == nil {
 				v.Status, _ = s.requestLiveState(r.Context(), permit, req)
 				// A CONFIRMED council outage (auth circuit open, or the fleet breaker
 				// refusing our connection): tell the visitor honestly rather than the
