@@ -390,18 +390,15 @@ func (c *Client) AuthGate() (open bool, retry time.Duration) {
 // closes the circuit (the fleet breaker owns the edge case).
 func (c *Client) recordAuthorizeOutcome(probe bool, status int, err error) {
 	now := time.Now()
-	var unavail *provider.Unavailable
+	sig := provider.Classify(err)
 	switch {
-	case err == nil, errors.Is(err, provider.ErrSessionExpired):
+	case sig.OK, sig.Expiry:
 		// A code, or a genuine expiry — the upstream served us. Close.
 		c.authCircuit.onSuccess(probe)
-	case errors.As(err, &unavail):
-		// Edge push-back (429/403/503) or a WAF challenge — routed by TYPE, not status,
-		// so a 503 the fleet breaker owns is not double-counted here. Inconclusive.
-		c.authCircuit.onInconclusive(now, probe)
-	case errors.Is(err, context.Canceled):
-		// Our own cancellation (a shutdown, a superseded request) is not an upstream
-		// signal — mirror health.noteAt, which also ignores it.
+	case sig.Pushback != nil, sig.Canceled:
+		// Edge push-back (429/403/503 / WAF), routed by TYPE not status so a 503 the
+		// fleet breaker owns is not double-counted here; or our own cancellation
+		// (mirrors health.noteAt, which also ignores it). Inconclusive either way.
 		c.authCircuit.onInconclusive(now, probe)
 	case status == 0, status >= 500:
 		// A transport failure (no response) or an origin 5xx: the upstream is down.

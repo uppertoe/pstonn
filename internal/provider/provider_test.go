@@ -8,6 +8,36 @@ import (
 	"time"
 )
 
+// TestClassifySignals locks the single error-classification the auth circuit, the
+// per-owner backoff/fleet breaker and the connector-health surface all read. The
+// critical row is the last: an *Unavailable is the ONLY thing that sets Pushback
+// (the fleet breaker's trigger); a bare ErrUnavailable sentinel — what the auth
+// backoff wraps — must NOT, or auth fast-fails would feed the fleet breaker.
+func TestClassifySignals(t *testing.T) {
+	unavail := &Unavailable{Status: 503, Surface: SurfaceAPI}
+	cases := []struct {
+		name string
+		err  error
+		want Signal
+	}{
+		{"nil", nil, Signal{OK: true}},
+		{"canceled", fmt.Errorf("gave up: %w", context.Canceled), Signal{Canceled: true}},
+		{"expiry", fmt.Errorf("stale: %w", ErrSessionExpired), Signal{Expiry: true}},
+		{"pushback struct", fmt.Errorf("edge: %w", unavail), Signal{Pushback: unavail}},
+		{"pushback sentinel is not struct", ErrUnavailable, Signal{}},
+		{"login shape", ErrLoginFormUnrecognised, Signal{LoginShape: true}},
+		{"login off-host", ErrLoginOffHost, Signal{LoginShape: true}},
+		{"login rejected", ErrLoginRejected, Signal{LoginRejected: true}},
+		{"unexpected", Fail(FailUnexpected, OpListPermits, errors.New("shape")), Signal{Unexpected: true}},
+		{"bare transient is neutral", errors.New("boom"), Signal{}},
+	}
+	for _, c := range cases {
+		if got := Classify(c.err); got != c.want {
+			t.Errorf("%s: Classify() = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestFailureOfClassifies(t *testing.T) {
 	cases := []struct {
 		err  error

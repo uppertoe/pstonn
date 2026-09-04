@@ -13,8 +13,6 @@ package parking
 // polls), so a blip that self-heals between polls is never mailed at all.
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -123,13 +121,14 @@ type connectorHealth struct {
 func (h *connectorHealth) note(owner string, err error) { h.noteAt(owner, err, time.Now()) }
 
 func (h *connectorHealth) noteAt(owner string, err error, now time.Time) {
-	if errors.Is(err, context.Canceled) {
+	sig := provider.Classify(err)
+	if sig.Canceled {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lastAttempt = now
-	if err == nil {
+	if sig.OK {
 		h.lastSuccess = now
 		h.consecFails = 0
 		delete(h.authRejects, owner) // their credentials demonstrably work
@@ -137,20 +136,18 @@ func (h *connectorHealth) noteAt(owner string, err error, now time.Time) {
 	}
 	h.consecFails++
 	switch {
-	case errors.Is(err, provider.ErrLoginFormUnrecognised), errors.Is(err, provider.ErrLoginOffHost):
+	case sig.LoginShape:
 		h.loginShapeAt = now
-	case errors.Is(err, provider.ErrLoginRejected):
+	case sig.LoginRejected:
 		if h.authRejects == nil {
 			h.authRejects = map[string]time.Time{}
 		}
 		h.authRejects[owner] = now
-	default:
-		if kind, _ := provider.FailureOf(err); kind == provider.FailUnexpected {
-			if h.unexpected == nil {
-				h.unexpected = map[string]time.Time{}
-			}
-			h.unexpected[owner] = now
+	case sig.Unexpected:
+		if h.unexpected == nil {
+			h.unexpected = map[string]time.Time{}
 		}
+		h.unexpected[owner] = now
 	}
 	h.pruneLocked(now)
 }

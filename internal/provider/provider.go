@@ -294,6 +294,70 @@ func DetailOf(err error) string {
 	return ""
 }
 
+// Signal is the single classification of a provider error, so the three consumers
+// that react to failures — the auth circuit (orikan), the per-owner backoff + fleet
+// breaker (parking.classify), and the connector-health surface (parking.noteAt) —
+// read the SAME predicates instead of each re-deriving them with their own
+// errors.Is / errors.As calls. It is a pure function of the error; a consumer
+// combines these facets with any context it alone holds (e.g. the authorize HTTP
+// status, which distinguishes an origin 5xx from an edge push-back).
+type Signal struct {
+	// OK: no error.
+	OK bool
+	// Canceled: our own context cancellation (a shutdown, a superseded or abandoned
+	// request). NOT a council signal — every consumer ignores it.
+	Canceled bool
+	// Expiry: the council served a genuine session-expiry, which is itself proof the
+	// upstream is serving.
+	Expiry bool
+	// Pushback is the edge push-back the fleet breaker owns (*Unavailable: 429/403/503
+	// or a WAF challenge), nil unless the error carries one. NOTE: the auth-circuit
+	// backoff error deliberately does NOT surface here — it wraps the ErrUnavailable
+	// sentinel but is not an *Unavailable struct, so errors.As misses it and it never
+	// feeds the fleet breaker. Preserve that when adding transient errors: only a real
+	// edge response should be modelled as *Unavailable.
+	Pushback *Unavailable
+	// LoginShape: the sign-in page was structurally unrecognised or pointed off-host —
+	// deterministic, owner-independent evidence the portal changed.
+	LoginShape bool
+	// LoginRejected: the portal answered the login but refused the credentials.
+	LoginRejected bool
+	// Unexpected: a response the provider could not parse (FailUnexpected) — a
+	// possible API change, alarmed on breadth across owners.
+	Unexpected bool
+}
+
+// Classify maps a provider error to its Signal. The facet precedence here mirrors
+// the switch each consumer previously ran inline, so consumers keep identical
+// behaviour by reading facets instead of re-testing the error.
+func Classify(err error) Signal {
+	if err == nil {
+		return Signal{OK: true}
+	}
+	var s Signal
+	switch {
+	case errors.Is(err, context.Canceled):
+		s.Canceled = true
+	case errors.Is(err, ErrSessionExpired):
+		s.Expiry = true
+	}
+	var u *Unavailable
+	if errors.As(err, &u) {
+		s.Pushback = u
+	}
+	switch {
+	case errors.Is(err, ErrLoginFormUnrecognised), errors.Is(err, ErrLoginOffHost):
+		s.LoginShape = true
+	case errors.Is(err, ErrLoginRejected):
+		s.LoginRejected = true
+	default:
+		if kind, _ := FailureOf(err); kind == FailUnexpected {
+			s.Unexpected = true
+		}
+	}
+	return s
+}
+
 // ---- request surfaces ----
 
 // Surface classifies an outbound request for traffic accounting and the login

@@ -365,14 +365,14 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 // so the clock counts only genuine wire attempts.
 func (c *Client) classify(owner string, permit breakerPermit, err error) {
 	c.health.note(owner, err)
-	var u *provider.Unavailable
+	sig := provider.Classify(err)
 	switch {
-	case err == nil:
+	case sig.OK:
 		c.clearPenalty(owner)
 		c.noteTenantSuccess(owner, permit) // closes the circuit only if this was the probe
-	case errors.As(err, &u):
-		c.recordPushback(u)
-		c.penalize(owner, u.RetryAfter)
+	case sig.Pushback != nil:
+		c.recordPushback(sig.Pushback)
+		c.penalize(owner, sig.Pushback.RetryAfter)
 	}
 }
 
