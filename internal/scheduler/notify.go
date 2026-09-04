@@ -174,6 +174,28 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 	})
 }
 
+// escalateFailure is the single gate every per-tick apply failure passes through:
+// it records one more consecutive-failure tick and, once the streak reaches
+// threshold, hands the outcome to notifyFailure — which then applies the episode
+// dedup (one soft + one urgent per episode, never a downgrade). Below the
+// threshold a lone failure is a blip and the household hears nothing. It returns
+// the new streak so the caller can drive its own backoff/park off the same count.
+//
+// The streak gate lives here, once, so a new failing branch cannot forget it; the
+// caller still owns the parts that legitimately differ by cause — the threshold,
+// the tier, the copy, and the retry policy. Two neighbours deliberately do NOT go
+// through here: reportTenantUnavailable speaks on a permanent condition with no
+// per-tick streak, so it calls notifyFailure directly; settle (episode close-out)
+// and reportUnresolvable (a schedule-config problem that opens no episode) are
+// deliberately outside the episode model and use notifyUser.
+func (s *Scheduler) escalateFailure(ctx context.Context, p model.Permit, threshold int, o notify.ApplyOutcome, tier failTier) int {
+	n := s.bumpFailStreak(ctx, p.ID)
+	if n >= threshold {
+		s.notifyFailure(ctx, p, o, tier)
+	}
+	return n
+}
+
 // notifyFailedDriver emails the driver of the car that could not be put on the
 // permit, if it is one of the owner's saved cars with a contact and the per-car
 // notify toggle on — the failure twin of notifyAddedDriver. Best effort, and
@@ -546,24 +568,16 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	// hit the tenant every minute forever. A refusal alarms at once and is PARKED:
 	// the portal has said no to this write and will keep saying no, so the permit
 	// is not attempted again until a user action (edit, re-link) clears it.
-	n := s.bumpFailStreak(ctx, p.ID)
-	threshold := failNotifyThreshold
 	// A refusal is parked (see parkRetry) and alarms at once; anything else backs
 	// off exponentially and alarms once the streak says it is not a blip. Whether
 	// the household actually hears about it is the episode's call (notifyFailure):
 	// one soft notice per episode per plate, whatever the cause does meanwhile.
+	threshold := failNotifyThreshold
 	if kind == parking.FailRejected {
 		threshold = 1
-		s.parkRetry(p.ID, want)
 		action += " p.stonn will not retry this change until you edit the schedule or re-link."
-	} else {
-		s.deferRetry(p.ID, n)
 	}
-	if n < threshold {
-		return
-	}
-
-	s.notifyFailure(ctx, p, notify.ApplyOutcome{
+	n := s.escalateFailure(ctx, p, threshold, notify.ApplyOutcome{
 		Owner:       p.Owner,
 		PermitLabel: permitLabel(p),
 		Reg:         want,
@@ -574,6 +588,13 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		Action:      action,
 		Transient:   kind != parking.FailRejected,
 	}, tierSoft)
+	// The retry policy is not gated by the notice threshold: a refusal is parked
+	// until a user action clears it, everything else backs off in the streak.
+	if kind == parking.FailRejected {
+		s.parkRetry(p.ID, want)
+	} else {
+		s.deferRetry(p.ID, n)
+	}
 }
 
 // describeFailure turns a failure classification into a plain-English reason and

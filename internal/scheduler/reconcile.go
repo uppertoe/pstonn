@@ -388,6 +388,12 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 					action = "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
 						"If " + last.Registration + " parked there during the booking, it was not covered."
 				}
+				// Deliberately notifyUser, NOT the episode model: this is the episode's
+				// one CLOSE-OUT — "the change you were waiting on went away and never
+				// landed" — sent once by construction, because settle closes the episode
+				// (below) right after. It reads failureNoticeSent (above) only to choose
+				// the "corrects the earlier notice" wording; its day key just dedups a
+				// repeat settle of the same plate the same day. See escalateFailure.
 				s.notifyUser(ctx, p, notify.ApplyOutcome{
 					Owner:       p.Owner,
 					PermitLabel: permitLabel(p),
@@ -437,6 +443,12 @@ func (s *Scheduler) clearUnscheduled(permitID int64) {
 // The registration on the row is the plate the permit is STILL showing, because
 // that is the fact the household needs: the car they think is covered is not, and
 // the car that is covered may not be there.
+//
+// Deliberately notifyUser, NOT the episode model (escalateFailure/notifyFailure):
+// nothing was attempted at the council — the schedule points at a car that no
+// longer exists — so this opens no failure episode. It is a "fix your schedule"
+// prompt, gated on entry into the state (noteUnscheduled) with its own once-a-day
+// cadence, not a per-tick apply failure.
 func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res model.Resolution) {
 	if !s.noteUnscheduled(p.ID, fmt.Sprintf("unresolved|%d|%s", res.VehicleID, model.NormPlate(p.ActiveRegistration))) {
 		return
@@ -696,7 +708,6 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// resume the moment the block lifts, rather than waiting out a backoff.
 		// fail_streak is shared with real failures — both mean "consecutive ticks we
 		// could not apply" — and a success clears it either way.
-		n := s.bumpFailStreak(ctx, p.ID)
 		// A CONFIRMED fleet block is not a blip: the portal is refusing OUR address,
 		// but the household can still reach the council themselves — so warn sooner
 		// and firmly (act now). An auth outage is different: the council's own sign-in
@@ -724,22 +735,21 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			action = "Nothing you need to do — p.stonn keeps trying and will apply your change automatically as soon as the council's system is back."
 		}
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
-		if n >= threshold {
-			// A confirmed block is the urgent tier ("act now to avoid a fine"); the
-			// rest is soft. The episode lets the urgent escalation through once even
-			// after a soft notice, and never lets a later soft notice (the breaker
-			// closing, a probe failing differently) re-tell what was already told.
-			// CouncilDown shapes the copy only — a copy flip is not a new event.
-			tier := tierSoft
-			if confirmed {
-				tier = tierUrgent
-			}
-			s.notifyFailure(ctx, p, notify.ApplyOutcome{
-				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
-				OK: false, CurrentReg: p.ActiveRegistration, CouncilDown: councilDown,
-				Reason: reason, Action: action, Transient: true, Urgent: confirmed,
-			}, tier)
+		// A confirmed block is the urgent tier ("act now to avoid a fine"); the rest
+		// is soft. The episode (escalateFailure -> notifyFailure) lets the urgent
+		// escalation through once even after a soft notice, and never lets a later
+		// soft notice (the breaker closing, a probe failing differently) re-tell what
+		// was already told. CouncilDown shapes the copy only — a copy flip is not a
+		// new event.
+		tier := tierSoft
+		if confirmed {
+			tier = tierUrgent
 		}
+		s.escalateFailure(ctx, p, threshold, notify.ApplyOutcome{
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
+			OK: false, CurrentReg: p.ActiveRegistration, CouncilDown: councilDown,
+			Reason: reason, Action: action, Transient: true, Urgent: confirmed,
+		}, tier)
 		return false
 	case errors.Is(err, parking.ErrNotCaptured):
 		// A tenant write endpoint returned "not captured": the API shape may have
@@ -776,15 +786,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// must not trip the multi-user-fail alarm.
 		reason := "p.stonn's sign-in to the council expired and signing back in hasn't succeeded yet, so your permit could not be updated."
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
-		if n := s.bumpFailStreak(ctx, p.ID); n >= sessionNotifyThreshold {
-			s.notifyFailure(ctx, p, notify.ApplyOutcome{
-				Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
-				OK: false, CurrentReg: p.ActiveRegistration,
-				Reason:    reason,
-				Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
-				Transient: true, Urgent: true,
-			}, tierUrgent)
-		}
+		s.escalateFailure(ctx, p, sessionNotifyThreshold, notify.ApplyOutcome{
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
+			OK: false, CurrentReg: p.ActiveRegistration,
+			Reason:    reason,
+			Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
+			Transient: true, Urgent: true,
+		}, tierUrgent)
 		s.deferRetry(p.ID, 3)
 		return true
 	default:
