@@ -587,8 +587,9 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
 	}
-	// Backfill tenant_id on rows that predate multi-tenant support: they are all
-	// the legacy single tenant's. Idempotent (only '' rows are touched).
+	// Backfill council_id (the column carrying the tenant scope) on rows that
+	// predate multi-tenant support: they are all the legacy single tenant's.
+	// Idempotent (only '' rows are touched).
 	for _, stmt := range []string{
 		`UPDATE council_session SET council_id = ? WHERE council_id = ''`,
 		`UPDATE permit SET council_id = ? WHERE council_id = ''`,
@@ -597,7 +598,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
 	}
-	// Rebuild `permit` if its uniqueness is still the global UNIQUE(tenant_permit_id):
+	// Rebuild `permit` if its uniqueness is still the global UNIQUE(council_permit_id):
 	// two registry' permit id spaces overlap, so the constraint must be per tenant.
 	// SQLite cannot change a constraint in place; redefine the table and copy the rows.
 	if scoped, err := s.permitUniqueIsScoped(); err != nil {
@@ -896,8 +897,9 @@ func (s *Store) permitUniqueIsScoped() (bool, error) {
 	return strings.Contains(strings.ToLower(sqlText), "unique(council_id, council_permit_id)"), nil
 }
 
-// rebuildPermitTable redefines permit with UNIQUE(tenant_id, tenant_permit_id),
-// preserving rows and ids. Tables that reference permit(id) (weekly_rule,
+// rebuildPermitTable redefines permit with UNIQUE(council_id, council_permit_id)
+// (the tenant-scoped key), preserving rows and ids. Tables that reference
+// permit(id) (weekly_rule,
 // override, apply_log, permit_notify, guest_grant) keep referencing "permit" by
 // name, which the renamed table satisfies; foreign keys are toggled off around
 // the DROP/RENAME per the SQLite table-redefinition guidance, and the migration
@@ -985,7 +987,7 @@ func (s *Store) rebuildBreakerTable() error {
 	return tx.Commit()
 }
 
-// sessionKeyIsScoped reports whether tenant_session is keyed by (owner, tenant_id).
+// sessionKeyIsScoped reports whether council_session is keyed by (owner, council_id).
 func (s *Store) sessionKeyIsScoped() (bool, error) {
 	var sqlText string
 	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'council_session'`).Scan(&sqlText)
@@ -995,7 +997,7 @@ func (s *Store) sessionKeyIsScoped() (bool, error) {
 	return strings.Contains(strings.ToLower(sqlText), "primary key (owner, council_id)"), nil
 }
 
-// rebuildSessionTable re-keys tenant_session by (owner, tenant_id), preserving
+// rebuildSessionTable re-keys council_session by (owner, council_id), preserving
 // rows and the columns the existing table has. Nothing references the table by
 // foreign key; foreign keys are toggled off around the DROP/RENAME as for the
 // other rebuilds, and the migration lock guarantees a single migrator.
