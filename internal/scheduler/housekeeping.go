@@ -28,6 +28,32 @@ func (s *Scheduler) safeSweep(ctx context.Context) {
 	s.sweepGuestRequests(ctx)
 }
 
+// Data-retention windows for the housekeeping sweep, gathered here so the app's
+// privacy posture is auditable in one place rather than scattered as inline
+// arithmetic. These are deliberately code constants, not env knobs: they encode a
+// privacy commitment, so a change should be a reviewed code change, not a
+// deploy-time override.
+const (
+	// decidedGuestRequestRetention bounds how long a decided printed-QR request row
+	// is kept. Visitor number plates are PII and the only reader (the holder's
+	// "recently decided" list) looks back 48h, so a week is already generous.
+	decidedGuestRequestRetention = 7 * 24 * time.Hour
+	// revokedRecipientRetention is how long a revoked guest link's recipient address
+	// is kept before it is forgotten — once revoked it can run nothing.
+	revokedRecipientRetention = 30 * 24 * time.Hour
+	// suppressionBounceRetention ages out bounce/unsubscribe suppressions; complaints
+	// are kept indefinitely (see store.PruneSuppressions).
+	suppressionBounceRetention = 2 * 365 * 24 * time.Hour
+	// confirmTokenRetention is a generous housekeeping cutoff for unclicked confirm
+	// tokens; the handler enforces the real, shorter TTL.
+	confirmTokenRetention = 60 * 24 * time.Hour
+	// logRetention is the shared window for the PII-bearing logs — apply log, override
+	// history, account change log, and the suppression diagnostics — kept for the
+	// dashboard's history rendering and no longer. store.ReferralInviteRetention
+	// matches it.
+	logRetention = 90 * 24 * time.Hour
+)
+
 // sweepGuestRequests runs periodic housekeeping on the keep-warm cadence:
 // pending printed-QR requests expire after an hour (a stale "approve this
 // plate?" must not be actionable days later, and abandoned scans drain out of
@@ -42,7 +68,7 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	}
 	// 7 days, not 30: the only reader (the holder's "recently decided" list) looks
 	// back 48 hours, so the rest was a visitor's number plate kept for nothing.
-	if _, err := s.store.PurgeDecidedGuestRequests(ctx, time.Now().Add(-7*24*time.Hour)); err != nil {
+	if _, err := s.store.PurgeDecidedGuestRequests(ctx, time.Now().Add(-decidedGuestRequestRetention)); err != nil {
 		log.Printf("scheduler: purge guest requests: %v", err)
 	}
 	// A decided request past its window no longer needs its poll secret.
@@ -50,34 +76,34 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 		log.Printf("scheduler: clear settled request nonces: %v", err)
 	}
 	// A revoked guest link's recipient address is no longer needed to run anything.
-	if _, err := s.store.ForgetRevokedRecipients(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
+	if _, err := s.store.ForgetRevokedRecipients(ctx, time.Now().Add(-revokedRecipientRetention)); err != nil {
 		log.Printf("scheduler: forget revoked recipients: %v", err)
 	}
 	// Bound the do-not-email list: bounces/unsubscribes age out after 2 years,
 	// complaints are kept (see PruneSuppressions), diagnostics cleared at 90 days.
 	if _, err := s.store.PruneSuppressions(ctx,
-		time.Now().Add(-2*365*24*time.Hour), time.Now().Add(-90*24*time.Hour)); err != nil {
+		time.Now().Add(-suppressionBounceRetention), time.Now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune suppressions: %v", err)
 	}
 	// An unclicked confirm token is a live capability; don't leave it lying about
 	// once its own TTL has passed. Generous cutoff: the handler enforces the real
 	// TTL, this is just housekeeping.
-	if _, err := s.store.ClearStaleConfirmTokens(ctx, time.Now().Add(-60*24*time.Hour)); err != nil {
+	if _, err := s.store.ClearStaleConfirmTokens(ctx, time.Now().Add(-confirmTokenRetention)); err != nil {
 		log.Printf("scheduler: clear stale confirm tokens: %v", err)
 	}
-	if _, err := s.store.PruneApplyLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
+	if _, err := s.store.PruneApplyLog(ctx, time.Now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune apply log: %v", err)
 	}
 	// Expired one-off/guest bookings: every guest activation writes one and a
 	// printed door QR is public, so this table would otherwise grow forever from
 	// anonymous traffic and slow every reconcile pass. 90 days keeps plenty of
 	// history for the dashboard's past-days rendering.
-	if _, err := s.store.PruneOverrides(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
+	if _, err := s.store.PruneOverrides(ctx, time.Now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune overrides: %v", err)
 	}
 	// The account change log names people and plates; keep it to the same 90-day
 	// window as the apply log rather than accumulating indefinitely.
-	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-90*24*time.Hour)); err != nil {
+	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune change log: %v", err)
 	}
 	// Referral invites name the inviter and a third party who never signed up;

@@ -370,11 +370,18 @@ const notifyRetryBackoff = 5 * time.Minute
 // the alert for the full throttle. Must be < systemAlertThrottle.
 const systemAlertRetry = 5 * time.Minute
 
+// DefaultWarmInterval is the keep-warm cadence New falls back to when Options
+// leaves WarmInterval unset (direct construction in tests; production always
+// passes config.Council.WarmInterval). Kept equal to config.DefaultWarmInterval
+// by TestWarmDefaultsAgree — scheduler stays config-free by design, so the value
+// is duplicated deliberately and pinned by a guard test rather than an import.
+const DefaultWarmInterval = 105 * time.Minute
+
 // New builds a Scheduler. loc is the timezone rosters are expressed in.
 func New(st *store.Store, tenant Tenant, loc *time.Location, opts Options) *Scheduler {
 	warm := opts.WarmInterval
 	if warm <= 0 {
-		warm = 105 * time.Minute
+		warm = DefaultWarmInterval
 	}
 	jf := opts.JitterFrac
 	if jf <= 0 {

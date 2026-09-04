@@ -5,7 +5,20 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/config"
+	"github.com/uppertoe/pstonn/internal/scheduler"
 )
+
+// TestWarmDefaultsAgree pins the keep-warm default that necessarily lives in two
+// decoupled places: config owns it for the warm-vs-idle validation at load time,
+// and the scheduler keeps a construction fallback (it stays config-free by design).
+// Importing across that boundary would risk an import cycle, so the value is
+// duplicated and this guard fails CI the moment the two diverge.
+func TestWarmDefaultsAgree(t *testing.T) {
+	if config.DefaultWarmInterval != scheduler.DefaultWarmInterval {
+		t.Fatalf("warm-interval defaults diverged: config=%s scheduler=%s",
+			config.DefaultWarmInterval, scheduler.DefaultWarmInterval)
+	}
+}
 
 // tenantOpDrain ties the rollover spread window to the governor rate, so raising
 // COUNCIL_GOV_RATE for a larger fleet shrinks the window with no separate tuning.

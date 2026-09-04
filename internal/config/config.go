@@ -184,6 +184,12 @@ type AppOIDCConfig struct {
 // Enabled reports whether OIDC app-login is configured.
 func (a AppOIDCConfig) Enabled() bool { return a.Issuer != "" }
 
+// DefaultWarmInterval is the COUNCIL_WARM_INTERVAL default. It lives here because
+// Load() needs it for the warm-vs-idle cross-field validation. The scheduler keeps
+// its own construction fallback of the same value (scheduler.DefaultWarmInterval);
+// the two are pinned equal by TestWarmDefaultsAgree so neither can drift silently.
+const DefaultWarmInterval = 105 * time.Minute
+
 // CouncilConfig describes how to talk to the council's IdentityServer + API.
 type CouncilConfig struct {
 	Issuer      string   // COUNCIL_ISSUER, the OIDC issuer (…/idm)
@@ -373,7 +379,7 @@ func Load() (*Config, error) {
 			Scopes:              strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
 			APIBase:             env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
 			SessionMaxAge:       time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
-			WarmInterval:        envDuration("COUNCIL_WARM_INTERVAL", 105*time.Minute),
+			WarmInterval:        envDuration("COUNCIL_WARM_INTERVAL", DefaultWarmInterval),
 			RolloverWindow:      envDurationOff("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
 			DriftInterval:       envDurationOff("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
 			IdleWindow:          envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
