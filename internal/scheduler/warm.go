@@ -54,7 +54,7 @@ func (s *Scheduler) noteWarmFailure(owner, tenant string) {
 	if s.warmRetryAt == nil { // lazily created: some tests construct a Scheduler literally
 		s.warmRetryAt = make(map[sessionKey]time.Time)
 	}
-	s.warmRetryAt[k] = time.Now().Add(s.warmRetryInterval())
+	s.warmRetryAt[k] = s.now().Add(s.warmRetryInterval())
 	s.warmMu.Unlock()
 }
 
@@ -224,7 +224,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 	if cs.Cookie == "" {
 		return
 	}
-	now := time.Now()
+	now := s.now()
 	// What THIS session's portal needs: whether an idle session lapses at all, and
 	// how long it may idle. The global options are the operator's estimate for the
 	// single-tenant deployment; the provider's declaration is per portal.
@@ -388,7 +388,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 func (s *Scheduler) warnNoReminderChannel() {
 	s.reminderWarnMu.Lock()
 	defer s.reminderWarnMu.Unlock()
-	now := time.Now()
+	now := s.now()
 	if now.Sub(s.reminderWarnAt) < time.Hour {
 		return
 	}

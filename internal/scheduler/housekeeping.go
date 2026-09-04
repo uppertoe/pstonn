@@ -61,54 +61,54 @@ const (
 // 30 days, the apply log is pruned to a 90-day window, and a daily consistent
 // DB snapshot is written for file-level backup tools.
 func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
-	if n, err := s.store.ExpireGuestRequests(ctx, time.Now().Add(-time.Hour)); err != nil {
+	if n, err := s.store.ExpireGuestRequests(ctx, s.now().Add(-time.Hour)); err != nil {
 		log.Printf("scheduler: expire guest requests: %v", err)
 	} else if n > 0 {
 		log.Printf("scheduler: expired %d stale guest request(s)", n)
 	}
 	// 7 days, not 30: the only reader (the holder's "recently decided" list) looks
 	// back 48 hours, so the rest was a visitor's number plate kept for nothing.
-	if _, err := s.store.PurgeDecidedGuestRequests(ctx, time.Now().Add(-decidedGuestRequestRetention)); err != nil {
+	if _, err := s.store.PurgeDecidedGuestRequests(ctx, s.now().Add(-decidedGuestRequestRetention)); err != nil {
 		log.Printf("scheduler: purge guest requests: %v", err)
 	}
 	// A decided request past its window no longer needs its poll secret.
-	if _, err := s.store.ClearSettledRequestNonces(ctx, time.Now()); err != nil {
+	if _, err := s.store.ClearSettledRequestNonces(ctx, s.now()); err != nil {
 		log.Printf("scheduler: clear settled request nonces: %v", err)
 	}
 	// A revoked guest link's recipient address is no longer needed to run anything.
-	if _, err := s.store.ForgetRevokedRecipients(ctx, time.Now().Add(-revokedRecipientRetention)); err != nil {
+	if _, err := s.store.ForgetRevokedRecipients(ctx, s.now().Add(-revokedRecipientRetention)); err != nil {
 		log.Printf("scheduler: forget revoked recipients: %v", err)
 	}
 	// Bound the do-not-email list: bounces/unsubscribes age out after 2 years,
 	// complaints are kept (see PruneSuppressions), diagnostics cleared at 90 days.
 	if _, err := s.store.PruneSuppressions(ctx,
-		time.Now().Add(-suppressionBounceRetention), time.Now().Add(-logRetention)); err != nil {
+		s.now().Add(-suppressionBounceRetention), s.now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune suppressions: %v", err)
 	}
 	// An unclicked confirm token is a live capability; don't leave it lying about
 	// once its own TTL has passed. Generous cutoff: the handler enforces the real
 	// TTL, this is just housekeeping.
-	if _, err := s.store.ClearStaleConfirmTokens(ctx, time.Now().Add(-confirmTokenRetention)); err != nil {
+	if _, err := s.store.ClearStaleConfirmTokens(ctx, s.now().Add(-confirmTokenRetention)); err != nil {
 		log.Printf("scheduler: clear stale confirm tokens: %v", err)
 	}
-	if _, err := s.store.PruneApplyLog(ctx, time.Now().Add(-logRetention)); err != nil {
+	if _, err := s.store.PruneApplyLog(ctx, s.now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune apply log: %v", err)
 	}
 	// Expired one-off/guest bookings: every guest activation writes one and a
 	// printed door QR is public, so this table would otherwise grow forever from
 	// anonymous traffic and slow every reconcile pass. 90 days keeps plenty of
 	// history for the dashboard's past-days rendering.
-	if _, err := s.store.PruneOverrides(ctx, time.Now().Add(-logRetention)); err != nil {
+	if _, err := s.store.PruneOverrides(ctx, s.now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune overrides: %v", err)
 	}
 	// The account change log names people and plates; keep it to the same 90-day
 	// window as the apply log rather than accumulating indefinitely.
-	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(-logRetention)); err != nil {
+	if _, err := s.store.PruneChangeLog(ctx, s.now().Add(-logRetention)); err != nil {
 		log.Printf("scheduler: prune change log: %v", err)
 	}
 	// Referral invites name the inviter and a third party who never signed up;
 	// same 90-day window as the other logs (store.ReferralInviteRetention).
-	if _, err := s.store.PruneReferralInvites(ctx, time.Now().Add(-store.ReferralInviteRetention)); err != nil {
+	if _, err := s.store.PruneReferralInvites(ctx, s.now().Add(-store.ReferralInviteRetention)); err != nil {
 		log.Printf("scheduler: prune referral invites: %v", err)
 	}
 	s.sweepOnboardNudges(ctx)
@@ -138,7 +138,7 @@ func (s *Scheduler) sweepOnboardNudges(ctx context.Context) {
 	if s.notifier == nil || !s.notifier.EmailAvailable() {
 		return
 	}
-	now := time.Now()
+	now := s.now()
 	owners, err := s.store.OnboardNudgeCandidates(ctx, now.Add(-s.nudgeLookback), now.Add(-s.nudgeAfter))
 	if err != nil {
 		log.Printf("scheduler: onboarding nudge candidates: %v", err)
@@ -171,7 +171,7 @@ func (s *Scheduler) sweepOnboardNudges(ctx context.Context) {
 // caller, so two snapshots cannot overlap. Its duration is still logged, as the
 // number an operator needs when something else in the process looks slow.
 func (s *Scheduler) maybeSnapshot(ctx context.Context) {
-	if s.snapshotPath == "" || time.Since(s.lastSnapshot) <= 24*time.Hour {
+	if s.snapshotPath == "" || s.now().Sub(s.lastSnapshot) <= 24*time.Hour {
 		return
 	}
 	// Don't retry a failing snapshot every housekeeping tick (15 min). Snapshot writes
@@ -181,14 +181,14 @@ func (s *Scheduler) maybeSnapshot(ctx context.Context) {
 	// (i.e. it failed), wait at least an hour before trying again. The daily cadence is
 	// unaffected while snapshots succeed, because success advances lastSnapshot and the
 	// 24h guard above dominates.
-	if !s.lastSnapshotAttempt.IsZero() && time.Since(s.lastSnapshotAttempt) < time.Hour {
+	if !s.lastSnapshotAttempt.IsZero() && s.now().Sub(s.lastSnapshotAttempt) < time.Hour {
 		return
 	}
-	s.lastSnapshotAttempt = time.Now()
+	s.lastSnapshotAttempt = s.now()
 	s.snapshotting.Store(true)
-	start := time.Now()
+	start := s.now()
 	err := s.store.Snapshot(ctx, s.snapshotPath)
-	took := time.Since(start)
+	took := s.now().Sub(start)
 	s.snapshotting.Store(false)
 	if err != nil {
 		log.Printf("scheduler: backup snapshot failed after %s: %v", took.Round(time.Millisecond), err)
@@ -199,7 +199,7 @@ func (s *Scheduler) maybeSnapshot(ctx context.Context) {
 				s.snapshotPath, took.Round(time.Millisecond), err))
 		return
 	}
-	s.lastSnapshot = time.Now()
+	s.lastSnapshot = s.now()
 	log.Printf("scheduler: wrote backup snapshot %s in %s", s.snapshotPath, took.Round(time.Millisecond))
 }
 
@@ -213,7 +213,7 @@ func (s *Scheduler) sweepFortnightNudges(ctx context.Context) {
 	if s.notifier == nil || !s.notifier.EmailAvailable() {
 		return
 	}
-	owners, err := s.store.FortnightNudgeCandidates(ctx, time.Now().Add(-fortnightNudgeAfter))
+	owners, err := s.store.FortnightNudgeCandidates(ctx, s.now().Add(-fortnightNudgeAfter))
 	if err != nil {
 		log.Printf("scheduler: fortnight nudge candidates: %v", err)
 		return

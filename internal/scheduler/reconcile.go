@@ -203,7 +203,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	// the tenant, slightly later convergence) rather than a narrower one.
 	s.fleetSize.Store(int64(len(permits)))
 
-	now := time.Now().In(s.loc)
+	now := s.now().In(s.loc)
 	stats := &passStats{failOwners: map[string]bool{}, unexpectedOwners: map[string]bool{}, busyOwners: map[string]bool{}}
 	// When many permits change at the same wall-clock boundary (a midnight/9am roster
 	// rollover), applying them back-to-back would be a burst from one IP that rate
@@ -502,7 +502,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// override whose StartsAt falls inside that window must be seen as started for
 	// the permit being processed now — otherwise the previous plate is (re)applied
 	// and only corrected next pass, leaving the wrong car on a live permit meanwhile.
-	now := time.Now().In(s.locOf(p.Owner, p.TenantID))
+	now := s.now().In(s.locOf(p.Owner, p.TenantID))
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
@@ -560,7 +560,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// behind the parking — checked before the deferral so the window is read
 	// with the target in hand, not blindly.
 	s.unparkIfTargetChanged(p.ID, want)
-	if s.retryDeferred(p.ID, time.Now()) {
+	if s.retryDeferred(p.ID, s.now()) {
 		return false // failing lately; inside its stretched retry window
 	}
 

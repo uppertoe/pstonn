@@ -47,10 +47,10 @@ func (s *Scheduler) noteDriftFailure(ctx context.Context, owner string, err erro
 	if s.driftInterval > 0 && backoff > s.driftInterval {
 		backoff = s.driftInterval
 	}
-	s.driftRetryAt[owner] = time.Now().Add(backoff)
+	s.driftRetryAt[owner] = s.now().Add(backoff)
 	var distinct int
 	if kind, _ := parking.FailureOf(err); kind == parking.FailUnexpected {
-		s.driftShape = append(pruneChurn(s.driftShape, time.Now()), churnEvent{owner, time.Now()})
+		s.driftShape = append(pruneChurn(s.driftShape, s.now()), churnEvent{owner, s.now()})
 		distinct = distinctOwners(s.driftShape)
 	}
 	s.driftMu.Unlock()
@@ -73,7 +73,7 @@ func (s *Scheduler) noteDriftSuccess(owner string) {
 func (s *Scheduler) noteDriftDeferred(owner string) {
 	s.driftMu.Lock()
 	delete(s.driftFails, owner)
-	s.driftRetryAt[owner] = time.Now().Add(s.driftThresholdFor(owner))
+	s.driftRetryAt[owner] = s.now().Add(s.driftThresholdFor(owner))
 	s.driftMu.Unlock()
 }
 
@@ -233,7 +233,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 	// the schedule over it at the other portal.
 	permits = slices.DeleteFunc(permits, func(p model.Permit) bool { return p.TenantID != tenantID })
 	drifted := false
-	now := time.Now()
+	now := s.now()
 	for i := range permits {
 		p := permits[i]
 		if p.Inactive(now, s.locOf(p.Owner, p.TenantID)) {
@@ -271,7 +271,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 			// fresh so a household whose plate never changes still gets the tick on
 			// a cold dashboard visit instead of a spinner (the dashboard's own touch
 			// only fires after its background read lands).
-			if e := s.store.TouchPermitConfirmed(ctx, p.ID, p.ActiveRegistration, time.Now()); e != nil {
+			if e := s.store.TouchPermitConfirmed(ctx, p.ID, p.ActiveRegistration, s.now()); e != nil {
 				log.Printf("scheduler: stamp confirmation for permit %s: %v", p.CouncilPermitID, e)
 			}
 			continue
@@ -359,7 +359,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 	if err != nil {
 		return
 	}
-	now := time.Now()
+	now := s.now()
 	for i := range managed {
 		p := managed[i]
 		if p.EndDate.IsZero() || p.ExpiryReminded {
@@ -397,7 +397,7 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	if prev == "" {
 		return
 	}
-	now := time.Now().In(s.locOf(p.Owner, p.TenantID))
+	now := s.now().In(s.locOf(p.Owner, p.TenantID))
 	overrides, err := s.store.ListOverrides(ctx, p.ID, now)
 	if err != nil {
 		return

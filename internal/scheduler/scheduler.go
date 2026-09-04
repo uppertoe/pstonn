@@ -155,6 +155,8 @@ type Options struct {
 type Scheduler struct {
 	store *store.Store
 
+	clock func() time.Time // injectable wall clock; nil = time.Now (see now())
+
 	// markDriftChecked indirects the drift checkpoint write. Production always uses the
 	// store; a test replaces it to make the write fail, which is the only way to reach
 	// the branch that decides whether a failed checkpoint may clear the backoff — and
@@ -452,6 +454,16 @@ func New(st *store.Store, tenant Tenant, loc *time.Location, opts Options) *Sche
 	return sc
 }
 
+// now returns the current time through the injectable clock, so tests can advance
+// it deterministically. A nil clock (production, and any direct construction) means
+// real wall-clock time.
+func (s *Scheduler) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
 // Kick requests an immediate reconcile (e.g. after a roster/override edit).
 // Non-blocking: a pending kick is coalesced.
 //
@@ -520,7 +532,7 @@ func (s *Scheduler) deferRetry(permitID int64, streak int) {
 		b = 30 * time.Minute
 	}
 	s.retryMu.Lock()
-	s.nextTry[permitID] = time.Now().Add(s.jittered(b))
+	s.nextTry[permitID] = s.now().Add(s.jittered(b))
 	s.retryMu.Unlock()
 }
 
@@ -541,7 +553,7 @@ func (s *Scheduler) deferRetry(permitID int64, streak int) {
 // the portal has never seen, and unparkIfTargetChanged lets it through.
 func (s *Scheduler) parkRetry(permitID int64, registration string) {
 	s.retryMu.Lock()
-	s.nextTry[permitID] = time.Now().Add(parkedRetry)
+	s.nextTry[permitID] = s.now().Add(parkedRetry)
 	if s.parkedFor == nil {
 		s.parkedFor = map[int64]string{} // literal-constructed test schedulers
 	}
@@ -692,8 +704,8 @@ func (s *Scheduler) Run(ctx context.Context) {
 	// that wedges (hangs before ever stamping anything). Without this seed they stay
 	// 0 and the watchdog's "no pass yet" guard would never fire — exactly the
 	// boot-time hang the dead-man's switch exists to catch.
-	s.lastReconcile.CompareAndSwap(0, time.Now().UnixNano())
-	s.lastProgress.CompareAndSwap(0, time.Now().UnixNano())
+	s.lastReconcile.CompareAndSwap(0, s.now().UnixNano())
+	s.lastProgress.CompareAndSwap(0, s.now().UnixNano())
 
 	// Join the helper loops before returning, so a caller that waits on Run can
 	// safely close the store afterwards (nothing is left mid-DB-call).
@@ -734,7 +746,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 // not when it bailed on a database read or panicked.
 func (s *Scheduler) safeReconcile(ctx context.Context) {
 	s.progress()
-	s.lastReconcileAttempt.Store(time.Now().UnixNano())
+	s.lastReconcileAttempt.Store(s.now().UnixNano())
 	completed := false
 	defer func() {
 		if r := recover(); r != nil {
@@ -744,7 +756,7 @@ func (s *Scheduler) safeReconcile(ctx context.Context) {
 			return
 		}
 		if completed {
-			s.lastReconcile.Store(time.Now().UnixNano())
+			s.lastReconcile.Store(s.now().UnixNano())
 		}
 	}()
 	completed = s.reconcileAll(ctx)
@@ -754,7 +766,7 @@ func (s *Scheduler) safeReconcile(ctx context.Context) {
 // pass and after each permit it considers, so "the loop is alive" is measured by
 // WORK DONE rather than by passes completed.
 func (s *Scheduler) progress() {
-	s.lastProgress.Store(time.Now().UnixNano())
+	s.lastProgress.Store(s.now().UnixNano())
 }
 
 // stallThreshold is how long the reconcile loop may go without touching a single
@@ -786,7 +798,7 @@ func (s *Scheduler) watchdog(ctx context.Context) {
 			if last == 0 {
 				continue // the loop has not started yet
 			}
-			age := time.Since(time.Unix(0, last))
+			age := s.now().Sub(time.Unix(0, last))
 			threshold := stallThreshold
 			if 5*s.interval > threshold {
 				threshold = 5 * s.interval // an unusually slow tick sets its own floor
@@ -825,7 +837,7 @@ func (s *Scheduler) systemAlertEvery(ctx context.Context, key, subject, body str
 	if retry <= 0 || retry >= throttle {
 		retry = systemAlertRetry
 	}
-	now := time.Now()
+	now := s.now()
 	s.alertMu.Lock()
 	if t, ok := s.lastAlert[key]; ok && now.Sub(t) < throttle {
 		s.alertMu.Unlock()
@@ -846,7 +858,7 @@ func (s *Scheduler) systemAlertEvery(ctx context.Context, key, subject, body str
 			return // leave the short window: the next call after `retry` re-sends
 		}
 		s.alertMu.Lock()
-		s.lastAlert[key] = time.Now() // delivered: hold the full throttle
+		s.lastAlert[key] = s.now() // delivered: hold the full throttle
 		s.alertMu.Unlock()
 	}()
 }

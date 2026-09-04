@@ -103,7 +103,7 @@ func distinctOwners(events []churnEvent) int {
 func (s *Scheduler) noteSessionExpiry(owner string) int {
 	s.churnMu.Lock()
 	defer s.churnMu.Unlock()
-	s.churnExpiry = append(pruneChurn(s.churnExpiry, time.Now()), churnEvent{owner, time.Now()})
+	s.churnExpiry = append(pruneChurn(s.churnExpiry, s.now()), churnEvent{owner, s.now()})
 	return distinctOwners(s.churnExpiry)
 }
 
@@ -111,7 +111,7 @@ func (s *Scheduler) noteSessionExpiry(owner string) int {
 func (s *Scheduler) noteReconnect(owner string) {
 	s.churnMu.Lock()
 	defer s.churnMu.Unlock()
-	s.churnReconn = append(pruneChurn(s.churnReconn, time.Now()), churnEvent{owner, time.Now()})
+	s.churnReconn = append(pruneChurn(s.churnReconn, s.now()), churnEvent{owner, s.now()})
 }
 
 // SessionChurn reports session-lifecycle activity over the last hour for /status:
@@ -121,7 +121,7 @@ func (s *Scheduler) noteReconnect(owner string) {
 func (s *Scheduler) SessionChurn() (expiries1h, reconnects1h, expiredOwners1h int) {
 	s.churnMu.Lock()
 	defer s.churnMu.Unlock()
-	now := time.Now()
+	now := s.now()
 	s.churnExpiry = pruneChurn(s.churnExpiry, now)
 	s.churnReconn = pruneChurn(s.churnReconn, now)
 	return len(s.churnExpiry), len(s.churnReconn), distinctOwners(s.churnExpiry)
@@ -163,7 +163,7 @@ func (s *Scheduler) enqueueReconnect(ctx context.Context, owner, tenantID string
 // set it (background discovery true, interactive false). It does NOT itself feed the
 // churn canary — enqueueReconnect does that for the counted path.
 func (s *Scheduler) queueReconnectItem(owner, tenantID string, gen int64, countsChurn bool) bool {
-	now := time.Now()
+	now := s.now()
 	key := sessionKey{owner, tenantID}
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
@@ -221,7 +221,7 @@ func (s *Scheduler) ReconnectActive(owner, tenantID string) bool {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
 	it, ok := s.reconnectQ[sessionKey{owner, tenantID}]
-	return ok && time.Since(it.queuedAt) < reconnectActiveWindow
+	return ok && s.now().Sub(it.queuedAt) < reconnectActiveWindow
 }
 
 // CancelReconnect drops any queued reconnect for owner, at EVERY tenant. Called
@@ -284,7 +284,7 @@ func (s *Scheduler) nextDueReconnect() (key sessionKey, item reconnectItem, wait
 	if !found {
 		return sessionKey{}, reconnectItem{}, 0, false
 	}
-	if now := time.Now(); item.next.After(now) {
+	if now := s.now(); item.next.After(now) {
 		return key, item, item.next.Sub(now), true
 	}
 	return key, item, 0, true
@@ -328,7 +328,7 @@ func (s *Scheduler) backoffReconnect(key sessionKey, attempted reconnectItem) {
 	if backoff > reconnectBackoffMax {
 		backoff = reconnectBackoffMax
 	}
-	it.next = time.Now().Add(backoff)
+	it.next = s.now().Add(backoff)
 	s.reconnectQ[key] = it
 	attempts := it.attempts
 	s.reconnectMu.Unlock()
@@ -342,7 +342,7 @@ func (s *Scheduler) backoffReconnect(key sessionKey, attempted reconnectItem) {
 func (s *Scheduler) ReconnectBacklog() (queued, due, oldestSeconds int) {
 	s.reconnectMu.Lock()
 	defer s.reconnectMu.Unlock()
-	now := time.Now()
+	now := s.now()
 	var oldest time.Time // earliest queuedAt — actual backlog age, not next-retry time
 	for _, it := range s.reconnectQ {
 		queued++

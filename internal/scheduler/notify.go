@@ -51,7 +51,7 @@ func (s *Scheduler) holdNotify(claim string) {
 	if s.notifyRetryAt == nil {
 		s.notifyRetryAt = map[string]time.Time{} // literal-constructed test schedulers
 	}
-	now := time.Now()
+	now := s.now()
 	for k, t := range s.notifyRetryAt {
 		if now.Sub(t) > time.Hour {
 			delete(s.notifyRetryAt, k)
@@ -363,7 +363,7 @@ func (s *Scheduler) warnDisplacedHow(ctx context.Context, p model.Permit, d mode
 		}
 		return false // undeliverable (or unknown): tell the account to pass it on
 	}
-	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, how, time.Now()); err != nil {
+	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, how, s.now()); err != nil {
 		log.Printf("scheduler: enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return false
 	}
@@ -428,7 +428,7 @@ func (s *Scheduler) logApply(ctx context.Context, permitID int64, reg, source, s
 // many visitors were exposed. Success keys stay undated; re-confirming an
 // identical success adds nothing.
 func (s *Scheduler) failureKeyDay(p model.Permit) string {
-	return time.Now().In(s.locOf(p.Owner, p.TenantID)).Format("2006-01-02")
+	return s.now().In(s.locOf(p.Owner, p.TenantID)).Format("2006-01-02")
 }
 
 // notifyUser delivers an apply outcome to the user with guaranteed-retry
@@ -466,7 +466,7 @@ func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify
 	// In-memory: a restart drops the claim, which is fine, the durable notified-key
 	// still dedups anything already delivered.
 	claim := fmt.Sprintf("%d|%s", p.ID, key)
-	if s.notifyHeld(claim, time.Now()) {
+	if s.notifyHeld(claim, s.now()) {
 		return // a recent attempt reached nobody, or not everyone; its retry is paced
 	}
 	if !s.claimNotify(claim) {
