@@ -73,6 +73,11 @@ using the service.
 *This section is the technical detail for developers and the curious — if you
 just want to use the site, the summary above is all you need.*
 
+> For the package map and the system's load-bearing invariants (the failure-
+> notification episode model, the two circuit breakers, the keep-warm/idle window
+> relationship, the dev-vs-production startup rules), see
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 **App sign-in** goes through a forward-auth layer (or the app's own OIDC): a
 one-time code sent to your email, so every account is tied to a verified
 address. There is no app password to store. See `internal/server` and
