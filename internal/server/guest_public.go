@@ -14,6 +14,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -658,10 +659,29 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestMenu(w, r, gc, permit, current, "", "")
 		return
 	}
-	// Non-transient: the council REFUSED the plate (FailRejected/FailUnexpected), not a
-	// sign-in problem. (NOTE: this copy still says "reconnect / try again", which is
-	// wrong for a rejection — flagged as a follow-up needing its own approved copy.)
-	s.renderGuestMenu(w, r, gc, permit, current, "", "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
+	// Non-transient: the council REFUSED the plate (FailRejected), or answered in a
+	// shape p.stonn could not read (FailUnexpected). Neither is a sign-in problem
+	// and neither will fix itself by trying again, so say what actually happened.
+	s.renderGuestMenu(w, r, gc, permit, current, "", guestRefusalMessage(err, reg, false))
+}
+
+// guestRefusalMessage words a non-transient failure for the visitor. A refusal
+// carries the council's own reason where the portal gave one ("Vehicle
+// Registration has invalid pattern") — the one thing that tells the visitor what
+// to fix. The plate is the visitor's own, so naming it is fine; the permit's
+// current plate is never disclosed here.
+func guestRefusalMessage(err error, plate string, restoring bool) string {
+	kind, _ := parking.FailureOf(err)
+	if kind != parking.FailRejected {
+		return "p.stonn got an unexpected answer from the council and hasn't changed the permit. Please ask the resident to check it."
+	}
+	if restoring {
+		return "The council wouldn't accept putting " + plate + " back, so nothing has changed. Please ask the resident to check the permit."
+	}
+	if d := provider.DetailOf(err); d != "" {
+		return "The council wouldn't accept " + plate + ": " + d + ". Nothing has changed on the permit — check the plate against the car, or ask the resident."
+	}
+	return "The council wouldn't accept " + plate + " on this permit, so nothing has changed. Check the plate against the car, or ask the resident."
 }
 
 // guestRevert restores the plate that was on the permit before this link's run
@@ -775,7 +795,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
 		return
 	}
-	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Couldn't update the permit right now. The account holder may need to reconnect their council login. Please try again shortly.")
+	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", guestRefusalMessage(err, target, true))
 }
 
 // guestFail reports a pre-resolution failure (bad origin, rate limit). For a

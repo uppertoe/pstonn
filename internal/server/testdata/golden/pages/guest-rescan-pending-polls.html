@@ -300,7 +300,7 @@ window.popClamp = window.popClamp || function (el) {
 <p class="gnow" style="margin-top:14px;text-align:center">Your request to use <span class="plate">GUEST1</span>:</p>
 <div aria-live="polite" style="text-align:center">
 
-<div id="reqstatus" hx-get="/g/req/4?n=nn" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="reqstatus" hx-get="/g/req/4?n=nn&fp=" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gspin"></div>
   <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
 </div>

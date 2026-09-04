@@ -67,6 +67,17 @@ type guestWaitView struct {
 	Nonce      string
 	Status     string // template-ready state: "pending" | "approved" | "applied" | "stalled" | "denied" | "expired" | "superseded" | "ended"
 	Until      string // set when approved
+	// FP fingerprints the state the 3s poll could change (status, plate, until).
+	// The poll echoes it; an unchanged state answers 204 so htmx swaps nothing —
+	// otherwise identical markup re-entered the aria-live region every tick and
+	// screen readers re-announced "Approved — putting X on the permit" endlessly.
+	FP string
+}
+
+// guestWaitFP is the fingerprint guestRequestStatus answers 204 against.
+func guestWaitFP(v guestWaitView) string {
+	sum := sha256.Sum256([]byte(v.Status + "|" + v.Plate + "|" + v.Until))
+	return hex.EncodeToString(sum[:6])
 }
 
 // guestReqView is one pending request in the holder's approvals queue.

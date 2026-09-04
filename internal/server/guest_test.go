@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
+	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -834,5 +836,87 @@ func TestGuestGrantLabelCap(t *testing.T) {
 	}
 	if !utf8.ValidString(got) {
 		t.Fatal("truncation split a multi-byte rune")
+	}
+}
+
+// TestGuestRefusalMessage: a refused plate is told as a refusal, with the
+// council's own reason where it gave one — never "reconnect / try again", which
+// was the sign-in wording and sent the visitor chasing the wrong fix.
+func TestGuestRefusalMessage(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       error
+		restoring bool
+		want      []string
+		never     []string
+	}{
+		{"refused with the portal's reason", provider.FailDetail(provider.FailRejected, provider.OpSetVehicle, "Vehicle Registration has invalid pattern", errors.New("400")), false,
+			[]string{"wouldn't accept ABC123: Vehicle Registration has invalid pattern", "Nothing has changed"}, []string{"reconnect", "try again"}},
+		{"refused, no reason", provider.Fail(provider.FailRejected, provider.OpSetVehicle, errors.New("400")), false,
+			[]string{"wouldn't accept ABC123 on this permit", "the plate against the car"}, []string{"reconnect"}},
+		{"unexpected shape", provider.Fail(provider.FailUnexpected, provider.OpSetVehicle, errors.New("?")), false,
+			[]string{"unexpected answer from the council", "hasn't changed the permit"}, []string{"reconnect", "wouldn't accept"}},
+		{"refused while restoring", provider.Fail(provider.FailRejected, provider.OpSetVehicle, errors.New("400")), true,
+			[]string{"wouldn't accept putting ABC123 back"}, []string{"reconnect"}},
+	}
+	for _, c := range cases {
+		got := guestRefusalMessage(c.err, "ABC123", c.restoring)
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: %q lacks %q", c.name, got, w)
+			}
+		}
+		for _, n := range c.never {
+			if strings.Contains(got, n) {
+				t.Errorf("%s: %q must not say %q", c.name, got, n)
+			}
+		}
+	}
+}
+
+// TestDoorQRPollAnswers204WhenNothingChanged: the visitor's wait page polls every
+// 3s into an aria-live region. Re-sending identical markup made screen readers
+// re-announce the state every tick; an unchanged fingerprint now answers 204 so
+// nothing is swapped, while a real change still renders.
+func TestDoorQRPollAnswers204WhenNothingChanged(t *testing.T) {
+	s := newGuestTestServer(t)
+	isolateGuestBounds(t)
+	_, _, raw := seedDoorQR(t, s, "owner@example.com", "Door")
+	first := s.postGuest("/g/"+raw, "203.0.113.11", "", url.Values{"plate": {"POLL123"}})
+	var remembered string
+	for _, c := range first.Result().Cookies() {
+		if c.Name == guestReqCookie {
+			remembered = c.Value
+		}
+	}
+	idStr, nonce, _ := strings.Cut(remembered, ".")
+	if nonce == "" {
+		t.Fatalf("no request cookie: %s", first.Body.String())
+	}
+	poll := func(fp string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/g/req/"+idStr+"?n="+nonce+"&fp="+fp, nil)
+		r.Host = "app.example.com"
+		r.RemoteAddr = "203.0.113.11:40000"
+		r.Header.Set("HX-Request", "true")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	// First poll (no fingerprint yet): renders, and hands back its own fingerprint.
+	w := poll("")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Waiting for the resident") {
+		t.Fatalf("first poll = %d %q", w.Code, w.Body.String())
+	}
+	m := regexp.MustCompile(`&fp=([0-9a-f]+)"`).FindStringSubmatch(w.Body.String())
+	if m == nil {
+		t.Fatalf("the rendered poller carries no fingerprint: %s", w.Body.String())
+	}
+	// Same state, echoed fingerprint: nothing to swap.
+	if w := poll(m[1]); w.Code != http.StatusNoContent || w.Body.Len() != 0 {
+		t.Fatalf("unchanged poll = %d %q, want 204 with an empty body", w.Code, w.Body.String())
+	}
+	// A stale fingerprint (state moved on) renders again.
+	if w := poll("deadbeef0000"); w.Code != http.StatusOK {
+		t.Fatalf("changed poll = %d, want 200", w.Code)
 	}
 }

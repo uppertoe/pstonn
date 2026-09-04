@@ -175,7 +175,7 @@
 {{/* approved, unconfirmed after a while — no spinner, but KEEP polling quietly so it
      still flips to "on the permit" if it lands (e.g. as a council outage clears)
      rather than freezing on this note until a manual refresh. */}}
-<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
   <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
 </div>
@@ -197,18 +197,18 @@
 {{/* approved, but the council's own system is down — honest rather than an
      optimistic spinner, and KEEPS polling so it flips to "on the permit" by itself
      once the council is back. */}}
-<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
   <p class="gresult">Approved &mdash; but the council&rsquo;s system is down right now, so <span class="plate">{{.Plate}}</span> may not be on the permit yet. p.stonn will put it on as soon as the council is back.</p>
 </div>
 {{else if eq .Status "approved"}}
 {{/* the resident said yes; keep polling until the council confirms the plate is on */}}
-<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gspin"></div>
   <p class="gresult" style="font-weight:500;color:var(--muted)">Approved &mdash; putting <span class="plate">{{.Plate}}</span> on the permit&hellip;</p>
 </div>
 {{else}}
-<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}" hx-trigger="every 3s" hx-swap="outerHTML">
+<div id="reqstatus" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML">
   <div class="gspin"></div>
   <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
 </div>

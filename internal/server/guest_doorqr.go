@@ -270,11 +270,19 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		log.Printf("guest poll %d: %v", id, err)
 		v = guestWaitView{ReqID: id, Nonce: nonce, Status: "pending"}
 	}
+	v.FP = guestWaitFP(v)
 	if !isHX(r) {
 		// A direct navigation (bookmark, or a browser that landed here after a
 		// network hiccup) gets the full wait page — with styling and the poller —
 		// not the bare fragment.
 		s.render(w, dashboardData{State: "guest-wait", Loc: s.cfg.DisplayLocation, Wait: &v})
+		return
+	}
+	// Unchanged since the state the poller is already showing: swap nothing. The
+	// element and its poller stay in place, so it still flips the moment the
+	// state does (guestLive does the same for the guest-link page).
+	if r.URL.Query().Get("fp") == v.FP {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if e := templates.ExecuteTemplate(w, "guest-req-status", v); e != nil {

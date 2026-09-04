@@ -858,6 +858,12 @@ func (s *Server) renderBuf(w http.ResponseWriter, data dashboardData) (*bytes.Bu
 		data.tenant = &cv
 	}
 	data.BaseURL = s.cfg.PublicBaseURL
+	// The visitor wait page's poller echoes a fingerprint of the state it shows;
+	// stamp it here so every path that renders the page (first scan, re-scan, a
+	// direct visit to the poll URL) hands the poller one.
+	if data.Wait != nil && data.Wait.FP == "" {
+		data.Wait.FP = guestWaitFP(*data.Wait)
+	}
 	data.Title, data.Description, data.CanonicalPath = seoFor(data.State, data.Tenant())
 	data.JSONLD = jsonLDFor(data.State, data.BaseURL, data.Tenant())
 	if data.Guide != nil {
