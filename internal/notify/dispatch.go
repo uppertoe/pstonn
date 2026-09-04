@@ -203,11 +203,42 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to, tenantID string, 
 // outbox instead of dropped. Enqueues ONE message per account member, each
 // honouring that member's own channels + failures-only, and dedups per member so
 // a repeated activation of the same plate doesn't double-notify anyone.
-func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
-	dels, err := s.accountDeliveries(ctx, o.Owner)
+// fanoutEnqueue delivers one per-member message to each account member on the
+// channels that member enabled, returning how many members were enqueued. build(d)
+// returns the message for member d — with its Recipients already set if the caller
+// wants this member emailed (the email rule differs by notification type, so the
+// caller owns it) — and ok=false to skip the member (a mute the caller owns). This
+// helper adds the member's ntfy topic when push is enabled, skips a member left
+// with no reachable channel, and enqueues, stopping on the first enqueue error. It
+// is the shared spine of the enqueue-one-combined-message notifications; callers
+// that send ntfy immediately, split email/push into separate messages, or
+// accumulate per-member errors keep their own loop.
+func (s *Service) fanoutEnqueue(ctx context.Context, owner string, build func(d memberPref) (outMessage, bool)) (int, error) {
+	dels, err := s.accountDeliveries(ctx, owner)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	n := 0
+	for _, d := range dels {
+		m, ok := build(d)
+		if !ok {
+			continue
+		}
+		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
+			m.NtfyTopic = d.pref.NtfyTopic
+		}
+		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
+			continue // this member has no reachable channel
+		}
+		if err := s.enqueueSplit(ctx, m); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	c := s.tenantOf(ctx, o.Owner, o.TenantID)
 	subject, body, priority, tags := composeApply(o, c.Links.Portal)
 	if s.appURL != "" {
@@ -215,9 +246,9 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	}
 	body += s.firstApplyLine(ctx, o)
 	now := time.Now()
-	for _, d := range dels {
-		if o.OK && d.pref.FailuresOnly && o.fromSchedule() && !o.ResolvesFailure {
-			continue
+	_, err := s.fanoutEnqueue(ctx, o.Owner, func(d memberPref) (outMessage, bool) {
+		if o.mutedByFailuresOnly(d.pref) {
+			return outMessage{}, false
 		}
 		m := outMessage{
 			Account: o.Owner,
@@ -231,17 +262,9 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 		if s.emailWanted(d.pref, o) {
 			m.Recipients = []string{d.email}
 		}
-		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
-			m.NtfyTopic = d.pref.NtfyTopic
-		}
-		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
-			continue // this member has no reachable channel
-		}
-		if err := s.enqueueSplit(ctx, m); err != nil {
-			return err
-		}
-	}
-	return nil
+		return m, true
+	})
+	return err
 }
 
 // NotifyApply tells everyone on the account about an apply outcome, each by the
@@ -267,7 +290,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	var seenKeys []string // every reached-memory key consulted by this delivery
 	now := time.Now()
 	for _, d := range dels {
-		if o.OK && d.pref.FailuresOnly && o.fromSchedule() && !o.ResolvesFailure {
+		if o.mutedByFailuresOnly(d.pref) {
 			continue
 		}
 		wantEmail := s.emailWanted(d.pref, o)
@@ -666,10 +689,6 @@ func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, p
 // skipped (it is information, not a fault). Durable via the outbox, deduped per
 // member, permit and plate.
 func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permitLabel, plate string) error {
-	dels, err := s.accountDeliveries(ctx, owner)
-	if err != nil {
-		return err
-	}
 	c := s.tenantOf(ctx, owner, tenantID)
 	var subject, body string
 	if plate == "" {
@@ -683,9 +702,9 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permi
 		body += "\n\n" + s.appURL
 	}
 	now := time.Now()
-	for _, d := range dels {
+	_, err := s.fanoutEnqueue(ctx, owner, func(d memberPref) (outMessage, bool) {
 		if d.pref.FailuresOnly {
-			continue
+			return outMessage{}, false
 		}
 		m := outMessage{
 			Account: owner, Subject: subject, Body: body,
@@ -697,17 +716,9 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permi
 		if d.pref.EmailEnabled {
 			m.Recipients = []string{d.email}
 		}
-		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
-			m.NtfyTopic = d.pref.NtfyTopic
-		}
-		if len(m.Recipients) == 0 && m.NtfyTopic == "" {
-			continue
-		}
-		if err := s.enqueueSplit(ctx, m); err != nil {
-			return err
-		}
-	}
-	return nil
+		return m, true
+	})
+	return err
 }
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a

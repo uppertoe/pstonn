@@ -104,6 +104,14 @@ func (o ApplyOutcome) actionNeeded() bool { return !o.OK && (!o.Transient || o.U
 // with routine confirmations off.
 func (o ApplyOutcome) fromSchedule() bool { return o.Source == "roster" || o.Source == "override" }
 
+// mutedByFailuresOnly reports whether a member who asked to hear about problems
+// only should be spared this outcome: a successful, household-scheduled apply that
+// is not itself the resolution of a prior failure they were told about. The single
+// source of the rule NotifyApply and EnqueueApply both apply per member.
+func (o ApplyOutcome) mutedByFailuresOnly(pref store.NotifyPref) bool {
+	return o.OK && pref.FailuresOnly && o.fromSchedule() && !o.ResolvesFailure
+}
+
 // emailWanted decides whether this member's verified address gets the outcome.
 // Email-off means "no routine confirmations", never "no safety alerts": an
 // action-needed failure ("change the plate yourself now or someone gets a fine")
