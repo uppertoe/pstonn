@@ -158,6 +158,54 @@ type Server struct {
 	// renameAlertOnce paces the "council may have renamed permit types" operator
 	// alert (see renderPicker): systemic, so once per process is enough.
 	renameAlertOnce sync.Once
+	// routes records every func route registered by Handler with the access guard
+	// it sits behind, so the guard choice is data a test can assert over rather than
+	// a property re-derived by reading Handler by eye. Rebuilt on each Handler call.
+	// See handle and TestMutatingRoutesAreGuarded.
+	routes []routeInfo
+}
+
+// guardKind tags a route with the access wrapper Handler registers it behind.
+type guardKind int
+
+const (
+	// guardPublic applies no auth wrapper: truly public pages, routes whose auth is
+	// a signed token or an internal bearer check (/status), and handlers the caller
+	// has already wrapped (publicGuest, throttlePerIP). CSRF-exempt by design.
+	guardPublic guardKind = iota
+	// guardUser is withUser: signed in, with the CSRF same-origin check on mutations,
+	// but no terms-consent gate — for the actions that must work before/around consent
+	// (accept/decline terms, answer an invite, leave/unlink/delete).
+	guardUser
+	// guardConsent is withConsent: guardUser plus the terms-acceptance gate. The
+	// default for any route that stores or changes account data.
+	guardConsent
+	// guardAdmin is requireAdmin: signed in and in the admin group.
+	guardAdmin
+)
+
+type routeInfo struct {
+	methodPattern string
+	guard         guardKind
+}
+
+// handle registers one func route and records its guard. Centralising the
+// guard→wrapper mapping means the wrapper can never disagree with the recorded
+// tag the tests assert over. guardPublic passes the handler through untouched, so
+// a caller may hand it a handler it has already wrapped (publicGuest / throttle).
+func (s *Server) handle(mux *http.ServeMux, methodPattern string, guard guardKind, h http.HandlerFunc) {
+	s.routes = append(s.routes, routeInfo{methodPattern, guard})
+	switch guard {
+	case guardUser:
+		h = s.withUser(h)
+	case guardConsent:
+		h = s.withConsent(h)
+	case guardAdmin:
+		h = s.requireAdmin(h)
+	case guardPublic:
+		// no wrapper: public, token/bearer-authenticated, or already wrapped
+	}
+	mux.HandleFunc(methodPattern, h)
 }
 
 // maxConcurrentGuest is how many public guest requests may be in flight at once.
@@ -258,10 +306,14 @@ func (s *Server) throttlePerIP(rl *rateLimiter, h http.HandlerFunc) http.Handler
 	}
 }
 
-// Handler builds the routed, identity-aware http.Handler.
+// Handler builds the routed, identity-aware http.Handler. Every func route is
+// registered through s.handle with an explicit guardKind, so the access wrapper
+// each one sits behind is recorded data (see s.routes) that the tests assert over
+// rather than a property re-derived by reading this method line by line.
 func (s *Server) Handler() http.Handler {
+	s.routes = s.routes[:0]
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", s.health)
+	s.handle(mux, "GET /healthz", guardPublic, s.health)
 	mux.Handle("GET /static/app.css", cacheStatic(http.HandlerFunc(serveAppCSS)))
 	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(staticSub))))
 
@@ -270,13 +322,13 @@ func (s *Server) Handler() http.Handler {
 		// pending authorization and sweeps expired ones; Callback consumes one), so
 		// they are throttled like every other public route rather than left as the
 		// one unbounded path onto the shared SQLite connection.
-		mux.HandleFunc("GET /auth/login", s.throttlePerIP(s.authLogin, s.auth.Login))
-		mux.HandleFunc("GET /auth/callback", s.throttlePerIP(s.authLogin, s.auth.Callback))
+		s.handle(mux, "GET /auth/login", guardPublic, s.throttlePerIP(s.authLogin, s.auth.Login))
+		s.handle(mux, "GET /auth/callback", guardPublic, s.throttlePerIP(s.authLogin, s.auth.Callback))
 		// Logout stays a GET (it is linked, not a form) but requires a same-origin
 		// Origin/Referer: without it any third-party page (or a link prefetcher)
 		// could embed /auth/logout and forcibly sign users out. App pages send a
 		// Referer under our same-origin Referrer-Policy, so real clicks pass.
-		mux.HandleFunc("GET /auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		s.handle(mux, "GET /auth/logout", guardPublic, func(w http.ResponseWriter, r *http.Request) {
 			if !sameOrigin(r) {
 				s.message(w, http.StatusForbidden, "Sign out using the link inside the app.")
 				return
@@ -285,133 +337,135 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 
-	mux.HandleFunc("POST /terms/accept", s.withUser(s.acceptTerms))
-	mux.HandleFunc("POST /terms/decline", s.withUser(s.declineTerms))
-	mux.HandleFunc("POST /tenant/link", s.withConsent(s.tenantLink))
-	mux.HandleFunc("POST /tenant/select", s.withConsent(s.tenantSelect))
-	mux.HandleFunc("GET /tenant/connect", s.withUser(s.connectArea))
-	mux.HandleFunc("POST /tenant/unlink", s.withUser(s.tenantUnlink)) // allow leaving without re-consent
-	mux.HandleFunc("POST /tenant/forget-password", s.withUser(s.tenantForgetPassword))
-	mux.HandleFunc("POST /account/delete", s.withUser(s.accountDelete)) // allow leaving without re-consent
-	mux.HandleFunc("POST /account/members", s.withConsent(s.addMember))
-	mux.HandleFunc("POST /account/members/remove", s.withConsent(s.removeMember))
-	mux.HandleFunc("POST /account/leave", s.withUser(s.leaveAccount)) // secondary can always leave
+	s.handle(mux, "POST /terms/accept", guardUser, s.acceptTerms)
+	s.handle(mux, "POST /terms/decline", guardUser, s.declineTerms)
+	s.handle(mux, "POST /tenant/link", guardConsent, s.tenantLink)
+	s.handle(mux, "POST /tenant/select", guardConsent, s.tenantSelect)
+	s.handle(mux, "GET /tenant/connect", guardUser, s.connectArea)
+	s.handle(mux, "POST /tenant/unlink", guardUser, s.tenantUnlink) // allow leaving without re-consent
+	s.handle(mux, "POST /tenant/forget-password", guardUser, s.tenantForgetPassword)
+	s.handle(mux, "POST /account/delete", guardUser, s.accountDelete) // allow leaving without re-consent
+	s.handle(mux, "POST /account/members", guardConsent, s.addMember)
+	s.handle(mux, "POST /account/members/remove", guardConsent, s.removeMember)
+	s.handle(mux, "POST /account/leave", guardUser, s.leaveAccount) // secondary can always leave
 	// Answering an invitation is the invited person's own consent step, and it must
 	// stay reachable before they have accepted anything — so withUser, not
 	// withConsent: a pending invite grants no access, and declining one should never
 	// require agreeing to terms first.
-	mux.HandleFunc("POST /account/invite/accept", s.withUser(s.acceptInvite))
-	mux.HandleFunc("POST /account/invite/decline", s.withUser(s.declineInvite))
-	mux.HandleFunc("GET /schedule/legend", s.withConsent(s.legendFragment))
-	mux.HandleFunc("POST /notifications", s.withConsent(s.saveNotify))
-	mux.HandleFunc("POST /notifications/resume-email", s.withConsent(s.resumeEmail))
-	mux.HandleFunc("POST /notifications/regen-topic", s.withConsent(s.regenTopic))
-	mux.HandleFunc("POST /notifications/test", s.withConsent(s.testNotify))
-	mux.HandleFunc("POST /notifications/test-push", s.withConsent(s.testPush))
-	mux.HandleFunc("GET /notifications/ntfy-status", s.withConsent(s.ntfyStatus))
+	s.handle(mux, "POST /account/invite/accept", guardUser, s.acceptInvite)
+	s.handle(mux, "POST /account/invite/decline", guardUser, s.declineInvite)
+	s.handle(mux, "GET /schedule/legend", guardConsent, s.legendFragment)
+	s.handle(mux, "POST /notifications", guardConsent, s.saveNotify)
+	s.handle(mux, "POST /notifications/resume-email", guardConsent, s.resumeEmail)
+	s.handle(mux, "POST /notifications/regen-topic", guardConsent, s.regenTopic)
+	s.handle(mux, "POST /notifications/test", guardConsent, s.testNotify)
+	s.handle(mux, "POST /notifications/test-push", guardConsent, s.testPush)
+	s.handle(mux, "GET /notifications/ntfy-status", guardConsent, s.ntfyStatus)
 	// Public, token-only: the Confirm button on a test push, posted by the ntfy app
 	// from the phone (no session). Must be listed as public at the proxy.
-	mux.HandleFunc("POST /ntfy/confirm/{token}", s.ntfyConfirm)
+	s.handle(mux, "POST /ntfy/confirm/{token}", guardPublic, s.ntfyConfirm)
 	// Public, token-only: the renewal-confirm link from the reminder email.
-	mux.HandleFunc("GET /tenant/confirm", s.tenantConfirm)
+	s.handle(mux, "GET /tenant/confirm", guardPublic, s.tenantConfirm)
 	// The renewal-confirm link is in emails already sent under the old path; keep it answering.
-	mux.HandleFunc("GET /council/confirm", s.tenantConfirm)
-	mux.HandleFunc("POST /tenant/confirm", s.tenantConfirmApply)
-	mux.HandleFunc("POST /council/confirm", s.tenantConfirmApply)
+	s.handle(mux, "GET /council/confirm", guardPublic, s.tenantConfirm)
+	s.handle(mux, "POST /tenant/confirm", guardPublic, s.tenantConfirmApply)
+	s.handle(mux, "POST /council/confirm", guardPublic, s.tenantConfirmApply)
 
 	// Public, signed-token: unsubscribe. GET confirms, POST acts (RFC 8058
 	// one-click). No login — most recipients have no account.
-	mux.HandleFunc("GET /u/{addr}/{token}", s.unsubscribePage)
-	mux.HandleFunc("POST /u/{addr}/{token}", s.unsubscribeApply)
+	s.handle(mux, "GET /u/{addr}/{token}", guardPublic, s.unsubscribePage)
+	s.handle(mux, "POST /u/{addr}/{token}", guardPublic, s.unsubscribeApply)
 	// No-sign-in guest-request decide links from the notification email. Public
 	// like /u/: the signed token is the authentication. Must be listed in the
 	// Caddy @public matcher or the gateway bounces it to the login page.
-	mux.HandleFunc("GET /r/{id}/{addr}/{token}", s.guestDecidePage)
-	mux.HandleFunc("POST /r/{id}/{addr}/{token}", s.guestDecideApply)
+	s.handle(mux, "GET /r/{id}/{addr}/{token}", guardPublic, s.guestDecidePage)
+	s.handle(mux, "POST /r/{id}/{addr}/{token}", guardPublic, s.guestDecideApply)
 
 	// Public, signature-verified: SES bounce/complaint events via SNS. Registered
 	// only when a topic ARN is configured, so an unwired deployment 404s rather
 	// than exposing an idle handler. SNS cannot send a bearer token, so trust
 	// comes from the message signature + topic ARN (see sesHook).
 	if s.cfg.SESHookEnabled() {
-		mux.HandleFunc("POST /hooks/ses", s.sesHook)
+		s.handle(mux, "POST /hooks/ses", guardPublic, s.sesHook)
 	}
 
 	// Public, token-only: the guest-pass activation link. GET renders a menu with
-	// NO side effects (scanner/prefetch-safe); POST performs the activation.
-	mux.HandleFunc("GET /g/{token}", s.publicGuest(s.guestPage))
+	// NO side effects (scanner/prefetch-safe); POST performs the activation. The
+	// handlers are pre-wrapped with publicGuest (concurrency cap + read throttle),
+	// so they register as guardPublic.
+	s.handle(mux, "GET /g/{token}", guardPublic, s.publicGuest(s.guestPage))
 	// Literal "manifest" first segment so it can't clash with /g/req/{id} (a
 	// /g/{token}/manifest.webmanifest would overlap it and panic the mux). Stays
 	// under /g/* so the public Caddy matcher covers it.
-	mux.HandleFunc("GET /g/manifest/{token}", s.publicGuest(s.guestManifest))
-	mux.HandleFunc("POST /g/{token}", s.publicGuest(s.guestActivate))
-	mux.HandleFunc("POST /g/{token}/revert", s.publicGuest(s.guestRevert))
-	mux.HandleFunc("GET /g/live/{token}", s.publicGuest(s.guestLive))
+	s.handle(mux, "GET /g/manifest/{token}", guardPublic, s.publicGuest(s.guestManifest))
+	s.handle(mux, "POST /g/{token}", guardPublic, s.publicGuest(s.guestActivate))
+	s.handle(mux, "POST /g/{token}/revert", guardPublic, s.publicGuest(s.guestRevert))
+	s.handle(mux, "GET /g/live/{token}", guardPublic, s.publicGuest(s.guestLive))
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
-	mux.HandleFunc("GET /g/req/{id}", s.publicGuest(s.guestRequestStatus))
+	s.handle(mux, "GET /g/req/{id}", guardPublic, s.publicGuest(s.guestRequestStatus))
 
-	mux.HandleFunc("GET /{$}", s.landing) // public, not behind forward-auth
+	s.handle(mux, "GET /{$}", guardPublic, s.landing) // public, not behind forward-auth
 	// The landing page's Sign in button. A dedicated path, forward-auth gated at
 	// the edge, that only ever bounces onward to the app: the button used to link
 	// to /schedule, and when the edge started sending anonymous /schedule to the
 	// landing page (shared-link hygiene) every sign-in silently looped back to the
 	// landing page for two days (2026-08-28..30). A path whose one job is "start
 	// signing in" cannot be caught by a rule about shared app URLs.
-	mux.HandleFunc("GET /signin", s.signin)
+	s.handle(mux, "GET /signin", guardPublic, s.signin)
 	// Catch-all 404: anything no route claims gets the styled message page
 	// instead of the mux's bare text. Registered at "/" (the landing owns the
 	// exact root via /{$}). Known trade: a wrong-METHOD request on a real path
 	// now lands here as a 404 rather than the mux's automatic 405 — nothing
 	// machine-facing relies on 405s, and a person sees the same "nothing here".
-	mux.HandleFunc("/", s.notFound)
-	mux.HandleFunc("GET /security", s.security)             // public
-	mux.HandleFunc("GET /how", s.how)                       // public
-	mux.HandleFunc("GET /faq", s.faq)                       // public
-	mux.HandleFunc("GET /guide/{slug}", s.guide)            // public question pages
-	mux.HandleFunc("GET /robots.txt", s.robotsTxt)          // public (SEO)
-	mux.HandleFunc("GET /sitemap.xml", s.sitemapXML)        // public (SEO)
-	mux.HandleFunc("GET /favicon.ico", s.faviconICO)        // public
-	mux.HandleFunc("GET /site.webmanifest", s.siteManifest) // public
-	mux.HandleFunc("GET /contact", s.contactPage)           // public
-	mux.HandleFunc("POST /contact", s.submitContact)        // public, rate-limited
-	mux.HandleFunc("GET /schedule", s.withUser(s.schedule)) // appShell gates internally too; wrapped for uniformity with the other app pages
-	mux.HandleFunc("GET /vehicles", s.withUser(s.vehiclesPage))
-	mux.HandleFunc("GET /activity", s.withUser(s.activityPage))
-	mux.HandleFunc("GET /settings", s.withUser(s.settingsPage))
-	mux.HandleFunc("GET /share", s.withConsent(s.sharePage))
-	mux.HandleFunc("GET /share/card", s.withConsent(s.shareCard))
-	mux.HandleFunc("POST /share/invite", s.withConsent(s.sendReferral))
-	mux.HandleFunc("GET /admin", s.requireAdmin(s.adminPage))
-	mux.HandleFunc("GET /status", s.statusJSON) // machine watchdog; bearer-token gated
-	mux.HandleFunc("GET /permits/new", s.withUser(s.pickerPage))
-	mux.HandleFunc("GET /permits/{id}/card", s.withConsent(s.permitCard))
-	mux.HandleFunc("GET /guests", s.withUser(s.guestsPage))
-	mux.HandleFunc("GET /guests/{id}/edit", s.withUser(s.editGuestGrant))
-	mux.HandleFunc("POST /guests", s.withConsent(s.createGuestGrant))
-	mux.HandleFunc("POST /guests/qr", s.withConsent(s.showVisitorQR))
-	mux.HandleFunc("POST /guests/printed", s.withConsent(s.showPrintedQR))
-	mux.HandleFunc("GET /guests/door/{id}/view", s.withConsent(s.viewDoorQR))
-	mux.HandleFunc("POST /guests/door/{id}/revoke", s.withConsent(s.revokeDoorQR))
-	mux.HandleFunc("POST /guests/requests/{id}/approve", s.withConsent(s.approveGuestRequest))
-	mux.HandleFunc("POST /guests/requests/{id}/deny", s.withConsent(s.denyGuestRequest))
-	mux.HandleFunc("POST /guests/{id}", s.withConsent(s.updateGuestGrant))
-	mux.HandleFunc("POST /guests/toggle", s.withConsent(s.toggleGuests))
-	mux.HandleFunc("POST /guests/{id}/delete", s.withConsent(s.deleteGuestGrant))
-	mux.HandleFunc("POST /guests/{id}/resend", s.withConsent(s.resendGuestLink))
-	mux.HandleFunc("POST /guests/tokens/{tid}/revoke", s.withConsent(s.revokeGuestToken))
-	mux.HandleFunc("POST /vehicles", s.withConsent(s.addVehicle))
-	mux.HandleFunc("POST /vehicles/{id}/delete", s.withConsent(s.deleteVehicle))
-	mux.HandleFunc("POST /vehicles/{id}/email", s.withConsent(s.setVehicleEmail))
-	mux.HandleFunc("POST /vehicles/{id}/notify", s.withConsent(s.setVehicleNotify))
-	mux.HandleFunc("POST /permits", s.withConsent(s.addPermit))
-	mux.HandleFunc("POST /permits/{id}/delete", s.withConsent(s.deletePermit))
-	mux.HandleFunc("POST /permits/{id}/name", s.withConsent(s.renamePermit))
-	mux.HandleFunc("POST /permits/{id}/rules", s.withConsent(s.setRule))
-	mux.HandleFunc("POST /permits/{id}/copy-schedule", s.withConsent(s.copySchedule))
-	mux.HandleFunc("POST /permits/{id}/copy-offer/dismiss", s.withConsent(s.dismissCopyOffer))
-	mux.HandleFunc("POST /permits/{id}/clear", s.withConsent(s.clearPermit))
-	mux.HandleFunc("POST /permits/{id}/override", s.withConsent(s.addOverride))
-	mux.HandleFunc("POST /permits/{id}/overrides/{oid}/delete", s.withConsent(s.deleteOverride))
+	s.handle(mux, "/", guardPublic, s.notFound)
+	s.handle(mux, "GET /security", guardPublic, s.security)             // public
+	s.handle(mux, "GET /how", guardPublic, s.how)                       // public
+	s.handle(mux, "GET /faq", guardPublic, s.faq)                       // public
+	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)            // public question pages
+	s.handle(mux, "GET /robots.txt", guardPublic, s.robotsTxt)          // public (SEO)
+	s.handle(mux, "GET /sitemap.xml", guardPublic, s.sitemapXML)        // public (SEO)
+	s.handle(mux, "GET /favicon.ico", guardPublic, s.faviconICO)        // public
+	s.handle(mux, "GET /site.webmanifest", guardPublic, s.siteManifest) // public
+	s.handle(mux, "GET /contact", guardPublic, s.contactPage)           // public
+	s.handle(mux, "POST /contact", guardPublic, s.submitContact)        // public, rate-limited
+	s.handle(mux, "GET /schedule", guardUser, s.schedule)               // appShell gates internally too; wrapped for uniformity with the other app pages
+	s.handle(mux, "GET /vehicles", guardUser, s.vehiclesPage)
+	s.handle(mux, "GET /activity", guardUser, s.activityPage)
+	s.handle(mux, "GET /settings", guardUser, s.settingsPage)
+	s.handle(mux, "GET /share", guardConsent, s.sharePage)
+	s.handle(mux, "GET /share/card", guardConsent, s.shareCard)
+	s.handle(mux, "POST /share/invite", guardConsent, s.sendReferral)
+	s.handle(mux, "GET /admin", guardAdmin, s.adminPage)
+	s.handle(mux, "GET /status", guardPublic, s.statusJSON) // machine watchdog; bearer-token gated
+	s.handle(mux, "GET /permits/new", guardUser, s.pickerPage)
+	s.handle(mux, "GET /permits/{id}/card", guardConsent, s.permitCard)
+	s.handle(mux, "GET /guests", guardUser, s.guestsPage)
+	s.handle(mux, "GET /guests/{id}/edit", guardUser, s.editGuestGrant)
+	s.handle(mux, "POST /guests", guardConsent, s.createGuestGrant)
+	s.handle(mux, "POST /guests/qr", guardConsent, s.showVisitorQR)
+	s.handle(mux, "POST /guests/printed", guardConsent, s.showPrintedQR)
+	s.handle(mux, "GET /guests/door/{id}/view", guardConsent, s.viewDoorQR)
+	s.handle(mux, "POST /guests/door/{id}/revoke", guardConsent, s.revokeDoorQR)
+	s.handle(mux, "POST /guests/requests/{id}/approve", guardConsent, s.approveGuestRequest)
+	s.handle(mux, "POST /guests/requests/{id}/deny", guardConsent, s.denyGuestRequest)
+	s.handle(mux, "POST /guests/{id}", guardConsent, s.updateGuestGrant)
+	s.handle(mux, "POST /guests/toggle", guardConsent, s.toggleGuests)
+	s.handle(mux, "POST /guests/{id}/delete", guardConsent, s.deleteGuestGrant)
+	s.handle(mux, "POST /guests/{id}/resend", guardConsent, s.resendGuestLink)
+	s.handle(mux, "POST /guests/tokens/{tid}/revoke", guardConsent, s.revokeGuestToken)
+	s.handle(mux, "POST /vehicles", guardConsent, s.addVehicle)
+	s.handle(mux, "POST /vehicles/{id}/delete", guardConsent, s.deleteVehicle)
+	s.handle(mux, "POST /vehicles/{id}/email", guardConsent, s.setVehicleEmail)
+	s.handle(mux, "POST /vehicles/{id}/notify", guardConsent, s.setVehicleNotify)
+	s.handle(mux, "POST /permits", guardConsent, s.addPermit)
+	s.handle(mux, "POST /permits/{id}/delete", guardConsent, s.deletePermit)
+	s.handle(mux, "POST /permits/{id}/name", guardConsent, s.renamePermit)
+	s.handle(mux, "POST /permits/{id}/rules", guardConsent, s.setRule)
+	s.handle(mux, "POST /permits/{id}/copy-schedule", guardConsent, s.copySchedule)
+	s.handle(mux, "POST /permits/{id}/copy-offer/dismiss", guardConsent, s.dismissCopyOffer)
+	s.handle(mux, "POST /permits/{id}/clear", guardConsent, s.clearPermit)
+	s.handle(mux, "POST /permits/{id}/override", guardConsent, s.addOverride)
+	s.handle(mux, "POST /permits/{id}/overrides/{oid}/delete", guardConsent, s.deleteOverride)
 
 	var decode identity.Decoder
 	if s.sessions != nil {
