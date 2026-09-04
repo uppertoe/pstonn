@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -41,7 +40,7 @@ func (c *Client) loginHosts() map[string]bool {
 // safe (the session and saved password are kept). The log line is what the
 // operator acts on.
 func linkShapeErr(err error) error {
-	log.Printf("orikan: sign-in page not usable: %v", err)
+	alog.Errorf("sign-in page not usable: %v", err)
 	return provider.Fail(provider.FailUnexpected, provider.OpLogin, err)
 }
 
@@ -82,7 +81,7 @@ func (c *Client) Login(ctx context.Context, creds provider.Credentials) (provide
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if !hosts[strings.ToLower(req.URL.Host)] {
 				err := fmt.Errorf("%w: refused to follow the sign-in off-host to %q", provider.ErrLoginOffHost, safeExcerpt(req.URL.Host))
-				log.Printf("orikan: SECURITY: %v", err)
+				alog.Errorf("SECURITY: %v", err)
 				return err
 			}
 			// A right-host redirect can still be a scheme DOWNGRADE (https→http on the
@@ -90,7 +89,7 @@ func (c *Client) Login(ctx context.Context, creds provider.Credentials) (provide
 			if !redirectSchemeOK(req.URL.Scheme, wantScheme) {
 				err := fmt.Errorf("%w: refused a %q redirect on a %q sign-in flow (host %q)",
 					provider.ErrLoginOffHost, safeExcerpt(req.URL.Scheme), wantScheme, safeExcerpt(req.URL.Host))
-				log.Printf("orikan: SECURITY: %v", err)
+				alog.Errorf("SECURITY: %v", err)
 				return err
 			}
 			// Setting CheckRedirect replaces Go's own 10-hop cap, so re-impose one.

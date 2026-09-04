@@ -12,7 +12,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -20,12 +19,15 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/session"
 	"github.com/uppertoe/pstonn/internal/store"
 )
+
+var alog = applog.For("webauth")
 
 // Authenticator drives the OIDC login.
 type Authenticator struct {
@@ -255,7 +257,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 	// explicitly verified claim; a provider that omits email_verified is refused rather
 	// than trusted, since silence is not a guarantee.
 	if claims.EmailVerified == nil || !*claims.EmailVerified {
-		log.Printf("oidc: refusing sign-in for %q: email_verified is %v (the email is the account key, so it must be verified)",
+		alog.Errorf("oidc: refusing sign-in for %q: email_verified is %v (the email is the account key, so it must be verified)",
 			redact.Email(u.Email), claims.EmailVerified)
 		http.Error(w, "your identity provider did not confirm this email address is verified, so sign-in was refused", http.StatusUnauthorized)
 		return
@@ -264,7 +266,7 @@ func (a *Authenticator) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("app login: %s", redact.Email(u.Email))
+	alog.Infof("app login: %s", redact.Email(u.Email))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

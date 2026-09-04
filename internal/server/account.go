@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -101,18 +100,18 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 		// them before any counting.
 		known, kerr := s.store.HasOwnData(r.Context(), user)
 		if kerr != nil {
-			log.Printf("capacity check for %s: %v", redact.Email(user), kerr)
+			alog.Infof("capacity check for %s: %v", redact.Email(user), kerr)
 			s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
 			return
 		}
 		if !known {
 			n, cerr := s.store.CountLinkedAccounts(r.Context())
 			if cerr != nil {
-				log.Printf("capacity check for %s: %v", redact.Email(user), cerr)
+				alog.Infof("capacity check for %s: %v", redact.Email(user), cerr)
 				s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
 				return
 			} else if n >= s.cfg.MaxAccounts {
-				log.Printf("capacity: refused a new link for %s (%d/%d accounts)", redact.Email(user), n, s.cfg.MaxAccounts)
+				alog.Warnf("capacity: refused a new link for %s (%d/%d accounts)", redact.Email(user), n, s.cfg.MaxAccounts)
 				s.message(w, http.StatusServiceUnavailable, s.say(r.Context(), user, "capacity.full"))
 				return
 			}
@@ -125,7 +124,7 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	linkCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	if err := s.tenant.Link(linkCtx, user, tenantID, user, password, savePassword, true, 0); err != nil {
-		log.Printf("council link for %s: %v", redact.Email(user), err)
+		alog.Infof("council link for %s: %v", redact.Email(user), err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
 			return
@@ -173,7 +172,7 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	// login rejected" line above, so link-success vs link-rejected is one grep
 	// (a run of rejections with no successes is exactly the signal that linking
 	// is broken). Redacted, like every other address in the log.
-	log.Printf("council linked for %s (tenant=%s, saved-password=%t)", redact.Email(user), linkedTenant, savePassword)
+	alog.Infof("council linked for %s (tenant=%s, saved-password=%t)", redact.Email(user), linkedTenant, savePassword)
 	// Drop any queued auto-reconnect for the OLD session: the user just established a
 	// fresh one, and stale recovery work must not act on it (the scheduler's generation
 	// check is the hard guard; this is the fast path).
@@ -281,7 +280,7 @@ func (s *Server) tenantUnlink(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sched.CancelReconnectIn(user, tenant) // no session to reconnect there; drop any queued attempt
 	s.logChange(r.Context(), user, user, store.ActionCouncilUnlink, "", "")
-	log.Printf("council unlinked for %s", redact.Email(user)) // operator milestone (churn)
+	alog.Infof("council unlinked for %s", redact.Email(user)) // operator milestone (churn)
 	redirectHome(w, r)
 }
 
@@ -367,7 +366,7 @@ func (s *Server) accountDelete(w http.ResponseWriter, r *http.Request) {
 	// The account is gone, so any session still holding it must go too — otherwise a
 	// signed cookie keeps asserting an identity whose data no longer exists.
 	s.revokeSessions(r.Context(), user)
-	log.Printf("account deleted for %s", redact.Email(user)) // operator milestone (churn)
+	alog.Infof("account deleted for %s", redact.Email(user)) // operator milestone (churn)
 	redirectHome(w, r)
 }
 
@@ -419,7 +418,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		// response nor the owner's own activity log can be used to probe whether an
 		// address already uses p.stonn. A pending invite grants nothing, so not creating
 		// one is safe.
-		log.Printf("add member %s to %s: %v", notify.RedactEmail(email), notify.RedactEmail(owner), err)
+		alog.Infof("add member %s to %s: %v", notify.RedactEmail(email), notify.RedactEmail(owner), err)
 		s.logChange(ctx, owner, user, store.ActionMemberAdd, email, "")
 		s.inviteSent(w, r, email, false)
 		return
@@ -439,11 +438,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if e := s.notify.SendInvite(nctx, to, from); e != nil {
-				log.Printf("invite email to %s: %v", notify.RedactEmail(to), e)
+				alog.Infof("invite email to %s: %v", notify.RedactEmail(to), e)
 			}
 		}(email, owner)
 	} else {
-		log.Printf("invite email to %s skipped (throttled or email not configured)", notify.RedactEmail(email))
+		alog.Infof("invite email to %s skipped (throttled or email not configured)", notify.RedactEmail(email))
 	}
 	s.logChange(ctx, owner, user, store.ActionMemberAdd, email, "")
 	s.inviteSent(w, r, email, mailed)
@@ -492,7 +491,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	// owner and is not something the accept flow can undo cleanly.
 	isP, err := s.store.IsPrimary(ctx, u.Email)
 	if err != nil {
-		log.Printf("acceptInvite: cannot check primary status for %s: %v", redact.Email(u.Email), err)
+		alog.Errorf("acceptInvite: cannot check primary status for %s: %v", redact.Email(u.Email), err)
 		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
 		return
 	}
@@ -502,7 +501,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	has, err := s.store.HasOwnData(ctx, u.Email)
 	if err != nil {
-		log.Printf("acceptInvite: cannot check own data for %s: %v", redact.Email(u.Email), err)
+		alog.Errorf("acceptInvite: cannot check own data for %s: %v", redact.Email(u.Email), err)
 		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
 		return
 	}
@@ -672,7 +671,7 @@ func (s *Server) tenantConfirmApply(w http.ResponseWriter, r *http.Request) {
 			Confirm: &confirmView{Stale: true}})
 		return
 	}
-	log.Printf("council session for %s confirmed via email link", redact.Email(owner))
+	alog.Infof("council session for %s confirmed via email link", redact.Email(owner))
 	v := &confirmView{Done: true}
 	if s.cfg.Council.SessionMaxAge > 0 {
 		v.Until = time.Now().Add(s.cfg.Council.SessionMaxAge).In(s.cfg.DisplayLocation).Format("2 January 2006")
@@ -696,7 +695,7 @@ func (s *Server) revokeSessions(ctx context.Context, email string) {
 	}
 	epoch, err := s.store.BumpSessionEpoch(ctx, email)
 	if err != nil {
-		log.Printf("SECURITY: could not revoke sessions for %s (%v); an existing sign-in may keep working until it expires", redact.Email(email), err)
+		alog.Errorf("SECURITY: could not revoke sessions for %s (%v); an existing sign-in may keep working until it expires", redact.Email(email), err)
 		return
 	}
 	if s.sessions != nil {

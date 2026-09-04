@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -52,7 +51,7 @@ func tr(c tenantView, key string, extra map[string]any, slots i18n.Slots) templa
 	}
 	out, err := catalog.For(i18n.DefaultLocale).HTML(key, data, slots)
 	if err != nil {
-		log.Printf("i18n: %v", err)
+		alog.Infof("i18n: %v", err)
 		return template.HTML(template.HTMLEscapeString(key))
 	}
 	return out
@@ -62,7 +61,7 @@ func tr(c tenantView, key string, extra map[string]any, slots i18n.Slots) templa
 func trText(c tenantView, key string) string {
 	out, err := catalog.For(i18n.DefaultLocale).Text(key, map[string]any{"Tenant": c})
 	if err != nil {
-		log.Printf("i18n: %v", err)
+		alog.Infof("i18n: %v", err)
 		return key
 	}
 	return out
@@ -554,7 +553,7 @@ func (s *Server) notifyViewOf(ctx context.Context, user string, pref store.Notif
 		nv.SuppressedInfo = true
 		nv.Suppressed, nv.SuppressedWhy = bad, why
 	} else {
-		log.Printf("settings: suppression lookup for %s: %v", notify.RedactEmail(user), err)
+		alog.Infof("settings: suppression lookup for %s: %v", notify.RedactEmail(user), err)
 	}
 	return nv
 }
@@ -871,7 +870,7 @@ func vehicleViews(vs []model.Vehicle) (views []vehicleView, colorByID, regByID, 
 func (s *Server) render(w http.ResponseWriter, data dashboardData) {
 	buf, err := s.renderBuf(w, data)
 	if err != nil {
-		log.Printf("render dashboard: %v", err)
+		alog.Infof("render dashboard: %v", err)
 		// The BARE page, deliberately: the styled message page renders through
 		// this same template set, so a broken template must land somewhere that
 		// depends on nothing.

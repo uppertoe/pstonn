@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
@@ -250,7 +249,7 @@ func (s *Store) BackfillVehicleColors(ctx context.Context) error {
 			return err
 		}
 	}
-	log.Printf("vehicles: re-coloured %d household(s) onto the current palette", len(stale))
+	alog.Infof("vehicles: re-coloured %d household(s) onto the current palette", len(stale))
 	return nil
 }
 

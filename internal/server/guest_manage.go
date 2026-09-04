@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -137,7 +136,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 	undeliverable, err := s.store.SuppressedAmong(ctx, allRecipients)
 	if err != nil {
 		// Best-effort annotation: never fail the page over it.
-		log.Printf("guests: suppression lookup for %s: %v", redact.Email(owner), err)
+		alog.Infof("guests: suppression lookup for %s: %v", redact.Email(owner), err)
 		undeliverable = map[string]string{}
 	}
 	for _, d := range details {
@@ -505,7 +504,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 			// A 500 here would tell the user the whole edit failed when the label/cars
 			// are already committed. Send them back to the pass, which shows its real
 			// current state and lets them add the recipients again.
-			log.Printf("guest: pass %d updated but adding recipients failed: %v", id, err)
+			alog.Errorf("guest: pass %d updated but adding recipients failed: %v", id, err)
 			http.Redirect(w, r, "/guests", http.StatusSeeOther)
 			return
 		}
@@ -530,7 +529,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		// never runs. Redirect instead — the pass and its recipients are listed on the
 		// guests page, so the household can re-send a link rather than being left with
 		// live tokens they never saw.
-		log.Printf("guest: pass %d updated but the guests page could not be rendered: %v", id, err)
+		alog.Errorf("guest: pass %d updated but the guests page could not be rendered: %v", id, err)
 		http.Redirect(w, r, "/guests", http.StatusSeeOther)
 		return
 	}
@@ -619,13 +618,13 @@ func (s *Server) emailLinks(ctx context.Context, owner, tenantID, permitLabel st
 	sent := 0
 	for _, l := range links {
 		if !s.guestLinkOut.allow("o:"+owner) || !s.guestLinkTo.allow("t:"+l.Email) {
-			log.Printf("guest link email to %s for %s throttled", notify.RedactEmail(l.Email), notify.RedactEmail(owner))
+			alog.Infof("guest link email to %s for %s throttled", notify.RedactEmail(l.Email), notify.RedactEmail(owner))
 			continue
 		}
 		if err := s.notify.SendGuestLink(ctx, l.Email, owner, tenantID, permitLabel, l.URL); err == nil {
 			sent++
 		} else {
-			log.Printf("guest link email to %s for %s: %v", notify.RedactEmail(l.Email), notify.RedactEmail(owner), err)
+			alog.Infof("guest link email to %s for %s: %v", notify.RedactEmail(l.Email), notify.RedactEmail(owner), err)
 		}
 	}
 	return sent
@@ -673,7 +672,7 @@ func (s *Server) reuseVisitorQR(ctx context.Context, owner string, permitID int6
 	}
 	raw, _, err := s.box.OpenCtx(secretbox.GuestToken(owner), sealed)
 	if err != nil {
-		log.Printf("visitor QR: could not open a live token for permit %d (%v); minting a fresh one", permitID, err)
+		alog.Warnf("visitor QR: could not open a live token for permit %d (%v); minting a fresh one", permitID, err)
 		return "", time.Time{}, store.ErrNotFound
 	}
 	return raw, expires, nil
@@ -735,7 +734,7 @@ func (s *Server) showVisitorQR(w http.ResponseWriter, r *http.Request) {
 	if isHX(r) && !isBoosted(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "qr-card", dashboardData{QR: qr, Loc: s.locForPermit(r.Context(), permit)}); err != nil {
-			log.Printf("render qr-card: %v", err)
+			alog.Infof("render qr-card: %v", err)
 		}
 		return
 	}

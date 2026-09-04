@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -121,7 +120,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if used, lerr := s.legendColors(ctx, owner, vviews, now); lerr == nil {
 		base.App.LegendVehicles, base.App.LegendMore = legendVehicles(vviews, used)
 	} else {
-		log.Printf("legend colours for %s: %v", redact.Email(owner), lerr)
+		alog.Infof("legend colours for %s: %v", redact.Email(owner), lerr)
 	}
 	base.App.Permits = pvs
 	base.App.ExpiredPermits = expired
@@ -190,7 +189,7 @@ func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
 	d.App.LegendVehicles, d.App.LegendMore = legendVehicles(vviews, used)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "legend", d); err != nil {
-		log.Printf("render legend: %v", err)
+		alog.Infof("render legend: %v", err)
 	}
 }
 
@@ -318,7 +317,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			// next cold visit would spin again. Persist it (guarded on the plate, and
 			// only when newer, so a render inside one cache window costs one write).
 			if terr := s.store.TouchPermitConfirmed(ctx, p.ID, p.ActiveRegistration, readAt); terr != nil {
-				log.Printf("dashboard: stamp council confirmation for permit %d: %v", p.ID, terr)
+				alog.Infof("dashboard: stamp council confirmation for permit %d: %v", p.ID, terr)
 			}
 		}
 		// model.SamePlate, not a plain !=: the portal echoes plates back in whatever
@@ -343,7 +342,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			if err != nil {
 				// Don't swallow it: a persistent write failure here would otherwise be
 				// invisible, the page just quietly showing a stale plate.
-				log.Printf("dashboard: adopt council plate for permit %d: %v", p.ID, err)
+				alog.Infof("dashboard: adopt council plate for permit %d: %v", p.ID, err)
 			}
 			if ok {
 				p.ActiveRegistration = actual
@@ -1060,7 +1059,7 @@ func (s *Server) renderPermitFragment(w http.ResponseWriter, r *http.Request, ow
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "permit-body", pv); err != nil {
-		log.Printf("render permit-body: %v", err)
+		alog.Infof("render permit-body: %v", err)
 	}
 }
 

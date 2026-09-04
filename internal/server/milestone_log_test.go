@@ -3,7 +3,7 @@ package server
 import (
 	"bytes"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,15 +12,14 @@ import (
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
-// captureLog redirects the standard logger for the duration of fn.
+// captureLog redirects the default slog logger (which applog logs through) for
+// the duration of fn.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
-	old := log.Writer()
-	flags := log.Flags()
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	defer func() { log.SetOutput(old); log.SetFlags(flags) }()
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{})))
+	defer slog.SetDefault(old)
 	fn()
 	return buf.String()
 }

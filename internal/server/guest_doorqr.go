@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -267,7 +266,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 	default:
 		// A transient DB error must NOT strand the visitor on a false "Not approved":
 		// keep polling.
-		log.Printf("guest poll %d: %v", id, err)
+		alog.Infof("guest poll %d: %v", id, err)
 		v = guestWaitView{ReqID: id, Nonce: nonce, Status: "pending"}
 	}
 	v.FP = guestWaitFP(v)
@@ -286,7 +285,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e := templates.ExecuteTemplate(w, "guest-req-status", v); e != nil {
-		log.Printf("render guest-req-status: %v", e)
+		alog.Infof("render guest-req-status: %v", e)
 	}
 }
 
@@ -304,14 +303,14 @@ func (s *Server) notifyGuestRequest(ctx context.Context, permit model.Permit, pl
 	// rationed, because the alarm is the part a stranger with a poster can aim at a
 	// household at 3am.
 	if !guestNudge.allow("n:" + permit.Owner) {
-		log.Printf("guest request nudge for %s throttled", redact.Email(permit.Owner))
+		alog.Infof("guest request nudge for %s throttled", redact.Email(permit.Owner))
 		return
 	}
 	// Enqueue durably (a fast DB insert) so the holder's "approve this?" nudge
 	// survives a restart and is retried — the printed-QR flow depends on it.
 	url := s.cfg.PublicBaseURL + "/guests"
 	if err := s.notify.NotifyGuestRequest(ctx, permit.Owner, permitLabel(permit), plate, url, reqID); err != nil {
-		log.Printf("guest request notify enqueue for %s: %v", redact.Email(permit.Owner), err)
+		alog.Infof("guest request notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 	}
 }
 
@@ -613,7 +612,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	// A token we cannot resolve tags nothing (0) rather than blocking the approval.
 	doorToken, terr := s.store.GrantTokenID(r.Context(), req.GrantID)
 	if terr != nil {
-		log.Printf("doorqr approve: no token for grant %d: %v", req.GrantID, terr)
+		alog.Infof("doorqr approve: no token for grant %d: %v", req.GrantID, terr)
 	}
 	// The state the visitor chose at the door travels with the request row, so the
 	// override (what the scheduler applies) and the write below agree with it.
@@ -680,7 +679,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 		}
 		if s.notify != nil {
 			if err := s.notify.EnqueueApply(bg, outcome); err != nil {
-				log.Printf("doorqr apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
+				alog.Infof("doorqr apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 			}
 		}
 	}
@@ -737,7 +736,7 @@ func (s *Server) authoriseGuestApply(ctx context.Context, tokenID, overrideID in
 	}
 	switch {
 	case err != nil:
-		log.Printf("guest: could not verify authorisation for token %d (override %d): %v", tokenID, overrideID, err)
+		alog.Errorf("guest: could not verify authorisation for token %d (override %d): %v", tokenID, overrideID, err)
 		return guestApplyUnverified
 	case !ok:
 		return guestApplyRevoked
@@ -776,7 +775,7 @@ func (s *Server) claimPermitApplies(ctx context.Context, ids []int64) func() {
 		release, ok := s.sched.AcquireApply(cctx, id)
 		cancel()
 		if !ok {
-			log.Printf("guest: revoking without the apply claim for permit %d (busy); a guest write in flight may still land and be reconciled away", id)
+			alog.Warnf("guest: revoking without the apply claim for permit %d (busy); a guest write in flight may still land and be reconciled away", id)
 			release()
 			continue
 		}

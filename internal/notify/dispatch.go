@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -67,14 +66,14 @@ func (s *Service) broadcastAccount(ctx context.Context, owner, tag, subject, bod
 		mpref, _ := s.store.GetNotifyPref(ctx, m)
 		if s.mail.Enabled() {
 			if e := s.sendEmailCritical(ctx, m, subject, body, reasonAccount); e != nil {
-				log.Printf("notify %s email %s: %s", tag, RedactEmail(m), errText(e, m))
+				alog.Infof("notify %s email %s: %s", tag, RedactEmail(m), errText(e, m))
 			} else {
 				delivered++
 			}
 		}
 		if mpref.NtfyEnabled && s.ntfyBase != "" && mpref.NtfyTopic != "" {
 			if e := s.sendNtfy(ctx, mpref.NtfyTopic, subject, body, "high", "warning"); e != nil {
-				log.Printf("notify %s ntfy %s: %v", tag, RedactEmail(m), e)
+				alog.Infof("notify %s ntfy %s: %v", tag, RedactEmail(m), e)
 			} else {
 				delivered++
 			}
@@ -146,14 +145,14 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permi
 		reached := false
 		if wantEmail {
 			if e := s.sendEmailCritical(ctx, d.email, subject, body, reasonAccount); e != nil {
-				log.Printf("notify permit-expiry email %s: %s", RedactEmail(d.email), errText(e, d.email))
+				alog.Infof("notify permit-expiry email %s: %s", RedactEmail(d.email), errText(e, d.email))
 			} else {
 				reached = true
 			}
 		}
 		if wantNtfy {
 			if e := s.sendNtfy(ctx, d.pref.NtfyTopic, subject, body, "default", "calendar"); e != nil {
-				log.Printf("notify permit-expiry ntfy %s: %v", RedactEmail(d.email), e)
+				alog.Infof("notify permit-expiry ntfy %s: %v", RedactEmail(d.email), e)
 			} else {
 				reached = true
 			}
@@ -174,7 +173,7 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to, tenantID string, 
 	}
 	if s.store != nil {
 		if bad, reason, err := s.store.IsSuppressed(ctx, to); err != nil {
-			log.Printf("notify: suppression lookup for %s: %v", RedactEmail(to), err)
+			alog.Infof("suppression lookup for %s: %v", RedactEmail(to), err)
 		} else if bad {
 			return fmt.Errorf("%w: %s", ErrSuppressed, reason)
 		}
@@ -192,7 +191,7 @@ func (s *Service) SendRenewalReminder(ctx context.Context, to, tenantID string, 
 	// As in sendEmail: only a rejected recipient is evidence about this address.
 	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
-			log.Printf("notify: suppress %s: %v", RedactEmail(to), serr)
+			alog.Infof("suppress %s: %v", RedactEmail(to), serr)
 		}
 	}
 	return err
@@ -355,7 +354,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				lim = s.urgentFailureTo
 			}
 			if !lim.allow(d.email) {
-				log.Printf("notify: apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
+				alog.Infof("apply-failure notice to %s throttled (per-recipient daily cap)", RedactEmail(d.email))
 				delivered++
 				continue
 			}
@@ -601,7 +600,7 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 		"If your car is still parked there it's no longer covered. Move it, or put it back on with your link, or check with the permit holder.",
 	}
 	if !s.displacedTo.allow(to) {
-		log.Printf("notify: displaced-driver notice to %s throttled (per-recipient cap)", RedactEmail(to))
+		alog.Infof("displaced-driver notice to %s throttled (per-recipient cap)", RedactEmail(to))
 		return nil
 	}
 	key := fmt.Sprintf("displaced|%s|%s|%s", to, permitLabel, oldReg)
@@ -640,7 +639,7 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 			s.appURL)
 	}
 	if !s.driverAddedTo.allow(to) {
-		log.Printf("notify: driver-added notice to %s throttled (per-recipient cap)", RedactEmail(to))
+		alog.Infof("driver-added notice to %s throttled (per-recipient cap)", RedactEmail(to))
 		return nil
 	}
 	// Deduped per day so a re-add of the same plate the same day is silent.
@@ -673,7 +672,7 @@ func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, p
 		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee — if you're unsure, check with them.",
 	}
 	if !s.driverFailedTo.allow(to) {
-		log.Printf("notify: driver-failed notice to %s throttled (per-recipient cap)", RedactEmail(to))
+		alog.Infof("driver-failed notice to %s throttled (per-recipient cap)", RedactEmail(to))
 		return nil
 	}
 	key := fmt.Sprintf("driver-fail|%s|%s|%s", to, plate, time.Now().In(s.loc).Format("2006-01-02"))

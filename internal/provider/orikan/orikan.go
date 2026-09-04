@@ -19,14 +19,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/provider"
 )
+
+// alog is the orikan provider's structured logger; each line is tagged
+// subsystem=orikan.
+var alog = applog.For("orikan")
 
 // ID is the connector name a tenant descriptor refers to.
 const ID = "orikan-ssp"
@@ -174,7 +178,7 @@ func (c *Client) writeToken(region, prior string) string {
 		if tok, ok := regionToken(region); ok {
 			return tok
 		}
-		log.Printf("orikan: unknown vehicle-state code %q; writing tenant home state %q", region, c.homeCode)
+		alog.Warnf("unknown vehicle-state code %q; writing tenant home state %q", region, c.homeCode)
 		return c.homeToken
 	}
 	if prior != "" {

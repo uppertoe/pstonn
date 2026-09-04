@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"html/template"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -123,7 +122,7 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 	if err := s.notify.SendReferralInvite(ctx, to, u.Email); err != nil {
 		// A suppressed address (bounced, complained, unsubscribed) is not the
 		// sender's problem to solve, and the reason is not theirs to see.
-		log.Printf("referral from %s: %v", redact.Email(u.Email), err)
+		alog.Infof("referral from %s: %v", redact.Email(u.Email), err)
 	}
 	s.logChange(ctx, owner, u.Email, store.ActionReferralSend, to, "")
 	http.Redirect(w, r, "/share?sent=1", http.StatusSeeOther)

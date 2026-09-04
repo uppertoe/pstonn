@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -56,7 +55,7 @@ func noteEdgeProxy(r *http.Request) string {
 		}
 		edgeProxySeen.Store(h)
 		edgeProxyWarn.Do(func() {
-			log.Printf("WARNING: request carried %s, so a CDN proxy now sits in front of this app. "+
+			alog.Warnf("request carried %s, so a CDN proxy now sits in front of this app. "+
 				"Every per-IP rate limit is keyed on the address the app sees, which is now an edge address shared by "+
 				"all visitors, so the throttles no longer limit anyone. Set the DNS record back to DNS-only (grey cloud).", h)
 		})
@@ -209,7 +208,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	} else {
-		log.Printf("admin: list suppressions: %v", err)
+		alog.Infof("admin: list suppressions: %v", err)
 	}
 	s.render(w, dashboardData{
 		State: "admin", User: u, LogoutURL: s.logoutURL(), Loc: loc, Admin: v,
@@ -622,7 +621,7 @@ func (s *Server) enrichRoster(ctx context.Context, roster []store.RosterEntry) [
 	for _, e := range roster {
 		permits, err := s.store.ListPermitsFor(ctx, e.Email)
 		if err != nil {
-			log.Printf("roster: permits for %s: %v (kept, unstamped)", redact.Email(e.Email), err)
+			alog.Infof("roster: permits for %s: %v (kept, unstamped)", redact.Email(e.Email), err)
 			out = append(out, e)
 			continue
 		}
@@ -635,12 +634,12 @@ func (s *Server) enrichRoster(ctx context.Context, roster []store.RosterEntry) [
 			alive = true
 			rules, rerr := s.store.ListRules(ctx, p.ID)
 			if rerr != nil {
-				log.Printf("roster: rules for permit %d: %v", p.ID, rerr)
+				alog.Infof("roster: rules for permit %d: %v", p.ID, rerr)
 				continue
 			}
 			overrides, oerr := s.store.ListOverrides(ctx, p.ID, now)
 			if oerr != nil {
-				log.Printf("roster: overrides for permit %d: %v", p.ID, oerr)
+				alog.Infof("roster: overrides for permit %d: %v", p.ID, oerr)
 				continue
 			}
 			if c := model.NextChange(now, rosterChangeHorizon, rules, overrides); c != nil && (next == nil || c.Before(*next)) {

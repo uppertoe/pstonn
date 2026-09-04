@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
@@ -179,14 +178,14 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 	defer s.reconciling.Store(false)
 	permits, err := s.store.ListPermits(ctx)
 	if err != nil {
-		log.Printf("scheduler: list permits: %v", err)
+		alog.Infof("list permits: %v", err)
 		s.systemAlert(ctx, "db-permits", "Scheduler database error",
 			fmt.Sprintf("Reconcile could not read permits: %v. No plate changes are being applied until this clears.", err))
 		return false
 	}
 	vehicles, err := s.store.ListVehicleRefs(ctx)
 	if err != nil {
-		log.Printf("scheduler: list vehicles: %v", err)
+		alog.Infof("list vehicles: %v", err)
 		s.systemAlert(ctx, "db-vehicles", "Scheduler database error",
 			fmt.Sprintf("Reconcile could not read vehicles: %v. No plate changes are being applied until this clears.", err))
 		return false
@@ -241,7 +240,7 @@ func (s *Scheduler) reconcileAll(ctx context.Context) bool {
 func (s *Scheduler) safeReconcilePermit(ctx context.Context, p model.Permit, vehByOwnerID map[ownerVehicle]model.VehicleInfo, stats *passStats) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: permit %s panicked (recovered); skipping it: %v", p.CouncilPermitID, r)
+			alog.Errorf("permit %s panicked (recovered); skipping it: %v", p.CouncilPermitID, r)
 			s.systemAlert(ctx, "panic-permit", "A permit panicked during reconcile",
 				fmt.Sprintf("Reconciling permit %s panicked and was skipped so the rest of the pass could continue: %v\n\nIt will be retried next pass; if it keeps panicking that record needs attention.", p.CouncilPermitID, r))
 		}
@@ -343,7 +342,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 	// reopened. Re-read, and act only on a belief that still holds.
 	fresh, err := s.store.GetPermit(ctx, p.ID)
 	if err != nil {
-		log.Printf("scheduler: settle permit %d: could not re-read it: %v", p.ID, err)
+		alog.Errorf("settle permit %d: could not re-read it: %v", p.ID, err)
 		return // the next pass sees the durable state and settles then
 	}
 	if fresh.FailStreak == 0 || !model.SamePlate(fresh.ActiveRegistration, p.ActiveRegistration) {
@@ -453,7 +452,7 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 	if !s.noteUnscheduled(p.ID, fmt.Sprintf("unresolved|%d|%s", res.VehicleID, model.NormPlate(p.ActiveRegistration))) {
 		return
 	}
-	log.Printf("scheduler: permit %s: the %s points at vehicle %d, which is not one of %s's saved cars; permit still shows %q",
+	alog.Infof("permit %s: the %s points at vehicle %d, which is not one of %s's saved cars; permit still shows %q",
 		p.CouncilPermitID, res.Source, res.VehicleID, redact.Email(p.Owner), p.ActiveRegistration)
 	const reason = "The car this permit is scheduled to use is no longer saved, so p.stonn has not changed the permit."
 	const action = "Open p.stonn and choose a car for today, or add the car back."
@@ -481,7 +480,7 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 // standard clears (an edit, a re-link, a restart) let it re-check.
 func (s *Scheduler) reportTenantUnavailable(ctx context.Context, p model.Permit, want, wantName string, res model.Resolution) {
 	s.deferRetry(p.ID, 5)
-	log.Printf("scheduler: permit %s: its council %q is not served by this process; the change to %s cannot be applied", p.CouncilPermitID, p.TenantID, want)
+	alog.Warnf("permit %s: its council %q is not served by this process; the change to %s cannot be applied", p.CouncilPermitID, p.TenantID, want)
 	const reason = "This permit's council is not currently available in p.stonn, so the change could not be applied."
 	const action = "Change the vehicle on your permit at the council yourself. p.stonn will resume automatically once the council is available again."
 	s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
@@ -505,12 +504,12 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	now := s.now().In(s.locOf(p.Owner, p.TenantID))
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
-		log.Printf("scheduler: rules for permit %d: %v", p.ID, err)
+		alog.Infof("rules for permit %d: %v", p.ID, err)
 		return false
 	}
 	overrides, err := s.store.ListOverrides(ctx, p.ID, now)
 	if err != nil {
-		log.Printf("scheduler: overrides for permit %d: %v", p.ID, err)
+		alog.Infof("overrides for permit %d: %v", p.ID, err)
 		return false
 	}
 	res := model.Resolve(now, rules, overrides)
@@ -519,7 +518,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// was last put on it, which is worth saying once — but only once, because the
 		// gap lasts as long as the gap in the schedule does.
 		if s.noteUnscheduled(p.ID, "none|"+model.NormPlate(p.ActiveRegistration)) && p.ActiveRegistration != "" {
-			log.Printf("scheduler: permit %s has nothing scheduled now; it still shows %s",
+			alog.Infof("permit %s has nothing scheduled now; it still shows %s",
 				p.CouncilPermitID, p.ActiveRegistration)
 		}
 		s.settle(ctx, p)
@@ -571,7 +570,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	// is the clobber the claim exists to prevent. The next tick recomputes and heals.
 	release, claimed := s.tryApply(p.ID)
 	if !claimed {
-		log.Printf("scheduler: permit %s skipped this tick: another plate change is in flight", p.CouncilPermitID)
+		alog.Infof("permit %s skipped this tick: another plate change is in flight", p.CouncilPermitID)
 		return false
 	}
 	defer release() // idempotent; a panic must never leave a permit claimed forever
@@ -587,7 +586,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// clean success (SetPermitActive matches 0 rows and returns nil), re-creating
 		// activity and notify rows for the id DeletePermit just cleaned up and emailing
 		// "your permit was updated" for the permit they just removed.
-		log.Printf("scheduler: skipping permit %d: could not re-read it under the claim: %v", p.ID, ferr)
+		alog.Errorf("skipping permit %d: could not re-read it under the claim: %v", p.ID, ferr)
 		return false
 	}
 	if fresh.Inactive(now, s.locOf(p.Owner, p.TenantID)) {
@@ -623,7 +622,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// drive a duplicate apply + "updated" notice on the next pass, and be wrong
 		// across a restart. Alert the operator and Kick a reconcile; the healing pass's
 		// pre-read sees the plate already present and records it, notifying exactly once.
-		log.Printf("scheduler: permit %s applied at the council but local commit failed: %v", p.CouncilPermitID, commitErr)
+		alog.Errorf("permit %s applied at the council but local commit failed: %v", p.CouncilPermitID, commitErr)
 		s.systemAlert(ctx, "commit-after-apply",
 			"Council change applied but not recorded locally",
 			fmt.Sprintf("Permit %s was set to %q at the council (confirmed), but writing that to the local database failed: %v. The car is on the permit; a reconcile will re-record it. If this repeats, the database may be failing.", p.CouncilPermitID, want, commitErr))
@@ -677,7 +676,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), By: res.By, OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: told, ResolvesFailure: resolves,
 		}, "success|"+prev+">"+want)
-		log.Printf("scheduler: permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
+		alog.Infof("permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true
 	case errors.Is(err, parking.ErrTenantUnavailable):
 		// Checked BEFORE ErrNotLinked, which it wraps. This is not "the household has
@@ -696,7 +695,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		if stats != nil {
 			stats.busyOwners[p.Owner] = true
 		}
-		log.Printf("scheduler: permit %s deferred: %v", p.CouncilPermitID, err)
+		alog.Infof("permit %s deferred: %v", p.CouncilPermitID, err)
 		// ...and tell the USER if it persists. A brief block is genuinely not worth
 		// mentioning, but this was previously silent FOREVER: no activity row, no
 		// notification, however long the permit sat showing the wrong plate. The
@@ -797,7 +796,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		return true
 	default:
 		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
-		log.Printf("scheduler: permit %s apply error: %v", p.CouncilPermitID, err)
+		alog.Errorf("permit %s apply error: %v", p.CouncilPermitID, err)
 		return true
 	}
 }

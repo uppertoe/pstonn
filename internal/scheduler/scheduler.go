@@ -10,19 +10,22 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"math/rand"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/store"
 )
+
+// alog is the scheduler subsystem's structured logger.
+var alog = applog.For("scheduler")
 
 // Tenant is the subset of the tenant client the scheduler needs: apply a plate
 // change, and force a keep-warm session renewal. Keeping it an interface lets the
@@ -750,7 +753,7 @@ func (s *Scheduler) safeReconcile(ctx context.Context) {
 	completed := false
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: reconcile panicked (recovered): %v", r)
+			alog.Errorf("reconcile panicked (recovered): %v", r)
 			s.systemAlert(ctx, "panic-reconcile", "Scheduler reconcile panicked",
 				fmt.Sprintf("The reconcile loop panicked and was recovered. Plate changes may be affected until fixed.\n\n%v", r))
 			return
@@ -854,7 +857,7 @@ func (s *Scheduler) systemAlertEvery(ctx context.Context, key, subject, body str
 		nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := s.notifier.NotifyAdmin(nctx, subject, body); err != nil {
-			log.Printf("scheduler: admin alert %q failed (retry in %s): %v", key, retry, err)
+			alog.Errorf("admin alert %q failed (retry in %s): %v", key, retry, err)
 			return // leave the short window: the next call after `retry` re-sends
 		}
 		s.alertMu.Lock()

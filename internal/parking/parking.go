@@ -15,17 +15,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/provider"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
+
+// alog is the parking package's structured logger; each line is tagged
+// subsystem=parking.
+var alog = applog.For("parking")
 
 // The provider vocabulary, re-exported so the core keeps one import. See
 // internal/provider for what each means.
@@ -173,10 +177,10 @@ func NewClientFor(tenantID string, p provider.Provider, st *store.Store, box *se
 		if bs, err := st.LoadBreakerState(context.Background(), tenantID); err == nil {
 			c.breaker.restore(bs.OpenUntil, bs.LastPushback, bs.Generation)
 			if bs.OpenUntil.After(time.Now()) {
-				log.Printf("parking: fleet circuit restored OPEN from persisted state (paused %s) — a block survived a restart", time.Until(bs.OpenUntil).Round(time.Second))
+				alog.Warnf("fleet circuit restored OPEN from persisted state (paused %s) — a block survived a restart", time.Until(bs.OpenUntil).Round(time.Second))
 			}
 		} else {
-			log.Printf("parking: load persisted breaker state: %v (starting closed)", err)
+			alog.Infof("load persisted breaker state: %v (starting closed)", err)
 		}
 	}
 	return c
@@ -225,7 +229,7 @@ func (c *Client) persistBreaker() {
 	c.persistErr, c.persistAt = err, time.Now()
 	c.persistMu.Unlock()
 	if err != nil {
-		log.Printf("parking: persist breaker state: %v (restart-protection degraded)", err)
+		alog.Warnf("persist breaker state: %v (restart-protection degraded)", err)
 	}
 }
 
@@ -256,10 +260,10 @@ func (c *Client) Linked(ctx context.Context, owner string) bool {
 func (c *Client) openSession(owner string, cs store.TenantSession) (provider.Session, error) {
 	plain, legacy, err := c.box.OpenCtxAny(cs.Cookie, secretbox.TenantCookieFor(owner, c.TenantID), secretbox.TenantCookie(owner))
 	if legacy {
-		log.Printf("parking: session for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", redact.Email(owner))
+		alog.Infof("session for %s is an unbound legacy ciphertext; it will be re-sealed on the next renew", redact.Email(owner))
 	}
 	if err != nil {
-		log.Printf("parking: unseal session for %s failed (%v); treating as expired session (re-link required)", redact.Email(owner), err)
+		alog.Errorf("unseal session for %s failed (%v); treating as expired session (re-link required)", redact.Email(owner), err)
 		return nil, ErrSessionExpired
 	}
 	if strings.HasPrefix(plain, sessionPrefix) {
@@ -268,7 +272,7 @@ func (c *Client) openSession(owner string, cs store.TenantSession) (provider.Ses
 	// Pre-provider shape: cookie header here, cached token in its own column.
 	imp, ok := c.p.(legacyImporter)
 	if !ok {
-		log.Printf("parking: session for %s is in the legacy shape and provider %s cannot import it; re-link required", redact.Email(owner), c.p.ID())
+		alog.Errorf("session for %s is in the legacy shape and provider %s cannot import it; re-link required", redact.Email(owner), c.p.ID())
 		return nil, ErrSessionExpired
 	}
 	token := ""
@@ -349,7 +353,7 @@ func (c *Client) withSession(ctx context.Context, owner string, persist bool, fn
 		// material over it would silently undo the user's re-link.
 		if err := c.store.UpdateTenantCookie(ctx, owner, c.TenantID, sealed, cs.Generation); err != nil {
 			if errors.Is(err, store.ErrSessionSuperseded) {
-				log.Printf("parking: session for %s was re-linked during an operation; keeping the newer one", redact.Email(owner))
+				alog.Infof("session for %s was re-linked during an operation; keeping the newer one", redact.Email(owner))
 				return nil
 			}
 			return err
@@ -453,13 +457,13 @@ func (c *Client) Reconnect(ctx context.Context, owner string) error {
 	}
 	password, legacy, err := c.box.OpenCtxAny(cs.Password, secretbox.TenantPasswordFor(owner, c.TenantID), secretbox.TenantPassword(owner))
 	if legacy {
-		log.Printf("parking: saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", redact.Email(owner))
+		alog.Infof("saved password for %s is an unbound legacy ciphertext; re-sealing on this reconnect", redact.Email(owner))
 	}
 	if err != nil {
 		// A decrypt failure (e.g. DATA_ENCRYPTION_KEY rotated) is deterministic:
 		// retrying it every scheduler pass never heals and never tells the user.
 		// Map it to ErrNoSavedPassword so the retire-and-notify path fires.
-		log.Printf("parking: unseal saved password for %s failed (%v); treating as no saved password (manual re-link required)", redact.Email(owner), err)
+		alog.Errorf("unseal saved password for %s failed (%v); treating as no saved password (manual re-link required)", redact.Email(owner), err)
 		return ErrNoSavedPassword
 	}
 	username := cs.TenantEmail
@@ -688,7 +692,7 @@ func (c *Client) refreshCurrentVehicle(owner string, p model.Permit) {
 		defer cancel()
 		reg, err := c.CurrentVehicle(ctx, owner, p)
 		if err != nil {
-			log.Printf("parking: background plate refresh for permit %s: %v", p.CouncilPermitID, err)
+			alog.Infof("background plate refresh for permit %s: %v", p.CouncilPermitID, err)
 			c.regFail.LoadOrStore(key, time.Now()) // keep the streak's START on repeats
 			c.noteExpired(owner, err)
 			return

@@ -7,7 +7,15 @@
 // failing silently.
 package notify
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/uppertoe/pstonn/internal/applog"
+)
+
+// alog is the notify package's structured logger; each line is tagged
+// subsystem=notify.
+var alog = applog.For("notify")
 
 // Provenance reasons. Each user-facing mail must say why THIS address received
 // it: several recipient classes (a guest handed a pass, a driver whose car came

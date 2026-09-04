@@ -1,7 +1,6 @@
 package parking
 
 import (
-	"log"
 	"sync"
 	"time"
 
@@ -38,7 +37,7 @@ func (c *Client) recordPushback(u *provider.Unavailable) {
 	c.traffic.pbMu.Lock()
 	c.traffic.lastPB = ev
 	c.traffic.pbMu.Unlock()
-	log.Printf("parking: council pushback %s %d (content-type=%q retry-after=%s x-azure-ref=%q)",
+	alog.Warnf("council pushback %s %d (content-type=%q retry-after=%s x-azure-ref=%q)",
 		ev.Surface, ev.Status, ev.ContentType, ev.RetryAfter.Round(time.Second), ev.AzureRef)
 }
 

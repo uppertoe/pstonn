@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -101,7 +100,7 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 	// Topic first: cheapest check, and it scopes everything that follows to the
 	// one topic this deployment owns.
 	if m.TopicARN != s.cfg.SESTopicARN {
-		log.Printf("ses hook: refusing message for unexpected topic %q", m.TopicARN)
+		alog.Warnf("ses hook: refusing message for unexpected topic %q", m.TopicARN)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -114,12 +113,12 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 	// stops a caller spending our outbound bandwidth on messages we were always
 	// going to refuse.
 	if !freshSNSTimestamp(m.Timestamp, time.Now()) {
-		log.Printf("ses hook: refusing message with stale or unparseable timestamp %q", m.Timestamp)
+		alog.Warnf("ses hook: refusing message with stale or unparseable timestamp %q", m.Timestamp)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	if err := verifySNSSignature(r.Context(), s.snsCert, &m); err != nil {
-		log.Printf("ses hook: signature verification failed: %v", err)
+		alog.Errorf("ses hook: signature verification failed: %v", err)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -129,11 +128,11 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 		// Confirm by fetching the URL SNS supplied. It is signature-verified above
 		// and host-checked here, so this cannot be pointed at an arbitrary target.
 		if err := confirmSNSSubscription(r.Context(), m.SubscribeURL); err != nil {
-			log.Printf("ses hook: subscription confirmation failed: %v", err)
+			alog.Errorf("ses hook: subscription confirmation failed: %v", err)
 			http.Error(w, "confirmation failed", http.StatusBadGateway)
 			return
 		}
-		log.Printf("ses hook: confirmed SNS subscription for topic %s", m.TopicARN)
+		alog.Infof("ses hook: confirmed SNS subscription for topic %s", m.TopicARN)
 	case "Notification":
 		if err := s.handleSESEvent(r, m.Message); err != nil {
 			// A suppression write failed (a full data volume, a read-only remount). Ack
@@ -143,16 +142,16 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 			// Return 500 instead: SNS redelivers, and SuppressAddress is an idempotent
 			// upsert so the retry is safe. (Bounded by snsMaxSkew — SNS stops retrying
 			// past the freshness window — but that beats dropping it on the first failure.)
-			log.Printf("ses hook: suppression write failed, asking SNS to retry: %v", err)
+			alog.Errorf("ses hook: suppression write failed, asking SNS to retry: %v", err)
 			http.Error(w, "temporary storage error", http.StatusInternalServerError)
 			return
 		}
 	case "UnsubscribeConfirmation":
 		// Someone unsubscribed our endpoint. That silently disables bounce handling,
 		// so make it loud rather than letting the app drift back to no feedback.
-		log.Printf("ses hook: WARNING our SNS subscription was cancelled for %s", m.TopicARN)
+		alog.Warnf("ses hook: our SNS subscription was cancelled for %s", m.TopicARN)
 	default:
-		log.Printf("ses hook: ignoring message type %q", m.Type)
+		alog.Infof("ses hook: ignoring message type %q", m.Type)
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -169,7 +168,7 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 	var ev sesEvent
 	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
-		log.Printf("ses hook: unparseable SES event: %v", err)
+		alog.Warnf("ses hook: unparseable SES event: %v", err)
 		return nil
 	}
 	kind := ev.NotificationType
@@ -185,7 +184,7 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 	switch strings.ToLower(kind) {
 	case "bounce":
 		if !strings.EqualFold(ev.Bounce.BounceType, "Permanent") {
-			log.Printf("ses hook: %s/%s bounce — not suppressing (retryable)", ev.Bounce.BounceType, ev.Bounce.BounceSubType)
+			alog.Infof("ses hook: %s/%s bounce — not suppressing (retryable)", ev.Bounce.BounceType, ev.Bounce.BounceSubType)
 			return nil
 		}
 		for _, rcpt := range ev.Bounce.BouncedRecipients {
@@ -194,7 +193,7 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 				detail = ev.Bounce.BounceSubType
 			}
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressBounce, detail); err != nil {
-				log.Printf("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
+				alog.Infof("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
 				writeErr = err
 				continue
 			}
@@ -202,7 +201,7 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 			// from a third party, and often quotes the address back) go in the
 			// suppression row, which the admin page shows and PruneSuppressions
 			// clears. The log needs only the fixed-vocabulary subtype.
-			log.Printf("ses hook: suppressed %s (permanent bounce: %s)", notify.RedactEmail(rcpt.EmailAddress), ev.Bounce.BounceSubType)
+			alog.Infof("ses hook: suppressed %s (permanent bounce: %s)", notify.RedactEmail(rcpt.EmailAddress), ev.Bounce.BounceSubType)
 		}
 	case "complaint":
 		// RFC 5965 defines "not-spam" as the recipient moving our mail OUT of their
@@ -210,21 +209,21 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 		// Acting on it would suppress someone for rescuing us, and a complaint row is
 		// the one kind that is never pruned and never user-clearable.
 		if strings.EqualFold(ev.Complaint.ComplaintFeedbackType, "not-spam") {
-			log.Printf("ses hook: ignoring a not-spam feedback report (the recipient un-junked our mail)")
+			alog.Infof("ses hook: ignoring a not-spam feedback report (the recipient un-junked our mail)")
 			return nil
 		}
 		for _, rcpt := range ev.Complaint.ComplainedRecipients {
 			if err := s.store.SuppressAddress(ctx, rcpt.EmailAddress, store.SuppressComplaint, ev.Complaint.ComplaintFeedbackType); err != nil {
-				log.Printf("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
+				alog.Infof("ses hook: suppress %s: %v", notify.RedactEmail(rcpt.EmailAddress), err)
 				writeErr = err
 				continue
 			}
-			log.Printf("ses hook: suppressed %s (spam complaint)", notify.RedactEmail(rcpt.EmailAddress))
+			alog.Infof("ses hook: suppressed %s (spam complaint)", notify.RedactEmail(rcpt.EmailAddress))
 		}
 	case "delivery":
 		// Nothing to do; subscribing to deliveries is optional and harmless.
 	default:
-		log.Printf("ses hook: ignoring SES event %q", kind)
+		alog.Infof("ses hook: ignoring SES event %q", kind)
 	}
 	return writeErr
 }

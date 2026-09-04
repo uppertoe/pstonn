@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -107,6 +106,6 @@ func (s *Server) ntfyConfirm(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Already confirmed. Push notifications are on for this phone.")
 		return
 	}
-	log.Printf("ntfy confirmed for %s", redact.Email(owner))
+	alog.Infof("ntfy confirmed for %s", redact.Email(owner))
 	fmt.Fprintln(w, "Confirmed — push notifications are getting through to this phone. You can now turn off email in p.stonn Settings if you'd rather.")
 }

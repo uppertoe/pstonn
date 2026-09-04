@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/uppertoe/pstonn/internal/notify"
@@ -54,7 +53,7 @@ func (s *Server) unsubscribeApply(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	log.Printf("unsubscribe: %s opted out of email", notify.RedactEmail(addr))
+	alog.Infof("unsubscribe: %s opted out of email", notify.RedactEmail(addr))
 	noStore(w)
 	// A one-click POST from a mail provider wants a bare 200, not a page; a human
 	// who pressed the button wants confirmation. Both get this — it is small, and

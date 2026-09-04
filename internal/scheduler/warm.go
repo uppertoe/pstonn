@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/notify"
@@ -137,7 +136,7 @@ func (s *Scheduler) warmLoop(ctx context.Context) {
 func (s *Scheduler) safeKeepWarm(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: keep-warm panicked (recovered): %v", r)
+			alog.Errorf("keep-warm panicked (recovered): %v", r)
 			s.systemAlert(ctx, "panic-keepwarm", "Scheduler keep-warm panicked",
 				fmt.Sprintf("The keep-warm loop panicked and was recovered. Sessions may lapse until fixed.\n\n%v", r))
 		}
@@ -193,7 +192,7 @@ func decideWarm(now, lastActive, linkedAt, updatedAt time.Time, maxAge, warmInte
 func (s *Scheduler) keepWarm(ctx context.Context) {
 	sessions, err := s.store.ListTenantSessions(ctx)
 	if err != nil {
-		log.Printf("scheduler: list council sessions: %v", err)
+		alog.Infof("list council sessions: %v", err)
 		return
 	}
 	for _, cs := range sessions {
@@ -216,7 +215,7 @@ func (s *Scheduler) keepWarm(ctx context.Context) {
 func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: keep-warm for %s panicked (recovered); skipping it: %v", redact.Email(cs.Owner), r)
+			alog.Errorf("keep-warm for %s panicked (recovered); skipping it: %v", redact.Email(cs.Owner), r)
 			s.systemAlert(ctx, "panic-keepwarm-session", "A session panicked during keep-warm",
 				fmt.Sprintf("Keep-warm for %s panicked and was skipped so the rest of the pass could continue: %v", cs.Owner, r))
 		}
@@ -240,16 +239,16 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		retired, err := s.store.DeleteTenantSessionIfIdle(ctx, cs.Owner, cs.TenantID, now.Add(-s.sessionMaxAge))
 		switch {
 		case err != nil:
-			log.Printf("scheduler: retire session %s: %v", redact.Email(cs.Owner), err)
+			alog.Infof("retire session %s: %v", redact.Email(cs.Owner), err)
 		case retired:
 			s.noteWarmSuccess(cs.Owner, cs.TenantID) // session gone; drop any warm backoff so it can't leak
-			log.Printf("scheduler: session for %s idle past the re-link limit; unlinked (re-link required)", redact.Email(cs.Owner))
+			alog.Infof("session for %s idle past the re-link limit; unlinked (re-link required)", redact.Email(cs.Owner))
 			// The renewal reminder (maybeRemind) is email-only and best-effort, so
 			// it must not be the sole signal: tell the user their permit just
 			// stopped being managed, exactly as the expired-cookie path does.
 			s.alertRelink(cs.Owner, cs.TenantID)
 		default:
-			log.Printf("scheduler: skipped retiring %s: the account was used again, or was already unlinked", redact.Email(cs.Owner))
+			alog.Infof("skipped retiring %s: the account was used again, or was already unlinked", redact.Email(cs.Owner))
 		}
 		return
 	}
@@ -304,7 +303,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 		case err == nil:
 			alive = true
 			s.noteWarmSuccess(cs.Owner, cs.TenantID)
-			log.Printf("scheduler: kept session for %s warm", redact.Email(cs.Owner))
+			alog.Infof("kept session for %s warm", redact.Email(cs.Owner))
 		case errors.Is(err, parking.ErrSessionExpired):
 			// Hand recovery to the reconnect worker and move on — never reconnect inline
 			// in the warm pass. alive stays false; the worker re-warms via a kick on a
@@ -326,7 +325,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 			// — a good citizen during the other side's outage, and it self-clears on
 			// recovery.
 			s.noteWarmFailure(cs.Owner, cs.TenantID)
-			log.Printf("scheduler: keep-warm %s: %v (backing off)", redact.Email(cs.Owner), err)
+			alog.Infof("keep-warm %s: %v (backing off)", redact.Email(cs.Owner), err)
 		}
 	}
 
@@ -356,7 +355,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 			} else {
 				s.noteDriftFailure(ctx, cs.Owner, derr)
 			}
-			log.Printf("scheduler: drift check %s: %v", redact.Email(cs.Owner), derr)
+			alog.Infof("drift check %s: %v", redact.Email(cs.Owner), derr)
 			// A drift read is often how we learn the cookie was killed tenant-side just
 			// AFTER a successful warm — the churn incident's signature. Without this the
 			// expiry was only logged: updated_at is fresh so keep-warm won't re-probe for
@@ -372,7 +371,7 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 			// we may be failing precisely because it is throttling us. Treating the failed
 			// write as a drift failure keeps the backoff on and lets it widen.
 			if err := s.markDriftChecked(ctx, cs.Owner, cs.TenantID); err != nil {
-				log.Printf("scheduler: mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", redact.Email(cs.Owner), err)
+				alog.Infof("mark drift-checked %s: %v (holding the backoff so this owner is not re-read every tick)", redact.Email(cs.Owner), err)
 				s.noteDriftFailure(ctx, cs.Owner, fmt.Errorf("drift checkpoint not saved: %w", err))
 			} else {
 				s.noteDriftSuccess(cs.Owner)  // clear any backoff from earlier failures
@@ -393,7 +392,7 @@ func (s *Scheduler) warnNoReminderChannel() {
 		return
 	}
 	s.reminderWarnAt = now
-	log.Printf("scheduler: renewal reminders are disabled because no SMTP sender is configured " +
+	alog.Warnf("renewal reminders are disabled because no SMTP sender is configured " +
 		"(the reminder is email-only; ntfy does not carry it). Households will not be warned before their council link expires.")
 }
 
@@ -432,7 +431,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 	}
 	token, err := randToken()
 	if err != nil {
-		log.Printf("scheduler: reminder token for %s: %v", redact.Email(cs.Owner), err)
+		alog.Infof("reminder token for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
 	url := s.publicBaseURL + "/tenant/confirm?token=" + token
@@ -441,7 +440,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 	// broken one every warm tick. Recording first makes the emailed link valid by
 	// construction; if the send then fails we roll the mark back so it can be retried.
 	if err := s.store.MarkReminderSent(ctx, cs.Owner, cs.TenantID, token); err != nil {
-		log.Printf("scheduler: mark reminder for %s: %v", redact.Email(cs.Owner), err)
+		alog.Infof("mark reminder for %s: %v", redact.Email(cs.Owner), err)
 		return
 	}
 	if err := s.notifier.SendRenewalReminder(ctx, cs.Owner, cs.TenantID, deadline.In(s.locOf(cs.Owner, cs.TenantID)), url); err != nil {
@@ -451,10 +450,10 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 			// this from rolling back, alerting and re-trying every recovery tick for
 			// the whole lead window. The retirement path still tells the household
 			// (and, when it cannot, the operator) once the bound is reached.
-			log.Printf("scheduler: renewal reminder to %s skipped (suppressed address); marked done", redact.Email(cs.Owner))
+			alog.Infof("renewal reminder to %s skipped (suppressed address); marked done", redact.Email(cs.Owner))
 			return
 		}
-		log.Printf("scheduler: send reminder to %s: %v", redact.Email(cs.Owner), err)
+		alog.Infof("send reminder to %s: %v", redact.Email(cs.Owner), err)
 		// DETACHED context for the rollback. Using ctx here was a real defect: the most
 		// likely reason the send failed is that ctx was cancelled (shutdown), and the
 		// rollback would then fail for the same reason — leaving the session marked
@@ -463,7 +462,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 		// duplicate the old ordering risked.
 		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		if cerr := s.store.ClearReminderSent(rbCtx, cs.Owner, cs.TenantID); cerr != nil {
-			log.Printf("scheduler: roll back reminder mark for %s: %v", redact.Email(cs.Owner), cerr)
+			alog.Infof("roll back reminder mark for %s: %v", redact.Email(cs.Owner), cerr)
 		}
 		cancel()
 		// The reminder is email-only. If it keeps failing through the window the
@@ -473,7 +472,7 @@ func (s *Scheduler) maybeRemind(ctx context.Context, cs store.TenantSession, now
 			fmt.Sprintf("Could not email the re-authorise reminder to %s: %v. If this persists their session will lapse without warning.", cs.Owner, err))
 		return
 	}
-	log.Printf("scheduler: emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner, cs.TenantID)).Format("2006-01-02"))
+	alog.Infof("emailed renewal reminder to %s (deadline %s)", redact.Email(cs.Owner), deadline.In(s.locOf(cs.Owner, cs.TenantID)).Format("2006-01-02"))
 }
 
 // idleWindowFor is the idle-expiry estimate a session's warm threshold is clamped

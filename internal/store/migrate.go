@@ -2,7 +2,6 @@ package store
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -145,7 +144,7 @@ INSERT OR IGNORE INTO schema_migration (id, version) VALUES (1, 0);
 				if _, err := s.db.Exec(
 					`UPDATE schema_migration SET locked_by = '', locked_at = '' WHERE id = 1 AND locked_by = ?`,
 					holder); err != nil {
-					log.Printf("migrate: could not release the migration lock: %v", err)
+					alog.Errorf("migrate: could not release the migration lock: %v", err)
 				}
 			}, nil
 		}
@@ -153,7 +152,7 @@ INSERT OR IGNORE INTO schema_migration (id, version) VALUES (1, 0);
 			return nil, fmt.Errorf("migrate: another process has held the migration lock for over %s; "+
 				"check for a second container on this data volume", migrationLockWait)
 		}
-		log.Printf("migrate: another process is migrating this database; waiting")
+		alog.Infof("migrate: another process is migrating this database; waiting")
 		time.Sleep(500 * time.Millisecond)
 	}
 }
@@ -653,7 +652,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		return err
 	} else if has {
 		if _, err := s.db.Exec(`ALTER TABLE guest_token DROP COLUMN last_used_at`); err != nil {
-			log.Printf("migrate: could not drop guest_token.last_used_at (%v); clearing its values instead", err)
+			alog.Errorf("migrate: could not drop guest_token.last_used_at (%v); clearing its values instead", err)
 			if _, err := s.db.Exec(`UPDATE guest_token SET last_used_at = '' WHERE last_used_at != ''`); err != nil {
 				return fmt.Errorf("migrate: clear guest_token.last_used_at: %w", err)
 			}

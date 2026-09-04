@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -113,7 +112,7 @@ func (s *Service) RunOutbox(ctx context.Context) {
 			// settles and is only needed for the 15-minute dedup window (its key is
 			// hashed at enqueue), so a day is generous.
 			if _, err := s.store.PurgeSentOutbox(ctx, time.Now().Add(-24*time.Hour)); err != nil {
-				log.Printf("notify: purge outbox: %v", err)
+				alog.Infof("purge outbox: %v", err)
 			}
 		}
 	}
@@ -159,7 +158,7 @@ func (s *Service) drainOutbox(ctx context.Context) {
 	}
 	due, err := s.store.DueOutbox(ctx, time.Now(), outboxBatch)
 	if err != nil {
-		log.Printf("notify: read outbox: %v", err)
+		alog.Infof("read outbox: %v", err)
 		return
 	}
 	for _, it := range due {
@@ -240,7 +239,7 @@ func (s *Service) record(ctx context.Context, id int64, u outboxUpdate) bool {
 // next_attempt in the past, and the same email went out every 15 seconds with
 // nothing anywhere saying so.
 func (s *Service) park(ctx context.Context, id int64, u outboxUpdate, err error) {
-	log.Printf("notify: outbox row %d was %s but the store refused the bookkeeping write (%v) — "+
+	alog.Errorf("outbox row %d was %s but the store refused the bookkeeping write (%v) — "+
 		"parking it and sending nothing further until that write lands", id, u.status, err)
 	if len(s.unrecorded) < maxUnrecorded {
 		s.unrecorded[id] = u
@@ -255,7 +254,7 @@ func (s *Service) park(ctx context.Context, id int64, u outboxUpdate, err error)
 				"Outbox row: %d\n\nNotifications are PAUSED until the write succeeds, so that the "+
 				"delivered message is not sent again on every retry. Check disk space and that the "+
 				"database volume is writable.", err, id)); ae != nil {
-			log.Printf("notify: outbox-write admin alert also failed: %v", ae)
+			alog.Errorf("outbox-write admin alert also failed: %v", ae)
 		}
 	}
 }
@@ -271,7 +270,7 @@ func (s *Service) flushUnrecorded(ctx context.Context) bool {
 		if !s.record(ctx, id, u) {
 			return false
 		}
-		log.Printf("notify: outbox row %d bookkeeping recorded on retry (%s)", id, u.status)
+		alog.Infof("outbox row %d bookkeeping recorded on retry (%s)", id, u.status)
 	}
 	return true
 }
@@ -285,11 +284,11 @@ func (s *Service) flushUnrecorded(ctx context.Context) bool {
 // key and (redacted) last error for a day, so an operator can correlate it with
 // the account but the message itself is gone.
 func (s *Service) announceDead(ctx context.Context, id int64, u outboxUpdate) {
-	log.Printf("notify: DROPPED outbox row %d (%s) to %s: %s", id, u.why, u.who, u.lastErr)
+	alog.Errorf("DROPPED outbox row %d (%s) to %s: %s", id, u.why, u.who, u.lastErr)
 	if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
 		fmt.Sprintf("A notification could not be delivered (%s) and was dropped.\nOutbox row: %d\nTo: %s\nLast error: %s",
 			u.why, id, u.who, u.lastErr)); ae != nil {
-		log.Printf("notify: dead-letter admin alert also failed: %v", ae)
+		alog.Errorf("dead-letter admin alert also failed: %v", ae)
 	}
 }
 
@@ -316,7 +315,7 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			// way the inline sender chose between sendEmail and sendEmailCritical.
 			e := s.sendEmailWith(ctx, addr, it.Subject, it.Body, it.Reason, it.Critical, mailer.Hero{Plate: it.HeroPlate, Color: it.HeroColor})
 			if errors.Is(e, ErrSuppressed) {
-				log.Printf("notify: skipping suppressed recipient %s (outbox row %d)", RedactEmail(addr), it.ID)
+				alog.Infof("skipping suppressed recipient %s (outbox row %d)", RedactEmail(addr), it.ID)
 				continue
 			}
 			emailTargets++
@@ -344,7 +343,7 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 	// attempt, and let email decide the row's fate as usual.
 	mixed := len(it.Recipients) > 0 && it.NtfyTopic != ""
 	if mixed && it.Attempts == 0 {
-		log.Printf("notify: outbox row %d addresses email and push in one row; "+
+		alog.Infof("outbox row %d addresses email and push in one row; "+
 			"pushing once only, since a retry cannot un-push it (enqueueSplit should have split it)", it.ID)
 	}
 	ntfyTargets, ntfyOK := 0, false

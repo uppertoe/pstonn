@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/uppertoe/pstonn/internal/mailer"
@@ -75,12 +74,12 @@ func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, su
 	if s.store != nil {
 		if bad, why, err := s.store.IsSuppressed(ctx, to); err != nil {
 			// Fail OPEN: a lookup error must not stop a permit notification going out.
-			log.Printf("notify: suppression lookup for %s: %v", RedactEmail(to), err)
+			alog.Infof("suppression lookup for %s: %v", RedactEmail(to), err)
 		} else if bad {
 			if !(critical && why == store.SuppressUnsubscribed) {
 				return fmt.Errorf("%w: %s", ErrSuppressed, why)
 			}
-			log.Printf("notify: critical notice to unsubscribed %s goes out anyway (unsubscribe mutes routine mail, not safety alerts)", RedactEmail(to))
+			alog.Infof("critical notice to unsubscribed %s goes out anyway (unsubscribe mutes routine mail, not safety alerts)", RedactEmail(to))
 		}
 	}
 	c := s.tenantOf(ctx, tenantOwner, tenantID)
@@ -94,12 +93,12 @@ func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, su
 	// mailbox, and acting on it would blacklist every user we tried to reach.
 	if err != nil && errors.Is(err, mailer.ErrBadAddress) && s.store != nil {
 		if serr := s.store.SuppressAddress(ctx, to, store.SuppressBounce, err.Error()); serr != nil {
-			log.Printf("notify: suppress %s: %v", RedactEmail(to), serr)
+			alog.Infof("suppress %s: %v", RedactEmail(to), serr)
 		} else {
 			// The full address and the server's own diagnostic go in the suppression
 			// row, which is where an operator looks and which gets pruned; the log line
 			// only needs to say that it happened.
-			log.Printf("notify: suppressing %s after the mail server rejected the address", RedactEmail(to))
+			alog.Errorf("suppressing %s after the mail server rejected the address", RedactEmail(to))
 		}
 	}
 	return err

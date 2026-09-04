@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -113,7 +112,7 @@ func (c *Client) listPermits(ctx context.Context, ss *session) ([]provider.Permi
 			// reported incomplete; the next pass reads it cleanly.
 			// Reported as partial by construction (total > len), whichever way the
 			// count moved, so a caller can never mistake it for the whole account.
-			log.Printf("orikan: permit count changed mid-read (%d -> %d at page %d); treating this list as incomplete", expected, total, page)
+			alog.Warnf("permit count changed mid-read (%d -> %d at page %d); treating this list as incomplete", expected, total, page)
 			return all, max(expected, total, len(all)+1), nil
 		}
 		added := 0
@@ -131,11 +130,11 @@ func (c *Client) listPermits(ctx context.Context, ss *session) ([]provider.Permi
 		if added == 0 {
 			// No progress and still short of the count: paging is not working the way
 			// we assumed, so report what we have as partial.
-			log.Printf("orikan: permit list stalled at %d of %d after %d page(s); reporting a partial list", len(all), expected, page+1)
+			alog.Warnf("permit list stalled at %d of %d after %d page(s); reporting a partial list", len(all), expected, page+1)
 			return all, expected, nil
 		}
 	}
-	log.Printf("orikan: permit list still incomplete after %d pages; reporting a partial list", maxPermitPages)
+	alog.Warnf("permit list still incomplete after %d pages; reporting a partial list", maxPermitPages)
 	return all, expected, nil
 }
 

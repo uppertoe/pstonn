@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/parking"
@@ -389,7 +388,7 @@ func (s *Scheduler) drainOneReconnect(ctx context.Context) (processed bool) {
 	processed = true // we have an item; a panic below is still "processed" (it gets a backoff)
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("scheduler: reconnect worker panicked on %s (recovered): %v", redact.Email(owner), r)
+			alog.Errorf("reconnect worker panicked on %s (recovered): %v", redact.Email(owner), r)
 			s.systemAlert(ctx, "panic-reconnect", "Reconnect worker panicked",
 				fmt.Sprintf("Recovering the session for %s panicked and was recovered; it will be retried. %v", owner, r))
 			s.backoffReconnect(key, item)
@@ -438,7 +437,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string,
 		// A TRANSIENT read failure (SQLite contention — likeliest during exactly the
 		// mass-expiry this queue exists for) must not drop the task, which is the same
 		// mistake the failed-delete path already corrects.
-		log.Printf("scheduler: reconnect guard read for %s failed; retrying later: %v", redact.Email(owner), err)
+		alog.Errorf("reconnect guard read for %s failed; retrying later: %v", redact.Email(owner), err)
 		return reconnectDeferred
 	case cur.Generation != gen:
 		return reconnectRetired // superseded: the current session is not ours to touch
@@ -457,18 +456,18 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string,
 		if countsChurn { // balance the churn counters: only a counted expiry's reconnect counts
 			s.noteReconnect(owner)
 		}
-		log.Printf("scheduler: session for %s expired; auto-reconnected from saved password", redact.Email(owner))
+		alog.Infof("session for %s expired; auto-reconnected from saved password", redact.Email(owner))
 		return reconnectRecovered
 	case errors.Is(rerr, store.ErrSessionSuperseded):
 		// The login succeeded at the tenant but the generation-conditioned save landed
 		// nowhere — the session changed under us (a relink or a password opt-out during
 		// the attempt). Discard; the current session is correct as it stands.
-		log.Printf("scheduler: reconnect for %s superseded by a concurrent session change; discarding", redact.Email(owner))
+		alog.Infof("reconnect for %s superseded by a concurrent session change; discarding", redact.Email(owner))
 		return reconnectRetired
 	case errors.Is(rerr, parking.ErrNoSavedPassword):
 		// No credentials to retry with → retire and prompt a manual re-link.
 	case errors.Is(rerr, parking.ErrLoginRejected):
-		log.Printf("scheduler: auto-reconnect for %s rejected (saved password no longer valid)", redact.Email(owner))
+		alog.Errorf("auto-reconnect for %s rejected (saved password no longer valid)", redact.Email(owner))
 	case errors.Is(rerr, parking.ErrLoginFormUnrecognised):
 		// The sign-in page shape changed: this breaks reconnect AND interactive
 		// re-link for EVERY user, and retrying cannot fix it. Alert as systemic and
@@ -481,14 +480,14 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string,
 		return reconnectDeferred
 	default:
 		// Transient — keep the session + saved password and retry after a backoff.
-		log.Printf("scheduler: auto-reconnect for %s deferred (transient): %v", redact.Email(owner), rerr)
+		alog.Infof("auto-reconnect for %s deferred (transient): %v", redact.Email(owner), rerr)
 		return reconnectDeferred
 	}
 	// Retire — but ONLY the generation we observed, so a relink during the attempt
 	// survives. A delete FAILURE keeps the task (don't lose the recovery work).
 	switch deleted, derr := s.store.DeleteTenantSessionIfGen(ctx, owner, tenantID, gen); {
 	case derr != nil:
-		log.Printf("scheduler: unlink expired session %s: %v", redact.Email(owner), derr)
+		alog.Infof("unlink expired session %s: %v", redact.Email(owner), derr)
 		s.systemAlert(ctx, "retire-delete", "Could not retire an unrecoverable session",
 			fmt.Sprintf("The session for %s could not be auto-reconnected and deleting it failed: %v. It will be retried; if this persists the account is stuck half-linked.", owner, derr))
 		return reconnectDeferred
@@ -496,7 +495,7 @@ func (s *Scheduler) recoverOrRetire(ctx context.Context, owner, tenantID string,
 		// Superseded by a fresh link/reconnect during the attempt: nothing to retire.
 		return reconnectRetired
 	default:
-		log.Printf("scheduler: session for %s expired; unlinked (re-link required)", redact.Email(owner))
+		alog.Infof("session for %s expired; unlinked (re-link required)", redact.Email(owner))
 		s.alertRelink(owner, tenantID) // proactively tell the user, don't wait for fine time
 		return reconnectRetired
 	}

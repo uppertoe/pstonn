@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -46,7 +45,7 @@ const unsubKeyLen = sha256.Size
 // unsubscribe links rather than with forgeable ones.
 func DeriveUnsubKey(dataKey []byte) []byte {
 	if len(dataKey) < minDataKeyLen {
-		log.Printf("WARNING: DATA_ENCRYPTION_KEY is unset or too short (%d bytes, need %d), "+
+		alog.Warnf("DATA_ENCRYPTION_KEY is unset or too short (%d bytes, need %d), "+
 			"so unsubscribe links are DISABLED. A key derived from a short secret is guessable, "+
 			"which would let anyone silence any address's notifications. Outgoing mail will carry "+
 			"no List-Unsubscribe header until a real key is set.", len(dataKey), minDataKeyLen)

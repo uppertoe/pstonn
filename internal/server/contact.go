@@ -1,7 +1,6 @@
 package server
 
 import (
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -353,7 +352,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		body += "\n\n(No reply address given.)"
 	}
 	if err := s.mail.SendWithReplyTo(s.cfg.ContactTo, replyTo, "p.stonn contact form", body); err != nil {
-		log.Printf("contact form send failed: %v", err)
+		alog.Errorf("contact form send failed: %v", err)
 		base.Warn = "Sorry, the message could not be sent right now. Please try again later."
 		s.render(w, base)
 		return

@@ -1,7 +1,6 @@
 package parking
 
 import (
-	"log"
 	"time"
 )
 
@@ -38,7 +37,7 @@ func (c *Client) penalize(owner string, retryAfter time.Duration) {
 	c.traffic.pushback.Add(1)
 	if c.breaker.onPushback(time.Now(), owner, retryAfter) {
 		_, wait := c.breaker.state(time.Now())
-		log.Printf("parking: FLEET CIRCUIT OPEN — multiple owners pushed back at once (likely an edge/IP block); pausing ALL council traffic for %s", wait.Round(time.Second))
+		alog.Warnf("FLEET CIRCUIT OPEN — multiple owners pushed back at once (likely an edge/IP block); pausing ALL council traffic for %s", wait.Round(time.Second))
 	}
 	c.persistBreaker()
 }
@@ -50,7 +49,7 @@ func (c *Client) clearPenalty(owner string) {
 
 func (c *Client) noteTenantSuccess(owner string, permit breakerPermit) {
 	if c.breaker.onSuccess(time.Now(), owner, permit) {
-		log.Printf("parking: fleet circuit closed — the council edge is serving us again; council traffic resumed")
+		alog.Infof("fleet circuit closed — the council edge is serving us again; council traffic resumed")
 		c.persistBreaker() // clear the persisted pause so a restart doesn't re-pause
 	}
 }

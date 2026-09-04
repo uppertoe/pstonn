@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"log"
 	"strconv"
 	"time"
 )
@@ -41,7 +40,7 @@ const decideTokenLife = 48 * time.Hour
 // would let anyone approve a stranger's plate onto the permit.
 func DeriveDecideKey(dataKey []byte) []byte {
 	if len(dataKey) < minDataKeyLen {
-		log.Printf("WARNING: DATA_ENCRYPTION_KEY is unset or too short (%d bytes, need %d), "+
+		alog.Warnf("DATA_ENCRYPTION_KEY is unset or too short (%d bytes, need %d), "+
 			"so no-sign-in approve/decline links are DISABLED. A key derived from a short secret "+
 			"is guessable, which would let anyone decide guest requests. Request emails will link "+
 			"to the signed-in approvals page only until a real key is set.", len(dataKey), minDataKeyLen)

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -112,7 +111,7 @@ func (s *Server) acceptTerms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if firstTime {
-		log.Printf("new account for %s", redact.Email(u.Email)) // operator milestone (sign-up)
+		alog.Infof("new account for %s", redact.Email(u.Email)) // operator milestone (sign-up)
 	}
 	redirectHome(w, r)
 }
@@ -142,7 +141,7 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, err)
 			return
 		}
-		log.Printf("secondary %s declined updated terms, left the shared account", redact.Email(user))
+		alog.Infof("secondary %s declined updated terms, left the shared account", redact.Email(user))
 		msg := "You declined the terms. Your shared access has been removed. The account owner's data is unaffected."
 		if s.logoutURL() != "" {
 			s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ".")
@@ -160,12 +159,12 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sched.CancelReconnect(user) // session gone; drop any queued reconnect
 	if wasLinked {
-		log.Printf("user %s declined updated terms, council account disconnected", redact.Email(user))
+		alog.Infof("user %s declined updated terms, council account disconnected", redact.Email(user))
 		go func() {
 			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if e := s.notify.NotifyDisconnected(nctx, user); e != nil {
-				log.Printf("notify disconnect %s: %v", redact.Email(user), e)
+				alog.Infof("notify disconnect %s: %v", redact.Email(user), e)
 			}
 		}()
 	}

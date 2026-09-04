@@ -15,7 +15,11 @@ import (
 	"time"
 
 	"modernc.org/sqlite"
+
+	"github.com/uppertoe/pstonn/internal/applog"
 )
+
+var alog = applog.For("store")
 
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("not found")

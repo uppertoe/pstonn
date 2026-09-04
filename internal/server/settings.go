@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -170,7 +169,7 @@ func (s *Server) renderNotifyView(w http.ResponseWriter, r *http.Request, nv not
 	if r.Header.Get("HX-Request") != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "notify-body", nv); err != nil {
-			log.Printf("render notify-body: %v", err)
+			alog.Infof("render notify-body: %v", err)
 		}
 		return
 	}
@@ -200,7 +199,7 @@ func (s *Server) resumeEmail(w http.ResponseWriter, r *http.Request) {
 	} else if !cleared {
 		status = "" // nothing to clear (or not clearable: bounce/complaint)
 	} else {
-		log.Printf("resubscribe: %s resumed email from the Settings banner", redact.Email(user))
+		alog.Infof("resubscribe: %s resumed email from the Settings banner", redact.Email(user))
 	}
 	// The banner state changed, so force the fragment to re-render even though
 	// the form normally saves with hx-swap:none.
@@ -258,9 +257,9 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 	// Only clears a self-requested unsubscribe — never a bounce or a complaint.
 	if email {
 		if cleared, err := s.store.UnsuppressIfUnsubscribed(r.Context(), user); err != nil {
-			log.Printf("resubscribe %s: %v", redact.Email(user), err)
+			alog.Infof("resubscribe %s: %v", redact.Email(user), err)
 		} else if cleared {
-			log.Printf("resubscribe: %s re-enabled email after unsubscribing", redact.Email(user))
+			alog.Infof("resubscribe: %s re-enabled email after unsubscribing", redact.Email(user))
 		}
 	}
 	// Failures-only: the sender has always honoured this, but nothing ever wrote
@@ -330,7 +329,7 @@ func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
 	// The one write on this page that silently changes what a phone must be
 	// subscribed to; without a line here a "my pushes stopped" report cannot be
 	// told apart from a subscription that was never made.
-	log.Printf("ntfy topic regenerated for %s", redact.Email(user))
+	alog.Infof("ntfy topic regenerated for %s", redact.Email(user))
 	s.renderNotify(w, r, user, pref, status, "")
 }
 
@@ -351,7 +350,7 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	if err := s.notify.SendTest(r.Context(), user, confirmURL); err != nil {
 		// Details (SMTP hosts, dial errors, ntfy URLs) go to the log, not the
 		// browser.
-		log.Printf("test notify %s: %v", redact.Email(user), err)
+		alog.Infof("test notify %s: %v", redact.Email(user), err)
 		s.message(w, http.StatusBadGateway, "Couldn't send the test notification. Check your channels in Settings, and ask the operator to check the logs if it keeps failing.")
 		return
 	}
@@ -373,7 +372,7 @@ func (s *Server) ntfyConfirmURL(ctx context.Context, user string) (confirmURL st
 	}
 	tok, err := s.mintNtfyConfirm(user, pref.NtfyTopic, time.Now().Add(ntfyConfirmTTL))
 	if err != nil {
-		log.Printf("test notify %s: mint confirm token: %v", redact.Email(user), err)
+		alog.Infof("test notify %s: mint confirm token: %v", redact.Email(user), err)
 		return "", false
 	}
 	return s.cfg.PublicBaseURL + "/ntfy/confirm/" + tok, true
@@ -407,7 +406,7 @@ func (s *Server) testPush(w http.ResponseWriter, r *http.Request) {
 			s.renderNotify(w, r, user, pref, "", "Turn on push notifications first.")
 			return
 		}
-		log.Printf("test push %s: %v", redact.Email(user), err)
+		alog.Infof("test push %s: %v", redact.Email(user), err)
 		s.renderNotify(w, r, user, pref, "", "Couldn't reach the push server just now. Please try again shortly.")
 		return
 	}

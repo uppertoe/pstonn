@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"io/fs"
-	"log"
 	"net/http"
 	"strings"
 
@@ -183,7 +182,7 @@ func (s *Server) user(w http.ResponseWriter, r *http.Request) (identity.User, bo
 		// missing) goes to the log where it belongs. This state means the deployment
 		// is misconfigured, so it is the operator who needs the detail, not a member
 		// of the public reading about APP_OIDC_*.
-		log.Print("sign-in is not configured: run behind the forward-auth layer, set APP_OIDC_*, or use DEV_IDENTITY_EMAIL for local use")
+		alog.Warnf("sign-in is not configured: run behind the forward-auth layer, set APP_OIDC_*, or use DEV_IDENTITY_EMAIL for local use")
 		s.message(w, http.StatusUnauthorized, "Sign-in isn't available right now. Please try again shortly.")
 	}
 	return identity.User{}, false
@@ -204,7 +203,7 @@ func (s *Server) resolveAccount(ctx context.Context) (user, owner string, isPrim
 		// read (a secondary just sees their own empty account for a moment). A MUTATING
 		// handler must NOT use this: it would write into that phantom own-account. Those
 		// use resolveAccountStrict and fail closed — see its doc.
-		log.Printf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", redact.Email(user), err)
+		alog.Errorf("resolveAccount %s: membership lookup failed (own account, primary privilege withheld): %v", redact.Email(user), err)
 		return user, user, false
 	}
 	return user, owner, isPrimary
@@ -233,7 +232,7 @@ func (s *Server) resolveAccountStrict(ctx context.Context) (user, owner string, 
 func (s *Server) accountForWrite(w http.ResponseWriter, r *http.Request) (user, owner string, isPrimary, ok bool) {
 	user, owner, isPrimary, err := s.resolveAccountStrict(r.Context())
 	if err != nil {
-		log.Printf("accountForWrite %s: membership lookup failed; refusing the mutation: %v", redact.Email(user), err)
+		alog.Errorf("accountForWrite %s: membership lookup failed; refusing the mutation: %v", redact.Email(user), err)
 		s.message(w, http.StatusServiceUnavailable, "We couldn't confirm your account just now. Please try again in a moment.")
 		return "", "", false, false
 	}

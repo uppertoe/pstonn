@@ -2,7 +2,6 @@ package notify
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -54,7 +53,7 @@ func say(c mailTenant, key string, extra map[string]any) string {
 	}
 	out, err := i18n.Default().For(i18n.DefaultLocale).Text(key, data)
 	if err != nil {
-		log.Printf("i18n: %v", err)
+		alog.Infof("i18n: %v", err)
 		return key
 	}
 	return out

@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"mime"
 	"net"
 	"net/smtp"
@@ -17,8 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/config"
 )
+
+var alog = applog.For("mailer")
 
 // Mailer sends email via an SMTP submission server (STARTTLS on the configured
 // port, PLAIN auth when a username is set).
@@ -267,7 +269,7 @@ func (m *Mailer) deliver(to string, msg []byte) error {
 	// mail was "undeliverable". So the send is a success from here; a QUIT hiccup is
 	// logged, not surfaced.
 	if err := c.Quit(); err != nil {
-		log.Printf("mailer: QUIT failed after the message was accepted (already delivered, not retrying): %v", err)
+		alog.Errorf("QUIT failed after the message was accepted (already delivered, not retrying): %v", err)
 	}
 	return nil
 }

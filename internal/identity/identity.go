@@ -11,13 +11,16 @@ package identity
 import (
 	"context"
 	"crypto/subtle"
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/uppertoe/pstonn/internal/applog"
 )
+
+var alog = applog.For("identity")
 
 type ctxKey struct{}
 
@@ -86,7 +89,7 @@ func warnUntrustedIdentity(remoteAddr string) {
 	if now-prev < spoofLogEvery || !lastSpoofLog.CompareAndSwap(prev, now) {
 		return
 	}
-	log.Printf("SECURITY: ignoring Remote-* identity headers from untrusted peer %s. "+
+	alog.Warnf("SECURITY: ignoring Remote-* identity headers from untrusted peer %s. "+
 		"These are only believed from a loopback/private peer (the reverse proxy). If sign-in is "+
 		"broken, the app is reachable other than through the proxy — do not expose its port directly.",
 		remoteAddr)
@@ -102,7 +105,7 @@ func warnMissingProxySecret(remoteAddr string) {
 	if now-prev < spoofLogEvery || !lastSpoofLog.CompareAndSwap(prev, now) {
 		return
 	}
-	log.Printf("SECURITY: ignoring Remote-* identity headers from private peer %s: PROXY_SECRET is set but the request carries no matching X-Proxy-Secret. "+
+	alog.Warnf("SECURITY: ignoring Remote-* identity headers from private peer %s: PROXY_SECRET is set but the request carries no matching X-Proxy-Secret. "+
 		"If sign-in is broken, the reverse proxy's PSTONN_PROXY_SECRET env does not match the app's PROXY_SECRET.", remoteAddr)
 }
 

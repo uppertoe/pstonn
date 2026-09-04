@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -135,7 +134,7 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 	told, urgent, err := s.store.FailureEpisode(ctx, p.ID)
 	if err != nil {
 		// An inconclusive read must not mint a notice; the next pass decides again.
-		log.Printf("scheduler: failure episode for permit %d unreadable, not notifying this pass: %v", p.ID, err)
+		alog.Infof("failure episode for permit %d unreadable, not notifying this pass: %v", p.ID, err)
 		return
 	}
 	if told == "" {
@@ -143,7 +142,7 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 			if lp, lu, ok := legacyFailureTold(k, o.Reg, p.TenantID); ok {
 				told, urgent = lp, lu
 				if e := s.store.MarkFailureTold(ctx, p.ID, lp, lu); e != nil {
-					log.Printf("scheduler: could not adopt the pre-episode notice for permit %d: %v", p.ID, e)
+					alog.Errorf("could not adopt the pre-episode notice for permit %d: %v", p.ID, e)
 				}
 			}
 		}
@@ -169,7 +168,7 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 	key := "fail|" + o.Reg + "|" + tier.String()
 	s.notifyUserThen(ctx, p, o, key, func(c context.Context) {
 		if e := s.store.MarkFailureTold(c, p.ID, o.Reg, tier == tierUrgent); e != nil {
-			log.Printf("scheduler: delivered a failure notice for permit %d but could not record it in the episode (may re-send): %v", p.ID, e)
+			alog.Errorf("delivered a failure notice for permit %d but could not record it in the episode (may re-send): %v", p.ID, e)
 		}
 	})
 }
@@ -206,7 +205,7 @@ func (s *Scheduler) notifyFailedDriver(ctx context.Context, p model.Permit, o no
 	}
 	vehicles, err := s.store.ListVehiclesFor(ctx, p.Owner)
 	if err != nil {
-		log.Printf("scheduler: driver-failed lookup for %s: %v", redact.Email(p.Owner), err)
+		alog.Errorf("driver-failed lookup for %s: %v", redact.Email(p.Owner), err)
 		return
 	}
 	var v model.Vehicle
@@ -222,12 +221,12 @@ func (s *Scheduler) notifyFailedDriver(ctx context.Context, p model.Permit, o no
 	}
 	if sup, err := s.store.SuppressedAmong(ctx, []string{v.Email}); err != nil || len(sup) > 0 {
 		if err != nil {
-			log.Printf("scheduler: suppression check for %s: %v", notify.RedactEmail(v.Email), err)
+			alog.Infof("suppression check for %s: %v", notify.RedactEmail(v.Email), err)
 		}
 		return
 	}
 	if err := s.notifier.NotifyDriverFailed(ctx, p.Owner, p.TenantID, v.Email, o.Reg, v.Color, o.CouncilDown); err != nil {
-		log.Printf("scheduler: enqueue driver-failed for %s: %v", notify.RedactEmail(v.Email), err)
+		alog.Errorf("enqueue driver-failed for %s: %v", notify.RedactEmail(v.Email), err)
 	}
 }
 
@@ -243,7 +242,7 @@ func (s *Scheduler) closeFailureEpisode(ctx context.Context, permitID int64) (wa
 		return false
 	}
 	if err := s.store.CloseFailureEpisode(ctx, permitID); err != nil {
-		log.Printf("scheduler: could not close the failure episode for permit %d: %v", permitID, err)
+		alog.Errorf("could not close the failure episode for permit %d: %v", permitID, err)
 	}
 	return true
 }
@@ -359,12 +358,12 @@ func (s *Scheduler) warnDisplacedHow(ctx context.Context, p model.Permit, d mode
 	}
 	if sup, err := s.store.SuppressedAmong(ctx, []string{d.Contact}); err != nil || len(sup) > 0 {
 		if err != nil {
-			log.Printf("scheduler: suppression check for %s: %v", notify.RedactEmail(d.Contact), err)
+			alog.Infof("suppression check for %s: %v", notify.RedactEmail(d.Contact), err)
 		}
 		return false // undeliverable (or unknown): tell the account to pass it on
 	}
 	if err := s.notifier.NotifyDriverDisplaced(ctx, p.Owner, d.Contact, permitLabel(p), prev, how, s.now()); err != nil {
-		log.Printf("scheduler: enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
+		alog.Infof("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return false
 	}
 	return true
@@ -393,12 +392,12 @@ func (s *Scheduler) notifyAddedDriver(ctx context.Context, p model.Permit, want 
 	}
 	if sup, err := s.store.SuppressedAmong(ctx, []string{vi.Email}); err != nil || len(sup) > 0 {
 		if err != nil {
-			log.Printf("scheduler: suppression check for %s: %v", notify.RedactEmail(vi.Email), err)
+			alog.Infof("suppression check for %s: %v", notify.RedactEmail(vi.Email), err)
 		}
 		return
 	}
 	if err := s.notifier.NotifyDriverAdded(ctx, p.Owner, p.TenantID, vi.Email, want, vi.Color); err != nil {
-		log.Printf("scheduler: enqueue driver-added for %s: %v", notify.RedactEmail(vi.Email), err)
+		alog.Infof("enqueue driver-added for %s: %v", notify.RedactEmail(vi.Email), err)
 	}
 }
 
@@ -503,7 +502,7 @@ func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify
 			// be the person who actually parks the car, and for an OK:false outcome that
 			// is the fine. Leave the key unset so a later pass re-delivers: the notifier
 			// remembers who it reached (o.Key), so the retry goes only to the rest.
-			log.Printf("scheduler: partial notify for %s (delivered=%d): %v — not recording, will retry", redact.Email(o.Owner), delivered, err)
+			alog.Infof("partial notify for %s (delivered=%d): %v — not recording, will retry", redact.Email(o.Owner), delivered, err)
 			s.holdNotify(claim)
 			return
 		}
@@ -513,7 +512,7 @@ func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify
 				// The notice went out but recording it as sent failed, so the next pass
 				// would re-send. Surface it rather than discarding: a persistent failure
 				// here means repeated messages to the user.
-				log.Printf("scheduler: delivered notice to %s but could not persist its dedup key for permit %d (may re-send): %v", redact.Email(o.Owner), p.ID, e)
+				alog.Errorf("delivered notice to %s but could not persist its dedup key for permit %d (may re-send): %v", redact.Email(o.Owner), p.ID, e)
 				s.systemAlert(nctx, "notify-dedup", "Notification sent but not recorded",
 					fmt.Sprintf("A permit notification for %s was delivered, but saving it as sent failed: %v. If this persists the same notice may be delivered repeatedly.", o.Owner, e))
 			}
@@ -526,7 +525,7 @@ func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify
 		// the busy branch re-enters here each minute for as long as the block lasts.
 		s.holdNotify(claim)
 		if err != nil {
-			log.Printf("scheduler: notify %s failed (will retry): %v", redact.Email(o.Owner), err)
+			alog.Errorf("notify %s failed (will retry): %v", redact.Email(o.Owner), err)
 		}
 		if adminKey != key {
 			outcome := "was updated"
@@ -538,7 +537,7 @@ func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify
 			if ae := s.notifier.NotifyAdmin(nctx, "User could not be notified: "+o.Owner, body); ae == nil {
 				_ = s.store.SetPermitAdminKey(nctx, p.ID, key)
 			} else {
-				log.Printf("scheduler: admin escalation for %s failed: %v", redact.Email(o.Owner), ae)
+				alog.Errorf("admin escalation for %s failed: %v", redact.Email(o.Owner), ae)
 			}
 		}
 	}()
@@ -633,7 +632,7 @@ var opWording = map[parking.Op]string{
 func (s *Scheduler) bumpFailStreak(ctx context.Context, permitID int64) int {
 	n, err := s.store.BumpFailStreak(ctx, permitID)
 	if err != nil {
-		log.Printf("scheduler: bump fail streak %d: %v", permitID, err)
+		alog.Infof("bump fail streak %d: %v", permitID, err)
 		return failNotifyThreshold // on a DB error, don't suppress the alert
 	}
 	return n
@@ -641,7 +640,7 @@ func (s *Scheduler) bumpFailStreak(ctx context.Context, permitID int64) int {
 
 func (s *Scheduler) clearFailStreak(ctx context.Context, permitID int64) {
 	if err := s.store.ClearFailStreak(ctx, permitID); err != nil {
-		log.Printf("scheduler: clear fail streak %d: %v", permitID, err)
+		alog.Infof("clear fail streak %d: %v", permitID, err)
 	}
 }
 

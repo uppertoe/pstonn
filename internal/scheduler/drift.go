@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/uppertoe/pstonn/internal/redact"
 	"hash/fnv"
-	"log"
 	"slices"
 	"time"
 
@@ -214,7 +213,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		// Refresh expiry/status/type from the same response. Owner-scoped, so it
 		// only touches rows this account manages.
 		if err := s.store.UpdatePermitMeta(ctx, owner, tenantID, pi.CouncilPermitID, pi.Status, pi.PermitNumber, pi.PermitType, pi.EndDate); err != nil {
-			log.Printf("scheduler: drift meta write for permit %s: %v", pi.CouncilPermitID, err)
+			alog.Infof("drift meta write for permit %s: %v", pi.CouncilPermitID, err)
 			incomplete = err
 		}
 	}
@@ -272,11 +271,11 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 			// a cold dashboard visit instead of a spinner (the dashboard's own touch
 			// only fires after its background read lands).
 			if e := s.store.TouchPermitConfirmed(ctx, p.ID, p.ActiveRegistration, s.now()); e != nil {
-				log.Printf("scheduler: stamp confirmation for permit %s: %v", p.CouncilPermitID, e)
+				alog.Infof("stamp confirmation for permit %s: %v", p.CouncilPermitID, e)
 			}
 			continue
 		}
-		log.Printf("scheduler: council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
+		alog.Infof("council drift on permit %s: cached %q, council shows %q — refreshing", p.CouncilPermitID, p.ActiveRegistration, actual)
 		// Record the external change durably so it appears in the activity log
 		// (nothing p.stonn does to the permit should be invisible) and so the
 		// re-assertion the kicked reconcile is about to perform isn't deduped
@@ -292,7 +291,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		swapped, e := s.store.SetPermitActiveIfUnchanged(ctx, p.ID, wasActive[p.ID], actual)
 		if e != nil || !swapped {
 			if e != nil {
-				log.Printf("scheduler: drift adopt for permit %s: %v", p.CouncilPermitID, e)
+				alog.Infof("drift adopt for permit %s: %v", p.CouncilPermitID, e)
 				incomplete = e // detected drift we failed to record: retry soon, not in 6h
 			}
 			continue
@@ -306,7 +305,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		// (quiet hours apply); a failure to queue it is logged, not fatal.
 		if s.notifier != nil && s.notifier.Enabled() {
 			if e := s.notifier.NotifyDriftChanged(ctx, p.Owner, p.TenantID, permitLabel(p), actual); e != nil {
-				log.Printf("scheduler: enqueue drift notice for %s: %v", redact.Email(p.Owner), e)
+				alog.Infof("enqueue drift notice for %s: %v", redact.Email(p.Owner), e)
 			}
 		}
 		// Clear the delivered-notification fingerprint. The tenant now holds a plate we
@@ -317,7 +316,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		// learn their deliberate manual change was reverted — the exact fine-risk case the
 		// notice exists for. Clearing forces the next apply to be treated as new.
 		if e := s.store.SetPermitNotifiedKey(ctx, p.ID, ""); e != nil {
-			log.Printf("scheduler: clear notified key for permit %s after drift: %v", p.CouncilPermitID, e)
+			alog.Infof("clear notified key for permit %s after drift: %v", p.CouncilPermitID, e)
 		}
 		drifted = true
 	}
@@ -384,7 +383,7 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 		}
 		if s.notifier.NotifyPermitExpiry(ctx, owner, p.TenantID, label, p.EndDate.In(s.locOf(p.Owner, p.TenantID))) > 0 {
 			if e := s.store.MarkPermitExpiryReminded(ctx, p.ID); e != nil {
-				log.Printf("scheduler: mark permit %d expiry-reminded: %v", p.ID, e)
+				alog.Infof("mark permit %d expiry-reminded: %v", p.ID, e)
 			}
 		}
 	}

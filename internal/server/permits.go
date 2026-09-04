@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -125,7 +124,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				staleBookmark := cserr == nil && !cs.LinkedAt.IsZero() && time.Since(cs.LinkedAt) >= freshLinkWindow
 				sessionGone := errors.Is(cserr, store.ErrNotFound)
 				if !staleBookmark && !sessionGone {
-					log.Printf("picker: council permit read for %s failed as session-expired right after linking", redact.Email(owner))
+					alog.Errorf("picker: council permit read for %s failed as session-expired right after linking", redact.Email(owner))
 					s.message(w, http.StatusBadGateway, s.say(ctx, owner, "picker.session_rejected"))
 					return
 				}
@@ -143,13 +142,13 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			if gen, ok := parking.SessionGenOf(err); ok && hasSaved {
 				s.sched.QueueReconnect(owner, tid, gen) // interactive: recover, but don't feed the churn canary
 				if s.sched.ReconnectActive(owner, tid) {
-					log.Printf("picker: council session for %s expired; saved-password reconnect in flight", redact.Email(owner))
+					alog.Infof("picker: council session for %s expired; saved-password reconnect in flight", redact.Email(owner))
 					s.renderReconnecting(w, r, owner)
 					return
 				}
-				log.Printf("picker: council session for %s expired; reconnect not progressing, showing re-link", redact.Email(owner))
+				alog.Infof("picker: council session for %s expired; reconnect not progressing, showing re-link", redact.Email(owner))
 			} else {
-				log.Printf("picker: council permit read for %s failed as session-expired; no saved password, showing re-link", redact.Email(owner))
+				alog.Errorf("picker: council permit read for %s failed as session-expired; no saved password, showing re-link", redact.Email(owner))
 			}
 			base.State = "onboarding"
 			base.Onboard = &onboardData{}
@@ -161,7 +160,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		base.State = "onboarding"
 		base.Onboard = &onboardData{}
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
-		log.Printf("list council permits for %s: %v", redact.Email(owner), err)
+		alog.Infof("list council permits for %s: %v", redact.Email(owner), err)
 		base.Warn = "Couldn't reach the council to load your permits. Try re-linking."
 		s.render(w, base)
 		return
@@ -198,7 +197,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	// could actually take.
 	tenantManaged, err := s.store.ManagedPermitIDsInTenant(ctx, tid)
 	if err != nil {
-		log.Printf("picker: tenant-managed set for %s: %v", redact.Email(owner), err)
+		alog.Infof("picker: tenant-managed set for %s: %v", redact.Email(owner), err)
 		tenantManaged = map[string]bool{}
 	}
 	fallback := s.visitorNameFallback(ctx, owner, permits)
@@ -232,7 +231,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				types = append(types, t)
 			}
 			seen := strings.Join(types, ", ")
-			log.Printf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback engaged; %s", redact.Email(owner), seen)
+			alog.Warnf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback engaged; %s", redact.Email(owner), seen)
 			outcome := "Nothing was offered: every changeable permit here is a resident permit, which the fallback excludes outright (it holds the resident's own car). The household saw their permits greyed out with the reason."
 			if offered > 0 {
 				outcome = "Non-resident changeable permits were offered with a caution; resident permits (if any) stayed excluded."
@@ -329,7 +328,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		if !complete {
 			detail += " — partial council read"
 		}
-		log.Printf("picker for %s: %d council permit(s), %d already managed, %d offered live: %s",
+		alog.Infof("picker for %s: %d council permit(s), %d already managed, %d offered live: %s",
 			redact.Email(owner), len(permits), len(permits)-len(base.Picker.Pick), offered, detail)
 		base.Picker.OfferedCount = offered // drives the picker's one-vs-many guidance
 	}
@@ -370,7 +369,7 @@ func (s *Server) say(ctx context.Context, owner, key string) string {
 	data := map[string]any{"Tenant": s.tenantViewFor(ctx, owner)}
 	out, err := catalog.For(i18n.DefaultLocale).Text(key, data)
 	if err != nil {
-		log.Printf("i18n: %v", err)
+		alog.Infof("i18n: %v", err)
 		return key
 	}
 	return out
@@ -465,7 +464,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
 			return
 		}
-		log.Printf("addPermit list council permits for %s: %v", redact.Email(owner), err)
+		alog.Infof("addPermit list council permits for %s: %v", redact.Email(owner), err)
 		s.message(w, http.StatusBadGateway, "Couldn't reach the council to confirm the permit. Try again shortly.")
 		return
 	}
@@ -537,13 +536,13 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// everyone.
 	if match.CurrentRego != "" {
 		if err := s.store.SetPermitActive(ctx, pid, match.CurrentRego); err != nil {
-			log.Printf("addPermit: seed current plate for permit %d: %v", pid, err)
+			alog.Infof("addPermit: seed current plate for permit %d: %v", pid, err)
 		}
 	}
 	// Seed expiry + status + identifiers so the schedule shows them straight away;
 	// the scheduler keeps them fresh on the keep-warm cadence thereafter.
 	if err := s.store.UpdatePermitMeta(ctx, owner, tenantID, cpid, match.Status, match.PermitNumber, match.PermitType, match.EndDate); err != nil {
-		log.Printf("addPermit: seed metadata for permit %s: %v", cpid, err)
+		alog.Infof("addPermit: seed metadata for permit %s: %v", cpid, err)
 	}
 	target := match.PermitNumber
 	if target == "" {
@@ -585,7 +584,7 @@ func (s *Server) anotherSchedulableUnmanaged(ctx context.Context, owner, tenantI
 	// "manage another permit" link still lets them find it.
 	managed, err := s.store.ManagedPermitIDsInTenant(ctx, tenantID)
 	if err != nil {
-		log.Printf("nudge: tenant-managed set for %s: %v", redact.Email(owner), err)
+		alog.Infof("nudge: tenant-managed set for %s: %v", redact.Email(owner), err)
 		return false
 	}
 	now := time.Now()
@@ -724,7 +723,7 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 			// rather than half-working — but the failure must reach the user (below),
 			// not just the log: the whole promise of this path is "links keep
 			// working", and a silent miss surfaces only through a confused guest.
-			log.Printf("copy schedule: move guest passes %d -> %d: %v", src, dst.ID, moveErr)
+			alog.Infof("copy schedule: move guest passes %d -> %d: %v", src, dst.ID, moveErr)
 			moved = 0
 		}
 	}
@@ -848,7 +847,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	err := s.tenant.ClearVehicle(applyCtx, owner, p)
 	if err == nil {
 		if e := s.store.SetPermitActive(bg, p.ID, ""); e != nil {
-			log.Printf("clearPermit: council cleared permit %d but local commit failed: %v", p.ID, e)
+			alog.Errorf("clearPermit: council cleared permit %d but local commit failed: %v", p.ID, e)
 		}
 		// Reflect the cleared plate on the struct we re-render from. Without this the
 		// card shows the OLD plate: respondPermit renders from this p, and the
@@ -861,7 +860,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 
 	label := permitLabel(p)
 	if err != nil {
-		log.Printf("clearPermit %d for %s: %v", p.ID, redact.Email(owner), err)
+		alog.Infof("clearPermit %d for %s: %v", p.ID, redact.Email(owner), err)
 		if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
 			s.formError(w, r, "Couldn't reach the council just now — nothing was changed. Please try again shortly.")
 			return

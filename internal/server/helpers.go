@@ -3,14 +3,18 @@ package server
 import (
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/model"
 )
+
+// alog is the server package's structured logger; every line it emits is tagged
+// subsystem=server so operators can filter the web layer's output by severity.
+var alog = applog.For("server")
 
 // formError reports a user-facing validation problem for a form submission. For
 // an htmx request it returns 422 with the bare message, which the client turns
@@ -48,7 +52,7 @@ func (s *Server) messagePage(w http.ResponseWriter, code int, mv messageView) {
 	data := dashboardData{State: "message", Loc: s.cfg.DisplayLocation, Contact: s.cfg.ContactEnabled(), Message: &mv}
 	buf, err := s.renderBuf(w, data)
 	if err != nil {
-		log.Printf("render message page: %v", err)
+		alog.Infof("render message page: %v", err)
 		s.bareMessage(w, code, mv)
 		return
 	}
@@ -117,7 +121,7 @@ func safeLinkHref(href string) bool {
 // affordance is recoverable, emitting a hostile link is not.
 func (s *Server) messageWithLink(w http.ResponseWriter, code int, msg, label, href, after string) {
 	if !safeLinkHref(href) {
-		log.Printf("messageWithLink: refusing unsafe href %q, rendering message without the link", href)
+		alog.Warnf("messageWithLink: refusing unsafe href %q, rendering message without the link", href)
 		s.message(w, code, msg)
 		return
 	}
@@ -125,7 +129,7 @@ func (s *Server) messageWithLink(w http.ResponseWriter, code int, msg, label, hr
 }
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {
-	log.Printf("server error: %v", err)
+	alog.Errorf("server error: %v", err)
 	s.message(w, http.StatusInternalServerError, "Something went wrong. Please try again.")
 }
 

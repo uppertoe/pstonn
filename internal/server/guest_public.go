@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -267,7 +266,7 @@ func (s *Server) applyGuestPlate(ctx context.Context, a guestApply) (guestApplyD
 			if e := s.store.SetPermitActive(ctx, a.permit.ID, a.plate); e != nil {
 				// Tenant confirmed the change; only the local record failed. The Kick
 				// below drives a reconcile that re-records it (and alerts if it persists).
-				log.Printf("guest: applied %q at council for permit %d but local commit failed: %v", a.plate, a.permit.ID, e)
+				alog.Errorf("guest: applied %q at council for permit %d but local commit failed: %v", a.plate, a.permit.ID, e)
 			}
 		}
 	}
@@ -282,7 +281,7 @@ func (s *Server) applyGuestPlate(ctx context.Context, a guestApply) (guestApplyD
 	}
 	// The activity log is user-facing: record a plain-English detail and keep the
 	// raw tenant error in the server log only.
-	log.Printf("%s %s on permit %d: %v", a.logAs, a.plate, a.permit.ID, err)
+	alog.Infof("%s %s on permit %d: %v", a.logAs, a.plate, a.permit.ID, err)
 	_ = s.store.RecordApply(ctx, a.permit.ID, a.plate, "guest", "error", guestApplyDetail(err))
 	return guestApplyAllowed, err
 }
@@ -466,7 +465,7 @@ func (s *Server) renderGuestMenuOpts(w http.ResponseWriter, r *http.Request, gc 
 	if isHX(r) && !isBoosted(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "guest-body", data); err != nil {
-			log.Printf("render guest-body: %v", err)
+			alog.Infof("render guest-body: %v", err)
 		}
 		return
 	}
@@ -752,7 +751,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		if _, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, baseline, targetState, now, &end, createdBy+" (undo)", gc.TokenID); err != nil {
 			// The sweep above ALREADY committed, so "the permit wasn't changed" would be
 			// false. Say what actually happened and let reconcile settle the target.
-			log.Printf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
+			alog.Errorf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
 			s.kickScheduler()
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
 				"Your car was taken off the permit, but we couldn't put the previous one back automatically — it will be restored shortly.")
@@ -890,7 +889,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 	// will, and notify's dedup key includes the plate, so cycling plates meant one
 	// email and one push per attempt with nothing in the way.
 	if !guestApplyNotify.allow("ga:" + permit.Owner) {
-		log.Printf("guest apply notify for %s throttled", redact.Email(permit.Owner))
+		alog.Infof("guest apply notify for %s throttled", redact.Email(permit.Owner))
 		return
 	}
 	// Enqueue durably (a fast insert): unlike the scheduler's apply-notify, this
@@ -901,7 +900,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 		DisplacedReg: d.Reg, DisplacedTold: told,
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {
-		log.Printf("guest apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
+		alog.Infof("guest apply notify enqueue for %s: %v", redact.Email(permit.Owner), err)
 	}
 }
 
@@ -943,12 +942,12 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 	}
 	if sup, serr := s.store.SuppressedAmong(ctx, []string{d.Contact}); serr != nil || len(sup) > 0 {
 		if serr != nil {
-			log.Printf("suppression check for %s: %v", notify.RedactEmail(d.Contact), serr)
+			alog.Infof("suppression check for %s: %v", notify.RedactEmail(d.Contact), serr)
 		}
 		return d, false // undeliverable (or unknown): ask the account to pass it on
 	}
 	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, "another car has been put on it", time.Now()); err != nil {
-		log.Printf("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
+		alog.Infof("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return d, false
 	}
 	return d, true
@@ -978,7 +977,7 @@ func (s *Server) renderStatus(w http.ResponseWriter, code int, data dashboardDat
 	if err != nil {
 		// The bare page, as render() does: the styled notice shares the template
 		// set that just failed.
-		log.Printf("render %s page: %v", data.State, err)
+		alog.Infof("render %s page: %v", data.State, err)
 		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "Something went wrong rendering this page. Please try again."})
 		return
 	}

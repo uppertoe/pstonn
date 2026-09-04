@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ import (
 
 	"flag"
 
+	"github.com/uppertoe/pstonn/internal/applog"
 	"github.com/uppertoe/pstonn/internal/config"
 	"github.com/uppertoe/pstonn/internal/connectors"
 	"github.com/uppertoe/pstonn/internal/mailer"
@@ -70,14 +72,18 @@ func tenantOpDrain(govRatePerMin int) time.Duration {
 	return time.Duration(float64(modelReqsPerOp) * 60 / float64(govRatePerMin) * float64(time.Second))
 }
 
+var alog = applog.For("app")
+
 func run() error {
+	applog.Setup(slog.LevelInfo)
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 
 	for _, w := range cfg.Council.CouncilWarnings() {
-		log.Printf("WARNING: %s", w)
+		alog.Warnf("%s", w)
 	}
 
 	box, err := buildSecretBox(cfg)
@@ -94,7 +100,7 @@ func run() error {
 	// One-time: lock in existing vehicles' current colours so later additions
 	// don't re-shuffle them (safe/idempotent after the first run).
 	if err := st.BackfillVehicleColors(context.Background()); err != nil {
-		log.Printf("startup: backfill vehicle colours: %v", err)
+		alog.Infof("startup: backfill vehicle colours: %v", err)
 	}
 
 	var sessions *session.Manager
@@ -120,7 +126,7 @@ func run() error {
 		return fmt.Errorf("oidc login: %w", err)
 	}
 	if auth == nil {
-		log.Print("APP_OIDC_ISSUER not set: OIDC login disabled; relying on forward_auth headers or DEV_IDENTITY_EMAIL")
+		alog.Infof("APP_OIDC_ISSUER not set: OIDC login disabled; relying on forward_auth headers or DEV_IDENTITY_EMAIL")
 	}
 
 	// The registry this process serves (docs/council-connections.md): one provider
@@ -151,7 +157,7 @@ func run() error {
 	}
 	tenant := tenantpkg.NewMux(st, clients)
 	if cfg.Council.Sandbox {
-		log.Print("WARNING: COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
+		alog.Warnf("COUNCIL_SANDBOX is on — the council is FAKED in memory (dev/demo only; nothing reaches the real portal)")
 	}
 	mail := mailer.New(cfg.SMTP)
 	// Unsubscribe links are signed with a key derived from the at-rest key, so no
@@ -161,16 +167,16 @@ func run() error {
 	// their own derived key, so neither token can ever verify as the other.
 	decideKey := notify.DeriveDecideKey(cfg.DataEncryptionKey)
 	notifier := notify.New(st, mail, cfg.Ntfy.BaseURL, cfg.Ntfy.Token, cfg.PublicBaseURL, cfg.AdminEmail, cfg.AdminNtfyTopic, cfg.DisplayLocation, unsubKey, decideKey)
-	log.Printf("notifications: email=%v ntfy=%v contact-form=%v admin-alerts=%v", mail.Enabled(), cfg.Ntfy.Enabled(), cfg.ContactEnabled(), notifier.AdminConfigured())
+	alog.Infof("notifications: email=%v ntfy=%v contact-form=%v admin-alerts=%v", mail.Enabled(), cfg.Ntfy.Enabled(), cfg.ContactEnabled(), notifier.AdminConfigured())
 	if !notifier.AdminConfigured() {
-		log.Print("WARNING: no admin alert channel configured (set ADMIN_EMAIL and/or ADMIN_NTFY_TOPIC); systemic failures will only be logged")
+		alog.Warnf("no admin alert channel configured (set ADMIN_EMAIL and/or ADMIN_NTFY_TOPIC); systemic failures will only be logged")
 	}
 	if from, app, mismatch := cfg.MailDomainMismatch(); mismatch {
-		log.Printf("WARNING: mail is sent from %q but the app is served at %q. Receivers judge DMARC alignment on the From domain, "+
+		alog.Warnf("mail is sent from %q but the app is served at %q. Receivers judge DMARC alignment on the From domain, "+
 			"and mail whose sender is unrelated to the links inside it is scored as phishing. Prefer a From on %s, and publish SPF/DKIM/DMARC for the sending domain.", from, app, app)
 	}
 	if !cfg.SESHookEnabled() && mail.Enabled() {
-		log.Print("NOTE: SES_SNS_TOPIC_ARN not set, so bounce/complaint feedback is not wired up. " +
+		alog.Warnf("SES_SNS_TOPIC_ARN not set, so bounce/complaint feedback is not wired up. " +
 			"Hard SMTP rejections are still learned at send time, but provider-reported bounces are not. See deploy/aws-ses-hook-setup.py")
 	}
 	sched := scheduler.New(st, tenant, cfg.DisplayLocation, scheduler.Options{
@@ -232,12 +238,12 @@ func run() error {
 	if n, err := st.CountPermits(ctx); err == nil && n > 0 {
 		bound, windowBinds := sched.RolloverBound(n)
 		if cfg.Council.RolloverWindow <= 0 {
-			log.Printf("rollover spread: DISABLED; %d permits sharing a boundary converge in ~%s, applied back to back", n, bound.Round(time.Second))
+			alog.Infof("rollover spread: DISABLED; %d permits sharing a boundary converge in ~%s, applied back to back", n, bound.Round(time.Second))
 		} else if windowBinds {
-			log.Printf("rollover spread: %s window over %d permits; a shared boundary converges by ~%s after it",
+			alog.Infof("rollover spread: %s window over %d permits; a shared boundary converges by ~%s after it",
 				cfg.Council.RolloverWindow, n, bound.Round(time.Second))
 		} else {
-			log.Printf("rollover spread: %s window is NARROWER than the %d-permit serial drain, so it is not smoothing anything; "+
+			alog.Infof("rollover spread: %s window is NARROWER than the %d-permit serial drain, so it is not smoothing anything; "+
 				"a shared boundary still converges in ~%s. Raise COUNCIL_ROLLOVER_WINDOW above that to spread the burst.",
 				cfg.Council.RolloverWindow, n, bound.Round(time.Second))
 		}
@@ -271,7 +277,7 @@ func run() error {
 					// that draws edge push-back), not just the hourly total; pushback is
 					// the count of 403/429/503 across all owners, the early-warning that
 					// we are approaching a limit before the breaker ever has to trip.
-					log.Printf("council traffic: %d requests last hour (login=%d auth=%d api=%d other=%d); rate now=%d/min 5m=%d; pushback=%d (+%d); since start: login=%d auth=%d api=%d other=%d",
+					alog.Infof("council traffic: %d requests last hour (login=%d auth=%d api=%d other=%d); rate now=%d/min 5m=%d; pushback=%d (+%d); since start: login=%d auth=%d api=%d other=%d",
 						d, l-pl, a-pa, api-pi, o-po, st.LastMinute, st.Last5Min, st.Pushback, st.Pushback-ppush, l, a, api, o)
 				}
 				pl, pa, pi, po, ppush = l, a, api, o, st.Pushback
@@ -293,7 +299,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("listening on %s (timezone: %s, oidc login: %v)", cfg.ListenAddr, cfg.DisplayLocation, auth != nil)
+		alog.Infof("listening on %s (timezone: %s, oidc login: %v)", cfg.ListenAddr, cfg.DisplayLocation, auth != nil)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -312,7 +318,7 @@ func run() error {
 			select {
 			case <-loopsDone:
 			case <-joinCtx.Done():
-				log.Print("shutdown: worker loops did not stop in time; closing the store anyway")
+				alog.Errorf("shutdown: worker loops did not stop in time; closing the store anyway")
 				return
 			}
 		}
@@ -328,7 +334,7 @@ func run() error {
 		joinLoops()
 		return err
 	case <-ctx.Done():
-		log.Print("shutting down")
+		alog.Infof("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err := httpServer.Shutdown(shutdownCtx)
@@ -361,7 +367,7 @@ func buildSecretBox(cfg *config.Config) (*secretbox.Box, error) {
 		return nil, errors.New("DATA_ENCRYPTION_KEY is required in production: set it to 64 hex chars (openssl rand -hex 32). " +
 			"Without it, stored council sessions cannot survive a restart.")
 	}
-	log.Print("WARNING: DATA_ENCRYPTION_KEY not set; using an ephemeral key (local/dev mode: DEV_IDENTITY_EMAIL or COUNCIL_SANDBOX is set). " +
+	alog.Warnf("DATA_ENCRYPTION_KEY not set; using an ephemeral key (local/dev mode: DEV_IDENTITY_EMAIL or COUNCIL_SANDBOX is set). " +
 		"Stored council sessions will not survive a restart.")
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
