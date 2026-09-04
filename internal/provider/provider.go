@@ -335,10 +335,14 @@ func Classify(err error) Signal {
 		return Signal{OK: true}
 	}
 	var s Signal
-	switch {
-	case errors.Is(err, context.Canceled):
+	// Independent, not mutually exclusive: an error carrying both sentinels (a
+	// pathological errors.Join) must let each consumer keep its OWN precedence —
+	// noteAt early-returns on Canceled, recordAuthorizeOutcome treats Expiry as a
+	// success first — which only holds if both facets are visible.
+	if errors.Is(err, context.Canceled) {
 		s.Canceled = true
-	case errors.Is(err, ErrSessionExpired):
+	}
+	if errors.Is(err, ErrSessionExpired) {
 		s.Expiry = true
 	}
 	var u *Unavailable
