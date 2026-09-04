@@ -83,6 +83,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	// but not here (a second home, just selected) is offered the link form.
 	if !s.tenant.Linked(ctx, owner, "") {
 		base.State = "onboarding"
+		base.Onboard = &onboardData{}
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
 		// The nil check has to come first: the init statement runs before the
 		// condition, so calling Enabled() there dereferenced a nil registry
@@ -90,7 +91,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		if enabled := s.enabledTenants(); len(enabled) > 1 {
 			current := s.tenantFor(ctx, owner)
 			for _, c := range enabled {
-				base.TenantOptions = append(base.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
+				base.Onboard.TenantOptions = append(base.Onboard.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
 			}
 			base.Flash = s.say(ctx, owner, "picker.connect_first")
 		}
@@ -151,12 +152,14 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				log.Printf("picker: council permit read for %s failed as session-expired; no saved password, showing re-link", redact.Email(owner))
 			}
 			base.State = "onboarding"
+			base.Onboard = &onboardData{}
 			base.AutoReconnect = hasSaved
 			base.Relink = true
 			s.render(w, base)
 			return
 		}
 		base.State = "onboarding"
+		base.Onboard = &onboardData{}
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
 		log.Printf("list council permits for %s: %v", redact.Email(owner), err)
 		base.Warn = "Couldn't reach the council to load your permits. Try re-linking."
@@ -168,15 +171,16 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		s.serverError(w, err)
 		return
 	}
+	base.Picker = &pickerData{}
 	if !complete {
 		// Say so rather than presenting a page as the whole account. Without this the
 		// household simply cannot see a permit they hold and has no way to know why.
 		base.Warn = "We could only load part of your permit list from the council just now, " +
 			"so a permit you hold may be missing below. Try again in a few minutes."
-		base.PermitsUnknown = true
+		base.Picker.PermitsUnknown = true
 	}
-	base.HasPermits = len(permits) > 0
-	base.HasManaged = len(managed) > 0
+	base.Picker.HasPermits = len(permits) > 0
+	base.Picker.HasManaged = len(managed) > 0
 	already := map[string]bool{}
 	for _, p := range managed {
 		// Scope to THIS council: a council permit id is unique only within its
@@ -292,7 +296,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				}
 			}
 		}
-		base.Pick = append(base.Pick, pickView{
+		base.Picker.Pick = append(base.Picker.Pick, pickView{
 			CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID,
 			PermitNumber: p.PermitNumber, PermitType: p.PermitType, CurrentRego: p.CurrentRego,
 			Addable: addable, Reason: reason, Warn: warn, Dead: dead, Status: status,
@@ -305,8 +309,8 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	// never log permit numbers or regos here.
 	{
 		offered := 0
-		parts := make([]string, 0, len(base.Pick))
-		for _, pv := range base.Pick {
+		parts := make([]string, 0, len(base.Picker.Pick))
+		for _, pv := range base.Picker.Pick {
 			d := "offered"
 			switch {
 			case pv.Dead:
@@ -326,12 +330,12 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 			detail += " — partial council read"
 		}
 		log.Printf("picker for %s: %d council permit(s), %d already managed, %d offered live: %s",
-			redact.Email(owner), len(permits), len(permits)-len(base.Pick), offered, detail)
-		base.OfferedCount = offered // drives the picker's one-vs-many guidance
+			redact.Email(owner), len(permits), len(permits)-len(base.Picker.Pick), offered, detail)
+		base.Picker.OfferedCount = offered // drives the picker's one-vs-many guidance
 	}
 	// Live permits first, dead ones last; the tenant's own order within each
 	// group. The template renders the dead group under its own heading.
-	slices.SortStableFunc(base.Pick, func(a, b pickView) int {
+	slices.SortStableFunc(base.Picker.Pick, func(a, b pickView) int {
 		switch {
 		case a.Dead == b.Dead:
 			return 0

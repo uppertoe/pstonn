@@ -59,21 +59,21 @@
 
   {{else}}
   {{/* ---- LIST MODE: all passes + create a new one ---- */}}
-  {{if .NewGuestLinks}}
+  {{if .GuestMgmt.NewGuestLinks}}
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-link"}}</span> New links</h2>
     <p class="empty-note" style="margin-bottom:4px">Copy these now. For security they are not shown again; to replace one, revoke it and add the person again.</p>
-    {{range .NewGuestLinks}}
+    {{range .GuestMgmt.NewGuestLinks}}
     <div class="glink"><span class="muted">{{.Email}}</span><code>{{.URL}}</code></div>
     {{end}}
   </section>
   {{end}}
 
-  {{if .PendingRequests}}
+  {{if .GuestMgmt.PendingRequests}}
   <section class="card" style="--hue:var(--danger)">
     <h2><span class="ic">{{template "ic-bell"}}</span> Waiting for you</h2>
     <p class="subtitle">Someone scanned a printed code and wants to use a permit. Approve to put their plate on until the end of today.</p>
-    {{range .PendingRequests}}
+    {{range .GuestMgmt.PendingRequests}}
     <div class="req">
       <div class="req-main">
         <span class="plate" style="--plate:var(--sec-vehicles)">{{.Plate}}</span>
@@ -88,11 +88,11 @@
   </section>
   {{end}}
 
-  {{if .RecentRequests}}
+  {{if .GuestMgmt.RecentRequests}}
   <section class="card">
     <h2><span class="ic">{{template "ic-bell"}}</span> Recent requests</h2>
     <p class="subtitle">How the latest printed-QR requests were resolved. Everyone on the account sees this, so you always know whether someone already handled a request.</p>
-    {{range .RecentRequests}}
+    {{range .GuestMgmt.RecentRequests}}
     <div class="req">
       <div class="req-main">
         <span class="plate" style="--plate:var(--sec-vehicles)">{{.Plate}}</span>
@@ -111,22 +111,22 @@
        or requests sees an admin toggle as its first card, for a feature it has
        never used. Shown once anything exists — and always when paused, so the
        Resume switch can never disappear. */}}
-  {{if or .Guests .DoorGrants .PendingRequests .RecentRequests (not .GuestsEnabled)}}
+  {{if or .GuestMgmt.Guests .GuestMgmt.DoorGrants .GuestMgmt.PendingRequests .GuestMgmt.RecentRequests (not .GuestMgmt.GuestsEnabled)}}
   <section class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
-        <strong>Guest passes are {{if .GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
+        <strong>Guest passes are {{if .GuestMgmt.GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
         <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor car still on a permit comes off now.</div>
       </div>
-      <form method="post" action="/guests/toggle"{{if .GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor car still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
-        <input type="hidden" name="enabled" value="{{if .GuestsEnabled}}{{else}}1{{end}}">
-        <button type="submit" class="{{if .GuestsEnabled}}danger{{end}}">{{if .GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
+      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor car still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
+        <input type="hidden" name="enabled" value="{{if .GuestMgmt.GuestsEnabled}}{{else}}1{{end}}">
+        <button type="submit" class="{{if .GuestMgmt.GuestsEnabled}}danger{{end}}">{{if .GuestMgmt.GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
       </form>
     </div>
   </section>
   {{end}}
 
-  {{if .PermitOpts}}
+  {{if .GuestMgmt.PermitOpts}}
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Visitor just arrived?</h2>
     <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
@@ -134,27 +134,27 @@
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
         <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
-        {{if gt (len .PermitOpts) 1}}
-        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
-        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        {{if gt (len .GuestMgmt.PermitOpts) 1}}
+        <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
         <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
       </form>
       <form method="post" action="/guests/printed" class="qropt">
         <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Leave it out (door, fridge, counter). A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
-        {{if gt (len .PermitOpts) 1}}
-        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
-        {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        {{if gt (len .GuestMgmt.PermitOpts) 1}}
+        <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
         <button type="submit" class="ghost">{{template "ic-qr"}} Print a QR</button>
       </form>
     </div>
   </section>
   {{end}}
 
-  {{if .DoorGrants}}
+  {{if .GuestMgmt.DoorGrants}}
   <section class="card" style="--hue:var(--sec-vehicles)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Your printed QRs</h2>
     <p class="subtitle">Durable codes to print, laminate, and leave up. Reopen any time to reprint the <em>same</em> one &mdash; the code keeps working. To change the code (say a sheet went missing), remove it and print a new one.</p>
-    {{range .DoorGrants}}
+    {{range .GuestMgmt.DoorGrants}}
     <div class="doorrow">
       <div class="doorrow-main">
         <span class="doorrow-ic">{{template "ic-qr"}}</span>
@@ -169,12 +169,12 @@
   </section>
   {{end}}
 
-  {{if .Guests}}
+  {{if .GuestMgmt.Guests}}
   {{/* The list of passes had no heading: a card titled "Cleaner" with cars and
        people under it did not say what it was. */}}
   <div class="sectitle" style="--hue:var(--sec-guests);margin-top:6px"><span class="ic">{{template "ic-link"}}</span> Passes you&rsquo;ve sent</div>
   <div class="grants">
-    {{range .Guests}}
+    {{range .GuestMgmt.Guests}}
     <section class="card">
       <div class="permit-head" style="margin-bottom:10px">
         <h2 style="margin:0">{{if .Label}}{{.Label}}{{else}}{{.PermitLabel}}{{end}}</h2>
@@ -219,7 +219,7 @@
   </div>
   {{end}}
 
-  {{if and .PermitOpts .Vehicles}}
+  {{if and .GuestMgmt.PermitOpts .Vehicles}}
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
     <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
@@ -230,7 +230,7 @@
     <form method="post" action="/guests" class="stack" x-data="{recips:'', sent:false}"
           @submit="if (sent) { $event.preventDefault(); return } sent = true">
       <label class="fld"><span>Permit</span>
-        <select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
+        <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
       </label>
       <label class="fld"><span>Label (optional)</span><input name="label" placeholder="e.g. Friday helpers"></label>
       <div class="fld"><span>Cars this pass may activate</span>

@@ -232,7 +232,7 @@ func TestOneOffModalGuardIgnoresPoll(t *testing.T) {
 	if err := templates.ExecuteTemplate(&page, "dashboard", dashboardData{
 		User: identity.User{Email: "a@b.com"}, State: "app", Page: "schedule", Loc: loc,
 		Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-		Permits:  []permitView{samplePermitView(loc)},
+		App:      &appData{Permits: []permitView{samplePermitView(loc)}},
 	}); err != nil {
 		t.Fatal(err)
 	}

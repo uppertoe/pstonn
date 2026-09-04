@@ -23,11 +23,12 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	base.App = &appData{}
 	limit := activityRows
 	if r.URL.Query().Get("all") == "1" {
 		limit = activityAllRows
 	}
-	base.ShowingAll = limit > activityRows
+	base.App.ShowingAll = limit > activityRows
 
 	// Ask for one more row than we display: getting it back is how we know there
 	// is something older to offer, without a second COUNT query.
@@ -37,9 +38,9 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(logs) > limit {
-		logs, base.LogMore = logs[:limit], true
+		logs, base.App.LogMore = logs[:limit], true
 	}
-	base.Log = logs
+	base.App.Log = logs
 
 	// Who changed the setup, alongside what p.stonn did to the permit. These are
 	// different questions and the second one used to have no answer at all: a
@@ -51,10 +52,10 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 		log.Printf("activity: list changes for %s: %v", redact.Email(base.Owner), err)
 	}
 	if len(changes) > limit {
-		changes, base.ChangesMore = changes[:limit], true
+		changes, base.App.ChangesMore = changes[:limit], true
 	}
 	for _, c := range changes {
-		base.Changes = append(base.Changes, changeView{
+		base.App.Changes = append(base.App.Changes, changeView{
 			Actor: c.Actor, Text: changeText(c), At: c.At,
 		})
 	}

@@ -162,11 +162,11 @@ func TestGuestsPageOffersOnlyActivePermits(t *testing.T) {
 	if err := s.loadGuests(ctx, &base, 0); err != nil {
 		t.Fatal(err)
 	}
-	if len(base.PermitOpts) != 1 || base.PermitOpts[0].ID != activeID {
-		t.Fatalf("PermitOpts = %+v, want only the live permit %d", base.PermitOpts, activeID)
+	if len(base.GuestMgmt.PermitOpts) != 1 || base.GuestMgmt.PermitOpts[0].ID != activeID {
+		t.Fatalf("PermitOpts = %+v, want only the live permit %d", base.GuestMgmt.PermitOpts, activeID)
 	}
-	if len(base.Guests) != 1 || !strings.Contains(base.Guests[0].PermitLabel, "no longer active") {
-		t.Fatalf("existing pass on the dead permit = %+v, want listed with a 'no longer active' label", base.Guests)
+	if len(base.GuestMgmt.Guests) != 1 || !strings.Contains(base.GuestMgmt.Guests[0].PermitLabel, "no longer active") {
+		t.Fatalf("existing pass on the dead permit = %+v, want listed with a 'no longer active' label", base.GuestMgmt.Guests)
 	}
 }
 

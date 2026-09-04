@@ -5,16 +5,16 @@
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-link"}}</span> Council connection</h2>
     {{if .IsPrimary}}
-    {{if .RelinkBy}}
-    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, it would stop around <strong>{{.RelinkBy}}</strong> &mdash; we'd email a one-click link first.</p>
+    {{if .Settings.RelinkBy}}
+    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, it would stop around <strong>{{.Settings.RelinkBy}}</strong> &mdash; we'd email a one-click link first.</p>
     {{end}}
-    {{if .TenantLinked}}
+    {{if .Settings.TenantLinked}}
     <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">
       <div style="max-width:60ch">
         <strong>Auto-reconnect</strong>
         {{if .AutoReconnect}}<span class="pill ok">On</span>
         <p class="empty-note" style="margin-top:4px">{{T "settings.password_saved" .}}</p>
-        <p class="empty-note" style="margin-top:4px">{{if .LastReconnect}}Last used to sign back in: <strong>{{.LastReconnect}}</strong>. This updates every time p.stonn uses your saved password, so you can always see when it was needed.{{else}}Your saved password hasn't been needed yet &mdash; this line will show when it was last used to sign back in.{{end}}</p>
+        <p class="empty-note" style="margin-top:4px">{{if .Settings.LastReconnect}}Last used to sign back in: <strong>{{.Settings.LastReconnect}}</strong>. This updates every time p.stonn uses your saved password, so you can always see when it was needed.{{else}}Your saved password hasn't been needed yet &mdash; this line will show when it was last used to sign back in.{{end}}</p>
         {{else}}<span class="pill">Off</span>
         <p class="empty-note" style="margin-top:4px">{{T "settings.password_not_saved" .}}</p>
         {{end}}
@@ -42,7 +42,7 @@
     <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
     {{end}}
   </section>
-  {{- range .OtherConnections}}
+  {{- range .Settings.OtherConnections}}
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-link"}}</span> {{T "settings.area_connection" .}}</h2>
     {{if .RelinkBy}}<p class="empty-note" style="margin-top:-8px">If nobody visits, this connection would stop around <strong>{{.RelinkBy}}</strong>.</p>{{end}}
@@ -84,7 +84,7 @@
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit">{{template "ic-plus"}} Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do.{{if .Notify.EmailAvailable}} p.stonn emails them to let them know.{{end}} Once they accept they can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
+    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do.{{if .Settings.Notify.EmailAvailable}} p.stonn emails them to let them know.{{end}} Once they accept they can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
     {{else}}
     <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
     {{end}}
@@ -100,8 +100,8 @@
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-bell"}}</span> Notifications</h2>
     <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
-    {{if or .Notify.EmailAvailable .Notify.NtfyAvailable}}
-    <div id="notify-body">{{template "notify-body" .Notify}}</div>
+    {{if or .Settings.Notify.EmailAvailable .Settings.Notify.NtfyAvailable}}
+    <div id="notify-body">{{template "notify-body" .Settings.Notify}}</div>
     <form method="post" action="/notifications/test" class="notify-test"><button type="submit" class="ghost">{{template "ic-bell"}} Send a test notification</button></form>
     {{else}}
     <p class="empty-note">No notification channels are set up by the operator. Configure <code>SMTP_*</code> (email) or <code>NTFY_BASE_URL</code> (push) to enable this.</p>

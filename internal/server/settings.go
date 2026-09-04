@@ -23,8 +23,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	owner := base.Owner
 	user := base.User.Email // the signed-in person; notification prefs are theirs
+	base.Settings = &settingsData{}
 	if cs, err := s.store.GetTenantSession(ctx, owner); err == nil {
-		base.TenantLinked = true
+		base.Settings.TenantLinked = true
 		base.AutoReconnect = cs.Password != ""
 		// The deadline is measured from the last time anyone on the account used the
 		// app, so it moves forward as the household keeps using it. Showing it from
@@ -34,10 +35,10 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			idleSince = cs.LinkedAt
 		}
 		if !idleSince.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
-			base.RelinkBy = idleSince.Add(s.cfg.Council.SessionMaxAge).In(s.locFor(ctx, owner)).Format("2 Jan 2006")
+			base.Settings.RelinkBy = idleSince.Add(s.cfg.Council.SessionMaxAge).In(s.locFor(ctx, owner)).Format("2 Jan 2006")
 		}
 		if base.AutoReconnect && !cs.ReconnectedAt.IsZero() {
-			base.LastReconnect = cs.ReconnectedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006, 3:04pm")
+			base.Settings.LastReconnect = cs.ReconnectedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006, 3:04pm")
 		}
 	}
 	// Other tenants this account is linked to get a card each (the current
@@ -60,7 +61,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 			if !idle.IsZero() && s.cfg.Council.SessionMaxAge > 0 {
 				cv.RelinkBy = idle.Add(s.cfg.Council.SessionMaxAge).In(c.Location()).Format("2 Jan 2006")
 			}
-			base.OtherConnections = append(base.OtherConnections, cv)
+			base.Settings.OtherConnections = append(base.Settings.OtherConnections, cv)
 		}
 	}
 	if r.URL.Query().Get("tested") == "1" {
@@ -120,7 +121,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		pref.NtfyTopic = notify.RandomTopic()
 		_ = s.store.SetNotifyPref(ctx, pref)
 	}
-	base.Notify = s.notifyViewOf(ctx, user, pref)
+	base.Settings.Notify = s.notifyViewOf(ctx, user, pref)
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
 		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006"))

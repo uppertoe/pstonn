@@ -1,8 +1,8 @@
 {{define "legend-inner"}}
-  {{if .LegendVehicles}}
+  {{if .App.LegendVehicles}}
   <div class="legend">
-    {{range .LegendVehicles}}<span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}} <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span></span>{{end}}
-    {{if .LegendMore}}<a class="legend-more" href="/vehicles">+{{.LegendMore}} more</a>{{end}}
+    {{range .App.LegendVehicles}}<span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}} <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span></span>{{end}}
+    {{if .App.LegendMore}}<a class="legend-more" href="/vehicles">+{{.App.LegendMore}} more</a>{{end}}
   </div>
   {{end}}
 {{end}}
@@ -42,13 +42,13 @@
   {{/* ---------- SCHEDULE ---------- */}}
   {{if .Vehicles}}
   {{template "legend" .}}
-  {{else if not .GuestActive}}
+  {{else if not .App.GuestActive}}
   {{/* A household already living on guest QRs doesn't need saved cars — the
        roster and one-off surfaces explain their own prerequisite at the moment
        of use, so this page-level hint stays quiet for them. */}}
   <div class="banner warn">{{template "ic-cars"}} <span>Add your plates on the <a href="/vehicles">Vehicles</a> page first, then pick which vehicle covers each day of the week.</span></div>
   {{end}}
-  {{range .Permits}}
+  {{range .App.Permits}}
   {{/* The one-off modal closes itself after a SUCCESSFUL SUBMIT and nothing else.
        The guard used to close it after any htmx request that bubbled through the
        section except the QR trigger — which included the badge's own timer poll
@@ -66,17 +66,17 @@
     {{template "permit-modals" .}}
   </section>
   {{else}}
-  {{if not .ExpiredPermits}}
+  {{if not .App.ExpiredPermits}}
   <section class="card"><p class="empty-note">No permits managed yet. <a href="/permits/new">Choose a permit →</a></p></section>
   {{end}}
   {{end}}
 
-  {{if .ExpiredPermits}}
+  {{if .App.ExpiredPermits}}
   <section class="card expired-permits">
     <h2 class="exp-h2">{{template "ic-clock"}} Permits no longer active</h2>
     <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and their guest passes and QR codes are paused. Got a new permit instead? <a href="/permits/new">Add it</a>, then pick the old one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links that people have saved keep working.</p>
     <ul class="explist">
-      {{range .ExpiredPermits}}
+      {{range .App.ExpiredPermits}}
       <li class="exprow">
         <div class="expmain"><span class="expname">{{.Label}}</span><span class="expstatus">{{.StatusText}}{{if .Detail}} · {{.Detail}}{{end}}</span></div>
         {{if $.IsPrimary}}
@@ -91,8 +91,8 @@
   </section>
   {{end}}
 
-  {{if or .Permits .ExpiredPermits}}
-  {{if .MoreToSetUp}}
+  {{if or .App.Permits .App.ExpiredPermits}}
+  {{if .App.MoreToSetUp}}
   {{/* Just after adding a permit while another visitor permit is still unmanaged
        (addPermit ?more=1): draw the eye to the very control that sets it up, rather
        than adding another banner to the stack. Amber, pulsing a few times, motion
@@ -102,7 +102,7 @@
   <a class="link-quiet" href="/permits/new">{{template "ic-plus"}} Manage another permit</a>
   {{end}}
   {{end}}
-  {{if .ShowShareHint}}
+  {{if .App.ShowShareHint}}
   <p class="share-hint" style="--hue:var(--sec-settings)" x-data="{hide: localStorage.getItem('pstonn-share-hint')==='1'}" x-show="!hide" x-cloak>
     {{template "ic-user"}}
     <span>Want another member of your household to manage this permit too? Invite them in <a href="/settings">Settings &rarr; Shared access</a> &mdash; they sign in with their own email, and no passwords change hands.</span>
@@ -110,7 +110,7 @@
             @click="hide=true; localStorage.setItem('pstonn-share-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
-  {{if .ShowGuestHint}}
+  {{if .App.ShowGuestHint}}
   {{/* Behaviour-gated (3+ one-off bookings, no guest activity — see schedule.go):
        this household is manually doing what a guest link automates. */}}
   <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-guest-hint')==='1'}" x-show="!hide" x-cloak>
@@ -120,7 +120,7 @@
             @click="hide=true; localStorage.setItem('pstonn-guest-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
-  {{if .ShowInstallHint}}
+  {{if .App.ShowInstallHint}}
   {{/* Hidden when already running from the home screen (display-mode: standalone,
        or iOS's navigator.standalone), and dismissed per browser like the share
        hint. The wording follows the platform's own menu names. */}}
@@ -133,8 +133,8 @@
             @click="hide=true; localStorage.setItem('pstonn-install-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
-  {{if .Permits}}
-  {{if gt (len .Permits) 1}}
+  {{if .App.Permits}}
+  {{if gt (len .App.Permits) 1}}
   {{/* More than one permit: the FAB can't know which one the booking is for, so
        it opens a chooser first. Each row shows the car on that permit right now —
        the plate is how a household actually tells its permits apart, and it shows
@@ -152,7 +152,7 @@
         </div>
         <p class="empty-note" style="margin:-6px 0 12px">You manage more than one permit &mdash; which one is the booking for? Next to each is the car on it right now.</p>
         <div class="pick">
-          {{range .Permits}}
+          {{range .App.Permits}}
           <button type="button" class="pick-item" data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">
             <span class="pick-name">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</span>
             {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no car</span>{{end}}
@@ -164,7 +164,7 @@
     </template>
   </div>
   {{else}}
-  {{range .Permits}}
+  {{range .App.Permits}}
   <button class="fab" type="button"
           data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
   {{end}}

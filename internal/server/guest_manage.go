@@ -94,6 +94,7 @@ func (s *Server) editGuestGrant(w http.ResponseWriter, r *http.Request) {
 // grants, it also populates base.Edit so the form renders in edit mode.
 func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int64) error {
 	owner := base.Owner
+	base.GuestMgmt = &guestMgmt{}
 	permits, err := s.store.ListPermitsFor(ctx, owner)
 	if err != nil {
 		return err
@@ -113,7 +114,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 			continue
 		}
 		labelByPermit[p.ID] = permitLabel(p)
-		base.PermitOpts = append(base.PermitOpts, permitOpt{ID: p.ID, Label: permitLabel(p)})
+		base.GuestMgmt.PermitOpts = append(base.GuestMgmt.PermitOpts, permitOpt{ID: p.ID, Label: permitLabel(p)})
 	}
 	vehicles, err := s.store.ListVehiclesFor(ctx, owner)
 	if err != nil {
@@ -148,7 +149,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 				Undeliverable: undeliverableText(undeliverable[t.RecipientEmail]),
 			})
 		}
-		base.Guests = append(base.Guests, guestGrantView{
+		base.GuestMgmt.Guests = append(base.GuestMgmt.Guests, guestGrantView{
 			ID: d.Grant.ID, Label: d.Grant.Label, PermitLabel: labelByPermit[d.Grant.PermitID],
 			PermitDead:     deadPermit[d.Grant.PermitID],
 			AllowOvernight: d.Grant.AllowOvernight, Cars: cars, Recipients: recips,
@@ -167,7 +168,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 	if reqs, rerr := s.store.ListPendingRequests(ctx, owner); rerr == nil {
 		now := time.Now()
 		for _, rq := range reqs {
-			base.PendingRequests = append(base.PendingRequests, guestReqView{
+			base.GuestMgmt.PendingRequests = append(base.GuestMgmt.PendingRequests, guestReqView{
 				ID: rq.ID, Plate: rq.Plate, PermitLabel: labelByPermit[rq.PermitID], Ago: agoText(now, rq.RequestedAt),
 			})
 		}
@@ -214,18 +215,18 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 			default: // "expired": aged out with nobody answering
 				v.Outcome = "Not answered"
 			}
-			base.RecentRequests = append(base.RecentRequests, v)
+			base.GuestMgmt.RecentRequests = append(base.GuestMgmt.RecentRequests, v)
 		}
 	}
 	if doors, derr := s.store.ListPrintedGrants(ctx, owner); derr == nil {
 		for _, d := range doors {
-			base.DoorGrants = append(base.DoorGrants, doorGrantView{
+			base.GuestMgmt.DoorGrants = append(base.GuestMgmt.DoorGrants, doorGrantView{
 				GrantID: d.GrantID, PermitLabel: d.PermitLabel,
 				CreatedAt: d.CreatedAt.In(s.locFor(ctx, base.Owner)).Format("2 Jan 2006"),
 			})
 		}
 	}
-	base.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)
+	base.GuestMgmt.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)
 	return err
 }
 
@@ -318,7 +319,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	base.NewGuestLinks = links
+	base.GuestMgmt.NewGuestLinks = links
 	switch {
 	case sent == len(links):
 		base.Flash = "Guest pass created and links emailed."
@@ -433,7 +434,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, err)
 			return
 		}
-		base.NewGuestLinks = links
+		base.GuestMgmt.NewGuestLinks = links
 		base.Flash = "The email could not be sent. Copy the fresh link below and share it yourself — the old link no longer works."
 		s.render(w, base)
 		return
@@ -535,7 +536,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(newLinks) > 0 {
 		plabel := ""
-		for _, g := range base.Guests {
+		for _, g := range base.GuestMgmt.Guests {
 			if g.ID == id {
 				plabel = g.PermitLabel
 			}
@@ -548,7 +549,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		sent := s.emailLinks(r.Context(), owner, tenantID, plabel, newLinks)
-		base.NewGuestLinks = newLinks
+		base.GuestMgmt.NewGuestLinks = newLinks
 		switch {
 		case sent == len(newLinks):
 			base.Flash = "Guest pass updated and new links emailed."

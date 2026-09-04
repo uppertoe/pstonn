@@ -199,7 +199,7 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 		d := dashboardData{User: user, State: "app", Page: page, IsPrimary: true, Loc: loc, LogoutURL: "https://auth.example.com/logout",
 			Regions:  regions,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", State: "NSW"}},
-			Permits:  []permitView{pv}}
+			App:      &appData{Permits: []permitView{pv}}}
 		if extra != nil {
 			extra(&d)
 		}
@@ -238,30 +238,33 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 		{"admin empty", dashboardData{User: user, State: "admin", Loc: loc, Admin: &adminView{SchedulerLast: "never", SchedulerStale: true}}, ""},
 		{"schedule with warn and flash", app("schedule", func(d *dashboardData) { d.Warn = "Couldn't reach the council just now."; d.Flash = "Saved." }), ""},
 		{"schedule with legend overflow", app("schedule", func(d *dashboardData) {
-			d.LegendVehicles = d.Vehicles
-			d.LegendMore = 3
+			d.App.LegendVehicles = d.Vehicles
+			d.App.LegendMore = 3
 		}), ""},
 		{"activity with changes", app("activity", func(d *dashboardData) {
-			d.Log = []store.ApplyRecord{
+			d.App.Log = []store.ApplyRecord{
 				{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now.Add(-2 * time.Hour)},
 				{PermitID: 7, Registration: "XYZ789", Source: "override", Status: "error", Detail: "council temporarily unavailable", At: now.Add(-26 * time.Hour)},
 			}
-			d.Changes = []changeView{{Actor: "a@b.com", Text: "added the car ABC123 (Van)", At: now.Add(-3 * 24 * time.Hour)}, {Text: "reconnected automatically", At: now.Add(-5 * 24 * time.Hour)}}
-			d.LogMore, d.ChangesMore = true, true
+			d.App.Changes = []changeView{{Actor: "a@b.com", Text: "added the car ABC123 (Van)", At: now.Add(-3 * 24 * time.Hour)}, {Text: "reconnected automatically", At: now.Add(-5 * 24 * time.Hour)}}
+			d.App.LogMore, d.App.ChangesMore = true, true
 		}), ""},
-		{"activity showing all", app("activity", func(d *dashboardData) { d.ShowingAll = true }), ""},
+		{"activity showing all", app("activity", func(d *dashboardData) { d.App.ShowingAll = true }), ""},
 		{"settings full", app("settings", func(d *dashboardData) {
-			d.TenantLinked, d.AutoReconnect, d.RelinkBy, d.LastReconnect = true, true, "15 Oct 2026", "14 Jul 2026, 3:04pm"
-			d.Notify = notifyView{EmailAvailable: true, EmailEnabled: true, NtfyAvailable: true, NtfyEnabled: true, NtfyTopic: "pstonn-abc", NtfyBase: "https://ntfy.example.com", QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}
+			d.AutoReconnect = true
+			d.Settings = &settingsData{TenantLinked: true, RelinkBy: "15 Oct 2026", LastReconnect: "14 Jul 2026, 3:04pm",
+				Notify: notifyView{EmailAvailable: true, EmailEnabled: true, NtfyAvailable: true, NtfyEnabled: true, NtfyTopic: "pstonn-abc", NtfyBase: "https://ntfy.example.com", QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}
 			d.Members = []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}
 			d.Terms = termsView{Version: "2026-07-18", Accepted: "v2026-07-18 on 18 Jul 2026"}
 		}), ""},
 		{"guests with links and requests", app("guests", func(d *dashboardData) {
-			d.GuestsEnabled = true
-			d.PermitOpts = []permitOpt{{ID: 1, Label: "Visitor Permit"}}
-			d.NewGuestLinks = []guestLinkView{{Email: "dad@example.com", URL: "https://p.stonn.org/g/tok1"}}
-			d.DoorGrants = []doorGrantView{{GrantID: 3, PermitLabel: "Visitor Permit", CreatedAt: "20 Jul 2026"}}
-			d.PendingRequests = []guestReqView{{ID: 4, Plate: "GUEST1", PermitLabel: "Visitor Permit", Ago: "2 min ago"}}
+			d.GuestMgmt = &guestMgmt{
+				GuestsEnabled:   true,
+				PermitOpts:      []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+				NewGuestLinks:   []guestLinkView{{Email: "dad@example.com", URL: "https://p.stonn.org/g/tok1"}},
+				DoorGrants:      []doorGrantView{{GrantID: 3, PermitLabel: "Visitor Permit", CreatedAt: "20 Jul 2026"}},
+				PendingRequests: []guestReqView{{ID: 4, Plate: "GUEST1", PermitLabel: "Visitor Permit", Ago: "2 min ago"}},
+			}
 		}), ""},
 		{"vehicles with email", app("vehicles", func(d *dashboardData) {
 			d.Vehicles = []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", Email: "van@example.com"}, {ID: 2, Label: "Mum", Registration: "AAA111", Color: "#127a49"}}
@@ -290,7 +293,7 @@ type fragmentRender struct {
 func goldenFragmentCases(loc *time.Location, user identity.User, now time.Time) []fragmentRender {
 	pv := samplePermitViewAt(loc, now)
 	return []fragmentRender{
-		{"default", "legend", dashboardData{User: user, Loc: loc, Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}}, Permits: []permitView{pv}}},
+		{"default", "legend", dashboardData{User: user, Loc: loc, Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}}, App: &appData{Permits: []permitView{pv}}}},
 		{"email only", "notify-body", notifyView{EmailAvailable: true, EmailEnabled: true}},
 		{"both with error", "notify-body", notifyView{EmailAvailable: true, EmailEnabled: true, NtfyAvailable: true, NtfyEnabled: true, NtfyTopic: "pstonn-abc", NtfyBase: "https://ntfy.example.com", Status: "Saved.", Error: "Keep at least one method on"}},
 		{"default", "qr-card", dashboardData{Loc: loc, QR: &qrShowView{PermitLabel: "Visitor Permit", ImageURI: template.URL("data:image/png;base64,AAAA"), URL: "https://p.stonn.org/g/tok", StopsAt: "11:59pm"}}},

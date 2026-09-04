@@ -43,6 +43,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	base.App = &appData{}
 	// The post-addPermit landing (see addPermit): say what just happened, because
 	// an expired permit's card is inside the collapsed section below and an
 	// active one's next step (set a roster) is not self-evident to a newcomer.
@@ -56,7 +57,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	// another unmanaged visitor permit, so the nudge rides the post-add landing only —
 	// like the flash above, a manual refresh of this URL re-shows it, but any normal
 	// navigation to /schedule (no query) drops it.
-	base.MoreToSetUp = r.URL.Query().Get("more") == "1"
+	base.App.MoreToSetUp = r.URL.Query().Get("more") == "1"
 	ctx := r.Context()
 	owner := base.Owner
 	now := time.Now().In(s.locFor(ctx, owner))
@@ -114,16 +115,16 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	// the extra query is skipped for every set-up household.
 	if len(vviews) == 0 {
 		if ga, gerr := s.store.HasGuestActivity(ctx, owner); gerr == nil {
-			base.GuestActive = ga
+			base.App.GuestActive = ga
 		}
 	}
 	if used, lerr := s.legendColors(ctx, owner, vviews, now); lerr == nil {
-		base.LegendVehicles, base.LegendMore = legendVehicles(vviews, used)
+		base.App.LegendVehicles, base.App.LegendMore = legendVehicles(vviews, used)
 	} else {
 		log.Printf("legend colours for %s: %v", redact.Email(owner), lerr)
 	}
-	base.Permits = pvs
-	base.ExpiredPermits = expired
+	base.App.Permits = pvs
+	base.App.ExpiredPermits = expired
 	// Sustained council-side trouble: say plainly that changes may be delayed rather
 	// than let a user wonder why "on permit now" is stale or a booking hasn't landed.
 	// Only when the connector is degraded-or-worse (already a sustained signal, not a
@@ -143,7 +144,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	// member here — that household has already found the feature.
 	if base.IsPrimary && len(pvs) > 0 {
 		if n, cerr := s.store.CountMembers(ctx, owner); cerr == nil && n == 0 {
-			base.ShowShareHint = true
+			base.App.ShowShareHint = true
 		}
 	}
 	// The home-screen tip waits for the first successful apply: it drip-feeds the
@@ -152,7 +153,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	// a chore.
 	if len(pvs) > 0 {
 		if n, cerr := s.store.CountSuccessfulApplies(ctx, owner); cerr == nil && n > 0 {
-			base.ShowInstallHint = true
+			base.App.ShowInstallHint = true
 		}
 	}
 	// Guest-pass pointer, gated on proven need: a household that keeps making
@@ -162,7 +163,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if len(pvs) > 0 {
 		if n, cerr := s.store.CountChanges(ctx, owner, store.ActionOverrideAdd); cerr == nil && n >= guestHintAfterOverrides {
 			if ga, gerr := s.store.HasGuestActivity(ctx, owner); gerr == nil && !ga {
-				base.ShowGuestHint = true
+				base.App.ShowGuestHint = true
 			}
 		}
 	}
@@ -185,7 +186,8 @@ func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var d dashboardData
-	d.LegendVehicles, d.LegendMore = legendVehicles(vviews, used)
+	d.App = &appData{}
+	d.App.LegendVehicles, d.App.LegendMore = legendVehicles(vviews, used)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "legend", d); err != nil {
 		log.Printf("render legend: %v", err)

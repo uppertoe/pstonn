@@ -32,11 +32,11 @@ func (s *Server) sharePage(w http.ResponseWriter, r *http.Request) {
 	case "1":
 		base.Flash = "Invitation sent."
 	}
-	base.ShareEmailAvailable = s.notify != nil && s.notify.EmailAvailable()
+	base.Share = &shareData{ShareEmailAvailable: s.notify != nil && s.notify.EmailAvailable()}
 	// The card preview: same QR the printable page renders.
 	if url := strings.TrimRight(s.cfg.PublicBaseURL, "/"); url != "" {
 		if img, err := qrDataURI(url); err == nil {
-			base.ShareQR = template.URL(img)
+			base.Share.ShareQR = template.URL(img)
 		}
 	}
 	s.render(w, base)
@@ -74,8 +74,7 @@ func (s *Server) shareCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := dashboardData{User: u, State: "share-card", OIDCEnabled: s.auth != nil, LogoutURL: s.logoutURL(), Loc: s.cfg.DisplayLocation}
-	base.ShareQR = template.URL(img)
-	base.ShareURL = strings.TrimPrefix(url, "https://")
+	base.Share = &shareData{ShareQR: template.URL(img), ShareURL: strings.TrimPrefix(url, "https://")}
 	s.render(w, base)
 }
 

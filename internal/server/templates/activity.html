@@ -5,7 +5,7 @@
   <section class="card" style="--hue:var(--sec-activity)">
     <table class="mtable">
       <tbody>
-      {{range .Log}}
+      {{range .App.Log}}
         <tr>
           <td class="muted" style="white-space:nowrap">{{localTime .At $.Loc}}</td>
           {{/* A removal has no plate: show a dash, not an empty pill. */}}
@@ -24,9 +24,9 @@
     {{/* Say what's being shown. A silently truncated list is indistinguishable
          from "that's everything", which is exactly the wrong impression on a page
          people check to confirm something happened. */}}
-    {{if .Log}}
+    {{if .App.Log}}
     <p class="empty-note" style="margin-top:12px">
-      {{if .LogMore}}Showing the most recent {{len .Log}}. <a href="/activity?all=1#plates">Show more</a> &middot; {{end}}Kept for 90 days.
+      {{if .App.LogMore}}Showing the most recent {{len .App.Log}}. <a href="/activity?all=1#plates">Show more</a> &middot; {{end}}Kept for 90 days.
     </p>
     {{end}}
   </section>
@@ -41,7 +41,7 @@
   <section class="card" style="--hue:var(--sec-settings)">
     <table class="mtable">
       <tbody>
-      {{range .Changes}}
+      {{range .App.Changes}}
         <tr>
           <td class="muted" style="white-space:nowrap">{{localTime .At $.Loc}}</td>
           <td>{{if .Actor}}<strong>{{.Actor}}</strong>{{else}}<span class="muted">p.stonn</span>{{end}}</td>
@@ -52,14 +52,14 @@
       {{end}}
       </tbody>
     </table>
-    {{if .Changes}}
+    {{if .App.Changes}}
     <p class="empty-note" style="margin-top:12px">
-      {{if .ChangesMore}}Showing the most recent {{len .Changes}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}Kept for 90 days.
+      {{if .App.ChangesMore}}Showing the most recent {{len .App.Changes}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}Kept for 90 days.
     </p>
     {{end}}
   </section>
 
-  {{if .ShowingAll}}
+  {{if .App.ShowingAll}}
   <p class="empty-note" style="margin-top:14px;text-align:center"><a href="/activity">&larr; Back to the recent view</a></p>
   {{end}}
 

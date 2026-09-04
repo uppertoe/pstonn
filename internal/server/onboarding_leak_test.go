@@ -56,14 +56,14 @@ func TestOnboardingCopyStaysQuietWhereItShould(t *testing.T) {
 	}
 
 	// A real browser gets no webview warning.
-	out := render(dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc})
+	out := render(dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc, Onboard: &onboardData{}})
 	if strings.Contains(out, "In the Facebook or Instagram app") {
 		t.Fatal("webview advice shown to a real browser")
 	}
 
 	// A secondary waiting on the owner links nothing, so the webview note (a
 	// link-form aid) has no business on their page either.
-	out = render(dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "p@example.com", InAppBrowser: true, Loc: loc})
+	out = render(dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "p@example.com", Onboard: &onboardData{InAppBrowser: true}, Loc: loc})
 	if strings.Contains(out, "In the Facebook or Instagram app") {
 		t.Fatal("webview advice shown to a secondary with no form to fill")
 	}

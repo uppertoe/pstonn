@@ -4,7 +4,7 @@
 <main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
-  {{if .LinkHelp}}
+  {{if .Onboard.LinkHelp}}
   {{/* Rejected council login: what happened (one line), then the remedies in
        likelihood order. The reset link leads now — the council can't tell us a
        wrong password from an account that never had a working one (permits set
@@ -30,7 +30,7 @@
     <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)))}}</span>
   </span></div>
   {{end}}
-  {{if .LinkThrottled}}
+  {{if .Onboard.LinkThrottled}}
   {{/* Too many council sign-in attempts: the wait is real (it protects their
        council account from its own lockout), but it must arrive WITH the likely
        fixes so the pause becomes checking time rather than giving-up time. Same
@@ -56,7 +56,7 @@
   <section class="card hero">
     <div class="ring">{{template "ic-link"}}</div>
     {{if .IsPrimary}}
-    {{if .CapacityFull}}
+    {{if .Onboard.CapacityFull}}
     {{/* Full deployment, new household: say so BEFORE terms are read and a
          council password is typed. councilLink still enforces this under the
          admission lock; this is the honest front door. */}}
@@ -75,7 +75,7 @@
       {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, cars and schedule are all still here.
       {{else}}{{T "onboarding.intro" .}}{{end}}
     </p>
-    {{if .InAppBrowser}}
+    {{if .Onboard.InAppBrowser}}
     {{/* The visitor is inside Facebook's (or Instagram's) built-in browser,
          where password managers don't auto-fill — and the council password is
          exactly the credential nobody types from memory. Say so BEFORE the
@@ -107,10 +107,10 @@
         And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
         invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
       </p>
-      {{- if .TenantOptions}}
+      {{- if .Onboard.TenantOptions}}
       <label class="fld">Council
         <select name="tenant_id" required>
-          {{range .TenantOptions}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
+          {{range .Onboard.TenantOptions}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.Name}}</option>{{end}}
         </select>
       </label>
       {{- end}}
@@ -174,19 +174,19 @@
        so without this the only way back to the schedule was the browser. Not
        shown to a first-timer with nothing managed — /schedule renders this very
        page for them, and the link would be a loop. */}}
-  {{if .HasManaged}}<a class="link-quiet" href="/schedule" style="margin-bottom:10px;display:inline-flex">&larr; Back to schedule</a>{{end}}
+  {{if .Picker.HasManaged}}<a class="link-quiet" href="/schedule" style="margin-bottom:10px;display:inline-flex">&larr; Back to schedule</a>{{end}}
   <section class="card">
     <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to set up</div>
     {{/* .OfferedCount (set in renderPicker) is how many live visitor permits are on
          offer. More than one means "this is usually your visitor permit" (singular)
          would contradict the two-or-more shown — an unanswerable choice — so lead
          with a "set up both" line instead. */}}
-    {{if gt .OfferedCount 1}}
+    {{if gt .Picker.OfferedCount 1}}
     <p class="subtitle">You have more than one visitor permit &mdash; each one holds a car. You can set up both; pick either to start, and add the other whenever you like.</p>
     {{else}}
     <p class="subtitle">Pick the permit whose plate you want to schedule. This is usually your visitor permit.</p>
     {{end}}
-    {{if .Pick}}
+    {{if .Picker.Pick}}
     {{/* A first-timer with a full picker had no reassurance here and no way to
          read up (the "How it works" link only appears in the empty states below).
          Observed 2026-09-02: a household linked, reloaded this page seven times over
@@ -200,12 +200,12 @@
          working permit: status pill, no "currently <plate>" (a cancelled permit
          still carries its last plate and read as live), and a quieter button
          that says what adding it is for. */}}
-    {{$live := 0}}{{range .Pick}}{{if not .Dead}}{{$live = 1}}{{end}}{{end}}
+    {{$live := 0}}{{range .Picker.Pick}}{{if not .Dead}}{{$live = 1}}{{end}}{{end}}
     {{if not $live}}
     <p class="empty-note" style="margin-bottom:12px">All your permits are managed or no longer active.</p>
     {{end}}
     <div class="pick">
-      {{range .Pick}}{{if not .Dead}}
+      {{range .Picker.Pick}}{{if not .Dead}}
       <div class="pick-item {{if not .Addable}}disabled{{end}}">
         <div>
           <div style="font-weight:650">{{.PermitNumber}}</div>
@@ -226,11 +226,11 @@
       </div>
       {{end}}{{end}}
     </div>
-    {{$dead := 0}}{{range .Pick}}{{if .Dead}}{{$dead = 1}}{{end}}{{end}}
+    {{$dead := 0}}{{range .Picker.Pick}}{{if .Dead}}{{$dead = 1}}{{end}}{{end}}
     {{if $dead}}
     <h3 class="pick-older">Older permits</h3>
     <div class="pick">
-      {{range .Pick}}{{if .Dead}}
+      {{range .Picker.Pick}}{{if .Dead}}
       <div class="pick-item dead">
         <div>
           <div style="font-weight:650">{{.PermitNumber}} <span class="pick-status">{{.Status}}</span></div>
@@ -254,10 +254,10 @@
          holds no permits at all. Deliberately NOT linking "back to schedule":
          with nothing managed, /schedule renders this very page, which read as a
          broken loop. */}}
-    {{if .PermitsUnknown}}
+    {{if .Picker.PermitsUnknown}}
     <p class="empty-note">We couldn't load your permit list from the council just now, so we can't tell what's on your account. Nothing has changed &mdash; please try again in a few minutes.</p>
     <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_error" .}} <a href="/how" hx-boost="false">How it works</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
-    {{else if .HasPermits}}
+    {{else if .Picker.HasPermits}}
     <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
     <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/how" hx-boost="false">What p.stonn can and cannot do</a></p>
     {{else}}

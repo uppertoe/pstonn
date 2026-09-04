@@ -126,8 +126,6 @@ type dashboardData struct {
 	Contact       bool        // whether the public contact link/form is available
 	ContactVal    string      // contact form: the message text to redisplay after a validation error
 	ContactFrom   string      // contact form: the reply-to address to redisplay after a validation error
-	// TenantOptions is the sign-up choice, offered only when more than one is enabled.
-	TenantOptions []tenantOption
 	// Tenants drives the user menu's area switcher: only the areas the account has
 	// LINKED (empty when the deployment serves one area). Switching between them.
 	Tenants []tenantChoice
@@ -135,10 +133,122 @@ type dashboardData struct {
 	// linked, so the menu offers "Connect another area…" → the connect-area picker.
 	CanConnectArea bool
 	// Areas is the unlinked-area list the connect-area picker renders (State "connectarea").
-	Areas []tenantChoice
-	// OtherConnections are the account\'s sessions with tenants other than the current one (Settings).
-	OtherConnections []connectionView
-	Relink           bool // tenant session expired → prompt re-link
+	Areas  []tenantChoice
+	Relink bool   // tenant session expired → prompt re-link
+	Flash  string // success (green)
+	Warn   string // problem / caution (amber)
+	// CouncilTrouble marks a SUSTAINED council-side problem (the connector state is
+	// degraded or worse — see councilTroubled), so the Schedule page can say plainly
+	// that changes may be delayed. Distinct from Relink, which is a per-account
+	// re-link the user must act on; this is the council's system, and nothing the
+	// user can do about it. CouncilName is the account's own tenant's name for the
+	// copy (the state signal is currently the account-wide worst — see schedule.go).
+	CouncilTrouble bool
+	CouncilName    string
+	Loc            *time.Location
+	// shared access
+	Owner      string       // effective account owner (email) that scopes the data
+	IsPrimary  bool         // whether the signed-in user owns this account
+	SharedWith string       // for a secondary: the primary account's email
+	Members    []memberView // for a primary: the secondaries with access (and any unanswered invites)
+	Invite     *inviteView  // an invitation awaiting the signed-in person's answer
+	// dashboard state (shared across the app pages — kept flat because the guests
+	// page also renders these; see App for the schedule/activity-only fields).
+	Vehicles []vehicleView
+	// Regions are the registration jurisdictions the tenant offers for a vehicle's
+	// state, home state first. Empty means no chooser is shown (the provider has no
+	// such concept, or the tenant is not resolvable yet).
+	Regions       []provider.Region
+	AutoReconnect bool      // settings/onboarding: a saved password lets p.stonn auto-reconnect
+	Terms         termsView // terms state + settings display
+	// guest passes
+	Edit    *editGrantView // non-nil puts the pass form in edit mode
+	QR      *qrShowView    // non-nil shows the on-screen visitor QR
+	DoorQR  *doorQRView    // non-nil renders the printable door-QR poster (State "doorqr")
+	Guest   guestActView   // public activation menu (State "guest")
+	Wait    *guestWaitView // public "waiting for approval" page (State "guest-wait")
+	Admin   *adminView     // admin dashboard (State "admin")
+	Unsub   *unsubView     // public unsubscribe confirm/result (State "unsubscribe")
+	Message *messageView   // styled message/error page (State "message")
+	Decide  *decideView    // public no-sign-in guest-request decide page (State "guestdecide")
+	Confirm *confirmView   // public renewal-confirm page (State "confirm")
+
+	// Per-page sub-views: each is non-nil only on the page it backs, so a page's
+	// data is explicit and separated from the others' (see the individual types).
+	Settings  *settingsData // Settings page (State "app", Page "settings")
+	Share     *shareData    // Share page (State "share" / "share-card")
+	Picker    *pickerData   // permit picker (State "picker")
+	Onboard   *onboardData  // link-your-council onboarding page (State "onboarding")
+	GuestMgmt *guestMgmt    // guest-pass management page (State "app", Page "guests")
+	App       *appData      // the schedule + activity dashboard pages (State "app")
+}
+
+// appData backs the schedule and activity dashboard pages (State "app", Pages
+// "schedule" and "activity"): the permit cards, the colour key, the activity
+// logs, and the schedule page's one-time hints. (Vehicles/Regions stay flat on
+// dashboardData: the guests page renders them too.)
+type appData struct {
+	// LegendVehicles is the Schedule page's colour key: only the cars whose colour
+	// is actually on the page (see legendVehicles). LegendMore counts those left
+	// out, surfaced as a link to the full list.
+	LegendVehicles []vehicleView
+	LegendMore     int
+	Permits        []permitView
+	ExpiredPermits []expiredPermitView // collapsed: expired/cancelled permits kept as copy sources
+	Log            []store.ApplyRecord
+	Changes        []changeView // who changed the setup (account_log), newest first
+	// Activity paging: whether older rows exist beyond what is shown, and whether
+	// we are already showing the expanded list.
+	LogMore     bool
+	ChangesMore bool
+	ShowingAll  bool
+	// MoreToSetUp puts a one-time nudge on the Schedule page right after a permit is
+	// added, when the council list still holds another schedulable visitor permit
+	// this account hasn't set up — surfacing the "add the other whenever you like"
+	// offer at the moment it is most relevant. Detected free in addPermit (it already
+	// read the list); passed via ?more=1 so it rides the post-add landing, not every
+	// later visit (a manual refresh of that URL re-shows it, like the added=1 flash).
+	MoreToSetUp bool
+	// ShowShareHint puts a quiet shared-access pointer on the Schedule page for a
+	// primary with no members. The feature's only other surface is a card in
+	// Settings, which new households demonstrably never open; the hint is
+	// server-gated here and dismissed per-browser in the template (localStorage),
+	// because seeing it once more on a new device is harmless.
+	ShowShareHint bool
+	// ShowInstallHint offers the add-to-home-screen tip on the Schedule page once
+	// the household has had a successful apply (the morning glance is the dominant
+	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
+	// template; hidden by the template when already running standalone.
+	ShowInstallHint bool
+	// ShowGuestHint points a household at guest passes once its behaviour proves
+	// the need: several one-off bookings and no guest activity means someone is
+	// manually doing exactly what a guest link automates. Server-gated on the
+	// change log, dismissed per-browser in the template like the other hints.
+	ShowGuestHint bool
+	// GuestActive gates the page-level "add your plates first" banner: a
+	// household already using guest QRs (which need no saved cars) shouldn't be
+	// told to add plates — the roster and one-off surfaces explain their own
+	// prerequisite at the moment of use instead.
+	GuestActive bool
+}
+
+// guestMgmt backs the guest-pass management page (State "app", Page "guests"):
+// existing passes, the create-a-pass choices, printed-QR grants and requests.
+type guestMgmt struct {
+	Guests          []guestGrantView   // management page: existing grants
+	GuestsEnabled   bool               // kill-switch state (default on)
+	PermitOpts      []permitOpt        // create-grant permit choices
+	NewGuestLinks   []guestLinkView    // links shown once, right after a grant is created
+	DoorGrants      []doorGrantView    // durable door QRs in the management list
+	PendingRequests []guestReqView     // printed-QR requests awaiting the holder's decision
+	RecentRequests  []guestDecidedView // recently decided printed-QR requests, so every member sees how they were resolved
+}
+
+// onboardData backs the onboarding / link-your-council page (State "onboarding"):
+// the link form's options and its several rejected/throttled/webview landings.
+type onboardData struct {
+	// TenantOptions is the sign-up choice, offered only when more than one is enabled.
+	TenantOptions []tenantOption
 	// CapacityFull hides the onboarding link form from a NEW household when the
 	// deployment is at MaxAccounts, so the refusal arrives before terms are read
 	// and a third-party password is typed — not after, as a toast. tenantLink
@@ -162,117 +272,46 @@ type dashboardData struct {
 	// tenant password ask becomes a dead end: nearly every stalled signup in the
 	// 2026-08 cohort arrived exactly this way (fbclid + FBAN/FBAV user agents).
 	InAppBrowser bool
-	Flash        string // success (green)
-	Warn         string // problem / caution (amber)
-	// CouncilTrouble marks a SUSTAINED council-side problem (the connector state is
-	// degraded or worse — see councilTroubled), so the Schedule page can say plainly
-	// that changes may be delayed. Distinct from Relink, which is a per-account
-	// re-link the user must act on; this is the council's system, and nothing the
-	// user can do about it. CouncilName is the account's own tenant's name for the
-	// copy (the state signal is currently the account-wide worst — see schedule.go).
-	CouncilTrouble bool
-	CouncilName    string
-	Loc            *time.Location
-	// shared access
-	Owner      string       // effective account owner (email) that scopes the data
-	IsPrimary  bool         // whether the signed-in user owns this account
-	SharedWith string       // for a secondary: the primary account's email
-	Members    []memberView // for a primary: the secondaries with access (and any unanswered invites)
-	Invite     *inviteView  // an invitation awaiting the signed-in person's answer
-	// ShowShareHint puts a quiet shared-access pointer on the Schedule page for a
-	// primary with no members. The feature's only other surface is a card in
-	// Settings, which new households demonstrably never open; the hint is
-	// server-gated here and dismissed per-browser in the template (localStorage),
-	// because seeing it once more on a new device is harmless.
-	ShowShareHint bool
-	// ShowInstallHint offers the add-to-home-screen tip on the Schedule page once
-	// the household has had a successful apply (the morning glance is the dominant
-	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
-	// template; hidden by the template when already running standalone.
-	ShowInstallHint bool
-	// OfferedCount is how many live, schedulable (visitor) permits the picker is
-	// offering. The picker tailors its guidance on it: more than one means the
-	// "this is usually your visitor permit" (singular) line would contradict the
-	// two-or-more shown, so a "you can set up both" line is used instead.
-	OfferedCount int
-	// MoreToSetUp puts a one-time nudge on the Schedule page right after a permit is
-	// added, when the council list still holds another schedulable visitor permit
-	// this account hasn't set up — surfacing the "add the other whenever you like"
-	// offer at the moment it is most relevant. Detected free in addPermit (it already
-	// read the list); passed via ?more=1 so it rides the post-add landing, not every
-	// later visit (a manual refresh of that URL re-shows it, like the added=1 flash).
-	MoreToSetUp bool
-	// ShowGuestHint points a household at guest passes once its behaviour proves
-	// the need: several one-off bookings and no guest activity means someone is
-	// manually doing exactly what a guest link automates. Server-gated on the
-	// change log, dismissed per-browser in the template like the other hints.
-	ShowGuestHint bool
-	// Share page (State "share" / "share-card").
-	ShareEmailAvailable bool         // the invite form only makes sense with SMTP configured
-	ShareQR             template.URL // data URI of the QR for the printable card (typed: html/template neuters a data: src otherwise)
-	ShareURL            string       // the human-readable address printed under the QR
-	// GuestActive gates the page-level "add your plates first" banner: a
-	// household already using guest QRs (which need no saved cars) shouldn't be
-	// told to add plates — the roster and one-off surfaces explain their own
-	// prerequisite at the moment of use instead.
-	GuestActive bool
-	// dashboard state
-	Vehicles []vehicleView
-	// Regions are the registration jurisdictions the tenant offers for a vehicle's
-	// state, home state first. Empty means no chooser is shown (the provider has no
-	// such concept, or the tenant is not resolvable yet).
-	Regions []provider.Region
-	// LegendVehicles is the Schedule page's colour key: only the cars whose colour
-	// is actually on the page (see legendVehicles). LegendMore counts those left
-	// out, surfaced as a link to the full list.
-	LegendVehicles []vehicleView
-	LegendMore     int
-	Permits        []permitView
-	ExpiredPermits []expiredPermitView // collapsed: expired/cancelled permits kept as copy sources
-	Log            []store.ApplyRecord
-	Changes        []changeView // who changed the setup (account_log), newest first
-	// Activity paging: whether older rows exist beyond what is shown, and whether
-	// we are already showing the expanded list.
-	LogMore       bool
-	ChangesMore   bool
-	ShowingAll    bool
-	RelinkBy      string     // human date the session must be re-authorised by ("" if unknown)
-	TenantLinked  bool       // settings: an active tenant session exists
-	AutoReconnect bool       // settings: a saved password lets p.stonn auto-reconnect
-	LastReconnect string     // settings: when the saved password last signed back in ("" = never)
-	Notify        notifyView // settings: notification channels
-	Terms         termsView  // terms state + settings display
-	// picker state
+}
+
+// pickerData backs the permit picker (State "picker"): the nominatable permits
+// and the empty-state guidance.
+type pickerData struct {
 	HasManaged bool // the account already manages a permit: the picker is "manage another", so it can offer a way back
 	Pick       []pickView
 	// HasPermits distinguishes the two empty-picker cases: the tenant account
 	// holds permits but none is schedulable (so explain why), versus it holds no
 	// permits at all (so explain that one must be applied for with the tenant).
 	HasPermits bool
-
 	// PermitsUnknown means the tenant gave us only part of the list, so an empty
 	// picker proves nothing. Without it, a partial response holding zero rows told the
 	// household flatly "your council account doesn't have any permits on it yet" —
 	// about an account that may well hold several.
 	PermitsUnknown bool
-	// guest passes
-	Guests          []guestGrantView   // management page: existing grants
-	GuestsEnabled   bool               // kill-switch state (default on)
-	PermitOpts      []permitOpt        // create-grant permit choices
-	NewGuestLinks   []guestLinkView    // links shown once, right after a grant is created
-	Edit            *editGrantView     // non-nil puts the pass form in edit mode
-	QR              *qrShowView        // non-nil shows the on-screen visitor QR
-	DoorQR          *doorQRView        // non-nil renders the printable door-QR poster (State "doorqr")
-	DoorGrants      []doorGrantView    // durable door QRs in the management list
-	PendingRequests []guestReqView     // printed-QR requests awaiting the holder's decision
-	RecentRequests  []guestDecidedView // recently decided printed-QR requests, so every member sees how they were resolved
-	Guest           guestActView       // public activation menu (State "guest")
-	Wait            *guestWaitView     // public "waiting for approval" page (State "guest-wait")
-	Admin           *adminView         // admin dashboard (State "admin")
-	Unsub           *unsubView         // public unsubscribe confirm/result (State "unsubscribe")
-	Message         *messageView       // styled message/error page (State "message")
-	Decide          *decideView        // public no-sign-in guest-request decide page (State "guestdecide")
-	Confirm         *confirmView       // public renewal-confirm page (State "confirm")
+	// OfferedCount is how many live, schedulable (visitor) permits the picker is
+	// offering. The picker tailors its guidance on it: more than one means the
+	// "this is usually your visitor permit" (singular) line would contradict the
+	// two-or-more shown, so a "you can set up both" line is used instead.
+	OfferedCount int
+}
+
+// shareData backs the Share page (State "share") and its printable card
+// (State "share-card").
+type shareData struct {
+	ShareEmailAvailable bool         // the invite form only makes sense with SMTP configured
+	ShareQR             template.URL // data URI of the QR for the printable card (typed: html/template neuters a data: src otherwise)
+	ShareURL            string       // the human-readable address printed under the QR
+}
+
+// settingsData backs the Settings page (State "app", Page "settings"): the tenant
+// connection, re-authorise deadline, notification channels and other-area cards.
+type settingsData struct {
+	TenantLinked  bool       // an active tenant session exists
+	LastReconnect string     // when the saved password last signed back in ("" = never)
+	Notify        notifyView // notification channels
+	// OtherConnections are the account's sessions with tenants other than the current one.
+	OtherConnections []connectionView
+	RelinkBy         string // human date the session must be re-authorised by ("" if unknown)
 }
 
 // messageView drives the styled message/error page (State "message"): the
@@ -909,16 +948,17 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// The tenant account belongs to the primary; a secondary can only wait
 		// for them to connect it (the template shows the right message per role).
 		base.State = "onboarding"
+		base.Onboard = &onboardData{}
 		// Several registry to choose from: the form asks. One: nothing to ask.
 		if s.registry != nil {
 			if enabled := s.registry.Enabled(); len(enabled) > 1 {
 				current := s.tenantFor(ctx, owner)
 				for _, c := range enabled {
-					base.TenantOptions = append(base.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
+					base.Onboard.TenantOptions = append(base.Onboard.TenantOptions, tenantOption{ID: c.ID, Name: c.Name, Selected: current != nil && current.ID == c.ID})
 				}
 			}
 		}
-		base.InAppBrowser = inAppBrowser(r.UserAgent())
+		base.Onboard.InAppBrowser = inAppBrowser(r.UserAgent())
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner) // drives the save-password default
 		// An unanswered invitation is the most likely reason a person with no
 		// tenant link is here at all; this page is the only one they can reach.
@@ -932,9 +972,9 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// template (it needs structure: lead line, button row, fallback link),
 		// not in this prose field.
 		if r.URL.Query().Get("link") == "rejected" {
-			base.LinkHelp = true
+			base.Onboard.LinkHelp = true
 		} else if r.URL.Query().Get("link") == "throttled" {
-			base.LinkThrottled = true
+			base.Onboard.LinkThrottled = true
 		} else
 		// A RETURNING household is not a signup. The paths that end a session
 		// (idle retirement, a rejected saved password, a manual disconnect)
@@ -951,7 +991,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 			// terms and a typed password — tenantLink re-checks under the
 			// admission lock, so this read needs no locking and may be stale.
 			if n, cerr := s.store.CountLinkedAccounts(ctx); cerr == nil && n >= s.cfg.MaxAccounts {
-				base.CapacityFull = true
+				base.Onboard.CapacityFull = true
 			}
 		}
 		s.render(w, base)

@@ -19,7 +19,7 @@
         <div class="qropt-txt"><strong>Send the link</strong><span class="empty-note">In a text, WhatsApp or Messenger &mdash; your phone&rsquo;s share sheet opens with the link ready. On a computer it copies the link instead.</span></div>
         <button type="button" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
       </div>
-      {{if .ShareEmailAvailable}}
+      {{if .Share.ShareEmailAvailable}}
       <div class="qropt">
         <div class="share-ic" style="--hue:var(--sec-vehicles)">{{template "ic-mail"}}</div>
         <div class="qropt-txt"><strong>Email an invite</strong><span class="empty-note">p.stonn sends them a short note saying you use it and what it does, from your name. Nothing else follows.</span></div>
@@ -32,7 +32,7 @@
       <div class="qropt" id="card">
         <div class="share-ic" style="--hue:var(--sec-activity)">{{template "ic-qr"}}</div>
         <div class="qropt-txt"><strong>Print a card</strong><span class="empty-note">A card with a QR code straight to p.stonn.org &mdash; for handing over the fence or leaving with a neighbour.</span></div>
-        {{if .ShareQR}}<div class="share-preview"><img src="{{.ShareQR}}" alt="" width="72" height="72"><span>p.stonn.org</span></div>{{end}}
+        {{if .Share.ShareQR}}<div class="share-preview"><img src="{{.Share.ShareQR}}" alt="" width="72" height="72"><span>p.stonn.org</span></div>{{end}}
         <a href="/share/card" hx-boost="false"><button type="button" class="ghost" style="width:100%;justify-content:center">{{template "ic-qr"}} Open the printable card</button></a>
       </div>
     </div>
@@ -56,8 +56,8 @@
       <span class="poster-kicker">Visitor parking</span>
     </div>
     <p class="poster-lead">{{T "share.poster_lead" .}}</p>
-    <img class="poster-qr" src="{{.ShareQR}}" alt="QR code to {{.ShareURL}}" width="240" height="240">
-    <p class="poster-url">{{.ShareURL}}</p>
+    <img class="poster-qr" src="{{.Share.ShareQR}}" alt="QR code to {{.Share.ShareURL}}" width="240" height="240">
+    <p class="poster-url">{{.Share.ShareURL}}</p>
     <p class="poster-note">{{T "share.poster_note" .}}</p>
   </article>
 </main>
