@@ -3733,6 +3733,81 @@ func TestFortnightNudgeCandidates(t *testing.T) {
 	}
 }
 
+// TestAdminApplySurfaces covers the operator's cross-account apply views: the
+// per-account success count on AdminAccounts, the newest-first all-accounts
+// history, and the per-(source, status) mix.
+func TestAdminApplySurfaces(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	const a, b = "a@example.com", "b@example.com"
+	pa, err := s.UpsertPermit(ctx, a, "1", "14", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pb, err := s.UpsertPermit(ctx, b, "2", "14", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		permit              int64
+		reg, source, status string
+	}{
+		{pa, "ABC123", "roster", "success"},
+		{pa, "XYZ789", "override", "success"},
+		{pa, "XYZ789", "override", "error"},
+		{pb, "GUEST1", "guest", "success"},
+	} {
+		if err := s.RecordApply(ctx, r.permit, r.reg, r.source, r.status, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	accts, err := s.AdminAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	okBy := map[string]int{}
+	for _, ac := range accts {
+		okBy[ac.Owner] = ac.ApplyOK
+	}
+	if okBy[a] != 2 || okBy[b] != 1 {
+		t.Fatalf("ApplyOK = %v, want a=2 b=1", okBy)
+	}
+
+	lg, err := s.AdminApplyLog(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lg) != 3 {
+		t.Fatalf("log rows = %d, want the limit of 3", len(lg))
+	}
+	// Newest first, each stamped with its owner.
+	if lg[0].Owner != b || lg[0].Registration != "GUEST1" {
+		t.Fatalf("newest row = %+v, want b's guest apply", lg[0])
+	}
+	if lg[1].Owner != a || lg[1].Status != "error" {
+		t.Fatalf("second row = %+v, want a's override error", lg[1])
+	}
+
+	mix, err := s.ApplyMix(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, m := range mix {
+		counts[m.Source+"/"+m.Status] = m.Count
+	}
+	want := map[string]int{"roster/success": 1, "override/success": 1, "override/error": 1, "guest/success": 1}
+	if len(counts) != len(want) {
+		t.Fatalf("mix = %v, want %v", counts, want)
+	}
+	for k, n := range want {
+		if counts[k] != n {
+			t.Fatalf("mix[%s] = %d, want %d (all: %v)", k, counts[k], n, counts)
+		}
+	}
+}
+
 // ManagedPermitIDsInTenant returns the council permit ids managed by ANY account in
 // a tenant, and an empty set for an unknown or empty tenant.
 func TestManagedPermitIDsInTenant(t *testing.T) {

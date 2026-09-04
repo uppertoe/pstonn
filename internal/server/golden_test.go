@@ -228,10 +228,22 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 			DoorQR: &doorQRView{GrantID: 3, PermitLabel: "Visitor Permit", OwnerEmail: "a@b.com", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok", CreatedAt: "20 Jul 2026"}}, ""},
 		{"admin", dashboardData{User: user, State: "admin", Loc: loc, LogoutURL: "https://auth.example.com/logout", Admin: &adminView{
 			Total: 3, Linked: 2, WarmOK: 1, Failing: 1, SchedulerLast: "2 min ago", StatusEnabled: true, SESHook: true,
+			StageSignedIn: 1, StagePermit: 1, StageApplied: 1,
 			Rows: []adminRow{
-				{Email: "a@b.com", Status: "ok", StatusLabel: "Linked", Warmed: "10 min ago", RelinkBy: "15 Oct 2026", EmailOn: true, Consent: "2026-07-18", Permits: 1, Plates: "ABC123", Members: 1, LastApply: "success · 2 hr ago"},
-				{Email: "c@d.com", Status: "stale", StatusLabel: "Keep-warm stale", Warmed: "9 hr ago", RelinkBy: "1 Sep 2026", NtfyTopic: "pstonn-abc", Permits: 1, Plates: "XYZ789", LastApply: "error · 5 min ago", LastApplyBad: true},
-				{Email: "e@f.com", Status: "unlinked", StatusLabel: "Not linked", InvitedBy: "a@b.com"},
+				{Email: "a@b.com", Status: "ok", StatusLabel: "Linked", Warmed: "10 min ago", RelinkBy: "15 Oct 2026", EmailOn: true, Consent: "2026-07-18", Permits: 1, Plates: "ABC123", Members: 1, LastApply: "success · 2 hr ago", ApplyOK: 42, Stage: "applied"},
+				{Email: "c@d.com", Status: "stale", StatusLabel: "Keep-warm stale", Warmed: "9 hr ago", RelinkBy: "1 Sep 2026", NtfyTopic: "pstonn-abc", Permits: 1, Plates: "XYZ789", LastApply: "error · 5 min ago", LastApplyBad: true, Stage: "permit"},
+				{Email: "e@f.com", Status: "unlinked", StatusLabel: "Not linked", InvitedBy: "a@b.com", Stage: "signedin"},
+			},
+			ApplyMix: []applyMixView{
+				{Source: "roster", Success: 40, Errors: 2},
+				{Source: "override", Success: 6},
+				{Source: "guest", Success: 3, Errors: 1},
+				{Source: "external", Changed: 2},
+			},
+			ApplyLog: []store.AdminApplyRecord{
+				{ApplyRecord: store.ApplyRecord{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now.Add(-2 * time.Hour)}, Owner: "a@b.com"},
+				{ApplyRecord: store.ApplyRecord{PermitID: 9, Registration: "XYZ789", Source: "override", Status: "error", Detail: "council temporarily unavailable", At: now.Add(-5 * time.Hour)}, Owner: "c@d.com"},
+				{ApplyRecord: store.ApplyRecord{PermitID: 9, Registration: "GUEST1", Source: "guest", Status: "success", At: now.Add(-26 * time.Hour)}, Owner: "c@d.com"},
 			},
 			Suppressed: []suppressionRow{{Address: "bounce@example.com", Reason: "bounce", Detail: "550 no such user", Ago: "3 days ago", Hits: 2}},
 		}}, ""},

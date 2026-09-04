@@ -57,6 +57,66 @@ VALUES (?, ?, ?, ?, ?, ?)`,
 	return err
 }
 
+// AdminApplyRecord is an apply-log row with the account it belongs to, for the
+// operator's all-accounts history on /admin.
+type AdminApplyRecord struct {
+	ApplyRecord
+	Owner string
+}
+
+// AdminApplyLog returns the most recent apply-log rows across every account.
+// Read-only and owner-agnostic — callers must gate it to admins.
+func (s *Store) AdminApplyLog(ctx context.Context, limit int) ([]AdminApplyRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT a.id, a.permit_id, p.owner, a.registration, a.source, a.status, a.detail, a.at
+FROM apply_log a JOIN permit p ON a.permit_id = p.id
+ORDER BY a.id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminApplyRecord
+	for rows.Next() {
+		var r AdminApplyRecord
+		var at string
+		if err := rows.Scan(&r.ID, &r.PermitID, &r.Owner, &r.Registration, &r.Source, &r.Status, &r.Detail, &at); err != nil {
+			return nil, err
+		}
+		r.At, _ = time.Parse(time.RFC3339, at)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ApplyMixRow is one (source, status) bucket of the retained apply log.
+type ApplyMixRow struct {
+	Source string
+	Status string
+	Count  int
+}
+
+// ApplyMix tallies the retained apply log by source and status, so the operator
+// can see what kinds of applies the app has been making (roster vs one-off vs
+// guest and so on) without scrolling the history. Bounded by PruneApplyLog's
+// retention, like everything else read from this table.
+func (s *Store) ApplyMix(ctx context.Context) ([]ApplyMixRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT source, status, COUNT(*) FROM apply_log GROUP BY source, status ORDER BY source, status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ApplyMixRow
+	for rows.Next() {
+		var r ApplyMixRow
+		if err := rows.Scan(&r.Source, &r.Status, &r.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ListApplyLogFor returns recent apply-log rows for the given app user's permits.
 func (s *Store) ListApplyLogFor(ctx context.Context, owner string, limit int) ([]ApplyRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `

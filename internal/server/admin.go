@@ -73,6 +73,21 @@ type adminView struct {
 	Linked  int
 	WarmOK  int
 	Failing int // linked accounts whose keep-warm looks stale or whose last apply errored
+	// Onboarding funnel: every account counted once, at the FURTHEST stage it has
+	// reached, so the filter chips answer "who is stuck where". The stages are
+	// ordered — signed in → linked → permit → applying — and the apply stage is
+	// read from the retained apply log, so a permit that has not applied inside
+	// the retention window sits at "permit" (in practice a healthy roster applies
+	// far more often than the log is pruned).
+	StageSignedIn int // signed in, never linked the council
+	StageLinked   int // linked, but no permit found yet
+	StagePermit   int // holds a permit, no successful apply on record
+	StageApplied  int // at least one successful apply
+	// What kinds of applies the app has been making, over the retained log: one
+	// row per source (roster, one-off, guest, …) with its outcomes, plus the
+	// recent history itself.
+	ApplyMix []applyMixView
+	ApplyLog []store.AdminApplyRecord
 	// service health
 	SchedulerLast  string
 	SchedulerStale bool
@@ -82,6 +97,14 @@ type adminView struct {
 	// growing list is the early warning that the sending domain's reputation is
 	// being damaged, which on SES ends in a sending pause.
 	Suppressed []suppressionRow
+}
+
+// applyMixView is one apply source's tally for the admin mix table.
+type applyMixView struct {
+	Source  string // the stored code; the template words it via sourceLabel
+	Success int
+	Errors  int
+	Changed int
 }
 
 type suppressionRow struct {
@@ -108,6 +131,23 @@ type adminRow struct {
 	Members      int
 	LastApply    string // e.g. "success · 2 hr ago" / "error · 5 min ago"
 	LastApplyBad bool   // most recent apply was not a success
+	ApplyOK      int    // successful applies within the log's retention window
+	Stage        string // funnel stage key for the filter chips: signedin | linked | permit | applied
+}
+
+// rowStage classifies an account at the furthest onboarding stage it has
+// reached (see the adminView funnel fields for the stage semantics).
+func rowStage(a store.AdminAccount) string {
+	switch {
+	case a.ApplyOK > 0:
+		return "applied"
+	case a.PermitCount > 0:
+		return "permit"
+	case a.Linked:
+		return "linked"
+	default:
+		return "signedin"
+	}
 }
 
 func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +198,17 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		row := adminRow{
 			Email: a.Owner, MemberOf: a.MemberOf, InvitedBy: a.InvitedBy, EmailOn: a.EmailEnabled,
 			Consent: a.ConsentVersion, Permits: a.PermitCount, Members: a.MemberCount,
-			Plates: strings.Join(a.Plates, ", "),
+			Plates: strings.Join(a.Plates, ", "), ApplyOK: a.ApplyOK, Stage: rowStage(a),
+		}
+		switch row.Stage {
+		case "applied":
+			v.StageApplied++
+		case "permit":
+			v.StagePermit++
+		case "linked":
+			v.StageLinked++
+		default:
+			v.StageSignedIn++
 		}
 		if a.NtfyEnabled {
 			row.NtfyTopic = a.NtfyTopic
@@ -199,6 +249,18 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Rows = append(v.Rows, row)
 	}
+	// The apply mix and history are context, not health — a read failure logs and
+	// the rest of the dashboard still renders, same as the suppression list.
+	if mix, err := s.store.ApplyMix(r.Context()); err == nil {
+		v.ApplyMix = foldApplyMix(mix)
+	} else {
+		alog.Infof("admin: apply mix: %v", err)
+	}
+	if lg, err := s.store.AdminApplyLog(r.Context(), adminApplyLogLimit); err == nil {
+		v.ApplyLog = lg
+	} else {
+		alog.Infof("admin: apply log: %v", err)
+	}
 	v.SESHook = s.cfg.SESHookEnabled()
 	if sups, err := s.store.ListSuppressions(r.Context()); err == nil {
 		for _, sp := range sups {
@@ -213,6 +275,38 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, dashboardData{
 		State: "admin", User: u, LogoutURL: s.logoutURL(), Loc: loc, Admin: v,
 	})
+}
+
+// adminApplyLogLimit caps the all-accounts apply history on /admin. Enough to
+// see the last day or two of a small fleet at a glance; the per-account view on
+// /activity remains the place to dig further back.
+const adminApplyLogLimit = 50
+
+// foldApplyMix collapses the store's per-(source, status) buckets into one row
+// per source with its outcomes side by side, preserving the store's source
+// order. Statuses other than the three the scheduler writes are counted as
+// errors rather than dropped — an unknown outcome disappearing silently is
+// exactly what an audit surface must not do.
+func foldApplyMix(rows []store.ApplyMixRow) []applyMixView {
+	var out []applyMixView
+	idx := map[string]int{}
+	for _, r := range rows {
+		i, ok := idx[r.Source]
+		if !ok {
+			out = append(out, applyMixView{Source: r.Source})
+			i = len(out) - 1
+			idx[r.Source] = i
+		}
+		switch r.Status {
+		case "success":
+			out[i].Success += r.Count
+		case "changed":
+			out[i].Changed += r.Count
+		default:
+			out[i].Errors += r.Count
+		}
+	}
+	return out
 }
 
 // ---- machine status endpoint (outage watchdog, bearer-token gated) ----

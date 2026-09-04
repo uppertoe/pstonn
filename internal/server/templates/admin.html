@@ -13,31 +13,89 @@
       <span class="muted">status API {{if .Admin.StatusEnabled}}on{{else}}off{{end}}</span>
     </div>
   </div>
-  <div class="adm-tablewrap">
-    <table class="adm">
-      <thead><tr>
-        <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
-        <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
-      </tr></thead>
-      <tbody>
-      {{range .Admin.Rows}}
-      <tr>
-        <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{else if .InvitedBy}}<div class="adm-sub">invited by {{.InvitedBy}} &mdash; not yet accepted</div>{{end}}</td>
-        <td data-label="Council"><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
-        <td data-label="Last warm">{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td data-label="Re-link by">{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td data-label="Permits">{{.Permits}}</td>
-        <td data-label="On permit">{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td class="adm-notify" data-label="Notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
-        <td data-label="Terms">{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td data-label="Shared">{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-        <td data-label="Last apply">{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-      </tr>
-      {{else}}
-      <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
-      {{end}}
-      </tbody>
-    </table>
+  {{/* Onboarding funnel filters. Each account sits at the furthest stage it has
+       reached, so the chips both filter the table and read as a funnel: the gap
+       between two counts is the drop-off between those stages. */}}
+  <div x-data="{f:'all'}">
+    <div class="adm-filters" role="group" aria-label="Filter accounts by stage">
+      <button type="button" class="adm-chip on" :class="{on: f==='all'}" @click="f='all'">All <span class="n">{{.Admin.Total}}</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='signedin'}" @click="f='signedin'">Signed in only <span class="n">{{.Admin.StageSignedIn}}</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='linked'}" @click="f='linked'">Linked, no permit <span class="n">{{.Admin.StageLinked}}</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='permit'}" @click="f='permit'">Permit, not applying <span class="n">{{.Admin.StagePermit}}</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='applied'}" @click="f='applied'">Applying <span class="n">{{.Admin.StageApplied}}</span></button>
+    </div>
+    <div class="adm-tablewrap">
+      <table class="adm">
+        <thead><tr>
+          <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
+          <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+        </tr></thead>
+        <tbody>
+        {{range .Admin.Rows}}
+        <tr x-show="f==='all' || f==='{{.Stage}}'">
+          <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{else if .InvitedBy}}<div class="adm-sub">invited by {{.InvitedBy}} &mdash; not yet accepted</div>{{end}}</td>
+          <td data-label="Council"><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
+          <td data-label="Last warm">{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td data-label="Re-link by">{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td data-label="Permits">{{.Permits}}</td>
+          <td data-label="On permit">{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td class="adm-notify" data-label="Notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
+          <td data-label="Terms">{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td data-label="Shared">{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td data-label="Last apply">{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{if .ApplyOK}}<div class="adm-sub">{{.ApplyOK}} successful in 90 days</div>{{end}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {{/* What the app has been doing at the council: the mix of apply types over
+       the retained log, then the most recent applies across every account. The
+       per-household view of the same log lives on /activity. */}}
+  <div class="card" style="margin-top:18px">
+    <div class="sectitle"><span class="ic">{{template "ic-activity"}}</span> Applies</div>
+    <p class="subtitle">The mix of apply types over the retained 90 days, then the most recent applies across every account.</p>
+    {{if .Admin.ApplyMix}}
+    <div class="adm-tablewrap">
+      <table class="adm">
+        <thead><tr><th>Type</th><th>Success</th><th>Errors</th><th>Changed at portal</th></tr></thead>
+        <tbody>
+        {{range .Admin.ApplyMix}}
+        <tr>
+          <td class="adm-acct">{{sourceLabel .Source}}</td>
+          <td data-label="Success">{{.Success}}</td>
+          <td data-label="Errors">{{if .Errors}}<span class="bad">{{.Errors}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td data-label="Changed at portal">{{if .Changed}}{{.Changed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{end}}
+    {{if .Admin.ApplyLog}}
+    <div class="adm-tablewrap" style="margin-top:12px">
+      <table class="adm">
+        <thead><tr><th>When</th><th>Account</th><th>Plate</th><th>Type</th><th>Outcome</th></tr></thead>
+        <tbody>
+        {{range .Admin.ApplyLog}}
+        <tr>
+          <td class="muted" data-label="When">{{localTime .At $.Loc}}</td>
+          <td class="adm-acct">{{.Owner}}</td>
+          <td data-label="Plate">{{if .Registration}}<span class="reg">{{.Registration}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td data-label="Type"><span class="tag">{{sourceLabel .Source}}</span></td>
+          <td class="logst" data-label="Outcome"><span class="s-{{.Status}}">{{.Status}}</span>{{if .Detail}} <span class="adm-sub">{{.Detail}}</span>{{end}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    <p class="empty-note" style="margin-top:10px">Showing the most recent {{len .Admin.ApplyLog}}. Each household&rsquo;s own history is on their Activity page.</p>
+    {{else}}
+    <p class="empty-note">No applies recorded yet.</p>
+    {{end}}
   </div>
 
   {{/* Undeliverable addresses. A growing list is the early warning that the

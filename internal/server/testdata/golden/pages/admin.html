@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=fc491fe55e">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=fc491fe55e">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=0957b2151e">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=0957b2151e">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=fc491fe55e">
+<link rel="stylesheet" href="/static/app.css?v=0957b2151e">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=fc491fe55e"></script>
-<script defer src="/static/alpine.min.js?v=fc491fe55e"></script>
+<script src="/static/htmx.min.js?v=0957b2151e"></script>
+<script defer src="/static/alpine.min.js?v=0957b2151e"></script>
 
 
 <script>
@@ -322,55 +322,144 @@ window.popClamp = window.popClamp || function (el) {
       <span class="muted">status API on</span>
     </div>
   </div>
-  <div class="adm-tablewrap">
-    <table class="adm">
-      <thead><tr>
-        <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
-        <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
-      </tr></thead>
-      <tbody>
-      
-      <tr>
-        <td class="adm-acct">a@b.com</td>
-        <td data-label="Council"><span class="adm-pill ok">Linked</span></td>
-        <td data-label="Last warm">10 min ago</td>
-        <td data-label="Re-link by">15 Oct 2026</td>
-        <td data-label="Permits">1</td>
-        <td data-label="On permit"><span class="reg">ABC123</span></td>
-        <td class="adm-notify" data-label="Notify"><span class="tag">email</span></td>
-        <td data-label="Terms">2026-07-18</td>
-        <td data-label="Shared">1</td>
-        <td data-label="Last apply"><span class="">success · 2 hr ago</span></td>
-      </tr>
-      
-      <tr>
-        <td class="adm-acct">c@d.com</td>
-        <td data-label="Council"><span class="adm-pill stale">Keep-warm stale</span></td>
-        <td data-label="Last warm">9 hr ago</td>
-        <td data-label="Re-link by">1 Sep 2026</td>
-        <td data-label="Permits">1</td>
-        <td data-label="On permit"><span class="reg">XYZ789</span></td>
-        <td class="adm-notify" data-label="Notify"><span class="tag">ntfy</span></td>
-        <td data-label="Terms"><span class="muted">&mdash;</span></td>
-        <td data-label="Shared"><span class="muted">&mdash;</span></td>
-        <td data-label="Last apply"><span class="bad">error · 5 min ago</span></td>
-      </tr>
-      
-      <tr>
-        <td class="adm-acct">e@f.com<div class="adm-sub">invited by a@b.com &mdash; not yet accepted</div></td>
-        <td data-label="Council"><span class="adm-pill unlinked">Not linked</span></td>
-        <td data-label="Last warm"><span class="muted">&mdash;</span></td>
-        <td data-label="Re-link by"><span class="muted">&mdash;</span></td>
-        <td data-label="Permits">0</td>
-        <td data-label="On permit"><span class="muted">&mdash;</span></td>
-        <td class="adm-notify" data-label="Notify"><span class="muted">off</span></td>
-        <td data-label="Terms"><span class="muted">&mdash;</span></td>
-        <td data-label="Shared"><span class="muted">&mdash;</span></td>
-        <td data-label="Last apply"><span class="muted">&mdash;</span></td>
-      </tr>
-      
-      </tbody>
-    </table>
+  
+  <div x-data="{f:'all'}">
+    <div class="adm-filters" role="group" aria-label="Filter accounts by stage">
+      <button type="button" class="adm-chip on" :class="{on: f==='all'}" @click="f='all'">All <span class="n">3</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='signedin'}" @click="f='signedin'">Signed in only <span class="n">1</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='linked'}" @click="f='linked'">Linked, no permit <span class="n">0</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='permit'}" @click="f='permit'">Permit, not applying <span class="n">1</span></button>
+      <button type="button" class="adm-chip" :class="{on: f==='applied'}" @click="f='applied'">Applying <span class="n">1</span></button>
+    </div>
+    <div class="adm-tablewrap">
+      <table class="adm">
+        <thead><tr>
+          <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
+          <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+        </tr></thead>
+        <tbody>
+        
+        <tr x-show="f==='all' || f==='applied'">
+          <td class="adm-acct">a@b.com</td>
+          <td data-label="Council"><span class="adm-pill ok">Linked</span></td>
+          <td data-label="Last warm">10 min ago</td>
+          <td data-label="Re-link by">15 Oct 2026</td>
+          <td data-label="Permits">1</td>
+          <td data-label="On permit"><span class="reg">ABC123</span></td>
+          <td class="adm-notify" data-label="Notify"><span class="tag">email</span></td>
+          <td data-label="Terms">2026-07-18</td>
+          <td data-label="Shared">1</td>
+          <td data-label="Last apply"><span class="">success · 2 hr ago</span><div class="adm-sub">42 successful in 90 days</div></td>
+        </tr>
+        
+        <tr x-show="f==='all' || f==='permit'">
+          <td class="adm-acct">c@d.com</td>
+          <td data-label="Council"><span class="adm-pill stale">Keep-warm stale</span></td>
+          <td data-label="Last warm">9 hr ago</td>
+          <td data-label="Re-link by">1 Sep 2026</td>
+          <td data-label="Permits">1</td>
+          <td data-label="On permit"><span class="reg">XYZ789</span></td>
+          <td class="adm-notify" data-label="Notify"><span class="tag">ntfy</span></td>
+          <td data-label="Terms"><span class="muted">&mdash;</span></td>
+          <td data-label="Shared"><span class="muted">&mdash;</span></td>
+          <td data-label="Last apply"><span class="bad">error · 5 min ago</span></td>
+        </tr>
+        
+        <tr x-show="f==='all' || f==='signedin'">
+          <td class="adm-acct">e@f.com<div class="adm-sub">invited by a@b.com &mdash; not yet accepted</div></td>
+          <td data-label="Council"><span class="adm-pill unlinked">Not linked</span></td>
+          <td data-label="Last warm"><span class="muted">&mdash;</span></td>
+          <td data-label="Re-link by"><span class="muted">&mdash;</span></td>
+          <td data-label="Permits">0</td>
+          <td data-label="On permit"><span class="muted">&mdash;</span></td>
+          <td class="adm-notify" data-label="Notify"><span class="muted">off</span></td>
+          <td data-label="Terms"><span class="muted">&mdash;</span></td>
+          <td data-label="Shared"><span class="muted">&mdash;</span></td>
+          <td data-label="Last apply"><span class="muted">&mdash;</span></td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  
+  <div class="card" style="margin-top:18px">
+    <div class="sectitle"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg></span> Applies</div>
+    <p class="subtitle">The mix of apply types over the retained 90 days, then the most recent applies across every account.</p>
+    
+    <div class="adm-tablewrap">
+      <table class="adm">
+        <thead><tr><th>Type</th><th>Success</th><th>Errors</th><th>Changed at portal</th></tr></thead>
+        <tbody>
+        
+        <tr>
+          <td class="adm-acct">weekly roster</td>
+          <td data-label="Success">40</td>
+          <td data-label="Errors"><span class="bad">2</span></td>
+          <td data-label="Changed at portal"><span class="muted">&mdash;</span></td>
+        </tr>
+        
+        <tr>
+          <td class="adm-acct">one-off booking</td>
+          <td data-label="Success">6</td>
+          <td data-label="Errors"><span class="muted">&mdash;</span></td>
+          <td data-label="Changed at portal"><span class="muted">&mdash;</span></td>
+        </tr>
+        
+        <tr>
+          <td class="adm-acct">guest link</td>
+          <td data-label="Success">3</td>
+          <td data-label="Errors"><span class="bad">1</span></td>
+          <td data-label="Changed at portal"><span class="muted">&mdash;</span></td>
+        </tr>
+        
+        <tr>
+          <td class="adm-acct">external</td>
+          <td data-label="Success">0</td>
+          <td data-label="Errors"><span class="muted">&mdash;</span></td>
+          <td data-label="Changed at portal">2</td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    
+    <div class="adm-tablewrap" style="margin-top:12px">
+      <table class="adm">
+        <thead><tr><th>When</th><th>Account</th><th>Plate</th><th>Type</th><th>Outcome</th></tr></thead>
+        <tbody>
+        
+        <tr>
+          <td class="muted" data-label="When">Mon 10 Aug, 12:30pm</td>
+          <td class="adm-acct">a@b.com</td>
+          <td data-label="Plate"><span class="reg">ABC123</span></td>
+          <td data-label="Type"><span class="tag">weekly roster</span></td>
+          <td class="logst" data-label="Outcome"><span class="s-success">success</span></td>
+        </tr>
+        
+        <tr>
+          <td class="muted" data-label="When">Mon 10 Aug, 9:30am</td>
+          <td class="adm-acct">c@d.com</td>
+          <td data-label="Plate"><span class="reg">XYZ789</span></td>
+          <td data-label="Type"><span class="tag">one-off booking</span></td>
+          <td class="logst" data-label="Outcome"><span class="s-error">error</span> <span class="adm-sub">council temporarily unavailable</span></td>
+        </tr>
+        
+        <tr>
+          <td class="muted" data-label="When">Sun 9 Aug, 12:30pm</td>
+          <td class="adm-acct">c@d.com</td>
+          <td data-label="Plate"><span class="reg">GUEST1</span></td>
+          <td data-label="Type"><span class="tag">guest link</span></td>
+          <td class="logst" data-label="Outcome"><span class="s-success">success</span></td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    <p class="empty-note" style="margin-top:10px">Showing the most recent 3. Each household&rsquo;s own history is on their Activity page.</p>
+    
   </div>
 
   
