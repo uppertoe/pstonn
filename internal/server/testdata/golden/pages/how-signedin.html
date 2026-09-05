@@ -288,18 +288,28 @@ window.popClamp = window.popClamp || function (el) {
 
 
 
-<header class="appbar pubbar">
+<header class="appbar">
   
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
-  <nav class="pubnav">
-    <a href="/how" hx-boost="false" class="link-quiet active" aria-current="page">How it works</a>
-    <a href="/faq" class="link-quiet">FAQ</a>
-    <a href="/security" class="link-quiet">Security &amp; data</a>
-    
-  </nav>
+  
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
   <div class="appbar-r">
-    <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle light / dark"><span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span></button>
-    <a href="/signin" hx-boost="false"><button type="button">Sign in</button></a>
+    
+    <a href="/how" hx-boost="false" class="howlink active" aria-current="page" aria-label="How it works"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">How it works</span></a>
+    <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
+      <span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span>
+    </button>
+    <div class="usermenu" x-data="{open:false}" @click.outside="open=false" @keydown.escape.window="open=false">
+      <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></button>
+      <div class="menu" x-show="open" x-cloak>
+        <div class="menu-email">a@b.com</div>
+        
+        
+        <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
+        
+        <a href="https://auth.example.com/logout" class="menu-item"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</a>
+        
+      </div>
+    </div>
   </div>
 </header>
 
@@ -307,33 +317,12 @@ window.popClamp = window.popClamp || function (el) {
   
   <section class="paper">
     <h1 class="about-h1">How it works</h1>
-    <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
-    <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
-    <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
-    <p>I got tired of logging in to swap the plate every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
+    <p>Everything p.stonn can do, in five short loops &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
   </section>
   
 
   <div class="features">
 
-    
-    <section class="feature">
-      <div class="feature-text">
-        <h2>Connect once</h2>
-        <p>Sign in to p.stonn with <strong>the same email address your ePermits account uses</strong> &mdash; it can only connect to the council account that matches. Then link once with your council password: p.stonn keeps an encrypted connection so it can update your permit on your schedule, and you don&rsquo;t sign in again each time.</p>
-      </div>
-      <div class="feature-demo">
-        <figure class="dm" data-demo="connect">
-        <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span> Link your council account</h2></div>
-          <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
-          <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
-          <div class="dm-btn"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</div>
-          <div class="dm-result"><span class="chk"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span><div class="msg"><b>Connected.</b> p.stonn keeps an encrypted session so it can update your permit for you.</div></div>
-        </div>
-        </figure>
-      </div>
-    </section>
     
 
     <section class="feature">
@@ -491,53 +480,13 @@ window.popClamp = window.popClamp || function (el) {
     </section>
 
     
-    <section class="feature">
-      <div class="feature-text">
-        <h2>Know it happened</h2>
-        <p>p.stonn emails or pushes you whenever it changes your permit, or when it can&rsquo;t. Delivery is best-effort, not a guarantee, so you stay responsible for your permit &mdash; but you&rsquo;ll usually know the moment anything changes.</p>
-      </div>
-      <div class="feature-demo">
-        <figure class="dm" data-demo="notify">
-        <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span> Notifications</h2></div>
-          <div class="dm-toggles">
-            <div class="dm-toggle">Email <span class="dm-swi"></span></div>
-            <div class="dm-toggle">Phone <span class="dm-swi"></span></div>
-          </div>
-          <div class="dm-push"><span class="badge" style="background:var(--ok)"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg">Your visitor permit is now <b>ABC123</b> (Nan's car).</div></div></div>
-          <div class="dm-push"><span class="badge" style="background:var(--accent)"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg></span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>Still trying</b> &mdash; you'll hear when it's done.</div></div></div>
-        </div>
-        </figure>
-      </div>
-    </section>
-    
 
   </div>
 
   
-  <section class="paper">
-    <h2 class="about-h2" style="margin-top:0">Before you start: get a Stonnington ePermit</h2>
-    <p>p.stonn does not replace the council's system. It works on top of a permit you already hold, so you need a City of Stonnington ePermits account with at least one visitor permit first.</p>
-    <p>If you are not set up yet:</p>
-    <ul>
-      <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
-      <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
-      <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
-      <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
-      <li><strong>Note the email address your ePermits account uses.</strong> You&rsquo;ll sign in to p.stonn with that same address &mdash; it&rsquo;s how p.stonn knows which council account is yours.</li>
-    </ul>
-    <p>The council's own pages have the current fees, forms and details:</p>
-    <ul>
-      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits" rel="noopener noreferrer">Parking permits</a></li>
-      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" rel="noopener noreferrer">Visitor parking permits</a></li>
-      <li><a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" rel="noopener noreferrer">Digital parking permit FAQs</a></li>
-    </ul>
-    <p>Once your council account has a visitor permit, <a href="/signin" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
-  </section>
-  
 
   
-  <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/schedule" hx-boost="false">&larr; Back to Schedule</a></p>
   
 </main>
 

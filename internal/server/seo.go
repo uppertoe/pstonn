@@ -185,7 +185,7 @@ func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
 // public pages last changed in a way a search engine should re-crawl for. Bump
 // it by hand with such a change — an automatic stamp (build time, process start)
 // would move on every deploy and teach crawlers the field is noise.
-const publicContentRev = "2026-09-02"
+const publicContentRev = "2026-09-05"
 
 // sitemapXML lists the indexable public pages so a search engine discovers them
 // without guessing. Only the four content pages plus the FAQ — nothing behind auth.

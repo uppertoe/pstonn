@@ -151,6 +151,41 @@
 .dm-qr { display: block; width: 56px; height: 56px; background: #fff; border-radius: 9px; padding: 5px; box-sizing: border-box; box-shadow: var(--shadow); flex: 0 0 auto; }
 .dm-qrcap { font-size: 11px; color: var(--muted); line-height: 1.45; }
 
+/* overlay "second phone" screens (visitor QR / door QR flows): a card that
+   slides over the base phone so one figure can show both sides of a flow
+   without a second device frame. Hidden until .show, like .dm-push. */
+.dm-screen { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg); padding: 12px; opacity: 0; transform: translateY(-8px); pointer-events: none;
+  transition: opacity .35s, transform .35s cubic-bezier(.2,.9,.3,1.15); }
+/* As an overlay it plays a whole second phone screen, so it covers the base
+   card completely — content pokes out beneath it otherwise. */
+.dm-screen.dm-over { bottom: 12px; }
+.dm-screen.show { opacity: 1; transform: none; }
+.dm-vlabel { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
+/* status line under a visitor action: reserved height so spinner → tick never
+   reflows the card. */
+.dm-vstat { min-height: 34px; margin-top: 8px; display: flex; align-items: center; gap: 8px;
+  font-size: 12px; line-height: 1.35; color: var(--muted); }
+.dm-vstat b { color: var(--ink); }
+.dm-vstat.ok { color: var(--ink); }
+.dm-vstat .dm-vtick { width: 20px; height: 20px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 18%, transparent);
+  color: var(--ok); display: grid; place-items: center; flex: 0 0 auto; }
+.dm-vstat .dm-vtick svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.dm-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  border-top-color: var(--primary); flex: 0 0 auto; animation: dm-spin .8s linear infinite; }
+@keyframes dm-spin { to { transform: rotate(360deg); } }
+/* approve / decline pair on the door-QR notification */
+.dm-actions { display: flex; gap: 8px; margin-top: 10px; }
+.dm-actions .dm-btn { margin-top: 0; }
+.dm-btn-ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+/* the printed poster, miniature */
+.dm-poster { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+  padding: 12px 14px 13px; text-align: center; }
+.dm-poster-kicker { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; font-weight: 700; color: var(--primary); }
+.dm-poster-lead { font-size: 13px; font-weight: 650; color: var(--ink); }
+.dm-poster-note { font-size: 11px; color: var(--muted); margin-top: 5px; line-height: 1.4; }
+.dm-poster .dm-qr { display: block; }
+
 /* mini demo for the landing hero */
 .dm-mini { max-width: 340px; margin: 0 auto; }
 .dm-mini .dm-day { height: 54px; }
@@ -170,5 +205,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .dm-cursor { display: none; }
-  .dm-chip, .dm-caption span, .dm-picker, .dm-booking, .dm-push, .dm-result, .dm-fade, .dm-caldot, .dm-fld, .dm-btn { transition: none !important; }
+  .dm-chip, .dm-caption span, .dm-picker, .dm-booking, .dm-push, .dm-result, .dm-fade, .dm-caldot, .dm-fld, .dm-btn, .dm-screen, .dm-gcar, .dm-vstat { transition: none !important; }
+  .dm-spin { animation: none; }
 }

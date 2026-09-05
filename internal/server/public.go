@@ -51,9 +51,18 @@ func (s *Server) security(w http.ResponseWriter, r *http.Request) {
 	s.render(w, dashboardData{State: "security", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
 }
 
-// how is the PUBLIC "how it works" page: why the app exists, the animated demos,
-// and what you need before starting.
+// how is the "how it works" page, serving two audiences from one URL: the
+// PUBLIC pre-signup pitch (intro, connect demo, prerequisites), and — for a
+// signed-in user arriving from the app header — a feature tour in the app
+// chrome, demos only. Signed-in gets the user and logout URL so the appbar's
+// account menu works; the tenant/area fields stay empty, which the appbar
+// renders as "no area switcher", correct for a tour page.
 func (s *Server) how(w http.ResponseWriter, r *http.Request) {
-	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "how", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+	u, signedIn := identity.FromContext(r.Context())
+	d := dashboardData{State: "how", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation}
+	if signedIn {
+		d.User = u
+		d.LogoutURL = s.logoutURL()
+	}
+	s.render(w, d)
 }

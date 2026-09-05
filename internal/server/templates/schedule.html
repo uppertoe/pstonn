@@ -105,6 +105,18 @@
   <a class="link-quiet" href="/permits/new">{{template "ic-plus"}} Manage another permit</a>
   {{end}}
   {{end}}
+  {{if or .App.Permits .App.ExpiredPermits}}
+  {{/* The feature-tour hint: most households use only the roster and one-off
+       bookings, so point once at the demos for the rest. Dismiss is remembered
+       per browser, like the other hint strips. Full navigation into /how — its
+       demo assets are head-only (see publicheader). */}}
+  <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-how-hint')==='1'}" x-show="!hide" x-cloak>
+    {{template "ic-qr"}}
+    <span>There&rsquo;s more than the roster: visitor QRs, a printed code for the door, guest passes. <a href="/how" hx-boost="false">See how they work</a>.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-how-hint','1')">{{template "ic-x"}}</button>
+  </p>
+  {{end}}
   {{if .App.ShowShareHint}}
   <p class="share-hint" style="--hue:var(--sec-settings)" x-data="{hide: localStorage.getItem('pstonn-share-hint')==='1'}" x-show="!hide" x-cloak>
     {{template "ic-user"}}

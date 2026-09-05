@@ -448,6 +448,10 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"security-encryption", dashboardData{State: "security", Loc: loc}, "AES-256-GCM"},
 		{"how", dashboardData{State: "how", Loc: loc}, "get a Stonnington ePermit"},
 		{"how-demos", dashboardData{State: "how", Loc: loc}, "data-demo=\"roster\""},
+		{"how-demos-doorqr", dashboardData{State: "how", Loc: loc}, "data-demo=\"doorqr\""},
+		// Signed-in /how is the in-app feature tour: app chrome, demos only — no
+		// pre-signup intro, connect demo or before-you-start section.
+		{"how-signedin", dashboardData{State: "how", SignedIn: true, User: user, LogoutURL: "https://auth.example.com/logout", Loc: loc}, "Back to Schedule"},
 		{"contact", dashboardData{State: "contact", Contact: true, Loc: loc}, "Send message"},
 		{"contact-sent", dashboardData{State: "contact", Contact: true, Flash: "Thanks. Your message has been sent.", Loc: loc}, "has been sent"},
 		{"terms", dashboardData{User: user, State: "terms", Loc: loc, Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}}, "I agree"},

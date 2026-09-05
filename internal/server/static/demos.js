@@ -177,33 +177,130 @@
     loop(steps, 6600);
   }
 
-  /* ---------- Demo E: hand a visitor access (guest link / QR) ---------- */
-  function initGuest(root) {
+  /* ---------- shared bits for the flow demos ---------- */
+  // Caption helper bound to a root's .dm-caption span.
+  function sayer(root) {
+    var cap = root.querySelector(".dm-caption span");
+    return function (h) { if (!cap) return; cap.classList.remove("show"); setTimeout(function () { cap.innerHTML = h; cap.classList.add("show"); }, 170); };
+  }
+  // A visitor-status line: spinner + text, or a tick + text.
+  function statSpin(el, html) { el.classList.remove("ok"); el.innerHTML = '<span class="dm-spin"></span><span>' + html + "</span>"; }
+  function statOk(el, html) {
+    el.classList.add("ok");
+    el.innerHTML = '<span class="dm-vtick"><svg viewBox="0 0 24 24"><path d="M5 13l4 4 10-11"/></svg></span><span>' + html + "</span>";
+  }
+  function press(btn) { btn.classList.add("press"); setTimeout(function () { btn.classList.remove("press"); }, 200); }
+  function pulse(sync) { if (!sync) return; sync.classList.add("pulse"); setTimeout(function () { sync.classList.remove("pulse"); }, 600); }
+
+  /* ---------- Demo E: a guest pass (the guest's own page) ---------- */
+  function initGuestpass(root) {
     var cars = [].slice.call(root.querySelectorAll(".dm-gcar"));
     var gdot = root.querySelector("[data-gdot]"), grego = root.querySelector("[data-grego]");
     var guntil = root.querySelector("[data-guntil]"), sync = root.querySelector(".dm-sync");
-    var CHOICE = 2; // the visitor picks car 2 (XYZ789, "Nanny")
+    var mail = root.querySelector("[data-gpmail]"), say = sayer(root);
+    var CHOICE = 2; // the guest taps car 2 (XYZ789, "Nanny")
     function pick() { return cars.filter(function (c) { return c.getAttribute("data-g") === String(CHOICE); })[0]; }
     function settle() {
       var car = CARS[CHOICE];
       gdot.style.background = car.v; grego.textContent = car.rego; guntil.textContent = "until the end of today";
     }
     if (reduced) {
+      show(mail, true);
       cars.forEach(function (c) { c.classList.add("in"); });
-      pick().classList.add("on"); settle(); return;
+      pick().classList.add("on"); settle();
+      var cap = root.querySelector(".dm-caption span");
+      if (cap) { cap.innerHTML = "They tap their car — <b>on until the end of today</b>, and you're told."; cap.classList.add("show"); }
+      return;
     }
     function reset() {
       cars.forEach(function (c) { c.classList.remove("in", "on"); });
       gdot.style.background = "var(--line)"; grego.textContent = "·"; guntil.textContent = "";
+      show(mail, false);
     }
-    var steps = [[150, reset]];
-    cars.forEach(function (c, i) { steps.push([500 + i * 200, function () { c.classList.add("in"); }]); });
-    steps.push([1650, function () { pick().classList.add("on"); }]);
-    steps.push([2050, function () { settle(); if (sync) { sync.classList.add("pulse"); setTimeout(function () { sync.classList.remove("pulse"); }, 600); } }]);
-    loop(steps, 6600);
+    var steps = [
+      [150, reset],
+      [300, function () { say("Send the pass once &mdash; they keep the link."); }],
+      [700, function () { show(mail, true); }],
+      [2900, function () { show(mail, false); say("When they arrive, they tap their car."); }]
+    ];
+    cars.forEach(function (c, i) { steps.push([3300 + i * 200, function () { c.classList.add("in"); }]); });
+    steps.push([4500, function () { pick().classList.add("on"); }]);
+    steps.push([4800, function () { guntil.textContent = "applying…"; }]);
+    steps.push([5600, function () { settle(); pulse(sync); }]);
+    steps.push([5900, function () { say("<b>On until the end of today</b> &mdash; and you're told each time."); }]);
+    loop(steps, 9200);
   }
 
-  var inits = { showcase: initShowcase, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guest: initGuest };
+  /* ---------- Demo F: visitor at the door (on-screen QR) ---------- */
+  function initVisitorqr(root) {
+    var dot = root.querySelector("[data-vqdot]"), rego = root.querySelector("[data-vqrego]"), until = root.querySelector("[data-vquntil]");
+    var btn = root.querySelector("[data-vqbtn]"), qr = root.querySelector("[data-vqqr]"), guest = root.querySelector("[data-vqguest]");
+    var fld = root.querySelector("[data-vqfld]"), put = root.querySelector("[data-vqput]"), stat = root.querySelector("[data-vqstat]");
+    var plate = fld.querySelector(".dm-fade"), sync = root.querySelector(".dm-sync"), say = sayer(root);
+    function settle() { dot.style.background = CARS[2].v; rego.textContent = CARS[2].rego; until.textContent = "until the end of today"; }
+    function reset() {
+      show(qr, false); show(guest, false); show(plate, false);
+      fld.classList.remove("lit"); stat.innerHTML = ""; stat.classList.remove("ok");
+      dot.style.background = CARS[1].v; rego.textContent = CARS[1].rego; until.textContent = "";
+    }
+    if (reduced) {
+      show(guest, true); show(plate, true);
+      statOk(stat, "<b>XYZ789</b> is on the permit until the end of today.");
+      settle();
+      var cap = root.querySelector(".dm-caption span");
+      if (cap) { cap.innerHTML = "They scan, type their plate &mdash; <b>done</b>. The code stops working after 15 minutes."; cap.classList.add("show"); }
+      return;
+    }
+    loop([
+      [150, reset],
+      [300, function () { say("A visitor arrives &mdash; tap <b>Show visitor QR</b>."); }],
+      [1300, function () { press(btn); }],
+      [1550, function () { show(qr, true); }],
+      [2500, function () { say("They scan it with their phone camera."); }],
+      [3900, function () { show(qr, false); show(guest, true); say("No app, no account &mdash; they type their plate."); }],
+      [4600, function () { fld.classList.add("lit"); show(plate, true); }],
+      [5100, function () { fld.classList.remove("lit"); }],
+      [5600, function () { press(put); }],
+      [5900, function () { statSpin(stat, "Changing to <b>XYZ789</b>&hellip;"); }],
+      [7200, function () { statOk(stat, "<b>XYZ789</b> is on the permit until the end of today."); }],
+      [8600, function () { show(guest, false); say("<b>Done.</b> The code stops working after 15 minutes."); }],
+      [8800, function () { settle(); pulse(sync); }]
+    ], 11600);
+  }
+
+  /* ---------- Demo G: printed door QR (ask → approve) ---------- */
+  function initDoorqr(root) {
+    var guest = root.querySelector("[data-dqguest]"), push = root.querySelector("[data-dqpush]");
+    var fld = root.querySelector("[data-dqfld]"), ask = root.querySelector("[data-dqask]"), stat = root.querySelector("[data-dqstat]");
+    var ok = root.querySelector("[data-dqok]"), plate = fld.querySelector(".dm-fade"), say = sayer(root);
+    function reset() {
+      show(guest, false); show(push, false); show(plate, false);
+      fld.classList.remove("lit"); stat.innerHTML = ""; stat.classList.remove("ok");
+    }
+    if (reduced) {
+      show(guest, true); show(plate, true);
+      statOk(stat, "<b>1QW4RT</b> is on the permit until the end of today.");
+      var cap = root.querySelector(".dm-caption span");
+      if (cap) { cap.innerHTML = "A scan only <b>asks</b> &mdash; you approve each visitor from your phone."; cap.classList.add("show"); }
+      return;
+    }
+    loop([
+      [150, reset],
+      [300, function () { say("Print it once &mdash; leave it by the door."); }],
+      [1800, function () { show(guest, true); say("A visitor scans and asks."); }],
+      [2500, function () { fld.classList.add("lit"); show(plate, true); }],
+      [3000, function () { fld.classList.remove("lit"); }],
+      [3400, function () { press(ask); }],
+      [3700, function () { statSpin(stat, "Waiting for the resident to approve&hellip;"); }],
+      [4700, function () { show(guest, false); show(push, true); say("You get a notification, wherever you are."); }],
+      [6700, function () { press(ok); }],
+      [7000, function () { show(push, false); show(guest, true); }],
+      [7500, function () { statOk(stat, "<b>1QW4RT</b> is on the permit until the end of today."); }],
+      [8000, function () { say("<b>Nothing goes on the permit until you say yes.</b>"); }]
+    ], 11200);
+  }
+
+  var inits = { showcase: initShowcase, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guestpass: initGuestpass, visitorqr: initVisitorqr, doorqr: initDoorqr };
   function initDemos() {
     document.querySelectorAll("[data-demo]").forEach(function (root) {
       if (root.dataset.demoInit) return; // already running

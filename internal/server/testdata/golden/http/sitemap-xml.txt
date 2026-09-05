@@ -10,12 +10,12 @@ X-Frame-Options: DENY
 
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://p.stonn.org/</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/how</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/security</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/contact</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/faq</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/guide/change-car-on-visitor-permit</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer</loc><lastmod>2026-09-02</lastmod></url>
-  <url><loc>https://p.stonn.org/guide/paper-visitor-permits</loc><lastmod>2026-09-02</lastmod></url>
+  <url><loc>https://p.stonn.org/</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/how</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/security</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/contact</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/faq</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/guide/change-car-on-visitor-permit</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer</loc><lastmod>2026-09-05</lastmod></url>
+  <url><loc>https://p.stonn.org/guide/paper-visitor-permits</loc><lastmod>2026-09-05</lastmod></url>
 </urlset>

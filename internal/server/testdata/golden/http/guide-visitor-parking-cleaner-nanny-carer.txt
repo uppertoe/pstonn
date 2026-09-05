@@ -24,22 +24,22 @@ X-Frame-Options: DENY
 <meta property="og:description" content="A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.">
 <meta property="og:url" content="https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer">
 <meta property="og:locale" content="en_AU">
-<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=90b6a853c5">
+<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=609c5845ad">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="p.stonn — schedule your City of Stonnington visitor parking permit">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Visitor parking for a cleaner, nanny or carer in Stonnington — p.stonn">
 <meta name="twitter:description" content="A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.">
-<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=90b6a853c5">
+<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=609c5845ad">
 
 <script type="application/ld+json" nonce="NONCE">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","acceptedAnswer":{"@type":"Answer","text":"A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn't, they will not be covered by the permit."},"name":"Visitor parking for a cleaner, nanny or carer in Stonnington"}]}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=90b6a853c5">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=90b6a853c5">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=609c5845ad">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=609c5845ad">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=90b6a853c5">
+<link rel="stylesheet" href="/static/app.css?v=609c5845ad">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script nonce="NONCE">
   
@@ -149,10 +149,10 @@ X-Frame-Options: DENY
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script nonce="NONCE" src="/static/htmx.min.js?v=90b6a853c5"></script>
-<script nonce="NONCE" defer src="/static/alpine.min.js?v=90b6a853c5"></script>
-<link rel="stylesheet" href="/static/demos.css?v=90b6a853c5">
-<script nonce="NONCE" defer src="/static/demos.js?v=90b6a853c5"></script>
+<script nonce="NONCE" src="/static/htmx.min.js?v=609c5845ad"></script>
+<script nonce="NONCE" defer src="/static/alpine.min.js?v=609c5845ad"></script>
+<link rel="stylesheet" href="/static/demos.css?v=609c5845ad">
+<script nonce="NONCE" defer src="/static/demos.js?v=609c5845ad"></script>
 
 <script nonce="NONCE">
   
@@ -345,13 +345,11 @@ window.popClamp = window.popClamp || function (el) {
       <div class="feature-text"><p>Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.</p></div>
       <div class="feature-demo">
         
-        <figure class="dm" data-demo="guest">
+        
+        <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Visitor pass</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-qrwrap">
-            <img class="dm-qr" src="/static/demo-qr.svg" alt="Example visitor-pass QR code" width="56" height="56">
-            <span class="dm-qrcap">Send it as a private link, or show it as a QR &mdash; the visitor opens it and picks their car.</span>
-          </div>
+          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
           <div class="dm-gsub">Tap your car to put it on the permit.</div>
           <div class="dm-gcars">
             <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
@@ -363,6 +361,7 @@ window.popClamp = window.popClamp || function (el) {
             <div class="dm-sync"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
           </div>
         </div>
+        <div class="dm-caption"><span></span></div>
         </figure>
 
       </div>

@@ -129,9 +129,20 @@
 {{end}}
 
 {{define "page-how"}}
-{{/* ================= PUBLIC: WHY / HOW IT WORKS ================= */}}
-{{template "publicheader" .}}
+{{/* ================= HOW IT WORKS (public + signed-in feature tour) =================
+     One page, two audiences. Anonymous visitors get the pre-signup funnel (intro,
+     connect demo, notify demo, before-you-start); signed-in users arrive from the
+     app header and get the app chrome and just the feature demos — most households
+     use only the roster and one-off bookings, and the three visitor features go
+     undiscovered, so this page is the discovery surface for them. */}}
+{{if .SignedIn}}{{template "appbar" .}}{{else}}{{template "publicheader" .}}{{end}}
 <main id="main" tabindex="-1" class="landing about">
+  {{if .SignedIn}}
+  <section class="paper">
+    <h1 class="about-h1">How it works</h1>
+    <p>Everything p.stonn can do, in five short loops &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
+  </section>
+  {{else}}
   <section class="paper">
     <h1 class="about-h1">How it works</h1>
     <p>{{T "public.history" .}}</p>
@@ -139,9 +150,11 @@
     <p>{{T "public.attempt" .}}</p>
     <p>I got tired of logging in to swap the plate every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
   </section>
+  {{end}}
 
   <div class="features">
 
+    {{if not .SignedIn}}
     <section class="feature">
       <div class="feature-text">
         <h2>Connect once</h2>
@@ -159,11 +172,12 @@
         </figure>
       </div>
     </section>
+    {{end}}
 
     <section class="feature">
       <div class="feature-text">
         <h2>A car for each day</h2>
-        <p>Set which registration is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
+        <p>Set which registration is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster holds up to four weeks and rotates them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-roster" .}}
@@ -173,7 +187,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>One-off bookings</h2>
-        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; book a car for a set window. Your weekly schedule takes back over the moment it ends.</p>
+        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; book a car for a set window. Your roster takes back over the moment it ends.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-oneoff" .}}
@@ -182,14 +196,37 @@
 
     <section class="feature">
       <div class="feature-text">
-        <h2>Hand a visitor access</h2>
-        <p>Send a private link or show a QR, and the visitor puts their own car on the permit &mdash; no account needed. There&rsquo;s also a printable QR code: a visitor scans it and requests a spot, and nothing changes until you approve it from your phone.</p>
+        <h2>A visitor at the door</h2>
+        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and their car is on the permit until the end of the day &mdash; no account, nothing to install.</p>
+        <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
       <div class="feature-demo">
-        {{template "demo-guest" .}}
+        {{template "demo-visitorqr" .}}
       </div>
     </section>
 
+    <section class="feature">
+      <div class="feature-text">
+        <h2>A printed code for the door</h2>
+        <p>Print a QR code once and leave it up &mdash; by the door, at the gate. It keeps working forever, and it&rsquo;s safe to post: a scan only <em>asks</em>. You get a notification with the visitor&rsquo;s plate, and nothing goes on the permit until you approve it from wherever you are.</p>
+      </div>
+      <div class="feature-demo">
+        {{template "demo-doorqr" .}}
+      </div>
+    </section>
+
+    <section class="feature">
+      <div class="feature-text">
+        <h2>A pass for your regulars</h2>
+        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their car and it&rsquo;s on the permit until the end of the day, and you&rsquo;re told each time.</p>
+        <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
+      </div>
+      <div class="feature-demo">
+        {{template "demo-guestpass" .}}
+      </div>
+    </section>
+
+    {{if not .SignedIn}}
     <section class="feature">
       <div class="feature-text">
         <h2>Know it happened</h2>
@@ -209,9 +246,11 @@
         </figure>
       </div>
     </section>
+    {{end}}
 
   </div>
 
+  {{if not .SignedIn}}
   <section class="paper">
     <h2 class="about-h2" style="margin-top:0">{{T "public.before_heading" .}}</h2>
     <p>{{T "public.before_intro" .}}</p>
@@ -231,8 +270,13 @@
     </ul>
     <p>Once your council account has a visitor permit, <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
   </section>
+  {{end}}
 
+  {{if .SignedIn}}
+  <p class="ldisclaimer" style="margin-top:26px"><a href="/schedule" hx-boost="false">&larr; Back to Schedule</a></p>
+  {{else}}
   <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>
+  {{end}}
 </main>
 
 {{end}}
@@ -284,7 +328,7 @@
     <div class="feature" style="margin-top:8px">
       <div class="feature-text"><p>{{.Guide.Pstonn}}</p></div>
       <div class="feature-demo">
-        {{if eq .Guide.Demo "roster"}}{{template "demo-roster" .}}{{else if eq .Guide.Demo "oneoff"}}{{template "demo-oneoff" .}}{{else if eq .Guide.Demo "guest"}}{{template "demo-guest" .}}{{end}}
+        {{if eq .Guide.Demo "roster"}}{{template "demo-roster" .}}{{else if eq .Guide.Demo "oneoff"}}{{template "demo-oneoff" .}}{{else if eq .Guide.Demo "guest"}}{{template "demo-guestpass" .}}{{end}}
       </div>
     </div>
     <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
@@ -353,14 +397,13 @@
         </div>
         </figure>
 {{end}}
-{{define "demo-guest"}}
-        <figure class="dm" data-demo="guest">
+{{define "demo-guestpass"}}
+        {{/* The guest's own page: the pass email arrives, then the guest taps
+             their car. Mirrors templates/guest.html (the /g/ page). */}}
+        <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Visitor pass</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-qrwrap">
-            <img class="dm-qr" src="/static/demo-qr.svg" alt="Example visitor-pass QR code" width="56" height="56">
-            <span class="dm-qrcap">Send it as a private link, or show it as a QR &mdash; the visitor opens it and picks their car.</span>
-          </div>
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-users"}}</span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
           <div class="dm-gsub">Tap your car to put it on the permit.</div>
           <div class="dm-gcars">
             <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
@@ -372,5 +415,65 @@
             <div class="dm-sync">{{template "ic-check"}}</div>
           </div>
         </div>
+        <div class="dm-caption"><span></span></div>
+        </figure>
+{{end}}
+
+{{define "demo-visitorqr"}}
+        {{/* One phone, two screens: the holder's card (base), then the visitor's
+             page slides over as an overlay. Mirrors the Show-visitor-QR flow:
+             schedule.html's qrtrigger + guests.html's qr-card + guest.html. */}}
+        <figure class="dm" data-demo="visitorqr">
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Visitor at the door</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-permit" style="margin-top:0;margin-bottom:12px">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-vqdot style="background:var(--v1)"></span> <span class="dm-rego" data-vqrego>ABC123</span></div><div class="dm-guntil" data-vquntil></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+          <div class="dm-btn" data-vqbtn>{{template "ic-qr"}} Show visitor QR</div>
+          <div class="dm-screen dm-over" data-vqqr>
+            <div class="dm-vlabel">Your phone</div>
+            <div class="dm-qrwrap" style="margin:6px 0 4px"><img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:72px;height:72px"><span class="dm-qrcap">Show this to your visitor. It stops working in 15 minutes &mdash; your permit itself is unchanged.</span></div>
+          </div>
+          <div class="dm-screen dm-over" data-vqguest>
+            <div class="dm-vlabel">Your visitor&rsquo;s phone</div>
+            <div class="dm-fld" data-vqfld style="margin-top:6px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
+            <div class="dm-btn" data-vqput>{{template "ic-check"}} Put my car on the permit</div>
+            <div class="dm-vstat" data-vqstat></div>
+          </div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+        </figure>
+{{end}}
+
+{{define "demo-doorqr"}}
+        {{/* The printed door code: poster (base), the visitor's ask, your
+             approve notification. Mirrors guests.html's poster, guest.html's
+             request branch and the notify guest-request email/push. */}}
+        <figure class="dm" data-demo="doorqr">
+        <div class="dm-phone">
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Printed for the door</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-poster">
+            <div class="dm-poster-kicker">Visitor parking</div>
+            <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:84px;height:84px;margin:8px auto">
+            <div class="dm-poster-lead">Scan to ask to use this parking permit</div>
+            <div class="dm-poster-note">Nothing goes on the permit until the resident approves.</div>
+          </div>
+          <div class="dm-screen dm-over" data-dqguest>
+            <div class="dm-vlabel">The visitor&rsquo;s phone</div>
+            <div class="dm-fld" data-dqfld style="margin-top:6px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">1QW4RT</span></span></div></div>
+            <div class="dm-btn" data-dqask>{{template "ic-bell"}} Ask to use the permit</div>
+            <div class="dm-vstat" data-dqstat></div>
+          </div>
+          <div class="dm-screen dm-over" data-dqpush>
+            <div class="dm-vlabel">Your phone &mdash; wherever you are</div>
+            <div class="dm-push show" style="margin-top:6px;opacity:1;transform:none"><span class="badge" style="background:var(--accent)">{{template "ic-bell"}}</span><div class="bd"><div class="ttl">Approve <b>1QW4RT</b> on your Visitor? <span class="ago">now</span></div><div class="msg">Someone scanned your printed QR code. Nothing is on the permit until you approve.</div></div></div>
+            <div class="dm-actions">
+              <div class="dm-btn" data-dqok>{{template "ic-check"}} Approve</div>
+              <div class="dm-btn dm-btn-ghost" data-dqno>Decline</div>
+            </div>
+          </div>
+        </div>
+        <div class="dm-caption"><span></span></div>
         </figure>
 {{end}}

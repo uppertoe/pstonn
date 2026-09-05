@@ -83,6 +83,13 @@ svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7;
 .brand .mark { width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:var(--on-primary); display:grid; place-items:center; box-shadow:var(--shadow); }
 .brand .mark svg { width:19px; height:19px; stroke-width:1.9; }
 .appbar-r { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+/* The feature-tour link beside the profile button: quiet like .link-quiet, an
+   icon plus a word that drops away on narrow screens (the aria-label carries it). */
+.howlink { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; font-weight:500; text-decoration:none; padding:8px 9px; border-radius:10px; transition:background .15s,color .15s; }
+.howlink svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:0 0 auto; }
+.howlink:hover { color:var(--primary); background:var(--surface-2); }
+.howlink.active { color:var(--ink); }
+@media (max-width: 560px) { .howlink-txt { display:none; } }
 .icon-btn { background:transparent; border:0; color:var(--muted); padding:8px; border-radius:10px; cursor:pointer; display:inline-flex; transition:background .15s,color .15s; }
 .icon-btn:hover { background:var(--surface-2); color:var(--ink); }
 .usermenu { position:relative; display:inline-flex; }
