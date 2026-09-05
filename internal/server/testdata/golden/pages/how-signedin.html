@@ -294,7 +294,7 @@ window.popClamp = window.popClamp || function (el) {
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
   <div class="appbar-r">
     
-    <a href="/how" hx-boost="false" class="howlink active" aria-current="page" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
+    <a href="/features" hx-boost="false" class="howlink active" aria-current="page" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
     <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
       <span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span>
     </button>
@@ -312,6 +312,17 @@ window.popClamp = window.popClamp || function (el) {
     </div>
   </div>
 </header>
+
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
 
 <main id="main" tabindex="-1" class="landing about">
   
@@ -473,11 +484,11 @@ window.popClamp = window.popClamp || function (el) {
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          
           <div class="dm-gsub">Tap your car to put it on the permit.</div>
           <div class="dm-gcars">
-            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
-            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
-            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
+            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Margaret&rsquo;s Camry</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
+            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Peter&rsquo;s ute</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
           </div>
           <div class="dm-permit">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>

@@ -51,13 +51,14 @@ func (s *Server) security(w http.ResponseWriter, r *http.Request) {
 	s.render(w, dashboardData{State: "security", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
 }
 
-// how is the "how it works" page, serving two audiences from one URL: the
-// PUBLIC pre-signup pitch (intro, connect demo, prerequisites), and — for a
-// signed-in user arriving from the app header — a feature tour in the app
-// chrome, demos only. Signed-in gets the user and logout URL so the appbar's
-// account menu works; the tenant/area fields stay empty, which the appbar
-// renders as "no area switcher", correct for a tour page.
-func (s *Server) how(w http.ResponseWriter, r *http.Request) {
+// features is the "what p.stonn can do" page, serving two audiences from one
+// URL: the PUBLIC pre-signup pitch (intro, connect demo, prerequisites), and —
+// for a signed-in user arriving from the app header — a feature explainer in
+// the app chrome, demos only. Signed-in gets the user and logout URL so the
+// appbar's account menu works; the tenant/area fields stay empty, which the
+// appbar renders as "no area switcher", correct here. The internal State stays
+// "how" (template names, asset conditions and goldens all key on it).
+func (s *Server) features(w http.ResponseWriter, r *http.Request) {
 	u, signedIn := identity.FromContext(r.Context())
 	d := dashboardData{State: "how", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation}
 	if signedIn {
@@ -65,4 +66,10 @@ func (s *Server) how(w http.ResponseWriter, r *http.Request) {
 		d.LogoutURL = s.logoutURL()
 	}
 	s.render(w, d)
+}
+
+// howRedirect keeps the page's original address alive: /how is indexed and
+// sits in saved links, so it forwards permanently to /features.
+func (s *Server) howRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/features", http.StatusMovedPermanently)
 }

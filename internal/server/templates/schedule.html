@@ -112,7 +112,7 @@
        demo assets are head-only (see publicheader). */}}
   <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-how-hint')==='1'}" x-show="!hide" x-cloak>
     {{template "ic-qr"}}
-    <span>There&rsquo;s more than the roster: visitor QRs, a printed QR that asks first, guest passes. <a href="/how" hx-boost="false">See how they work</a>.</span>
+    <span>There&rsquo;s more than the roster: visitor QRs, a printed QR that asks first, guest passes. <a href="/features" hx-boost="false">See how they work</a>.</span>
     <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
             @click="hide=true; localStorage.setItem('pstonn-how-hint','1')">{{template "ic-x"}}</button>
   </p>

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -88,7 +89,7 @@ func TestRobotsAndSitemap(t *testing.T) {
 		}
 	}
 	// Public content pages must NOT be blocked.
-	for _, pub := range []string{"Disallow: /how", "Disallow: /security", "Disallow: /faq", "Disallow: /contact"} {
+	for _, pub := range []string{"Disallow: /features", "Disallow: /security", "Disallow: /faq", "Disallow: /contact"} {
 		if strings.Contains(robots, pub) {
 			t.Errorf("robots.txt wrongly blocks a public page: %q", pub)
 		}
@@ -97,7 +98,7 @@ func TestRobotsAndSitemap(t *testing.T) {
 	rr = httptest.NewRecorder()
 	s.sitemapXML(rr, httptest.NewRequest("GET", "/sitemap.xml", nil))
 	sitemap := rr.Body.String()
-	for _, u := range []string{"https://p.stonn.org/", "https://p.stonn.org/how", "https://p.stonn.org/security", "https://p.stonn.org/contact", "https://p.stonn.org/faq"} {
+	for _, u := range []string{"https://p.stonn.org/", "https://p.stonn.org/features", "https://p.stonn.org/security", "https://p.stonn.org/contact", "https://p.stonn.org/faq"} {
 		if !strings.Contains(sitemap, "<loc>"+u+"</loc>") {
 			t.Errorf("sitemap missing <loc>%s</loc>:\n%s", u, sitemap)
 		}
@@ -112,6 +113,17 @@ func TestRobotsAndSitemap(t *testing.T) {
 	}
 	if got, want := strings.Count(sitemap, "<lastmod>"+publicContentRev+"</lastmod>"), strings.Count(sitemap, "<loc>"); got != want {
 		t.Errorf("sitemap has %d lastmod entries for %d locs:\n%s", got, want, sitemap)
+	}
+}
+
+// The page's original address must keep working: /how is indexed and sits in
+// saved links, so it forwards permanently to /features.
+func TestHowRedirectsToFeatures(t *testing.T) {
+	s := &Server{}
+	rr := httptest.NewRecorder()
+	s.howRedirect(rr, httptest.NewRequest("GET", "/how", nil))
+	if rr.Code != http.StatusMovedPermanently || rr.Header().Get("Location") != "/features" {
+		t.Fatalf("/how = %d -> %q, want 301 -> /features", rr.Code, rr.Header().Get("Location"))
 	}
 }
 

@@ -10,7 +10,7 @@
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
          up stuck, and the failure looks like "wrong password" when it isn't. */}}
-    <p class="lnote">{{T "public.need_account" . (slots "b" (strong) "how" (link "/how" (noboost)))}}</p>
+    <p class="lnote">{{T "public.need_account" . (slots "b" (strong) "how" (link "/features" (noboost)))}}</p>
   </section>
   <div class="demos">
     <div class="dm-mini dm-showcase" data-demo="showcase">
@@ -33,7 +33,7 @@
         </div>
       </div>
       <div class="dm-caption" data-cap><span></span></div>
-      <p class="dm-foot"><a href="/how" hx-boost="false">See all the features &rarr;</a></p>
+      <p class="dm-foot"><a href="/features" hx-boost="false">See all the features &rarr;</a></p>
     </div>
   </div>
   <section class="lsteps">
@@ -68,7 +68,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>{{T "public.about_unofficial" . (slots "how" (link "/how" (noboost)))}}</p>
+    <p>{{T "public.about_unofficial" . (slots "how" (link "/features" (noboost)))}}</p>
 
     <h2 class="about-h2">The short version</h2>
     <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
@@ -135,7 +135,7 @@
      app header and get the app chrome and just the feature demos — most households
      use only the roster and one-off bookings, and the three visitor features go
      undiscovered, so this page is the discovery surface for them. */}}
-{{if .SignedIn}}{{template "appbar" .}}{{else}}{{template "publicheader" .}}{{end}}
+{{if .SignedIn}}{{template "appbar" .}}{{template "appnav" .}}{{else}}{{template "publicheader" .}}{{end}}
 <main id="main" tabindex="-1" class="landing about">
   {{if .SignedIn}}
   <section class="paper">
@@ -290,7 +290,7 @@
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Frequently asked questions</h1>
-    <p>{{T "public.faq_unofficial" . (slots "how" (link "/how" (noboost)))}}</p>
+    <p>{{T "public.faq_unofficial" . (slots "how" (link "/features" (noboost)))}}</p>
     {{range .FAQ}}
     <div class="faq-item">
       <h2 class="about-h2">{{.Q}}</h2>
@@ -332,7 +332,7 @@
       </div>
     </div>
     <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
-    <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor (newtab)) "faq" (link .Tenant.Links.FAQ (newtab)) "how" (link "/how" (noboost)) "faq_page" (link "/faq" (noboost)))}}</p>
+    <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor (newtab)) "faq" (link .Tenant.Links.FAQ (newtab)) "how" (link "/features" (noboost)) "faq_page" (link "/faq" (noboost)))}}</p>
   </section>
 </main>
 {{end}}
@@ -404,11 +404,13 @@
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic">{{template "ic-users"}}</span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          {{/* One pass, one household: these are the grandparents' two cars, not
+               a mix of unrelated helpers — a pass goes to one person, who taps
+               whichever car they came in. */}}
           <div class="dm-gsub">Tap your car to put it on the permit.</div>
           <div class="dm-gcars">
-            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
-            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick">{{template "ic-check"}}</span></div>
-            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Margaret&rsquo;s Camry</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Peter&rsquo;s ute</span><span class="dm-tick">{{template "ic-check"}}</span></div>
           </div>
           <div class="dm-permit">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>

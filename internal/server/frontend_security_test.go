@@ -78,7 +78,7 @@ func TestEveryScriptTagCarriesTheResponseNonce(t *testing.T) {
 	s := newAuthzServer(t)
 	// A spread of the layout's rendering states: the public pages (which also pull in
 	// the demo assets), and a signed-in path, which lands on the terms gate here.
-	for _, path := range []string{"/", "/security", "/how", "/schedule"} {
+	for _, path := range []string{"/", "/security", "/features", "/schedule"} {
 		t.Run(path, func(t *testing.T) {
 			email := ""
 			if path == "/schedule" {
@@ -276,8 +276,8 @@ func TestNoInlineScriptInsideBoostedBody(t *testing.T) {
 // unstyled and inert until a manual refresh. The nav already opts out; the hazard is
 // that every future content link has to remember, so this enforces it centrally.
 func TestLinksIntoAssetPagesAreNotBoosted(t *testing.T) {
-	// Matches an <a> whose href is exactly "/" or "/how" and that lacks hx-boost.
-	link := regexp.MustCompile(`<a href="(/|/how)"(?:\s[^>]*)?>`)
+	// Matches an <a> whose href is exactly "/" or "/features" and that lacks hx-boost.
+	link := regexp.MustCompile(`<a href="(/|/features)"(?:\s[^>]*)?>`)
 	err := fs.WalkDir(templateFS, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
 			return err

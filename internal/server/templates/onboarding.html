@@ -193,7 +193,7 @@
          two and a half hours, read /how on another device, and never tapped Manage.
          Say plainly that choosing is a local, reversible step — nothing touches the
          council until a schedule is set. */}}
-    <p class="subtitle">Choosing a permit changes nothing at the council. You set up the schedule next. <a href="/how" hx-boost="false">What p.stonn can do</a></p>
+    <p class="subtitle">Choosing a permit changes nothing at the council. You set up the schedule next. <a href="/features" hx-boost="false">What p.stonn can do</a></p>
     {{/* Two groups: live permits (the ones a resident is here for), then dead
          ones under their own heading. A dead permit is still addable — its old
          schedule can be copied onto a renewal — but it must not look like the
@@ -256,13 +256,13 @@
          broken loop. */}}
     {{if .Picker.PermitsUnknown}}
     <p class="empty-note">We couldn't load your permit list from the council just now, so we can't tell what's on your account. Nothing has changed &mdash; please try again in a few minutes.</p>
-    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_error" .}} <a href="/how" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_error" .}} <a href="/features" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else if .Picker.HasPermits}}
     <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
-    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/how" hx-boost="false">What p.stonn can and cannot do</a></p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/features" hx-boost="false">What p.stonn can and cannot do</a></p>
     {{else}}
     <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
-    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_apply" .}} <a href="/how" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_apply" .}} <a href="/features" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{end}}
     {{end}}
   </section>

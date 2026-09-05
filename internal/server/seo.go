@@ -26,7 +26,7 @@ func seoFor(state string, c tenantView) (title, desc, canonPath string) {
 	case "landing":
 		return trText(c, "seo.landing_title"), trText(c, "seo.landing_desc"), "/"
 	case "how":
-		return trText(c, "seo.how_title"), trText(c, "seo.how_desc"), "/how"
+		return trText(c, "seo.how_title"), trText(c, "seo.how_desc"), "/features"
 	case "security":
 		return "Security & data — p.stonn", trText(c, "seo.security_desc"), "/security"
 	case "contact":
@@ -194,7 +194,7 @@ func (s *Server) sitemapXML(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
-	for _, p := range []string{"/", "/how", "/security", "/contact", "/faq"} {
+	for _, p := range []string{"/", "/features", "/security", "/contact", "/faq"} {
 		fmt.Fprintf(&b, "  <url><loc>%s%s</loc><lastmod>%s</lastmod></url>\n", base, p, publicContentRev)
 	}
 	for _, g := range guidesFor(s.tenantViewFor(r.Context(), "")) {

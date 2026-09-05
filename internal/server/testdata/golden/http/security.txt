@@ -318,7 +318,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/how" hx-boost="false" class="link-quiet">Features</a>
+    <a href="/features" hx-boost="false" class="link-quiet">Features</a>
     <a href="/faq" class="link-quiet">FAQ</a>
     <a href="/security" class="link-quiet active" aria-current="page">Security &amp; data</a>
     
@@ -332,7 +332,7 @@ window.popClamp = window.popClamp || function (el) {
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. See <a href="/how" hx-boost="false">what p.stonn can do</a>.</p>
+    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. See <a href="/features" hx-boost="false">what p.stonn can do</a>.</p>
 
     <h2 class="about-h2">The short version</h2>
     <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>

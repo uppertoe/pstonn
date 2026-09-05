@@ -325,7 +325,7 @@ func TestGoldenPublicHTTP(t *testing.T) {
 	cfg := &config.Config{PublicBaseURL: "https://p.stonn.org", DisplayLocation: loc, Domain: "stonn.org"}
 	s := &Server{cfg: cfg, terms: loadTerms("")}
 	h := s.Handler()
-	paths := []string{"/", "/how", "/security", "/faq", "/contact", "/robots.txt", "/sitemap.xml", "/site.webmanifest", "/healthz", "/no-such-page"}
+	paths := []string{"/", "/features", "/security", "/faq", "/contact", "/robots.txt", "/sitemap.xml", "/site.webmanifest", "/healthz", "/no-such-page"}
 	for _, gd := range guidesFor(defaultTenantView) {
 		paths = append(paths, "/guide/"+gd.Slug)
 	}

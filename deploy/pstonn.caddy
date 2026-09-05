@@ -68,7 +68,7 @@ p.{$DOMAIN} {
 	# have no account at all, and an opt-out they cannot reach is not an opt-out.
 	# The link carries a signed per-address token, so it can only ever stop mail to
 	# the one address it was issued for.
-	@public path /security /how /contact /healthz /council/confirm /tenant/confirm /g/* /status /hooks/ses /u/* /r/*
+	@public path /security /how /features /faq /guide/* /contact /healthz /tenant/confirm /council/confirm /ntfy/confirm/* /g/* /status /u/* /hooks/ses /r/* /favicon.ico /robots.txt /sitemap.xml /site.webmanifest
 	handle @public {
 		route {
 			import strip_client_identity

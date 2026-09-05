@@ -419,7 +419,8 @@ func (s *Server) Handler() http.Handler {
 	// machine-facing relies on 405s, and a person sees the same "nothing here".
 	s.handle(mux, "/", guardPublic, s.notFound)
 	s.handle(mux, "GET /security", guardPublic, s.security)             // public
-	s.handle(mux, "GET /how", guardPublic, s.how)                       // public
+	s.handle(mux, "GET /features", guardPublic, s.features)             // public
+	s.handle(mux, "GET /how", guardPublic, s.howRedirect)               // public; the page's old address
 	s.handle(mux, "GET /faq", guardPublic, s.faq)                       // public
 	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)            // public question pages
 	s.handle(mux, "GET /robots.txt", guardPublic, s.robotsTxt)          // public (SEO)

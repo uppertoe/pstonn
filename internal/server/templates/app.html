@@ -1,6 +1,7 @@
-{{define "page-app"}}
-{{/* ================= APP (nav + pages) ================= */}}
-{{template "appbar" .}}
+{{define "appnav"}}
+{{/* The app's section tabs. Shared: every app page, and the signed-in
+     /features page — which is not a section (no tab active there), but whose
+     visitors still need the way back to be where it always is. */}}
 <div class="navwrap">
   <nav class="nav">
     <a href="/schedule" class="nav-item {{if eq .Page "schedule"}}active{{end}}" style="--hue:var(--sec-schedule)">{{template "ic-calendar"}}<span>Schedule</span></a>
@@ -10,6 +11,12 @@
     <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" style="--hue:var(--sec-settings)">{{template "ic-gear"}}<span>Settings</span></a>
   </nav>
 </div>
+{{end}}
+
+{{define "page-app"}}
+{{/* ================= APP (nav + pages) ================= */}}
+{{template "appbar" .}}
+{{template "appnav" .}}
 <main id="main" tabindex="-1">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}

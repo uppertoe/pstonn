@@ -320,7 +320,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/how" hx-boost="false" class="link-quiet">Features</a>
+    <a href="/features" hx-boost="false" class="link-quiet">Features</a>
     <a href="/faq" class="link-quiet">FAQ</a>
     <a href="/security" class="link-quiet">Security &amp; data</a>
     
@@ -350,11 +350,11 @@ window.popClamp = window.popClamp || function (el) {
         <div class="dm-phone">
           <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          
           <div class="dm-gsub">Tap your car to put it on the permit.</div>
           <div class="dm-gcars">
-            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
-            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
-            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
+            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Margaret&rsquo;s Camry</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
+            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Peter&rsquo;s ute</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
           </div>
           <div class="dm-permit">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>
@@ -367,7 +367,7 @@ window.popClamp = window.popClamp || function (el) {
       </div>
     </div>
     <p style="margin-top:22px"><a href="/signin" hx-boost="false"><button type="button"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Get started</button></a></p>
-    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council’s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener noreferrer">parking permit FAQs</a>. See also <a href="/how" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
+    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council’s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener noreferrer">parking permit FAQs</a>. See also <a href="/features" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
   </section>
 </main>
 

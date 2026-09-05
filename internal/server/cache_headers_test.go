@@ -68,7 +68,7 @@ func TestPublicPagesAreStillCacheable(t *testing.T) {
 	// Cache-Control trivially satisfies the no-store check for reasons unrelated to
 	// caching — so the guard has to hit real 200 pages, or it would stay green even if
 	// one of them were later wrapped in noStoreCache (the regression it exists to catch).
-	for _, path := range []string{"/", "/security", "/how"} {
+	for _, path := range []string{"/", "/security", "/features"} {
 		w := s.doReq("GET", path, "", "", nil)
 		if w.Code != http.StatusOK {
 			t.Fatalf("%s: want 200 (a public page), got %d — the guard is testing the wrong route", path, w.Code)

@@ -6,7 +6,7 @@
        would render the gallery unstyled and inert. Full navigations only. */}}
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/how" hx-boost="false" class="link-quiet{{if eq .State "how"}} active{{end}}"{{if eq .State "how"}} aria-current="page"{{end}}>Features</a>
+    <a href="/features" hx-boost="false" class="link-quiet{{if eq .State "how"}} active{{end}}"{{if eq .State "how"}} aria-current="page"{{end}}>Features</a>
     <a href="/faq" class="link-quiet{{if eq .State "faq"}} active{{end}}"{{if eq .State "faq"}} aria-current="page"{{end}}>FAQ</a>
     <a href="/security" class="link-quiet{{if eq .State "security"}} active{{end}}"{{if eq .State "security"}} aria-current="page"{{end}}>Security &amp; data</a>
     {{if .Contact}}<a href="/contact" class="link-quiet{{if eq .State "contact"}} active{{end}}"{{if eq .State "contact"}} aria-current="page"{{end}}>Contact</a>{{end}}
@@ -34,7 +34,7 @@
          the menu — the visitor features go undiscovered, and a control nobody
          sees teaches nothing. Full navigation: /how's demo assets are head-only
          (see publicheader), so a boosted arrival would render a dead gallery. */}}
-    <a href="/how" hx-boost="false" class="howlink{{if eq .State "how"}} active{{end}}" {{if eq .State "how"}}aria-current="page" {{end}}aria-label="Features">{{template "ic-help"}}<span class="howlink-txt">Features</span></a>
+    <a href="/features" hx-boost="false" class="howlink{{if eq .State "how"}} active{{end}}" {{if eq .State "how"}}aria-current="page" {{end}}aria-label="Features">{{template "ic-help"}}<span class="howlink-txt">Features</span></a>
     <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
       <span class="th-moon">{{template "ic-moon"}}</span><span class="th-sun">{{template "ic-sun"}}</span>
     </button>
