@@ -175,7 +175,9 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 			body = fmt.Sprintf("Your %s is now set to %s, for a one-off booking made by %s.%s",
 				o.PermitLabel, car, o.By, confirm)
 		case o.Source == "roster":
-			body = fmt.Sprintf("Your %s is now set to %s for today, as scheduled by your weekly roster.%s", o.PermitLabel, car, confirm)
+			// "your roster", not "your weekly roster": a multi-week cycle is still
+			// the roster, and the weekly case loses nothing.
+			body = fmt.Sprintf("Your %s is now set to %s for today, as scheduled by your roster.%s", o.PermitLabel, car, confirm)
 		case o.Source == "override":
 			body = fmt.Sprintf("Your %s is now set to %s, for the one-off booking you made.%s", o.PermitLabel, car, confirm)
 		default:

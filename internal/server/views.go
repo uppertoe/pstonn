@@ -645,10 +645,27 @@ type permitView struct {
 	// plate neutral, so colour reads as "one of ours" and its absence as "someone
 	// else's" — which is the question this badge exists to answer.
 	ActiveColor string
-	Days        []dayView
-	Cal         []calView
-	Overrides   []overrideView
-	Vehicles    []vehicleView
+	// Weeks is the roster, one entry per cycle week (a plain weekly roster has
+	// exactly one). The template renders tabs only when there is more than one.
+	Weeks []weekView
+	// CurrentWeek is the 0-based cycle week now falls in — the default-open tab,
+	// and the one carrying the "now" marker.
+	CurrentWeek int
+	// CycleWeeks mirrors the permit's cycle length (>= 1); CanAddWeek offers the
+	// "+" tab while under model.MaxCycleWeeks.
+	CycleWeeks int
+	CanAddWeek bool
+	// CalRowLabels names each calendar row's cycle week ("This week — Week 2");
+	// nil for a plain weekly roster, where the rows need no distinguishing.
+	CalRowLabels []string
+	// UndoWeek, when set, renders a one-tap Undo in the Notice banner after a
+	// week was removed: the payload IS the removed week (weekday:vehicle pairs),
+	// so the undo is stateless and survives nothing — the next edit or a reload
+	// discards it, which is the intended lifetime.
+	UndoWeek  string
+	Cal       []calView
+	Overrides []overrideView
+	Vehicles  []vehicleView
 	// Regions are the tenant's registration jurisdictions (home first) for the
 	// one-off plate's state selector; empty hides it.
 	Regions []provider.Region
@@ -789,12 +806,21 @@ func permitDetail(p model.Permit) string {
 
 type dayView struct {
 	PermitID   int64
+	Week       int // 0-based cycle week this day cell edits
 	WeekdayNum int
 	Name       string // short, e.g. "Mon"
 	VehicleID  int64
 	Reg        string
 	Label      string
 	Color      string
+}
+
+// weekView is one cycle week's roster pane.
+type weekView struct {
+	Index     int  // 0-based, the value the edit endpoints take
+	Num       int  // 1-based, what people read ("Week 2")
+	IsCurrent bool // the cycle is in this week right now — the "now" marker
+	Days      []dayView
 }
 
 type calView struct {

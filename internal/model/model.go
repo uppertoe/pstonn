@@ -3,6 +3,7 @@
 package model
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -50,6 +51,22 @@ type Permit struct {
 	// answered — dismissed, a copy ran, or a roster day was set — and must never
 	// lead again on this permit. The quiet copy button stays available regardless.
 	CopyOfferDone bool
+	// CycleWeeks and CycleAnchor describe the roster's multi-week rotation; see
+	// Cycle. Persisted on the permit because the cycle is part of the schedule:
+	// it must survive restarts, be copied with the schedule, and be readable
+	// everywhere the rules are.
+	CycleWeeks  int
+	CycleAnchor string
+}
+
+// Cycle returns the permit's roster rotation, normalised so a legacy row
+// (CycleWeeks 0) behaves as the plain weekly roster.
+func (p Permit) Cycle() Cycle {
+	w := p.CycleWeeks
+	if w < 1 {
+		w = 1
+	}
+	return Cycle{Weeks: w, Anchor: p.CycleAnchor}
 }
 
 // deadStatuses are the tenant PermitStatus WORDS that mean a permit is no longer
@@ -141,13 +158,77 @@ func SamePlate(a, b string) bool {
 	return NormPlate(a) == NormPlate(b)
 }
 
-// WeeklyRule allocates a vehicle to a permit on a given weekday, the building
-// block of a repeating roster (e.g. AVS619 on Mondays, BSD529 on Tuesdays).
+// WeeklyRule allocates a vehicle to a permit on a given weekday of a given
+// cycle week, the building block of a repeating roster (e.g. AVS619 on Mondays,
+// BSD529 on Tuesdays). Week is the 0-based index into the permit's Cycle; a
+// plain weekly roster keeps every rule in week 0.
 type WeeklyRule struct {
 	ID        int64
 	PermitID  int64
+	Week      int
 	Weekday   time.Weekday
 	VehicleID int64
+}
+
+// MaxCycleWeeks caps how many weeks a roster cycle may hold.
+const MaxCycleWeeks = 4
+
+// Cycle is a permit's multi-week rotation. Weeks <= 1 (or no anchor) is the
+// plain weekly roster: every instant is week 0. Anchor is a bare local date
+// ("2006-01-02") naming a day in the week whose index is 0 — a date, not an
+// instant, because the store reads permits without knowing their timezone;
+// WeekAt parses it in the caller's clock, the same clock weekdays are read
+// from, so week boundaries and day boundaries can never disagree.
+type Cycle struct {
+	Weeks  int
+	Anchor string
+}
+
+// WeekAt reports which cycle week now falls in. now must already be in the
+// timezone rosters are expressed in (the same contract as Resolve). Both ends
+// are snapped to their week's Sunday at NOON local before differencing — noon
+// anchoring plus rounding means a 23- or 25-hour DST day between the two
+// Sundays cannot shift the count, and the Sunday arithmetic matches the
+// schedule page's grid. A corrupt anchor degrades to week 0 (the weekly
+// behaviour), never to a wrong random week.
+func (c Cycle) WeekAt(now time.Time) int {
+	if c.Weeks <= 1 || c.Anchor == "" {
+		return 0
+	}
+	a, err := time.ParseInLocation("2006-01-02", c.Anchor, now.Location())
+	if err != nil {
+		return 0
+	}
+	nowSun := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -int(now.Weekday()))
+	anchSun := time.Date(a.Year(), a.Month(), a.Day(), 12, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -int(a.Weekday()))
+	days := int(math.Round(nowSun.Sub(anchSun).Hours() / 24))
+	w := (days / 7) % c.Weeks
+	if w < 0 {
+		// An anchor after now shouldn't exist (re-anchoring always lands on the
+		// current Sunday or earlier), but Go's % truncates toward zero and a
+		// negative week index would match no rule — a permit that silently stops
+		// updating. Wrap instead.
+		w += c.Weeks
+	}
+	return w
+}
+
+// ReanchoredCycle returns the cycle after changing the week count, re-anchored
+// so the CURRENT week keeps a deterministic index: growing preserves
+// WeekAt(now) (changing the modulus alone would silently jump which week "now"
+// is in); shrinking maps it to oldIndex mod newWeeks. now must be in the
+// permit's roster timezone. One formula rather than per-case rules so repeated
+// edits inside one week compose correctly.
+func ReanchoredCycle(now time.Time, old Cycle, newWeeks int) Cycle {
+	if newWeeks <= 1 {
+		return Cycle{Weeks: 1}
+	}
+	idx := old.WeekAt(now) % newWeeks
+	sun := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -int(now.Weekday())-7*idx)
+	return Cycle{Weeks: newWeeks, Anchor: sun.Format("2006-01-02")}
 }
 
 // Override is a one-off allocation that takes precedence over the roster for its
@@ -212,8 +293,8 @@ type Resolution struct {
 // activation supersedes the roster and any earlier booking for its window, while
 // a later deliberate booking by the account holder still overrides the guest.
 // now must already be in the timezone rosters are expressed in (weekday is read
-// from it directly).
-func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution {
+// from it directly, and c's anchor date is parsed in its clock).
+func Resolve(now time.Time, c Cycle, rules []WeeklyRule, overrides []Override) Resolution {
 	var best *Override
 	for i := range overrides {
 		o := &overrides[i]
@@ -250,10 +331,14 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 	}
 
 	wd := now.Weekday()
+	wk := c.WeekAt(now)
 	var bestRule *WeeklyRule
 	for i := range rules {
 		r := &rules[i]
-		if r.Weekday != wd {
+		// wk is always inside the cycle (WeekAt wraps), so this one comparison
+		// also keeps orphan rows from a shrunk cycle or a manual edit from ever
+		// resurfacing on another week's days.
+		if r.Week != wk || r.Weekday != wd {
 			continue
 		}
 		// Deterministic tie-break if the data ever holds two rules for one weekday (a
@@ -297,7 +382,9 @@ func Resolve(now time.Time, rules []WeeklyRule, overrides []Override) Resolution
 // now must already be in the roster timezone (see Resolve). Candidate change
 // instants are the local midnights and the override boundaries in the horizon;
 // Resolve is piecewise-constant between those, so nothing can change elsewhere.
-func NextChange(now time.Time, horizon time.Duration, rules []WeeklyRule, overrides []Override) *time.Time {
+// A cycle-week flip is a Sunday local midnight, already in the walk — a
+// multi-week cycle adds no new candidate kinds.
+func NextChange(now time.Time, horizon time.Duration, c Cycle, rules []WeeklyRule, overrides []Override) *time.Time {
 	end := now.Add(horizon)
 	var cands []time.Time
 	for d := startOfDay(now).AddDate(0, 0, 1); !d.After(end); d = d.AddDate(0, 0, 1) {
@@ -313,10 +400,10 @@ func NextChange(now time.Time, horizon time.Duration, rules []WeeklyRule, overri
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].Before(cands[j]) })
 
-	last := Resolve(now, rules, overrides)
+	last := Resolve(now, c, rules, overrides)
 	haveLast := last.Source != SourceNone
 	for _, t := range cands {
-		r := Resolve(t, rules, overrides)
+		r := Resolve(t, c, rules, overrides)
 		if r.Source == SourceNone {
 			continue // entering a gap writes nothing; the last plate lingers
 		}

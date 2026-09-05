@@ -13,7 +13,7 @@ import (
 
 func (s *Store) ListRules(ctx context.Context, permitID int64) ([]model.WeeklyRule, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, permit_id, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ? ORDER BY weekday`, permitID)
+		`SELECT id, permit_id, cycle_week, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ? ORDER BY cycle_week, weekday`, permitID)
 	if err != nil {
 		return nil, err
 	}
@@ -22,7 +22,7 @@ func (s *Store) ListRules(ctx context.Context, permitID int64) ([]model.WeeklyRu
 	for rows.Next() {
 		var r model.WeeklyRule
 		var wd int
-		if err := rows.Scan(&r.ID, &r.PermitID, &wd, &r.VehicleID); err != nil {
+		if err := rows.Scan(&r.ID, &r.PermitID, &r.Week, &wd, &r.VehicleID); err != nil {
 			return nil, err
 		}
 		r.Weekday = time.Weekday(wd)
@@ -31,18 +31,36 @@ func (s *Store) ListRules(ctx context.Context, permitID int64) ([]model.WeeklyRu
 	return out, rows.Err()
 }
 
-// SetRule sets (or replaces) the vehicle for a permit on a weekday.
-func (s *Store) SetRule(ctx context.Context, permitID int64, weekday time.Weekday, vehicleID int64) error {
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, weekday, vehicle_id) VALUES (?, ?, ?)
-ON CONFLICT(permit_id, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
-		permitID, int(weekday), vehicleID)
-	return err
+// ErrCycleWeek reports a rule write aimed at a cycle week the permit does not
+// have — a stale tab from before a week was removed. Refused rather than
+// written: an unreachable rule row would silently do nothing until a later
+// cycle change made it resurface as a surprise.
+var ErrCycleWeek = errors.New("store: no such cycle week on this permit")
+
+// SetRule sets (or replaces) the vehicle for a permit on a weekday of a cycle
+// week. The insert is guarded in SQL against the permit's own cycle_weeks so a
+// stale form can never write an orphan week (single round trip; the guard and
+// the write cannot race apart on the one-connection pool).
+func (s *Store) SetRule(ctx context.Context, permitID int64, week int, weekday time.Weekday, vehicleID int64) error {
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
+SELECT ?, ?, ?, ? WHERE ? < (SELECT cycle_weeks FROM permit WHERE id = ?)
+ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
+		permitID, week, int(weekday), vehicleID, week, permitID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrCycleWeek
+	}
+	return nil
 }
 
-// ClearRule removes any rule for a permit on a weekday.
-func (s *Store) ClearRule(ctx context.Context, permitID int64, weekday time.Weekday) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM weekly_rule WHERE permit_id = ? AND weekday = ?`, permitID, int(weekday))
+// ClearRule removes any rule for a permit on a weekday of a cycle week.
+func (s *Store) ClearRule(ctx context.Context, permitID int64, week int, weekday time.Weekday) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM weekly_rule WHERE permit_id = ? AND cycle_week = ? AND weekday = ?`,
+		permitID, week, int(weekday))
 	return err
 }
 
@@ -119,9 +137,20 @@ SELECT (SELECT COUNT(*) FROM weekly_rule WHERE permit_id = ?)
 	}
 
 	rres, err := tx.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, weekday, vehicle_id)
-SELECT ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?`, dstID, srcID)
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
+SELECT ?, cycle_week, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?`, dstID, srcID)
 	if err != nil {
+		return 0, err
+	}
+	// The cycle shape is part of the schedule: without it, weeks 2+ of the copied
+	// rules would be unreachable on the target. The anchor is copied verbatim so
+	// source and target stay in phase — "put my schedule back" means the same car
+	// on the same real-world week, not a cycle restarted from today. Placed after
+	// the empty-source guard, so an empty source touches nothing at all.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE permit SET cycle_weeks = (SELECT cycle_weeks FROM permit WHERE id = ?),
+                  cycle_anchor = (SELECT cycle_anchor FROM permit WHERE id = ?)
+WHERE id = ?`, srcID, srcID, dstID); err != nil {
 		return 0, err
 	}
 	ores, err := tx.ExecContext(ctx, `
@@ -138,6 +167,147 @@ FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
 	rn, _ := rres.RowsAffected()
 	on, _ := ores.RowsAffected()
 	return int(rn + on), nil
+}
+
+// ---- Roster cycle weeks ----
+//
+// The cycle grows and shrinks only at its end (a week keeps its position and
+// number for life), and every operation moves the rule rows, the week count and
+// the anchor in ONE transaction: a crash between them would leave WeekAt
+// pointing at rules that don't exist. The anchor string is computed by the
+// caller (model.ReanchoredCycle needs the permit's timezone, which the store
+// does not know).
+
+// AddCycleWeek appends one week to a permit's roster cycle, seeded with a copy
+// of the (previously) last week's rules — the resolved car is unchanged at the
+// boundary until the new week is edited. Returns the new week count; capped at
+// model.MaxCycleWeeks.
+func (s *Store) AddCycleWeek(ctx context.Context, owner string, permitID int64, anchor string) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var weeks int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?`, permitID, owner).Scan(&weeks); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	if weeks < 1 {
+		weeks = 1
+	}
+	if weeks >= model.MaxCycleWeeks {
+		return weeks, ErrCycleWeek
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
+SELECT permit_id, ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ? AND cycle_week = ?`,
+		weeks, permitID, weeks-1); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`,
+		weeks+1, anchor, permitID); err != nil {
+		return 0, err
+	}
+	return weeks + 1, tx.Commit()
+}
+
+// RemoveLastCycleWeek takes the last week off a permit's roster cycle,
+// returning the removed rules (the caller renders them into a stateless Undo).
+// Shrinking to one week clears the anchor: a plain weekly roster has no cycle.
+func (s *Store) RemoveLastCycleWeek(ctx context.Context, owner string, permitID int64, anchor string) (removed []model.WeeklyRule, newWeeks int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback()
+	var weeks int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?`, permitID, owner).Scan(&weeks); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, 0, ErrNotFound
+		}
+		return nil, 0, err
+	}
+	if weeks <= 1 {
+		return nil, weeks, ErrCycleWeek
+	}
+	last := weeks - 1
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, permit_id, cycle_week, weekday, vehicle_id FROM weekly_rule
+WHERE permit_id = ? AND cycle_week = ? ORDER BY weekday`, permitID, last)
+	if err != nil {
+		return nil, 0, err
+	}
+	for rows.Next() {
+		var r model.WeeklyRule
+		var wd int
+		if err := rows.Scan(&r.ID, &r.PermitID, &r.Week, &wd, &r.VehicleID); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		r.Weekday = time.Weekday(wd)
+		removed = append(removed, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM weekly_rule WHERE permit_id = ? AND cycle_week = ?`, permitID, last); err != nil {
+		return nil, 0, err
+	}
+	if last == 1 {
+		anchor = "" // back to a plain weekly roster
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`, last, anchor, permitID); err != nil {
+		return nil, 0, err
+	}
+	return removed, last, tx.Commit()
+}
+
+// RestoreCycleWeek is RemoveLastCycleWeek's undo: it re-appends one week with
+// the given (weekday → vehicle) rules. Rules are inserted fresh (new ids); the
+// caller has already validated vehicle ownership.
+func (s *Store) RestoreCycleWeek(ctx context.Context, owner string, permitID int64, rules []model.WeeklyRule, anchor string) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var weeks int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?`, permitID, owner).Scan(&weeks); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	if weeks < 1 {
+		weeks = 1
+	}
+	if weeks >= model.MaxCycleWeeks {
+		return weeks, ErrCycleWeek
+	}
+	for _, r := range rules {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id) VALUES (?, ?, ?, ?)
+ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
+			permitID, weeks, int(r.Weekday), r.VehicleID); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`,
+		weeks+1, anchor, permitID); err != nil {
+		return 0, err
+	}
+	return weeks + 1, tx.Commit()
 }
 
 // ---- Overrides ----

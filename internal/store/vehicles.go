@@ -322,9 +322,13 @@ type VehicleUsage struct {
 	LiveOverrides int
 }
 
-// VehicleRuleUse is one roster day that would be emptied.
+// VehicleRuleUse is one roster day that would be emptied. Week is the 0-based
+// cycle week the day belongs to; CycleWeeks is that permit's cycle length, so
+// the warning can say "Tuesday (week 2)" only when the permit actually cycles.
 type VehicleRuleUse struct {
 	PermitLabel string
+	Week        int
+	CycleWeeks  int
 	Weekday     time.Weekday
 }
 
@@ -340,18 +344,18 @@ type VehicleRuleUse struct {
 func (s *Store) VehicleUsageFor(ctx context.Context, owner string, vehicleID int64) (VehicleUsage, error) {
 	var u VehicleUsage
 	rows, err := s.db.QueryContext(ctx, `
-SELECT COALESCE(p.label, ''), r.weekday
+SELECT COALESCE(p.label, ''), r.cycle_week, p.cycle_weeks, r.weekday
 FROM weekly_rule r
 JOIN permit p ON p.id = r.permit_id
 WHERE r.vehicle_id = ? AND p.owner = ?
-ORDER BY p.label, r.weekday`, vehicleID, owner)
+ORDER BY p.label, r.cycle_week, r.weekday`, vehicleID, owner)
 	if err != nil {
 		return u, err
 	}
 	for rows.Next() {
 		var use VehicleRuleUse
 		var wd int
-		if err := rows.Scan(&use.PermitLabel, &wd); err != nil {
+		if err := rows.Scan(&use.PermitLabel, &use.Week, &use.CycleWeeks, &wd); err != nil {
 			rows.Close()
 			return u, err
 		}

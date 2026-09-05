@@ -162,7 +162,7 @@ func TestWeeklyRuleResolvesByLocalDayAcrossTransitions(t *testing.T) {
 				// Resolve reads now.Weekday(), so the caller must hand it a local time — every
 				// call site in the app converts first, and this asserts why that matters.
 				local := now.In(loc)
-				res := Resolve(local, rules, nil)
+				res := Resolve(local, Cycle{}, rules, nil)
 				if res.Source != SourceRoster || res.VehicleID != 7 {
 					t.Fatalf("at %s (local %s, weekday %s) the Sunday rule did not fire: %+v",
 						now, local, local.Weekday(), res)
@@ -237,7 +237,7 @@ func TestResolveWindowBoundariesToTheSecond(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := Resolve(c.now, rules, overrides)
+			res := Resolve(c.now, Cycle{}, rules, overrides)
 			if res.Source != c.wantSource || res.VehicleID != c.wantVeh {
 				t.Errorf("at %s got %+v, want source %v vehicle %d", c.now.In(loc), res, c.wantSource, c.wantVeh)
 			}
@@ -258,7 +258,7 @@ func TestResolveTieBreaksOnIDWhenCreatedAtMatches(t *testing.T) {
 
 	// Both orderings must give the same answer, or the result depends on scan order.
 	for _, ovs := range [][]Override{{lower, higher}, {higher, lower}} {
-		res := Resolve(now, nil, ovs)
+		res := Resolve(now, Cycle{}, nil, ovs)
 		if res.VehicleID != 60 {
 			t.Errorf("tie broke to vehicle %d, want 60 (the higher ID = later insert)", res.VehicleID)
 		}
@@ -279,7 +279,7 @@ func TestOpenEndedOverrideSurvivesATransition(t *testing.T) {
 		time.Date(2026, 10, 4, 4, 0, 0, 0, loc),  // after the jump
 		time.Date(2026, 10, 6, 12, 0, 0, 0, loc), // days later
 	} {
-		res := Resolve(now, rules, ovs)
+		res := Resolve(now, Cycle{}, rules, ovs)
 		if res.Source != SourceOverride || res.VehicleID != 9 {
 			t.Errorf("at %s the open-ended booking stopped winning: %+v", now.In(loc), res)
 		}

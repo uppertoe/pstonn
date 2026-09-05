@@ -352,6 +352,20 @@ tr:last-child td { border-bottom:0; }
 .segpanes { display:grid; }
 .segpanes > .segpane { grid-area:1 / 1; }
 .segpane.hide { visibility:hidden; pointer-events:none; }
+/* Roster week tabs: the .seg control, sized for its place above the roster grid.
+   The + tab stays narrow (it adds a week, it isn't one), and the "now" mark
+   names the week the cycle is actually in — a fact, so it keeps its contrast on
+   the active tab too. */
+.wktabs { margin:0 0 10px; }
+.wktabs button { padding:8px 10px; }
+.wktabs .wkadd { flex:0 0 auto; padding:8px 12px; }
+.wktabs .wkadd svg { width:14px; height:14px; vertical-align:-2px; }
+.wknow { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:1px 6px; border-radius:999px; margin-left:5px; background:color-mix(in srgb, currentColor 14%, transparent); }
+.wkremove { margin-top:10px; }
+.wkadd-first { margin-top:10px; }
+.undoweek { margin-left:auto; flex:0 0 auto; }
+.sub.calwk { margin-bottom:6px; }
+.cal + .sub.calwk { margin-top:14px; }
 .vpick { position:relative; }
 .vpick-btn { display:flex; align-items:center; gap:9px; width:100%; justify-content:flex-start; background:var(--surface); color:var(--ink); border:1px solid var(--line); box-shadow:none; font-weight:500; padding:9px 11px; }
 .vpick-btn:hover { filter:none; box-shadow:none; border-color:var(--primary); }

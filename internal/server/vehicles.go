@@ -183,7 +183,13 @@ func usageSentence(u store.VehicleUsage) string {
 			if _, seen := byPermit[label]; !seen {
 				order = append(order, label)
 			}
-			byPermit[label] = append(byPermit[label], r.Weekday.String())
+			day := r.Weekday.String()
+			if r.CycleWeeks > 1 {
+				// On a cycling roster the same weekday exists once per week, so the
+				// bare day name would under-describe what was emptied.
+				day = fmt.Sprintf("%s (week %d)", day, r.Week+1)
+			}
+			byPermit[label] = append(byPermit[label], day)
 		}
 		for _, label := range order {
 			parts = append(parts, joinWords(byPermit[label])+" on "+label)

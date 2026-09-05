@@ -839,7 +839,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, cmp.Or(rerr, oerr))
 		return
 	}
-	if res := model.Resolve(now, rules, ovs); res.Source != model.SourceNone {
+	if res := model.Resolve(now, p.Cycle(), rules, ovs); res.Source != model.SourceNone {
 		release()
 		s.formError(w, r, "This permit has a car scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
 		return

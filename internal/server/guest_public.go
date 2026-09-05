@@ -121,7 +121,7 @@ func (s *Server) guestDesired(ctx context.Context, permit model.Permit) (want, s
 	if err != nil {
 		return "", "", time.Time{}, time.Time{}
 	}
-	res := model.Resolve(now, rules, overrides)
+	res := model.Resolve(now, permit.Cycle(), rules, overrides)
 	if res.Source == model.SourceNone {
 		return "", "", time.Time{}, time.Time{}
 	}

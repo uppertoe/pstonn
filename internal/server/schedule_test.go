@@ -151,7 +151,7 @@ func TestBuildPermitViewPlateTiers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.st.SetRule(ctx, id, now.Weekday(), vid); err != nil {
+		if err := r.st.SetRule(ctx, id, 0, now.Weekday(), vid); err != nil {
 			t.Fatal(err)
 		}
 		p := base

@@ -257,7 +257,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.st.SetRule(r.ctx, pid, time.Now().In(tenant.Stonnington().Location()).Weekday(), vid); err != nil {
+		if err := r.st.SetRule(r.ctx, pid, 0, time.Now().In(tenant.Stonnington().Location()).Weekday(), vid); err != nil {
 			t.Fatal(err)
 		}
 		rr := r.post(path, rigUser, nil)
@@ -270,7 +270,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 		// Drop the rule for the next case.
 		rules, _ := r.st.ListRules(r.ctx, pid)
 		for _, ru := range rules {
-			_ = r.st.ClearRule(r.ctx, pid, ru.Weekday)
+			_ = r.st.ClearRule(r.ctx, pid, 0, ru.Weekday)
 		}
 	})
 	t.Run("an unscheduled permit is emptied at the council and locally", func(t *testing.T) {

@@ -459,7 +459,7 @@ func seedSchedule(t *testing.T, s *store.Store, owner string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRule(ctx, pid, time.Monday, veh); err != nil {
+	if err := s.SetRule(ctx, pid, 0, time.Monday, veh); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -680,13 +680,13 @@ func TestReconcileSkipsInactivePermits(t *testing.T) {
 	past := time.Now().Add(-24 * time.Hour)
 
 	act, _ := st.UpsertPermit(ctx, owner, "active-1", "14", "Active")
-	if err := st.SetRule(ctx, act, today, veh); err != nil {
+	if err := st.SetRule(ctx, act, 0, today, veh); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.UpdatePermitMeta(ctx, owner, st.DefaultTenant, "active-1", "Granted", "VPP1", "1st Visitor Permit", future)
 
 	exp, _ := st.UpsertPermit(ctx, owner, "expired-1", "14", "Expired")
-	if err := st.SetRule(ctx, exp, today, veh); err != nil {
+	if err := st.SetRule(ctx, exp, 0, today, veh); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.UpdatePermitMeta(ctx, owner, st.DefaultTenant, "expired-1", "Granted", "VPP2", "1st Visitor Permit", past)
@@ -1119,7 +1119,7 @@ func TestDriftBackoffSurvivesAFailedCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("vehicle: %v", err)
 	}
-	if err := st.SetRule(ctx, pid, time.Monday, vid); err != nil {
+	if err := st.SetRule(ctx, pid, 0, time.Monday, vid); err != nil {
 		t.Fatalf("weekly rule: %v", err)
 	}
 	s := New(st, &fakeTenant{}, time.UTC, Options{WarmInterval: time.Hour, DriftInterval: time.Nanosecond})
@@ -1254,7 +1254,7 @@ func TestWarnExternallyDisplacedRosterGate(t *testing.T) {
 	}
 
 	// With MUM123 as today's rostered car, the same portal edit does warn the driver.
-	if err := st.SetRule(ctx, pid, time.Now().In(s.loc).Weekday(), vid); err != nil {
+	if err := st.SetRule(ctx, pid, 0, time.Now().In(s.loc).Weekday(), vid); err != nil {
 		t.Fatal(err)
 	}
 	s.warnExternallyDisplaced(ctx, p, "MUM123")
@@ -1372,7 +1372,7 @@ func TestTenantBusyTellsTheUserEventually(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid, _ := st.UpsertPermit(ctx, owner, "busy-1", "14", "Busy permit")
-	if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), veh); err != nil {
+	if err := st.SetRule(ctx, pid, 0, time.Now().In(time.UTC).Weekday(), veh); err != nil {
 		t.Fatal(err)
 	}
 	// The permit currently shows something else, so there is a real change pending.
@@ -1473,7 +1473,7 @@ func seedActivePermit(t *testing.T, st *store.Store, owner, tenantID, reg, activ
 	}
 	// The scheduler resolves the roster from time.Now() in its own location (UTC in
 	// these tests), so the rule has to be for today's UTC weekday.
-	if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), veh); err != nil {
+	if err := st.SetRule(ctx, pid, 0, time.Now().In(time.UTC).Weekday(), veh); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetPermitActive(ctx, pid, active); err != nil {

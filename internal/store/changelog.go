@@ -17,6 +17,10 @@ const (
 	// Weekly roster
 	ActionRosterSet   = "roster.set"
 	ActionRosterClear = "roster.clear"
+	// Roster cycle (multi-week rotation)
+	ActionCycleAdd     = "cycle.add"
+	ActionCycleRemove  = "cycle.remove"
+	ActionCycleRestore = "cycle.restore"
 	// One-off bookings
 	ActionOverrideAdd    = "override.add"
 	ActionOverrideDelete = "override.delete"

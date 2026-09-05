@@ -109,6 +109,15 @@ func changeText(c store.Change) string {
 		return "set " + c.Target + " to " + c.Detail
 	case store.ActionRosterClear:
 		return "cleared the roster for " + c.Target
+	case store.ActionCycleAdd:
+		return "added " + c.Detail + " to the roster on " + c.Target
+	case store.ActionCycleRemove:
+		// Detail names the week and the cars it held ("week 3 — Mon ABC123, Wed
+		// XYZ789"), captured before the delete: like a car deletion, this row is
+		// the durable record of what went.
+		return "removed " + c.Detail + " from the roster on " + c.Target
+	case store.ActionCycleRestore:
+		return "restored " + c.Detail + " to the roster on " + c.Target
 	case store.ActionOverrideAdd:
 		return "added a one-off booking for " + c.Target + " (" + c.Detail + ")"
 	case store.ActionOverrideDelete:

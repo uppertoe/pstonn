@@ -423,7 +423,7 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 		if err != nil {
 			return
 		}
-		if roster := model.Resolve(now, rules, nil); roster.Source == model.SourceRoster &&
+		if roster := model.Resolve(now, p.Cycle(), rules, nil); roster.Source == model.SourceRoster &&
 			model.SamePlate(prev, byID[roster.VehicleID].Registration) {
 			d = model.FindDisplacedVehicle(byID, prev, "", members)
 		}

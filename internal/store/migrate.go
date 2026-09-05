@@ -19,8 +19,13 @@ import (
 // idempotent and cost microseconds on an already-migrated file.
 //
 // History: 4 = per-tenant permit/session keys; 5 = outbox.critical, hashed
-// outbox dedup keys.
-const schemaVersion = 5
+// outbox dedup keys; 6 = multi-week roster: weekly_rule rebuilt with cycle_week
+// + UNIQUE(permit_id, cycle_week, weekday), permit.cycle_weeks/cycle_anchor.
+// Version 6 is a deliberate fence, not bookkeeping: an old binary's ListRules
+// would read every cycle week's rows and its Resolve tie-break could put the
+// WRONG week's car on a council permit — a silent wrong write — so the old
+// build must refuse to boot against this file instead.
+const schemaVersion = 6
 
 // migrationLockTTL bounds how long a dead migrator keeps the next start out. A
 // process killed mid-migration leaves the row claimed, and with no takeover window
@@ -218,9 +223,10 @@ CREATE TABLE IF NOT EXISTS permit (
 CREATE TABLE IF NOT EXISTS weekly_rule (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     permit_id  INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    cycle_week INTEGER NOT NULL DEFAULT 0, -- 0-based index into the permit's roster cycle
     weekday    INTEGER NOT NULL,          -- 0=Sunday .. 6=Saturday (time.Weekday)
     vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
-    UNIQUE(permit_id, weekday)
+    UNIQUE(permit_id, cycle_week, weekday)
 );
 
 CREATE TABLE IF NOT EXISTS override (
@@ -559,6 +565,10 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// on existing permits, which is safe: any permit with a roster already
 		// renders the quiet button, not the pitch.
 		`ALTER TABLE permit ADD COLUMN copy_offer_done INTEGER NOT NULL DEFAULT 0`,
+		// The roster cycle: how many weeks rotate (1 = the plain weekly roster
+		// every existing permit has) and the local date anchoring week index 0.
+		`ALTER TABLE permit ADD COLUMN cycle_weeks INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE permit ADD COLUMN cycle_anchor TEXT NOT NULL DEFAULT ''`,
 		// Which tenant a row belongs to (docs/council-connections.md). Every row that
 		// predates the column is the City of Stonnington's — the only tenant the app
 		// has ever served — which the backfill below records.
@@ -667,6 +677,16 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 	} else if !has {
 		if err := s.rebuildOverrideTable(); err != nil {
 			return fmt.Errorf("migrate override table: %w", err)
+		}
+	}
+	// Rebuild `weekly_rule` if it predates the roster cycle: the unique key must
+	// widen from (permit_id, weekday) to include cycle_week, which SQLite cannot
+	// do in place. Existing rows land as cycle week 0 — behaviour-identical.
+	if has, err := s.columnExists("weekly_rule", "cycle_week"); err != nil {
+		return err
+	} else if !has {
+		if err := s.rebuildWeeklyRuleTable(); err != nil {
+			return fmt.Errorf("migrate weekly_rule table: %w", err)
 		}
 	}
 	// Hash the outbox dedup keys older builds stored in plaintext. The key embeds
@@ -783,7 +803,12 @@ var (
 		{"permit_type_id", "''"}, {"label", "''"}, {"active_registration", "''"}, {"end_date", "''"},
 		{"status", "''"}, {"expiry_reminded", "''"}, {"permit_number", "''"}, {"permit_type", "''"},
 		{"updated_at", "''"}, {"fail_streak", "0"}, {"copy_offer_done", "0"},
-		{"active_confirmed_at", "''"},
+		{"active_confirmed_at", "''"}, {"cycle_weeks", "1"}, {"cycle_anchor", "''"},
+	}
+	weeklyRuleColumns = []rebuildColumn{
+		// id is carried so the Resolve duplicate-row tie-break (highest ID wins)
+		// survives the rebuild unchanged.
+		{"id", "NULL"}, {"permit_id", "0"}, {"cycle_week", "0"}, {"weekday", "0"}, {"vehicle_id", "0"},
 	}
 	sessionColumns = []rebuildColumn{
 		{"owner", "''"}, {"council_id", "''"}, {"sub", "''"}, {"council_email", "''"}, {"cookie_sealed", "''"},
@@ -800,6 +825,7 @@ var (
 	rebuiltTables = map[string][]rebuildColumn{
 		"override": overrideColumns, "permit": permitColumns,
 		"council_session": sessionColumns, "breaker_state": breakerColumns,
+		"weekly_rule": weeklyRuleColumns,
 	}
 )
 
@@ -880,6 +906,47 @@ func (s *Store) rebuildOverrideTable() error {
 	return tx.Commit()
 }
 
+// rebuildWeeklyRuleTable redefines weekly_rule with the cycle_week column and
+// the widened UNIQUE(permit_id, cycle_week, weekday), preserving rows and ids
+// (the Resolve tie-break keys on id). weekly_rule holds foreign keys but nothing
+// references it, so the DROP/RENAME is safe with foreign keys toggled off, per
+// the same guidance the override rebuild follows.
+func (s *Store) rebuildWeeklyRuleTable() error {
+	copyStmt, err := s.copyColumns("weekly_rule", "weekly_rule_new", weeklyRuleColumns)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer s.db.Exec(`PRAGMA foreign_keys=ON`)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		// Must mirror the base schema exactly (weeklyRuleColumns is the checked
+		// list; see TestRebuildColumnListsMatchLiveTables).
+		`CREATE TABLE weekly_rule_new (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    permit_id  INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
+    cycle_week INTEGER NOT NULL DEFAULT 0,
+    weekday    INTEGER NOT NULL,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
+    UNIQUE(permit_id, cycle_week, weekday)
+)`,
+		copyStmt,
+		`DROP TABLE weekly_rule`,
+		`ALTER TABLE weekly_rule_new RENAME TO weekly_rule`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // LegacyTenantID is the tenant every row written before the tenant dimension
 // existed belongs to. The migration stamps it onto ” rows; the registry tests
 // check the embedded registry still describes it, so those rows never orphan.
@@ -939,6 +1006,8 @@ func (s *Store) rebuildPermitTable() error {
     fail_streak         INTEGER NOT NULL DEFAULT 0,
     copy_offer_done     INTEGER NOT NULL DEFAULT 0,
     active_confirmed_at TEXT NOT NULL DEFAULT '',
+    cycle_weeks         INTEGER NOT NULL DEFAULT 1,
+    cycle_anchor        TEXT NOT NULL DEFAULT '',
     UNIQUE(council_id, council_permit_id)
 )`,
 		copyStmt,

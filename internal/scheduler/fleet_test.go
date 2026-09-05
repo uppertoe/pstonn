@@ -499,7 +499,7 @@ func newFleetRigOpts(t *testing.T, size int, freshTokens, savePasswords bool) *f
 		if err != nil {
 			t.Fatalf("seed vehicle %d: %v", i, err)
 		}
-		if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), vid); err != nil {
+		if err := st.SetRule(ctx, pid, 0, time.Now().In(time.UTC).Weekday(), vid); err != nil {
 			t.Fatalf("seed rule %d: %v", i, err)
 		}
 		desired[pid] = plate

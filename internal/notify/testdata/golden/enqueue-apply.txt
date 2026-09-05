@@ -2,7 +2,7 @@
 Dedup: apply|primary@example.com|primary@example.com|Visitor|ABC123|true|email|primary@example.com
 Subject: Permit updated: Visitor now shows ABC123
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
 
@@ -12,7 +12,7 @@ https://p.stonn.org
 Dedup: apply|primary@example.com|primary@example.com|Visitor|ABC123|true|ntfy
 Subject: Permit updated: Visitor now shows ABC123
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
 
@@ -22,7 +22,7 @@ https://p.stonn.org
 Dedup: apply|sam@example.com|primary@example.com|Visitor|ABC123|true|email|sam@example.com
 Subject: Permit updated: Visitor now shows ABC123
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
 

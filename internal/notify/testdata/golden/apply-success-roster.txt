@@ -2,7 +2,7 @@
 Subject: Permit updated: Visitor now shows ABC123
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
 
@@ -13,7 +13,7 @@ Title: Permit updated: Visitor now shows ABC123
 Priority: default
 Tags: white_check_mark
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
 
@@ -21,7 +21,7 @@ Nothing to do — this is just your confirmation it went through.
 Subject: Permit updated: Visitor now shows ABC123
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your weekly roster.
+Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
 

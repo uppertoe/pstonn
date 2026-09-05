@@ -378,7 +378,7 @@ func TestPartialPermitListIsNotACompletedDriftCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("vehicle: %v", err)
 	}
-	if err := st.SetRule(ctx, pid, time.Monday, vid); err != nil {
+	if err := st.SetRule(ctx, pid, 0, time.Monday, vid); err != nil {
 		t.Fatalf("rule: %v", err)
 	}
 

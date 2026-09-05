@@ -74,6 +74,23 @@ VALUES (42, 5, '2026-08-01T00:00:00Z', NULL, 'primary@example.com', '2026-08-01T
 		if reg != "" || tokenID != 0 {
 			t.Fatalf("override defaults after rebuild: registration=%q guest_token_id=%d", reg, tokenID)
 		}
+		// The rebuilt weekly_rule kept its row as cycle week 0 WITH ITS ID (the
+		// Resolve tie-break keys on id), and the widened unique key enforces
+		// per-week uniqueness: the same (permit, weekday) is refused within week
+		// 0 but accepted in week 1.
+		var rid, week int64
+		if err := s.db.QueryRow(`SELECT id, cycle_week FROM weekly_rule WHERE permit_id = 42 AND weekday = 1`).Scan(&rid, &week); err != nil {
+			t.Fatalf("weekly_rule row after rebuild: %v", err)
+		}
+		if rid != 1 || week != 0 {
+			t.Fatalf("weekly_rule after rebuild: id=%d week=%d, want the original id in week 0", rid, week)
+		}
+		if _, err := s.db.Exec(`INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id) VALUES (42, 0, 1, 5)`); err == nil {
+			t.Fatal("duplicate (permit, week 0, weekday) was not refused")
+		}
+		if _, err := s.db.Exec(`INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id) VALUES (42, 1, 1, 5)`); err != nil {
+			t.Fatalf("the same weekday in week 1 should be a separate slot: %v", err)
+		}
 	})
 }
 
@@ -84,7 +101,8 @@ func TestFreshSchemaCarriesEveryColumn(t *testing.T) {
 	s := newTestStore(t)
 	for table, cols := range map[string][]string{
 		"vehicle":        {"email", "color", "state"},
-		"permit":         {"fail_streak", "copy_offer_done", "council_id"},
+		"permit":         {"fail_streak", "copy_offer_done", "council_id", "cycle_weeks", "cycle_anchor"},
+		"weekly_rule":    {"cycle_week"},
 		"account_flags":  {"onboard_nudge_sent", "fortnight_nudge_sent", "council_id"},
 		"account_member": {"invite_pending"},
 		"outbox":         {"account", "reason", "critical"},

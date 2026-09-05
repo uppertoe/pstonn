@@ -97,7 +97,7 @@ func TestParkedRefusalDoesNotHoldADifferentTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetRule(ctx, pid, time.Now().In(time.UTC).Weekday(), vehB); err != nil {
+	if err := st.SetRule(ctx, pid, 0, time.Now().In(time.UTC).Weekday(), vehB); err != nil {
 		t.Fatal(err)
 	}
 	fc.setErr = nil

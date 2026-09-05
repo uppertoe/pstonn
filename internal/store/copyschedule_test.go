@@ -45,10 +45,10 @@ func copyFixture(t *testing.T, st *Store, owner string) (src, dst, vehID int64) 
 	if dst, err = st.UpsertPermit(ctx, owner, "dst-permit", "14", "Target"); err != nil {
 		t.Fatalf("dst permit: %v", err)
 	}
-	if err := st.SetRule(ctx, src, time.Monday, vehID); err != nil {
+	if err := st.SetRule(ctx, src, 0, time.Monday, vehID); err != nil {
 		t.Fatalf("rule: %v", err)
 	}
-	if err := st.SetRule(ctx, src, time.Friday, vehID); err != nil {
+	if err := st.SetRule(ctx, src, 0, time.Friday, vehID); err != nil {
 		t.Fatalf("rule: %v", err)
 	}
 	return src, dst, vehID
@@ -149,7 +149,7 @@ func TestCopyScheduleReplacesTheTarget(t *testing.T) {
 	src, dst, vehID := copyFixture(t, st, owner)
 
 	// Give the target a roster of its own on a day the source does not use.
-	if err := st.SetRule(ctx, dst, time.Wednesday, vehID); err != nil {
+	if err := st.SetRule(ctx, dst, 0, time.Wednesday, vehID); err != nil {
 		t.Fatalf("dst rule: %v", err)
 	}
 	now := time.Now().UTC()
@@ -323,7 +323,7 @@ func TestCopyScheduleEmptySourceIsNoOp(t *testing.T) {
 	if _, err := st.db.Exec(`DELETE FROM override WHERE permit_id = ?`, src); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetRule(ctx, dst, time.Monday, vehID); err != nil {
+	if err := st.SetRule(ctx, dst, 0, time.Monday, vehID); err != nil {
 		t.Fatal(err)
 	}
 

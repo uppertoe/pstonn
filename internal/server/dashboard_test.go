@@ -40,7 +40,9 @@ func samplePermitViewAt(loc *time.Location, at time.Time) permitView {
 		Permit:        model.Permit{ID: 7, CouncilPermitID: "14576", Label: "Visitor", ActiveRegistration: "ABC123"},
 		DesiredReg:    "ABC123",
 		DesiredSource: "roster",
-		Days:          days,
+		Weeks:         []weekView{{Index: 0, Num: 1, IsCurrent: true, Days: days}},
+		CycleWeeks:    1,
+		CanAddWeek:    true,
 		Cal:           cal,
 		Overrides:     []overrideView{{ID: 3, PermitID: 7, Reg: "XYZ789", Label: "Mum", Color: "#127a49", StartsAt: now, EndsAt: &end, CreatedBy: "a@b.com"}},
 		Vehicles:      vv,
@@ -342,7 +344,7 @@ func TestEmptyGarageNudges(t *testing.T) {
 	if err := templates.ExecuteTemplate(&body, "permit-body", empty); err != nil {
 		t.Fatalf("render permit-body: %v", err)
 	}
-	if !strings.Contains(body.String(), "The weekly roster runs on your saved cars") {
+	if !strings.Contains(body.String(), "The roster runs on your saved cars") {
 		t.Fatal("empty-garage roster popover does not explain what the roster needs")
 	}
 	if strings.Contains(body.String(), "clear day") {
@@ -806,5 +808,39 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p.ShowSetupNudge = true
 			return p
 		}, `isn't on a schedule yet`},
+		// A cycling roster renders the week tabs (with the "now" mark on the
+		// current week), per-week panes, and the labelled calendar rows.
+		{"cycle-tabs", func() permitView {
+			return sampleCyclingPermitView(loc, now)
+		}, `role="tablist"`},
+		{"cycle-now-marker", func() permitView {
+			return sampleCyclingPermitView(loc, now)
+		}, `class="wknow"`},
+		{"cycle-calendar-row-labels", func() permitView {
+			return sampleCyclingPermitView(loc, now)
+		}, `Next week — Week 2`},
+		// Removing a week answers with the stateless Undo riding the banner.
+		{"cycle-remove-undo", func() permitView {
+			p := sampleCyclingPermitView(loc, now)
+			p.Notice = "Removed week 2. The roster is back to a single repeating week."
+			p.UndoWeek = "1:1|2026-09-06"
+			return p
+		}, `name="undo"`},
 	}
+}
+
+// sampleCyclingPermitView is samplePermitViewAt grown to a two-week cycle, week
+// 1 (index 0) current.
+func sampleCyclingPermitView(loc *time.Location, now time.Time) permitView {
+	p := samplePermitViewAt(loc, now)
+	week2 := make([]dayView, len(p.Weeks[0].Days))
+	copy(week2, p.Weeks[0].Days)
+	for i := range week2 {
+		week2[i].Week = 1
+	}
+	p.Weeks = append(p.Weeks, weekView{Index: 1, Num: 2, Days: week2})
+	p.CycleWeeks = 2
+	p.CanAddWeek = true
+	p.CalRowLabels = []string{"This week — Week 1", "Next week — Week 2"}
+	return p
 }

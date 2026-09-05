@@ -297,7 +297,7 @@ func (s *Scheduler) displaced(ctx context.Context, p model.Permit, overrides []m
 	// nobody was actually scheduled today, so its driver is not parked and must not
 	// be warned. (Without this gate, a one-off replacing yesterday's leftover plate
 	// emailed that driver and told the account it had — the reported bug.)
-	roster := model.Resolve(now, rules, nil) // the roster/none pick, one-offs excluded
+	roster := model.Resolve(now, p.Cycle(), rules, nil) // the roster/none pick, one-offs excluded
 	if roster.Source != model.SourceRoster {
 		return model.DisplacedBooking{} // today has no rostered car; nobody was scheduled
 	}
@@ -512,7 +512,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		alog.Infof("overrides for permit %d: %v", p.ID, err)
 		return false
 	}
-	res := model.Resolve(now, rules, overrides)
+	res := model.Resolve(now, p.Cycle(), rules, overrides)
 	if res.Source == model.SourceNone {
 		// Nothing scheduled right now; leave the permit as-is. It keeps whatever plate
 		// was last put on it, which is worth saying once — but only once, because the

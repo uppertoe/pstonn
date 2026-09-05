@@ -83,7 +83,7 @@ func TestComposeApplyCopy(t *testing.T) {
 	subj, body, _, _ := composeApply(ApplyOutcome{
 		PermitLabel: "VPP24714", Reg: "1OF7MC", Name: "Anita's Car (Nanny)", Source: "roster", OK: true,
 	}, testPortal)
-	for _, want := range []string{"VPP24714 now shows 1OF7MC", "Anita's Car (Nanny) — 1OF7MC", "as scheduled by your weekly roster", "confirmation it went through"} {
+	for _, want := range []string{"VPP24714 now shows 1OF7MC", "Anita's Car (Nanny) — 1OF7MC", "as scheduled by your roster", "confirmation it went through"} {
 		if !strings.Contains(subj+body, want) {
 			t.Fatalf("roster copy missing %q; got subj=%q body=%q", want, subj, body)
 		}

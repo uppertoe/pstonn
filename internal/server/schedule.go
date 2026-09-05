@@ -375,6 +375,12 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// by definition minutes old at most.
 		plateCheckedAgo = "checked just now"
 	}
+	// The permit's clock, converted BEFORE anything reads weekdays or cycle weeks
+	// from it (the instant-arithmetic above is timezone-indifferent). Taking date
+	// parts from a clock in some other zone yields a day — and with a cycle, a
+	// week — that is off by one for part of every day.
+	loc := s.locForPermit(ctx, p)
+	now = now.In(loc)
 	rules, err := s.store.ListRules(ctx, p.ID)
 	if err != nil {
 		return permitView{}, err
@@ -383,7 +389,8 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	if err != nil {
 		return permitView{}, err
 	}
-	res := model.Resolve(now, rules, overrides)
+	cyc := p.Cycle()
+	res := model.Resolve(now, cyc, rules, overrides)
 
 	// dispReg resolves what to show for a resolution or override: a saved vehicle's
 	// reg/label/colour, or an ad-hoc one-off plate (no saved name, neutral colour).
@@ -394,25 +401,32 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		return regByID[vid], labelByID[vid], colorByID[vid]
 	}
 
-	ruleByWeekday := map[time.Weekday]int64{}
+	// Rules keyed by (cycle week, weekday). One map per week rather than a flat
+	// weekday map: the calendar's second row is usually a DIFFERENT cycle week,
+	// so a weekday-only lookup would show the wrong "usually X".
+	ruleBy := map[int]map[time.Weekday]int64{}
 	for _, ru := range rules {
-		ruleByWeekday[ru.Weekday] = ru.VehicleID
+		m := ruleBy[ru.Week]
+		if m == nil {
+			m = map[time.Weekday]int64{}
+			ruleBy[ru.Week] = m
+		}
+		m[ru.Weekday] = ru.VehicleID
 	}
-	var days []dayView
-	for _, wd := range weekdaysDisplay {
-		vid := ruleByWeekday[wd]
-		days = append(days, dayView{
-			PermitID: p.ID, WeekdayNum: int(wd), Name: shortDay(wd),
-			VehicleID: vid, Reg: regByID[vid], Label: labelByID[vid], Color: colorByID[vid],
-		})
+	curWeek := cyc.WeekAt(now)
+	var weeks []weekView
+	for w := 0; w < cyc.Weeks; w++ {
+		var days []dayView
+		for _, wd := range weekdaysDisplay {
+			vid := ruleBy[w][wd]
+			days = append(days, dayView{
+				PermitID: p.ID, Week: w, WeekdayNum: int(wd), Name: shortDay(wd),
+				VehicleID: vid, Reg: regByID[vid], Label: labelByID[vid], Color: colorByID[vid],
+			})
+		}
+		weeks = append(weeks, weekView{Index: w, Num: w + 1, IsCurrent: w == curWeek, Days: days})
 	}
 
-	// "Today" is the permit's calendar day, so the instant is moved into the
-	// permit's zone BEFORE its date parts are read: taking Year/Month/Day from a
-	// clock in some other zone and stamping them onto loc yields a day that is off
-	// by one for part of every day.
-	loc := s.locForPermit(ctx, p)
-	now = now.In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	// Align the fortnight grid to weekday columns (Sunday first) so the same
 	// weekday sits in the same column as the roster above. The grid starts on the
@@ -430,7 +444,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		if isToday {
 			resolveAt = now
 		}
-		r := model.Resolve(resolveAt, rules, overrides)
+		r := model.Resolve(resolveAt, cyc, rules, overrides)
 		hasOneoff := false
 		for i := range overrides {
 			o := overrides[i]
@@ -452,7 +466,9 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		adhoc := r.Source == model.SourceOverride && r.Registration != ""
 		usual := ""
 		if r.Source == model.SourceOverride {
-			if reg := regByID[ruleByWeekday[day.Weekday()]]; reg != "" && !model.SamePlate(reg, calReg) {
+			// The roster car this override displaced must come from the DAY's cycle
+			// week, not the current one — the grid's second row usually isn't.
+			if reg := regByID[ruleBy[cyc.WeekAt(resolveAt)][day.Weekday()]]; reg != "" && !model.SamePlate(reg, calReg) {
 				usual = reg
 			}
 		}
@@ -517,11 +533,24 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// What THIS permit's portal can do decides which controls the card offers.
 	// Resolved by the permit's tenant, never the account's current selection.
 	caps := s.tenant.Capabilities(ctx, p.Owner, p.TenantID)
+	// Name each calendar row's cycle week only when there is more than one —
+	// with a cycle, the calendar is the one place a household can SEE which
+	// week is which against real dates.
+	var calRowLabels []string
+	if cyc.Weeks > 1 {
+		calRowLabels = []string{
+			fmt.Sprintf("This week — Week %d", curWeek+1),
+			fmt.Sprintf("Next week — Week %d", (curWeek+1)%cyc.Weeks+1),
+		}
+	}
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
 		Caps:    capsOf(caps),
 		Regions: caps.Regions,
-		Days:    days, Cal: cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
+		Weeks:   weeks, CurrentWeek: curWeek, CycleWeeks: cyc.Weeks,
+		CanAddWeek:   cyc.Weeks < model.MaxCycleWeeks,
+		CalRowLabels: calRowLabels,
+		Cal:          cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 		ActiveColor: colorOfPlate(vviews, p.ActiveRegistration),
 		RosterEmpty: len(rules) == 0,
 		CopyPitch:   len(rules) == 0 && !p.CopyOfferDone,
@@ -568,6 +597,11 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			label := sp.Label
 			if label == "" {
 				label = "Permit " + sp.CouncilPermitID
+			}
+			// Name a cycling source's pattern in the option itself, so the person
+			// knows which SHAPE of schedule they are about to copy, not just whose.
+			if cw := sp.Cycle().Weeks; cw > 1 {
+				label += fmt.Sprintf(" (%d-week cycle)", cw)
 			}
 			dead := sp.Inactive(now, loc)
 			if dead {
@@ -639,6 +673,20 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	weekday := time.Weekday(wd)
+	// The cycle week gets weekday's strictness, and for the same reason: a
+	// defaulted-to-0 week would silently edit week 1. Blank is accepted as week 0
+	// ONLY for a plain weekly roster (the pre-cycle form shape); a cycling permit
+	// must say which week it means. The upper bound is the permit's own cycle so
+	// a stale tab from before a week was removed cannot write an orphan row.
+	week := 0
+	if raw := strings.TrimSpace(r.FormValue("week")); raw != "" || p.Cycle().Weeks > 1 {
+		wv, werr := strconv.Atoi(raw)
+		if werr != nil || wv < 0 || wv >= p.Cycle().Weeks {
+			s.formError(w, r, "That week isn't valid. Please reload the page and try again.")
+			return
+		}
+		week = wv
+	}
 	// The car gets the same strictness: atoi64 mapped anything unparseable to 0,
 	// and 0 is the "clear this day" sentinel, so a mangled id (a stale page, a
 	// hand-edited form) silently emptied the roster day instead of being refused.
@@ -655,12 +703,12 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	var err error
 	var plate string
 	if vehicleID == 0 {
-		err = s.store.ClearRule(r.Context(), p.ID, weekday)
+		err = s.store.ClearRule(r.Context(), p.ID, week, weekday)
 	} else {
 		if !s.ownsVehicle(w, r, owner, vehicleID) {
 			return
 		}
-		err = s.store.SetRule(r.Context(), p.ID, weekday, vehicleID)
+		err = s.store.SetRule(r.Context(), p.ID, week, weekday, vehicleID)
 		plate = s.plateOf(r.Context(), owner, vehicleID)
 	}
 	if err != nil {
@@ -678,15 +726,225 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	// Roster edits are the change most likely to matter and least likely to be
 	// noticed: clearing a day produces no apply at all, so the scheduler does
 	// nothing and says nothing.
+	// Name the cycle week only when the roster has more than one — "Tuesday
+	// (week 2)" on a plain weekly roster would just be noise.
+	dayName := weekday.String()
+	if p.Cycle().Weeks > 1 {
+		dayName = fmt.Sprintf("%s (week %d)", weekday, week+1)
+	}
 	if vehicleID == 0 {
 		s.logChange(r.Context(), owner, user, store.ActionRosterClear,
-			weekday.String()+" on "+permitLabel(p), "")
+			dayName+" on "+permitLabel(p), "")
 	} else {
 		s.logChange(r.Context(), owner, user, store.ActionRosterSet,
-			weekday.String()+" on "+permitLabel(p), plate)
+			dayName+" on "+permitLabel(p), plate)
 	}
 	s.sched.KickPermit(p.ID)
 	s.respondPermit(w, r, owner, p)
+}
+
+// ---- roster cycle weeks ----
+
+// encodeWeekRules flattens a removed week's days into the stateless Undo
+// payload ("weekday:vehicle" pairs; "-" for an empty week, so the button's
+// presence never depends on the payload being non-empty). decodeWeekRules is
+// its strict inverse — anything malformed is refused, never coerced.
+func encodeWeekRules(rules []model.WeeklyRule) string {
+	if len(rules) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(rules))
+	for _, r := range rules {
+		parts = append(parts, fmt.Sprintf("%d:%d", int(r.Weekday), r.VehicleID))
+	}
+	return strings.Join(parts, ",")
+}
+
+func decodeWeekRules(s string) ([]model.WeeklyRule, bool) {
+	if s == "-" {
+		return nil, true
+	}
+	var out []model.WeeklyRule
+	seen := map[int]bool{}
+	for _, part := range strings.Split(s, ",") {
+		wd, vid, ok := strings.Cut(part, ":")
+		if !ok {
+			return nil, false
+		}
+		w, werr := strconv.Atoi(wd)
+		v, verr := strconv.ParseInt(vid, 10, 64)
+		if werr != nil || verr != nil || w < 0 || w > 6 || v <= 0 || seen[w] {
+			return nil, false
+		}
+		seen[w] = true
+		out = append(out, model.WeeklyRule{Weekday: time.Weekday(w), VehicleID: v})
+	}
+	return out, len(out) > 0
+}
+
+// addCycleWeek appends one week to the roster cycle, seeded from the last week,
+// so the resolved car is unchanged until the new week is edited — no council
+// write, no kick. Re-anchoring keeps the current week's index where it is.
+func (s *Server) addCycleWeek(w http.ResponseWriter, r *http.Request) {
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	now := time.Now().In(s.locForPermit(r.Context(), p))
+	cyc := p.Cycle()
+	if cyc.Weeks >= model.MaxCycleWeeks {
+		s.formError(w, r, "A roster holds at most four weeks.")
+		return
+	}
+	next := model.ReanchoredCycle(now, cyc, cyc.Weeks+1)
+	n, err := s.store.AddCycleWeek(r.Context(), owner, p.ID, next.Anchor)
+	if err != nil {
+		if errors.Is(err, store.ErrCycleWeek) {
+			s.formError(w, r, "A roster holds at most four weeks.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	p.CycleWeeks, p.CycleAnchor = n, next.Anchor
+	s.logChange(r.Context(), owner, user, store.ActionCycleAdd, permitLabel(p), fmt.Sprintf("week %d", n))
+	notice := fmt.Sprintf("Added week %d, copied from week %d. The roster now repeats every %d weeks.", n, n-1, n)
+	if n == 2 {
+		notice = "Added week 2, copied from week 1. The roster now alternates between the two weeks."
+	}
+	s.respondPermitNotice(w, r, owner, p, notice)
+}
+
+// removeCycleWeek takes the LAST week off the cycle — weeks keep their position
+// and number for life, so only the end can go. Deletion is immediate; the
+// response's notice carries a one-tap Undo whose payload IS the removed week
+// (plus the pre-remove anchor, so undoing while inside the removed week puts
+// the mapping back exactly). Removing the week the cycle is currently IN
+// changes today's resolved car, so that path kicks the scheduler and says so.
+func (s *Server) removeCycleWeek(w http.ResponseWriter, r *http.Request) {
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	now := time.Now().In(s.locForPermit(ctx, p))
+	cyc := p.Cycle()
+	if cyc.Weeks <= 1 {
+		s.formError(w, r, "This roster is a single repeating week — there is no extra week to remove.")
+		return
+	}
+	inRemoved := cyc.WeekAt(now) == cyc.Weeks-1
+	next := model.ReanchoredCycle(now, cyc, cyc.Weeks-1)
+	removed, n, err := s.store.RemoveLastCycleWeek(ctx, owner, p.ID, next.Anchor)
+	if err != nil {
+		if errors.Is(err, store.ErrCycleWeek) {
+			s.formError(w, r, "This roster is a single repeating week — there is no extra week to remove.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	oldAnchor := p.CycleAnchor
+	p.CycleWeeks, p.CycleAnchor = n, next.Anchor
+	// Name what went, durably: the activity row is the only record once Undo lapses.
+	detail := fmt.Sprintf("week %d", cyc.Weeks)
+	if days := describeWeekRules(ctx, s, owner, removed); days != "" {
+		detail += " — " + days
+	}
+	s.logChange(ctx, owner, user, store.ActionCycleRemove, permitLabel(p), detail)
+	notice := fmt.Sprintf("Removed week %d.", cyc.Weeks)
+	if n == 1 {
+		notice = fmt.Sprintf("Removed week %d. The roster is back to a single repeating week.", cyc.Weeks)
+	}
+	if inRemoved {
+		notice += fmt.Sprintf(" The cycle was in that week, so this week now runs week %d's roster.", next.WeekAt(now)+1)
+		s.sched.KickPermit(p.ID)
+	}
+	undo := encodeWeekRules(removed) + "|" + oldAnchor
+	s.respondPermitUndo(w, r, owner, p, notice, undo)
+}
+
+// restoreCycleWeek is the Undo: re-append the removed week with its days, under
+// the pre-remove anchor so the mapping comes back exactly. The payload is
+// client-held; every part of it is re-validated here (day bounds, vehicle
+// ownership, a parseable anchor) — a tampered payload is refused, and the worst
+// a crafted-but-valid one can do is edit the owner's own roster, which any
+// roster form can already do.
+func (s *Server) restoreCycleWeek(w http.ResponseWriter, r *http.Request) {
+	user, owner, _, ok := s.accountForWrite(w, r)
+	if !ok {
+		return
+	}
+	p, ok := s.ownedPermit(w, r, owner)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	payload, anchor, okCut := strings.Cut(r.FormValue("undo"), "|")
+	rules, okRules := decodeWeekRules(payload)
+	if !okCut || !okRules {
+		s.formError(w, r, "That undo has expired. Please add the week again by hand.")
+		return
+	}
+	if anchor != "" {
+		if _, err := time.Parse("2006-01-02", anchor); err != nil {
+			s.formError(w, r, "That undo has expired. Please add the week again by hand.")
+			return
+		}
+	}
+	cyc := p.Cycle()
+	if cyc.Weeks >= model.MaxCycleWeeks {
+		s.formError(w, r, "A roster holds at most four weeks.")
+		return
+	}
+	for _, ru := range rules {
+		if !s.ownsVehicle(w, r, owner, ru.VehicleID) {
+			return
+		}
+	}
+	if anchor == "" {
+		// A 1→2 undo (the removed cycle had no anchor of its own to put back):
+		// anchor the way adding a week would.
+		anchor = model.ReanchoredCycle(time.Now().In(s.locForPermit(ctx, p)), cyc, cyc.Weeks+1).Anchor
+	}
+	n, err := s.store.RestoreCycleWeek(ctx, owner, p.ID, rules, anchor)
+	if err != nil {
+		if errors.Is(err, store.ErrCycleWeek) {
+			s.formError(w, r, "A roster holds at most four weeks.")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	p.CycleWeeks, p.CycleAnchor = n, anchor
+	s.logChange(ctx, owner, user, store.ActionCycleRestore, permitLabel(p), fmt.Sprintf("week %d", n))
+	s.sched.KickPermit(p.ID)
+	s.respondPermitNotice(w, r, owner, p, fmt.Sprintf("Week %d is back.", n))
+}
+
+// describeWeekRules names a removed week's days for the activity log
+// ("Monday ABC123, Wednesday XYZ789"); "" for an empty week.
+func describeWeekRules(ctx context.Context, s *Server, owner string, rules []model.WeeklyRule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, ru := range rules {
+		if plate := s.plateOf(ctx, owner, ru.VehicleID); plate != "" {
+			parts = append(parts, ru.Weekday.String()+" "+plate)
+		} else {
+			parts = append(parts, ru.Weekday.String())
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // combineDateTime joins a native date input (YYYY-MM-DD) and time input (HH:MM)
@@ -1015,7 +1273,13 @@ func (s *Server) respondPermit(w http.ResponseWriter, r *http.Request, owner str
 // card, for the person whose action just changed this permit. Both are the
 // MUTATION reply: they tell the page the schedule changed (see the legend).
 func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice string) {
-	s.renderPermitFragment(w, r, owner, p, notice, true)
+	s.renderPermitFragment(w, r, owner, p, notice, "", true)
+}
+
+// respondPermitUndo is respondPermitNotice with a one-tap Undo in the banner —
+// the reply to removing a roster week, whose payload is the removed week itself.
+func (s *Server) respondPermitUndo(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice, undo string) {
+	s.renderPermitFragment(w, r, owner, p, notice, undo, true)
 }
 
 // renderPermitFragment re-renders the card body. changed says whether the request
@@ -1023,7 +1287,7 @@ func (s *Server) respondPermitNotice(w http.ResponseWriter, r *http.Request, own
 // trigger. The self-poll (permitCard) passes false — it changes nothing, and
 // when every tick re-fetched the legend too, a badge check cost two requests
 // and re-rendered a key that could not have moved.
-func (s *Server) renderPermitFragment(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice string, changed bool) {
+func (s *Server) renderPermitFragment(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice, undo string, changed bool) {
 	if r.Header.Get("HX-Request") == "" {
 		redirectHome(w, r)
 		return
@@ -1047,6 +1311,7 @@ func (s *Server) renderPermitFragment(w http.ResponseWriter, r *http.Request, ow
 	attempt, _ := strconv.Atoi(r.URL.Query().Get("n"))
 	pv.armPlatePoll(attempt)
 	pv.Notice = notice
+	pv.UndoWeek = undo
 	_, _, pv.IsPrimary = s.resolveAccount(ctx)
 	// The colour key lives ABOVE the permit cards, outside this fragment's target,
 	// so a roster change would otherwise leave it stale until the next full load —
@@ -1074,7 +1339,7 @@ func (s *Server) permitCard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.renderPermitFragment(w, r, owner, p, "", false)
+	s.renderPermitFragment(w, r, owner, p, "", "", false)
 }
 
 // windowEndText renders a booking's end for a human.

@@ -27,7 +27,7 @@ func TestNextChangeRosterBoundary(t *testing.T) {
 		{ID: 1, Weekday: time.Monday, VehicleID: 1},
 		{ID: 2, Weekday: time.Tuesday, VehicleID: 2},
 	}
-	got := NextChange(now, 48*time.Hour, rules, nil)
+	got := NextChange(now, 48*time.Hour, Cycle{}, rules, nil)
 	want := time.Date(2026, 8, 25, 0, 0, 0, 0, loc)
 	if got == nil || !got.Equal(want) {
 		t.Fatalf("next change = %v, want %v", got, want)
@@ -44,7 +44,7 @@ func TestNextChangeSameCarConsecutiveDaysIsNoWrite(t *testing.T) {
 		{ID: 1, Weekday: time.Monday, VehicleID: 1},
 		{ID: 2, Weekday: time.Tuesday, VehicleID: 1},
 	}
-	if got := NextChange(now, 36*time.Hour, rules, nil); got != nil {
+	if got := NextChange(now, 36*time.Hour, Cycle{}, rules, nil); got != nil {
 		t.Fatalf("same-car rollover reported a change at %v", got)
 	}
 }
@@ -58,14 +58,14 @@ func TestNextChangeGapLeavesPlateAlone(t *testing.T) {
 		{ID: 1, Weekday: time.Monday, VehicleID: 1},
 		{ID: 3, Weekday: time.Wednesday, VehicleID: 1},
 	}
-	if got := NextChange(now, 72*time.Hour, same, nil); got != nil {
+	if got := NextChange(now, 72*time.Hour, Cycle{}, same, nil); got != nil {
 		t.Fatalf("gap then the same car reported a change at %v", got)
 	}
 	diff := []WeeklyRule{
 		{ID: 1, Weekday: time.Monday, VehicleID: 1},
 		{ID: 3, Weekday: time.Wednesday, VehicleID: 2},
 	}
-	got := NextChange(now, 72*time.Hour, diff, nil)
+	got := NextChange(now, 72*time.Hour, Cycle{}, diff, nil)
 	want := time.Date(2026, 8, 26, 0, 0, 0, 0, loc)
 	if got == nil || !got.Equal(want) {
 		t.Fatalf("gap then a different car = %v, want %v", got, want)
@@ -82,13 +82,13 @@ func TestNextChangeBookingBoundaries(t *testing.T) {
 	ov := []Override{{ID: 1, VehicleID: 2, StartsAt: start, EndsAt: &end, CreatedAt: booked}}
 
 	// The booking's start is the next write…
-	got := NextChange(now, 24*time.Hour, rules, ov)
+	got := NextChange(now, 24*time.Hour, Cycle{}, rules, ov)
 	if got == nil || !got.Equal(start) {
 		t.Fatalf("next change = %v, want the booking start %v", got, start)
 	}
 	// …and once inside it, handing back to the roster car at 17:00 is the next.
 	inside := time.Date(2026, 8, 24, 12, 0, 0, 0, loc)
-	got = NextChange(inside, 24*time.Hour, rules, ov)
+	got = NextChange(inside, 24*time.Hour, Cycle{}, rules, ov)
 	if got == nil || !got.Equal(end) {
 		t.Fatalf("next change from inside booking = %v, want its end %v", got, end)
 	}
@@ -106,7 +106,7 @@ func TestNextChangeBookingOfRosterCarIsNoWrite(t *testing.T) {
 	start := time.Date(2026, 8, 24, 9, 0, 0, 0, loc)
 	end := time.Date(2026, 8, 24, 17, 0, 0, 0, loc)
 	ov := []Override{{ID: 1, VehicleID: 1, StartsAt: start, EndsAt: &end, CreatedAt: start.Add(-time.Hour)}}
-	if got := NextChange(now, 36*time.Hour, rules, ov); got != nil {
+	if got := NextChange(now, 36*time.Hour, Cycle{}, rules, ov); got != nil {
 		t.Fatalf("booking the rostered car reported a change at %v", got)
 	}
 }
@@ -122,7 +122,7 @@ func TestNextChangeAdHocPlateComparesNormalised(t *testing.T) {
 		{ID: 1, Registration: "abc 123", StartsAt: now.Add(-time.Hour), EndsAt: &mid, CreatedAt: now.Add(-2 * time.Hour)},
 		{ID: 2, Registration: "ABC123", StartsAt: mid, EndsAt: &end, CreatedAt: now.Add(-time.Hour)},
 	}
-	if got := NextChange(now, 12*time.Hour, nil, ov); got != nil {
+	if got := NextChange(now, 12*time.Hour, Cycle{}, nil, ov); got != nil {
 		t.Fatalf("re-spelt plate reported a change at %v", got)
 	}
 }
@@ -136,7 +136,7 @@ func TestNextChangeRespectsHorizon(t *testing.T) {
 		{ID: 1, Weekday: time.Monday, VehicleID: 1},
 		{ID: 2, Weekday: time.Tuesday, VehicleID: 2},
 	}
-	if got := NextChange(now, 6*time.Hour, rules, nil); got != nil {
+	if got := NextChange(now, 6*time.Hour, Cycle{}, rules, nil); got != nil {
 		t.Fatalf("change beyond the horizon reported: %v", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestNextChangeFromEmptyScheduleCountsFirstAllocation(t *testing.T) {
 	// most one, in the harmless direction for an outage warning.
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, loc) // Monday, no Monday rule
 	rules := []WeeklyRule{{ID: 2, Weekday: time.Tuesday, VehicleID: 2}}
-	got := NextChange(now, 24*time.Hour, rules, nil)
+	got := NextChange(now, 24*time.Hour, Cycle{}, rules, nil)
 	want := time.Date(2026, 8, 25, 0, 0, 0, 0, loc)
 	if got == nil || !got.Equal(want) {
 		t.Fatalf("first allocation from empty = %v, want %v", got, want)

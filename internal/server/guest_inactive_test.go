@@ -194,7 +194,7 @@ func TestRenewalRevivesGuestLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.SetRule(ctx, src, time.Monday, vehID); err != nil {
+	if err := s.store.SetRule(ctx, src, 0, time.Monday, vehID); err != nil {
 		t.Fatal(err)
 	}
 	raw := "guestlink" + strings.Repeat("y", 20)
@@ -227,7 +227,7 @@ func TestRenewalRevivesGuestLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.SetRule(ctx, src2, time.Tuesday, vehID); err != nil {
+	if err := s.store.SetRule(ctx, src2, 0, time.Tuesday, vehID); err != nil {
 		t.Fatal(err)
 	}
 	raw2 := "guestlink" + strings.Repeat("z", 20)
@@ -317,7 +317,7 @@ func TestDeadToDeadCopyDoesNotMoveGuests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.SetRule(ctx, src, time.Monday, vehID); err != nil {
+	if err := s.store.SetRule(ctx, src, 0, time.Monday, vehID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.store.CreateGuestGrant(ctx, owner, owner, src, "Nanny", false,

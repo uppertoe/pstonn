@@ -56,8 +56,11 @@
        vanished mid-typing. htmx 2's afterRequest detail carries `successful` and
        `requestConfig.verb` (lower-case), so a form POST that landed is the only
        thing that closes it; a failed submit keeps the form up with its error. */}}
+  {{/* wk (the selected roster week tab) lives HERE, not inside #pbody: every
+       roster tap swaps the fragment, and state inside it would snap back to the
+       server default mid-edit. Seeded with the week the cycle is currently in. */}}
   <section class="card" id="permit-{{.Permit.ID}}" style="--hue:var(--sec-schedule)"
-           x-data="{addOpen:false, qrOpen:false}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '{{.Permit.ID}}') addOpen=true"
+           x-data="{addOpen:false, qrOpen:false, wk:{{.CurrentWeek}}}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '{{.Permit.ID}}') addOpen=true"
            @htmx:after-request="if($event.detail.successful && $event.detail.requestConfig && $event.detail.requestConfig.verb !== 'get' && !$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     {{/* #pbody is the swap target for every card re-render (plate poll, roster edits,
          one-off add/delete). The teleported modals are rendered as a sibling OUTSIDE
@@ -175,7 +178,17 @@
 
 {{/* =================== PERMIT BODY (swappable) =================== */}}
 {{define "permit-body"}}
-{{if .Notice}}<div class="banner ok" style="margin-bottom:12px">{{template "ic-check"}} <span>{{.Notice}}</span></div>{{end}}
+{{if .Notice}}<div class="banner ok" style="margin-bottom:12px">{{template "ic-check"}} <span>{{.Notice}}</span>
+  {{/* The stateless Undo for a just-removed roster week: the payload IS the
+       removed week, so it lives exactly as long as this banner does — the next
+       edit or a reload discards it, which is the intended lifetime. */}}
+  {{if .UndoWeek}}
+  <form class="undoweek" hx-post="/permits/{{.Permit.ID}}/weeks/restore" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML">
+    <input type="hidden" name="undo" value="{{.UndoWeek}}">
+    <button type="submit" class="ghost sm">Undo</button>
+  </form>
+  {{end}}
+</div>{{end}}
 <div class="permit-head">
   <div class="pname" x-data="{rename:false}">
     {{/* Only the TITLE line swaps between the name and the rename form; the
@@ -325,64 +338,110 @@
 </span></div>
 {{end}}
 
+{{$cycling := gt .CycleWeeks 1}}
+{{if $cycling}}
+<p class="sub">Roster &mdash; repeats every {{.CycleWeeks}} weeks</p>
+{{/* Week tabs: fixed positions and numbers for the life of the roster (weeks
+     are only ever added or removed at the END). The tab for the week the cycle
+     is currently in carries the "now" mark and is the server-rendered default;
+     the selected tab (wk) lives on the CARD's x-data, so it survives the htmx
+     swaps every roster tap performs on this fragment.
+
+     Deliberately NO ids on the tabs or panes (and so no aria-controls /
+     aria-labelledby wiring): htmx "settles" the attributes of id-matched
+     elements back to the server-rendered values ~20ms after a swap, clobbering
+     the classes Alpine just bound from wk — the selected tab snapped back to
+     the current week on every roster tap. The panes carry their own
+     aria-labels instead. */}}
+<div class="seg wktabs" role="tablist" aria-label="Roster weeks"
+     @keydown.arrow-right.prevent="wk=(wk+1)%{{.CycleWeeks}}" @keydown.arrow-left.prevent="wk=(wk+{{.CycleWeeks}}-1)%{{.CycleWeeks}}">
+  {{$pid := .Permit.ID}}
+  {{range .Weeks}}
+  <button type="button" role="tab"
+          class="{{if .IsCurrent}}on{{end}}" :class="{on: wk==={{.Index}}}" :aria-selected="wk==={{.Index}}" :tabindex="wk==={{.Index}} ? 0 : -1"
+          @click="wk={{.Index}}">Week {{.Num}}{{if .IsCurrent}} <span class="wknow" title="The cycle is in this week">now</span>{{end}}</button>
+  {{end}}
+  {{if .CanAddWeek}}
+  <button type="button" class="wkadd" title="Add a week" aria-label="Add a week to the roster, copied from the last week"
+          hx-post="/permits/{{$pid}}/weeks/add" hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"
+          @click="wk={{.CycleWeeks}}">{{template "ic-plus"}}</button>
+  {{end}}
+</div>
+{{else}}
 <p class="sub">Weekly roster</p>
-<div class="roster">
-  {{$vehicles := .Vehicles}}
+{{end}}
+<div class="segpanes">
+  {{$vehicles := .Vehicles}}{{$pv := .}}
+  {{range .Weeks}}
+  {{$week := .}}
+  <div class="segpane{{if not .IsCurrent}}{{if $cycling}} hide{{end}}{{end}}" {{if $cycling}}role="tabpanel" aria-label="Week {{.Num}} roster" :class="{hide: wk!=={{.Index}}}"{{end}}>
+  <div class="roster">
   {{range .Days}}
-  {{$pid := .PermitID}}{{$wd := .WeekdayNum}}{{$sel := .VehicleID}}
+  {{$pid := .PermitID}}{{$wk := .Week}}{{$wd := .WeekdayNum}}{{$sel := .VehicleID}}
   <div class="rcell" x-data="{open:false}">
     <div class="day">{{.Name}}</div>
     <button type="button" class="chip {{if not .Reg}}empty{{end}}" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no vehicle, choose one{{end}}">
+            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no vehicle, choose one{{end}}">
       {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else}}<span class="lab muted">none</span>{{end}}
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       {{if $vehicles}}
-      <p class="tt">{{.Name}}: pick a vehicle</p>
+      <p class="tt">{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: pick a vehicle</p>
       <div class="vopts">
         <button type="button" class="vopt {{if not $sel}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">clear day</button>
         {{range $vehicles}}
         <button type="button" class="vopt {{if eq $sel .ID}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
         {{end}}
       </div>
       {{else}}
       {{/* Empty garage: the only thing this popover could offer is "clear", a
            no-op that reads as broken. Say what the roster runs on instead. */}}
-      <p class="tt">The weekly roster runs on your saved cars</p>
+      <p class="tt">The roster runs on your saved cars</p>
       <p class="empty-note" style="margin:2px 0 10px">Add a car once, then set it for any day with one tap.</p>
       <a class="vopt" href="/vehicles" style="text-decoration:none">{{template "ic-plus"}} <span class="lab">Add your cars</span></a>
       {{end}}
     </div>
   </div>
   {{end}}
-</div>
-
-<p class="sub" style="margin-top:20px">This week and next</p>
-<div class="cal">
-  {{range .Cal}}
-  {{/* Read-only day summary. The full information is in the aria-label, so a
-       keyboard/screen-reader user gets it on focus without opening the popover;
-       the popover is a visual convenience and is hidden from assistive tech. */}}
-  <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
-       role="button" tabindex="0" :aria-expanded="open"
-       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{if eq .Source "roster"}}weekly roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}{{if .Unconfirmed}}. Not confirmed with the council — the permit may still show a different plate{{else if .Applying}}. Change still applying — not on the permit yet{{end}}"
-       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
-    <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
-    <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
-    <div class="bar{{if .Adhoc}} adhoc{{end}}{{if .Unconfirmed}} unconf{{else if .Applying}} applying{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
-    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
-         x-effect="open && $nextTick(() => popClamp($el))">
-      <p class="tt">{{.DayLabel}}</p>
-      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{if eq .Source "roster"}}weekly roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
-      {{if .Unconfirmed}}<br><span class="calwarn">not confirmed with the council</span>{{else if .Applying}}<br><span class="muted">still applying &mdash; not on the permit yet</span>{{end}}
-    </div>
+  </div>
+  {{/* The last week is the only removable one — weeks keep their positions —
+       and removal is immediate, with the Undo in the reply's banner. */}}
+  {{if and $cycling (eq .Num $pv.CycleWeeks)}}
+  <button type="button" class="ghost sm wkremove"
+          hx-post="/permits/{{$pv.Permit.ID}}/weeks/remove" hx-target="#pbody-{{$pv.Permit.ID}}" hx-swap="innerHTML"
+          @click="wk=Math.max(0, {{.Index}}-1)">{{template "ic-x"}} Remove week {{.Num}}</button>
+  {{end}}
   </div>
   {{end}}
 </div>
+{{if and (not $cycling) .CanAddWeek $vehicles}}
+{{/* The doorway to the cycle: a quiet affordance under the single-week roster.
+     The new week starts as a copy of this one, so nothing changes until edited. */}}
+<button type="button" class="ghost sm wkadd-first"
+        hx-post="/permits/{{.Permit.ID}}/weeks/add" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
+        @click="wk=1">{{template "ic-plus"}} Add a second week &mdash; the roster then alternates week about</button>
+{{end}}
+
+{{if .CalRowLabels}}
+{{range $i, $d := .Cal}}{{if eq $i 0}}
+<p class="sub calwk" style="margin-top:20px">{{index $.CalRowLabels 0}}</p>
+<div class="cal">
+{{else if eq $i 7}}
+</div>
+<p class="sub calwk">{{index $.CalRowLabels 1}}</p>
+<div class="cal">
+{{end}}{{template "cal-day" $d}}{{end}}
+</div>
+{{else}}
+<p class="sub" style="margin-top:20px">This week and next</p>
+<div class="cal">
+  {{range .Cal}}{{template "cal-day" .}}{{end}}
+</div>
+{{end}}
 
 <p class="sub" style="margin-top:20px">One-off bookings</p>
 {{if .Overrides}}
@@ -571,4 +630,26 @@
   </div>
 </div>
 </template>
+{{end}}
+
+{{/* =================== ONE CALENDAR DAY =================== */}}
+{{/* Read-only day summary, shared by the labelled (cycling) and plain calendar
+     layouts. The full information is in the aria-label, so a keyboard/screen-
+     reader user gets it on focus without opening the popover; the popover is a
+     visual convenience and is hidden from assistive tech. */}}
+{{define "cal-day"}}
+  <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
+       role="button" tabindex="0" :aria-expanded="open"
+       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{if eq .Source "roster"}}roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}{{if .Unconfirmed}}. Not confirmed with the council — the permit may still show a different plate{{else if .Applying}}. Change still applying — not on the permit yet{{end}}"
+       @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
+    <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
+    <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
+    <div class="bar{{if .Adhoc}} adhoc{{end}}{{if .Unconfirmed}} unconf{{else if .Applying}} applying{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
+    <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
+         x-effect="open && $nextTick(() => popClamp($el))">
+      <p class="tt">{{.DayLabel}}</p>
+      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{if eq .Source "roster"}}roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
+      {{if .Unconfirmed}}<br><span class="calwarn">not confirmed with the council</span>{{else if .Applying}}<br><span class="muted">still applying &mdash; not on the permit yet</span>{{end}}
+    </div>
+  </div>
 {{end}}

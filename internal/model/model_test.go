@@ -58,17 +58,17 @@ func TestResolve(t *testing.T) {
 	}
 
 	t.Run("roster picks the weekday vehicle", func(t *testing.T) {
-		if got := Resolve(monday, rules, nil); got.VehicleID != 10 || got.Source != SourceRoster {
+		if got := Resolve(monday, Cycle{}, rules, nil); got.VehicleID != 10 || got.Source != SourceRoster {
 			t.Fatalf("monday: got %+v, want vehicle 10 via roster", got)
 		}
-		if got := Resolve(tuesday, rules, nil); got.VehicleID != 20 || got.Source != SourceRoster {
+		if got := Resolve(tuesday, Cycle{}, rules, nil); got.VehicleID != 20 || got.Source != SourceRoster {
 			t.Fatalf("tuesday: got %+v, want vehicle 20 via roster", got)
 		}
 	})
 
 	t.Run("no rule for the weekday resolves to none", func(t *testing.T) {
 		sunday := mustTime(t, "2026-07-19 09:00 +1000")
-		if got := Resolve(sunday, rules, nil); got.Source != SourceNone {
+		if got := Resolve(sunday, Cycle{}, rules, nil); got.Source != SourceNone {
 			t.Fatalf("sunday: got %+v, want none", got)
 		}
 	})
@@ -76,7 +76,7 @@ func TestResolve(t *testing.T) {
 	t.Run("active override beats the roster", func(t *testing.T) {
 		end := mustTime(t, "2026-07-20 18:00 +1000")
 		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), EndsAt: &end}}
-		if got := Resolve(monday, rules, ovr); got.VehicleID != 99 || got.Source != SourceOverride {
+		if got := Resolve(monday, Cycle{}, rules, ovr); got.VehicleID != 99 || got.Source != SourceOverride {
 			t.Fatalf("override: got %+v, want vehicle 99 via override", got)
 		}
 	})
@@ -84,7 +84,7 @@ func TestResolve(t *testing.T) {
 	t.Run("expired override is ignored", func(t *testing.T) {
 		end := mustTime(t, "2026-07-20 08:30 +1000")
 		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: mustTime(t, "2026-07-20 07:00 +1000"), EndsAt: &end}}
-		if got := Resolve(monday, rules, ovr); got.VehicleID != 10 || got.Source != SourceRoster {
+		if got := Resolve(monday, Cycle{}, rules, ovr); got.VehicleID != 10 || got.Source != SourceRoster {
 			t.Fatalf("expired override: got %+v, want fall back to roster vehicle 10", got)
 		}
 	})
@@ -96,7 +96,7 @@ func TestResolve(t *testing.T) {
 			{ID: 1, VehicleID: 55, StartsAt: mustTime(t, "2026-07-20 06:00 +1000"), CreatedAt: mustTime(t, "2026-07-19 09:00 +1000")},
 			{ID: 2, VehicleID: 66, StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), CreatedAt: mustTime(t, "2026-07-19 10:00 +1000")},
 		}
-		if got := Resolve(monday, rules, ovr); got.VehicleID != 66 {
+		if got := Resolve(monday, Cycle{}, rules, ovr); got.VehicleID != 66 {
 			t.Fatalf("overlap: got %+v, want vehicle 66 (created latest)", got)
 		}
 	})
@@ -105,7 +105,7 @@ func TestResolve(t *testing.T) {
 		ovr := []Override{
 			{ID: 1, Registration: "GUEST99", StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), CreatedAt: mustTime(t, "2026-07-20 08:00 +1000")},
 		}
-		got := Resolve(monday, rules, ovr)
+		got := Resolve(monday, Cycle{}, rules, ovr)
 		if got.Source != SourceOverride || got.Registration != "GUEST99" || got.VehicleID != 0 {
 			t.Fatalf("ad-hoc: got %+v, want registration GUEST99, no vehicle", got)
 		}
@@ -119,7 +119,7 @@ func TestResolve(t *testing.T) {
 			{ID: 1, VehicleID: 55, StartsAt: mustTime(t, "2026-07-20 09:00 +1000"), CreatedAt: mustTime(t, "2026-07-19 09:00 +1000")},
 			{ID: 2, VehicleID: 66, StartsAt: mustTime(t, "2026-07-20 08:00 +1000"), CreatedAt: mustTime(t, "2026-07-20 08:00 +1000")},
 		}
-		if got := Resolve(monday, rules, ovr); got.VehicleID != 66 {
+		if got := Resolve(monday, Cycle{}, rules, ovr); got.VehicleID != 66 {
 			t.Fatalf("guest overlap: got %+v, want vehicle 66 (created latest)", got)
 		}
 	})
@@ -303,7 +303,7 @@ func TestResolveScheduledClassification(t *testing.T) {
 	rules := []WeeklyRule{{ID: 1, Weekday: time.Monday, VehicleID: 10}}
 
 	t.Run("roster is scheduled from local midnight", func(t *testing.T) {
-		got := Resolve(monday, rules, nil)
+		got := Resolve(monday, Cycle{}, rules, nil)
 		if !got.Scheduled {
 			t.Fatal("a roster day is clock-driven and must be Scheduled")
 		}
@@ -315,7 +315,7 @@ func TestResolveScheduledClassification(t *testing.T) {
 	t.Run("advance booking is scheduled from its start", func(t *testing.T) {
 		start := mustTime(t, "2026-07-20 08:00 +1000")
 		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: start, CreatedAt: mustTime(t, "2026-07-19 10:00 +1000")}}
-		got := Resolve(monday, rules, ovr)
+		got := Resolve(monday, Cycle{}, rules, ovr)
 		if !got.Scheduled || !got.Since.Equal(start) {
 			t.Fatalf("advance booking: Scheduled=%v Since=%s, want true from %s", got.Scheduled, got.Since, start)
 		}
@@ -324,7 +324,7 @@ func TestResolveScheduledClassification(t *testing.T) {
 	t.Run("start == created is immediate, not scheduled (the boundary)", func(t *testing.T) {
 		now := mustTime(t, "2026-07-20 08:00 +1000")
 		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: now, CreatedAt: now}}
-		got := Resolve(monday, rules, ovr)
+		got := Resolve(monday, Cycle{}, rules, ovr)
 		if got.Scheduled {
 			t.Fatal("a booking that starts exactly when it was made is immediate — someone is waiting — and must NOT be spread")
 		}
@@ -336,7 +336,7 @@ func TestResolveScheduledClassification(t *testing.T) {
 	t.Run("backdated booking (start before created) is immediate", func(t *testing.T) {
 		created := mustTime(t, "2026-07-20 08:00 +1000")
 		ovr := []Override{{ID: 1, VehicleID: 99, StartsAt: mustTime(t, "2026-07-20 06:00 +1000"), CreatedAt: created}}
-		got := Resolve(monday, rules, ovr)
+		got := Resolve(monday, Cycle{}, rules, ovr)
 		if got.Scheduled || !got.Since.Equal(created) {
 			t.Fatalf("backdated booking: Scheduled=%v Since=%s, want immediate from %s", got.Scheduled, got.Since, created)
 		}
@@ -349,11 +349,11 @@ func TestRosterTieBreakIsDeterministic(t *testing.T) {
 	now := mustTime(t, "2026-07-20 12:00 +1000")
 	wd := now.Weekday()
 	rules := []WeeklyRule{{ID: 1, Weekday: wd, VehicleID: 10}, {ID: 2, Weekday: wd, VehicleID: 20}}
-	if res := Resolve(now, rules, nil); res.Source != SourceRoster || res.VehicleID != 20 {
+	if res := Resolve(now, Cycle{}, rules, nil); res.Source != SourceRoster || res.VehicleID != 20 {
 		t.Fatalf("tie-break picked vehicle %d (source %v), want the highest-ID rule's 20", res.VehicleID, res.Source)
 	}
 	// Order-independent: the reversed slice yields the same winner.
-	if res := Resolve(now, []WeeklyRule{{ID: 2, Weekday: wd, VehicleID: 20}, {ID: 1, Weekday: wd, VehicleID: 10}}, nil); res.VehicleID != 20 {
+	if res := Resolve(now, Cycle{}, []WeeklyRule{{ID: 2, Weekday: wd, VehicleID: 20}, {ID: 1, Weekday: wd, VehicleID: 10}}, nil); res.VehicleID != 20 {
 		t.Fatalf("winner depended on slice order: got %d", res.VehicleID)
 	}
 }

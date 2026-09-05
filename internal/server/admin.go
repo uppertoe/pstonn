@@ -736,7 +736,7 @@ func (s *Server) enrichRoster(ctx context.Context, roster []store.RosterEntry) [
 				alog.Infof("roster: overrides for permit %d: %v", p.ID, oerr)
 				continue
 			}
-			if c := model.NextChange(now, rosterChangeHorizon, rules, overrides); c != nil && (next == nil || c.Before(*next)) {
+			if c := model.NextChange(now, rosterChangeHorizon, p.Cycle(), rules, overrides); c != nil && (next == nil || c.Before(*next)) {
 				next = c
 			}
 		}

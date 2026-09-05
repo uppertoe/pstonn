@@ -30,7 +30,7 @@ func TestEnrichRoster(t *testing.T) {
 		if verr != nil {
 			t.Fatal(verr)
 		}
-		if err := s.store.SetRule(ctx, pid, wd, vid); err != nil {
+		if err := s.store.SetRule(ctx, pid, 0, wd, vid); err != nil {
 			t.Fatal(err)
 		}
 	}
