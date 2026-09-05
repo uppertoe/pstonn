@@ -419,11 +419,13 @@
   {{end}}
 </div>
 {{if and (not $cycling) .CanAddWeek $vehicles}}
-{{/* The doorway to the cycle: a quiet affordance under the single-week roster.
-     The new week starts as a copy of this one, so nothing changes until edited. */}}
-<button type="button" class="ghost sm wkadd-first"
+{{/* The doorway to the cycle: styled like the quiet "Manage another permit"
+     link, because it sits on every single-week card forever — a capability to
+     discover, not a pitch. The new week starts as a copy of this one, so
+     nothing changes until edited. */}}
+<button type="button" class="wkadd-first"
         hx-post="/permits/{{.Permit.ID}}/weeks/add" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
-        @click="wk=1">{{template "ic-plus"}} Add a second week &mdash; the roster then alternates week about</button>
+        @click="wk=1">{{template "ic-plus"}} Add week 2 to the roster</button>
 {{end}}
 
 {{if .CalRowLabels}}

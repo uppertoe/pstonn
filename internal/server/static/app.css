@@ -362,7 +362,11 @@ tr:last-child td { border-bottom:0; }
 .wktabs .wkadd svg { width:14px; height:14px; vertical-align:-2px; }
 .wknow { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:1px 6px; border-radius:999px; margin-left:5px; background:color-mix(in srgb, currentColor 14%, transparent); }
 .wkremove { margin-top:10px; }
-.wkadd-first { margin-top:10px; }
+/* The single-week card's doorway into the cycle: the .link-quiet look, on a
+   button (it posts). Stripped of button chrome so it reads as a capability the
+   page happens to have, not a call to action shown to everyone forever. */
+.wkadd-first { margin-top:10px; background:none; border:0; box-shadow:none; border-radius:0; padding:0; color:var(--muted); font-size:13.5px; font-weight:500; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.wkadd-first:hover { color:var(--primary); background:none; filter:none; box-shadow:none; }
 .undoweek { margin-left:auto; flex:0 0 auto; }
 .sub.calwk { margin-bottom:6px; }
 .cal + .sub.calwk { margin-top:14px; }
