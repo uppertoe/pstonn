@@ -24,22 +24,22 @@ X-Frame-Options: DENY
 <meta property="og:description" content="What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial Stonnington parking tool.">
 <meta property="og:url" content="https://p.stonn.org/security">
 <meta property="og:locale" content="en_AU">
-<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=9eafc03405">
+<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=9d7be12a08">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="p.stonn — schedule your City of Stonnington visitor parking permit">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Security &amp; data — p.stonn">
 <meta name="twitter:description" content="What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial Stonnington parking tool.">
-<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=9eafc03405">
+<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=9d7be12a08">
 
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=9eafc03405">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=9eafc03405">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=9d7be12a08">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=9d7be12a08">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=9eafc03405">
+<link rel="stylesheet" href="/static/app.css?v=9d7be12a08">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script nonce="NONCE">
   
@@ -149,8 +149,8 @@ X-Frame-Options: DENY
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script nonce="NONCE" src="/static/htmx.min.js?v=9eafc03405"></script>
-<script nonce="NONCE" defer src="/static/alpine.min.js?v=9eafc03405"></script>
+<script nonce="NONCE" src="/static/htmx.min.js?v=9d7be12a08"></script>
+<script nonce="NONCE" defer src="/static/alpine.min.js?v=9d7be12a08"></script>
 
 
 <script nonce="NONCE">
@@ -318,7 +318,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/how" hx-boost="false" class="link-quiet">How it works</a>
+    <a href="/how" hx-boost="false" class="link-quiet">Features</a>
     <a href="/faq" class="link-quiet">FAQ</a>
     <a href="/security" class="link-quiet active" aria-current="page">Security &amp; data</a>
     
@@ -332,7 +332,7 @@ window.popClamp = window.popClamp || function (el) {
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
-    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. For what it does, see <a href="/how" hx-boost="false">How it works</a>.</p>
+    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. See <a href="/how" hx-boost="false">what p.stonn can do</a>.</p>
 
     <h2 class="about-h2">The short version</h2>
     <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>

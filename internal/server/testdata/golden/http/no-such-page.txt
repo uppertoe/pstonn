@@ -17,11 +17,11 @@ X-Frame-Options: DENY
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=9eafc03405">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=9eafc03405">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=9d7be12a08">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=9d7be12a08">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=9eafc03405">
+<link rel="stylesheet" href="/static/app.css?v=9d7be12a08">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script nonce="NONCE">
   
@@ -131,8 +131,8 @@ X-Frame-Options: DENY
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script nonce="NONCE" src="/static/htmx.min.js?v=9eafc03405"></script>
-<script nonce="NONCE" defer src="/static/alpine.min.js?v=9eafc03405"></script>
+<script nonce="NONCE" src="/static/htmx.min.js?v=9d7be12a08"></script>
+<script nonce="NONCE" defer src="/static/alpine.min.js?v=9d7be12a08"></script>
 
 
 <script nonce="NONCE">
@@ -300,7 +300,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
   <nav class="pubnav">
-    <a href="/how" hx-boost="false" class="link-quiet">How it works</a>
+    <a href="/how" hx-boost="false" class="link-quiet">Features</a>
     <a href="/faq" class="link-quiet">FAQ</a>
     <a href="/security" class="link-quiet">Security &amp; data</a>
     

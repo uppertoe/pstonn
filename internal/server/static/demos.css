@@ -82,8 +82,11 @@
 .dm-cursor.on { opacity: 1; }
 
 .dm-caption { margin-top: 14px; text-align: center; min-height: 44px; font-size: 13px; color: var(--muted); display: flex; align-items: center; justify-content: center; }
-.dm-caption span { display: inline-block; opacity: 0; transform: translateY(4px); transition: opacity .35s, transform .35s; }
-.dm-caption span.show { opacity: 1; transform: none; }
+/* Captions fade IN PLACE — no slide. They swap every couple of seconds across
+   five figures, and a 4px translate on each swap read as the whole page
+   subtly moving, even though nothing reflows. */
+.dm-caption span { display: inline-block; opacity: 0; transition: opacity .35s; }
+.dm-caption span.show { opacity: 1; }
 .dm-caption b { color: var(--ink); font-weight: 650; }
 
 /* one-off booking */
@@ -141,9 +144,11 @@
 .dm-gcar .dm-tick { margin-left: auto; color: var(--ok); display: grid; place-items: center; opacity: 0; transform: scale(.7); transition: opacity .2s, transform .2s cubic-bezier(.2,.9,.3,1.4); }
 .dm-gcar .dm-tick svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .dm-gcar.on .dm-tick { opacity: 1; transform: none; }
-/* until-text on its OWN reserved line: min-height keeps the space whether or not
-   the text is present, so it fading in mid-animation can't reflow the tile. */
-.dm-guntil { min-height: 15px; margin-top: 3px; color: var(--muted); font-weight: 600; font-size: 11px; }
+/* until-text on its OWN reserved line. A FIXED height and matching line-height,
+   not min-height: the inherited line-height made the text render ~17px tall, so
+   a 15px minimum let the strip grow 2px when the text appeared and shrink when
+   it cleared — a subtle whole-page bounce on every loop. */
+.dm-guntil { height: 17px; line-height: 17px; margin-top: 3px; color: var(--muted); font-weight: 600; font-size: 11px; overflow: hidden; }
 
 /* pretend QR, ties the card to the "link or QR" feature. Always dark-on-white
    (a QR is), independent of theme. */
