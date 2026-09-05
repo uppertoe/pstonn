@@ -276,8 +276,8 @@ func TestNoInlineScriptInsideBoostedBody(t *testing.T) {
 // unstyled and inert until a manual refresh. The nav already opts out; the hazard is
 // that every future content link has to remember, so this enforces it centrally.
 func TestLinksIntoAssetPagesAreNotBoosted(t *testing.T) {
-	// Matches an <a> whose href is exactly "/" or "/features" and that lacks hx-boost.
-	link := regexp.MustCompile(`<a href="(/|/features)"(?:\s[^>]*)?>`)
+	// Matches an <a> whose href is exactly "/", "/features" or "/features/app" and that lacks hx-boost.
+	link := regexp.MustCompile(`<a href="(/|/features|/features/app)"(?:\s[^>]*)?>`)
 	err := fs.WalkDir(templateFS, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
 			return err

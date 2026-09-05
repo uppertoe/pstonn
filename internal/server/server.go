@@ -418,8 +418,13 @@ func (s *Server) Handler() http.Handler {
 	// now lands here as a 404 rather than the mux's automatic 405 — nothing
 	// machine-facing relies on 405s, and a person sees the same "nothing here".
 	s.handle(mux, "/", guardPublic, s.notFound)
-	s.handle(mux, "GET /security", guardPublic, s.security)             // public
-	s.handle(mux, "GET /features", guardPublic, s.features)             // public
+	s.handle(mux, "GET /security", guardPublic, s.security) // public
+	s.handle(mux, "GET /features", guardPublic, s.features) // public
+	// The signed-in twin of /features. The edge's public block strips identity
+	// on purpose, so /features itself can never know who you are; Caddy
+	// redirects session-cookie holders here, where the protected catch-all
+	// delivers full identity and the same handler renders the app chrome.
+	s.handle(mux, "GET /features/app", guardPublic, s.features)
 	s.handle(mux, "GET /how", guardPublic, s.howRedirect)               // public; the page's old address
 	s.handle(mux, "GET /faq", guardPublic, s.faq)                       // public
 	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)            // public question pages
