@@ -761,19 +761,22 @@ table.adm .bad { color:var(--danger); }
    full-width, two-row block: plate · "on permit now" on the first row, the status
    icon centred under the plate with its hint beside it on the second. The hint is
    always present, so the height never changes either. */
-/* .pcheck exists for the phone layout below; on desktop it dissolves so the
-   icon and hint stay direct flex items of the pill, byte-identical layout. */
+/* .pcheck is markup-only grouping; it dissolves at every width so the icon and
+   hint participate directly in the pill's flex (desktop) or grid (phone). */
 .pcheck { display:contents; }
 @media (max-width:560px){
-  .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"plate label" "check check"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }
+  /* Two rows, two columns: plate | label on the first, tick | hint on the
+     second. Row two is reserved at a height that fits both the badge and a
+     two-line failure note, so no state swap ever moves the layout. */
+  .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto minmax(38px, auto); grid-template-areas:"plate label" "icon hint"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }
   .nowbadge > .plate { grid-area:plate; justify-self:start; }
   .nowbadge > .muted { grid-area:label; }
-  /* The status row wears its own UNFILLED badge — same shape as the plate badge
-     above (2px border, 6px radius, matching padding) so the tick/spinner reads
-     as a deliberate labelled unit, not a stray indent. Full row width, so the
-     hint's wording changing between polls never resizes the outline. */
-  .nowbadge .pcheck { grid-area:check; display:flex; align-items:center; gap:8px; border:2px solid var(--line); border-radius:6px; padding:4px 9px; background:transparent; min-width:0; }
-  .nowbadge .phint, .nowbadge .pnote { min-width:0; white-space:normal; }
+  /* The tick alone wears an UNFILLED echo of the plate badge — same border
+     weight, radius and height, stretched to the plate's column width so it
+     sits squarely beneath it and the indent reads as deliberate. Width comes
+     from the plate, never from the hint, so poll swaps can't resize it. */
+  .nowbadge .pslot { grid-area:icon; justify-self:stretch; width:auto; height:auto; min-height:32px; border:2px solid var(--line); border-radius:6px; background:transparent; display:flex; align-items:center; justify-content:center; }
+  .nowbadge .phint, .nowbadge .pnote { grid-area:hint; min-width:0; white-space:normal; }
 }
 .pslot .pwarn { display:inline-flex; color:var(--warn); }
 .pslot .pwarn svg { width:13px; height:13px; stroke-width:2.4; }
