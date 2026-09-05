@@ -69,7 +69,7 @@
     "seo.landing_title": "{{.Tenant.Short}} visitor parking permits, on a schedule — p.stonn",
     "seo.landing_desc": "Free tool to schedule the car on your {{.Tenant.Name}} visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.",
     "seo.how_title": "How p.stonn manages your {{.Tenant.Short}} visitor permit",
-    "seo.how_desc": "Connect your {{.Tenant.Short}} {{.Tenant.Terms.portal}} login once; p.stonn sets your visitor permit to your car schedule, with one-off bookings, visitor QR codes, a printable door code and guest passes.",
+    "seo.how_desc": "Connect your {{.Tenant.Short}} {{.Tenant.Terms.portal}} login once; p.stonn sets your visitor permit to your car schedule, with one-off bookings, visitor QR codes, a printable QR and guest passes.",
     "seo.security_desc": "What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial {{.Tenant.Short}} parking tool.",
     "seo.contact_desc": "Questions about p.stonn, the free scheduler for {{.Tenant.Name}} visitor parking permits? Get in touch.",
     "seo.faq_desc": "Answers about scheduling your {{.Tenant.Name}} visitor parking permit with p.stonn — recurring visitor parking, sharing with family, cost, and safety.",

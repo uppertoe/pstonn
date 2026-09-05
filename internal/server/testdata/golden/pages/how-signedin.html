@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=609c5845ad">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=609c5845ad">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=9eafc03405">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=9eafc03405">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=609c5845ad">
+<link rel="stylesheet" href="/static/app.css?v=9eafc03405">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,10 +122,10 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=609c5845ad"></script>
-<script defer src="/static/alpine.min.js?v=609c5845ad"></script>
-<link rel="stylesheet" href="/static/demos.css?v=609c5845ad">
-<script defer src="/static/demos.js?v=609c5845ad"></script>
+<script src="/static/htmx.min.js?v=9eafc03405"></script>
+<script defer src="/static/alpine.min.js?v=9eafc03405"></script>
+<link rel="stylesheet" href="/static/demos.css?v=9eafc03405">
+<script defer src="/static/demos.js?v=9eafc03405"></script>
 
 <script>
   
@@ -317,7 +317,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <section class="paper">
     <h1 class="about-h1">How it works</h1>
-    <p>Everything p.stonn can do, in five short loops &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
+    <p>Everything p.stonn can do, in five short animations &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
   </section>
   
 
@@ -379,7 +379,7 @@ window.popClamp = window.popClamp || function (el) {
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A visitor at the door</h2>
+        <h2>Add a visitor with a QR</h2>
         <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and their car is on the permit until the end of the day &mdash; no account, nothing to install.</p>
         <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
@@ -388,19 +388,21 @@ window.popClamp = window.popClamp || function (el) {
         
         <figure class="dm" data-demo="visitorqr">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Visitor at the door</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Add a visitor</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-permit" style="margin-top:0;margin-bottom:12px">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-vqdot style="background:var(--v1)"></span> <span class="dm-rego" data-vqrego>ABC123</span></div><div class="dm-guntil" data-vquntil></div></div>
             <div class="dm-sync"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
           </div>
           <div class="dm-btn" data-vqbtn><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Show visitor QR</div>
-          <div class="dm-screen dm-over" data-vqqr>
-            <div class="dm-vlabel">Your phone</div>
-            <div class="dm-qrwrap" style="margin:6px 0 4px"><img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:72px;height:72px"><span class="dm-qrcap">Show this to your visitor. It stops working in 15 minutes &mdash; your permit itself is unchanged.</span></div>
+          <div class="dm-qrstage">
+            <div class="dm-fade" data-vqqr>
+              <img class="dm-qr dm-qr-lg" src="/static/demo-qr.svg" alt="" width="128" height="128">
+              <div class="dm-qrline">Stops working in 15 minutes &mdash; your permit itself is unchanged.</div>
+            </div>
           </div>
           <div class="dm-screen dm-over" data-vqguest>
             <div class="dm-vlabel">Your visitor&rsquo;s phone</div>
-            <div class="dm-fld" data-vqfld style="margin-top:6px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
+            <div class="dm-fld" data-vqfld style="margin-top:10px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
             <div class="dm-btn" data-vqput><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Put my car on the permit</div>
             <div class="dm-vstat" data-vqstat></div>
           </div>
@@ -413,33 +415,42 @@ window.popClamp = window.popClamp || function (el) {
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A printed code for the door</h2>
-        <p>Print a QR code once and leave it up &mdash; by the door, at the gate. It keeps working forever, and it&rsquo;s safe to post: a scan only <em>asks</em>. You get a notification with the visitor&rsquo;s plate, and nothing goes on the permit until you approve it from wherever you are.</p>
+        <h2>A printed QR that asks first</h2>
+        <p>Print a QR code once and put it where visitors will find it &mdash; the fridge, the front door, the gate. It keeps working indefinitely, and it&rsquo;s safe to leave up: a scan only <em>asks</em>. Your phone gets a notification with the visitor&rsquo;s plate, and nothing goes on the permit until you approve.</p>
       </div>
       <div class="feature-demo">
         
         
         <figure class="dm" data-demo="doorqr">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Printed for the door</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-poster">
-            <div class="dm-poster-kicker">Visitor parking</div>
-            <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:84px;height:84px;margin:8px auto">
-            <div class="dm-poster-lead">Scan to ask to use this parking permit</div>
-            <div class="dm-poster-note">Nothing goes on the permit until the resident approves.</div>
-          </div>
-          <div class="dm-screen dm-over" data-dqguest>
-            <div class="dm-vlabel">The visitor&rsquo;s phone</div>
-            <div class="dm-fld" data-dqfld style="margin-top:6px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">1QW4RT</span></span></div></div>
-            <div class="dm-btn" data-dqask><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Ask to use the permit</div>
-            <div class="dm-vstat" data-dqstat></div>
-          </div>
-          <div class="dm-screen dm-over" data-dqpush>
-            <div class="dm-vlabel">Your phone &mdash; wherever you are</div>
-            <div class="dm-push show" style="margin-top:6px;opacity:1;transform:none"><span class="badge" style="background:var(--accent)"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span><div class="bd"><div class="ttl">Approve <b>1QW4RT</b> on your Visitor? <span class="ago">now</span></div><div class="msg">Someone scanned your printed QR code. Nothing is on the permit until you approve.</div></div></div>
-            <div class="dm-actions">
-              <div class="dm-btn" data-dqok><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Approve</div>
-              <div class="dm-btn dm-btn-ghost" data-dqno>Decline</div>
+          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> A printed QR</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-duo">
+            <div class="dm-fridge">
+              <div class="dm-fridge-seam"></div>
+              <div class="dm-fridge-handle"></div>
+              <div class="dm-paper" data-dqpaper>
+                <div class="dm-tape"></div>
+                <div class="dm-paper-kicker">Visitor parking</div>
+                <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:64px;height:64px;margin:6px auto 5px;display:block">
+                <div class="dm-paper-lead">Scan to ask to use this permit</div>
+              </div>
+            </div>
+            <div class="dm-mobile">
+              <div class="dm-mobile-notch"></div>
+              <div class="dm-mobile-screen">
+                <div class="dm-mscene dm-fade" data-dqpush>
+                  <div class="dm-mpush"><span class="dm-mbadge"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span>
+                    <div class="dm-mtxt"><b>Approve <span class="dm-rego">1QW4RT</span>?</b><br>Someone scanned your printed QR.</div>
+                  </div>
+                  <div class="dm-actions">
+                    <div class="dm-btn dm-btn-sm" data-dqok><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Approve</div>
+                    <div class="dm-btn dm-btn-sm dm-btn-ghost">Decline</div>
+                  </div>
+                </div>
+                <div class="dm-mscene dm-fade" data-dqdone>
+                  <div class="dm-vstat ok" style="min-height:0"><span class="dm-vtick"><svg viewBox="0 0 24 24"><path d="M5 13l4 4 10-11"/></svg></span><span><b>1QW4RT</b> is on the permit until the end of today.</span></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -451,7 +462,7 @@ window.popClamp = window.popClamp || function (el) {
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A pass for your regulars</h2>
+        <h2>A pass for regular visitors</h2>
         <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their car and it&rsquo;s on the permit until the end of the day, and you&rsquo;re told each time.</p>
         <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
       </div>

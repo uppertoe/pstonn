@@ -140,7 +140,7 @@
   {{if .SignedIn}}
   <section class="paper">
     <h1 class="about-h1">How it works</h1>
-    <p>Everything p.stonn can do, in five short loops &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
+    <p>Everything p.stonn can do, in five short animations &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
   </section>
   {{else}}
   <section class="paper">
@@ -196,7 +196,7 @@
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A visitor at the door</h2>
+        <h2>Add a visitor with a QR</h2>
         <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and their car is on the permit until the end of the day &mdash; no account, nothing to install.</p>
         <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
@@ -207,8 +207,8 @@
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A printed code for the door</h2>
-        <p>Print a QR code once and leave it up &mdash; by the door, at the gate. It keeps working forever, and it&rsquo;s safe to post: a scan only <em>asks</em>. You get a notification with the visitor&rsquo;s plate, and nothing goes on the permit until you approve it from wherever you are.</p>
+        <h2>A printed QR that asks first</h2>
+        <p>Print a QR code once and put it where visitors will find it &mdash; the fridge, the front door, the gate. It keeps working indefinitely, and it&rsquo;s safe to leave up: a scan only <em>asks</em>. Your phone gets a notification with the visitor&rsquo;s plate, and nothing goes on the permit until you approve.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-doorqr" .}}
@@ -217,7 +217,7 @@
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A pass for your regulars</h2>
+        <h2>A pass for regular visitors</h2>
         <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their car and it&rsquo;s on the permit until the end of the day, and you&rsquo;re told each time.</p>
         <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
       </div>
@@ -420,24 +420,28 @@
 {{end}}
 
 {{define "demo-visitorqr"}}
-        {{/* One phone, two screens: the holder's card (base), then the visitor's
-             page slides over as an overlay. Mirrors the Show-visitor-QR flow:
-             schedule.html's qrtrigger + guests.html's qr-card + guest.html. */}}
+        {{/* One phone, two screens: the holder's card with the QR taking centre
+             stage in a RESERVED slot (no reflow as it appears), then the
+             visitor's page slides over as a full-card overlay. Mirrors the
+             Show-visitor-QR flow: schedule.html's qrtrigger + guests.html's
+             qr-card + guest.html. */}}
         <figure class="dm" data-demo="visitorqr">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Visitor at the door</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Add a visitor</h2><span class="dm-sample">Sample data</span></div>
           <div class="dm-permit" style="margin-top:0;margin-bottom:12px">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-vqdot style="background:var(--v1)"></span> <span class="dm-rego" data-vqrego>ABC123</span></div><div class="dm-guntil" data-vquntil></div></div>
             <div class="dm-sync">{{template "ic-check"}}</div>
           </div>
           <div class="dm-btn" data-vqbtn>{{template "ic-qr"}} Show visitor QR</div>
-          <div class="dm-screen dm-over" data-vqqr>
-            <div class="dm-vlabel">Your phone</div>
-            <div class="dm-qrwrap" style="margin:6px 0 4px"><img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:72px;height:72px"><span class="dm-qrcap">Show this to your visitor. It stops working in 15 minutes &mdash; your permit itself is unchanged.</span></div>
+          <div class="dm-qrstage">
+            <div class="dm-fade" data-vqqr>
+              <img class="dm-qr dm-qr-lg" src="/static/demo-qr.svg" alt="" width="128" height="128">
+              <div class="dm-qrline">Stops working in 15 minutes &mdash; your permit itself is unchanged.</div>
+            </div>
           </div>
           <div class="dm-screen dm-over" data-vqguest>
             <div class="dm-vlabel">Your visitor&rsquo;s phone</div>
-            <div class="dm-fld" data-vqfld style="margin-top:6px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
+            <div class="dm-fld" data-vqfld style="margin-top:10px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
             <div class="dm-btn" data-vqput>{{template "ic-check"}} Put my car on the permit</div>
             <div class="dm-vstat" data-vqstat></div>
           </div>
@@ -447,30 +451,41 @@
 {{end}}
 
 {{define "demo-doorqr"}}
-        {{/* The printed door code: poster (base), the visitor's ask, your
-             approve notification. Mirrors guests.html's poster, guest.html's
-             request branch and the notify guest-request email/push. */}}
+        {{/* The printed QR in situ: a paper sheet taped to the fridge, and the
+             holder's mobile beside it receiving the approval ping. Mirrors
+             guests.html's poster copy and the notify guest-request push; the
+             phone screen's states are STACKED (grid) so swapping the
+             notification for the outcome never reflows. */}}
         <figure class="dm" data-demo="doorqr">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Printed for the door</h2><span class="dm-sample">Sample data</span></div>
-          <div class="dm-poster">
-            <div class="dm-poster-kicker">Visitor parking</div>
-            <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:84px;height:84px;margin:8px auto">
-            <div class="dm-poster-lead">Scan to ask to use this parking permit</div>
-            <div class="dm-poster-note">Nothing goes on the permit until the resident approves.</div>
-          </div>
-          <div class="dm-screen dm-over" data-dqguest>
-            <div class="dm-vlabel">The visitor&rsquo;s phone</div>
-            <div class="dm-fld" data-dqfld style="margin-top:6px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">1QW4RT</span></span></div></div>
-            <div class="dm-btn" data-dqask>{{template "ic-bell"}} Ask to use the permit</div>
-            <div class="dm-vstat" data-dqstat></div>
-          </div>
-          <div class="dm-screen dm-over" data-dqpush>
-            <div class="dm-vlabel">Your phone &mdash; wherever you are</div>
-            <div class="dm-push show" style="margin-top:6px;opacity:1;transform:none"><span class="badge" style="background:var(--accent)">{{template "ic-bell"}}</span><div class="bd"><div class="ttl">Approve <b>1QW4RT</b> on your Visitor? <span class="ago">now</span></div><div class="msg">Someone scanned your printed QR code. Nothing is on the permit until you approve.</div></div></div>
-            <div class="dm-actions">
-              <div class="dm-btn" data-dqok>{{template "ic-check"}} Approve</div>
-              <div class="dm-btn dm-btn-ghost" data-dqno>Decline</div>
+          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> A printed QR</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-duo">
+            <div class="dm-fridge">
+              <div class="dm-fridge-seam"></div>
+              <div class="dm-fridge-handle"></div>
+              <div class="dm-paper" data-dqpaper>
+                <div class="dm-tape"></div>
+                <div class="dm-paper-kicker">Visitor parking</div>
+                <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:64px;height:64px;margin:6px auto 5px;display:block">
+                <div class="dm-paper-lead">Scan to ask to use this permit</div>
+              </div>
+            </div>
+            <div class="dm-mobile">
+              <div class="dm-mobile-notch"></div>
+              <div class="dm-mobile-screen">
+                <div class="dm-mscene dm-fade" data-dqpush>
+                  <div class="dm-mpush"><span class="dm-mbadge">{{template "ic-bell"}}</span>
+                    <div class="dm-mtxt"><b>Approve <span class="dm-rego">1QW4RT</span>?</b><br>Someone scanned your printed QR.</div>
+                  </div>
+                  <div class="dm-actions">
+                    <div class="dm-btn dm-btn-sm" data-dqok>{{template "ic-check"}} Approve</div>
+                    <div class="dm-btn dm-btn-sm dm-btn-ghost">Decline</div>
+                  </div>
+                </div>
+                <div class="dm-mscene dm-fade" data-dqdone>
+                  <div class="dm-vstat ok" style="min-height:0"><span class="dm-vtick"><svg viewBox="0 0 24 24"><path d="M5 13l4 4 10-11"/></svg></span><span><b>1QW4RT</b> is on the permit until the end of today.</span></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
