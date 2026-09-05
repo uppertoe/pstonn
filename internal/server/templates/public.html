@@ -138,6 +138,7 @@
 {{if .SignedIn}}{{template "appbar" .}}{{template "appnav" .}}{{else}}{{template "publicheader" .}}{{end}}
 <main id="main" tabindex="-1" class="landing about">
   {{if .SignedIn}}
+  <p class="topback"><a class="link-quiet" href="/schedule" hx-boost="false">&larr; Back to Schedule</a></p>
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
     <p>Everything p.stonn can do, in five short animations &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>

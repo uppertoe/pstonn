@@ -761,12 +761,19 @@ table.adm .bad { color:var(--danger); }
    full-width, two-row block: plate · "on permit now" on the first row, the status
    icon centred under the plate with its hint beside it on the second. The hint is
    always present, so the height never changes either. */
+/* .pcheck exists for the phone layout below; on desktop it dissolves so the
+   icon and hint stay direct flex items of the pill, byte-identical layout. */
+.pcheck { display:contents; }
 @media (max-width:560px){
-  .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"plate label" "icon hint"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }
+  .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-areas:"plate label" "check check"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }
   .nowbadge > .plate { grid-area:plate; justify-self:start; }
   .nowbadge > .muted { grid-area:label; }
-  .nowbadge > .pslot { grid-area:icon; justify-self:center; }
-  .nowbadge > .phint, .nowbadge > .pnote { grid-area:hint; min-width:0; white-space:normal; }
+  /* The status row wears its own UNFILLED badge — same shape as the plate badge
+     above (2px border, 6px radius, matching padding) so the tick/spinner reads
+     as a deliberate labelled unit, not a stray indent. Full row width, so the
+     hint's wording changing between polls never resizes the outline. */
+  .nowbadge .pcheck { grid-area:check; display:flex; align-items:center; gap:8px; border:2px solid var(--line); border-radius:6px; padding:4px 9px; background:transparent; min-width:0; }
+  .nowbadge .phint, .nowbadge .pnote { min-width:0; white-space:normal; }
 }
 .pslot .pwarn { display:inline-flex; color:var(--warn); }
 .pslot .pwarn svg { width:13px; height:13px; stroke-width:2.4; }
@@ -837,8 +844,15 @@ form.stack { display:grid; gap:11px; max-width:none; margin:0; text-align:left; 
 .lstep p { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
 .ldisclaimer { text-align:center; color:var(--muted); font-size:12.5px; margin:40px auto 0; max-width:580px; line-height:1.5; }
 .brand-link { color:inherit; }
+/* Quiet way home at the TOP of the signed-in features page — the nav tabs are
+   there too, but a page entered from the header deserves an exit before the
+   scroll, not only after it. */
+.topback { margin:8px 0 -6px; font-size:13.5px; }
 /* about */
 .about { max-width:820px; }
+/* On phones the features/about prose ran too close to the screen edges (main's
+   base padding is tuned for cards, which carry their own inner padding). */
+@media (max-width:560px){ main.landing { padding-left:22px; padding-right:22px; } }
 .about-h1 { font-size:30px; letter-spacing:-.02em; margin:30px 0 6px; font-weight:750; }
 .about-h2 { font-size:16px; letter-spacing:-.01em; margin:28px 0 8px; }
 /* readable prose panel (used on the why/how-it-works page) */
