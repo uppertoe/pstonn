@@ -310,7 +310,15 @@ tr:last-child td { border-bottom:0; }
 .cday:hover { border-color:var(--primary); }
 .cday:active { transform:scale(.98); }
 .cday.today { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; }
-.cday.past { opacity:.42; }
+/* Dim a past day's CONTENTS, not the cell: opacity on the cell created a
+   stacking context that trapped its popover's z-index, so a past day's popover
+   rendered BEHIND the next calendar row (seen live on the two-row cycling
+   calendar). The popover child is excluded so it opens at full strength. */
+.cday.past { border-color:color-mix(in srgb, var(--line) 55%, transparent); }
+.cday.past > :not(.pop) { opacity:.42; }
+/* And a cell with its popover open rises above later-painted cells regardless
+   of what future styling does to stacking, mirroring the .card rule below. */
+.cday:has(.pop:not([style*="none"])) { z-index:31; }
 .cday .cd { font-size:10.5px; color:var(--muted); margin-bottom:4px; white-space:nowrap; font-weight:600; }
 /* one-off marker: a fixed centred slot between the date and the bar, so it is
    always the same height (dot present or not) and never widens the cell. */

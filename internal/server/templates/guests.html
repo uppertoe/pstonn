@@ -140,7 +140,7 @@
         <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
       </form>
       <form method="post" action="/guests/printed" class="qropt">
-        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Leave it out (door, fridge, counter). A scan only <em>asks</em> you to approve, so it's safe to post up. Doesn't expire.</span></div>
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Stick it on the fridge, or wherever your visitors will see it. A scan only <em>asks</em> you to approve. It keeps working until you remove it.</span></div>
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
