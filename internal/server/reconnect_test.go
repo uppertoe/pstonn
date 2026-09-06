@@ -60,7 +60,7 @@ func TestPickerExpiredWithSavedPasswordQueuesReconnect(t *testing.T) {
 	r.s.sched.CancelReconnect(rigUser) // stand in for the drain worker dequeuing
 	r.fake.ListErr = nil
 	rr = r.get("/schedule", rigUser)
-	if !strings.Contains(rr.Body.String(), "VPP-SANDBOX") {
+	if !strings.Contains(rr.Body.String(), "VPP-104233") {
 		t.Fatalf("expected the picker once reconnected, got: %s", excerpt(rr.Body.String()))
 	}
 }

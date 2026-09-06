@@ -311,6 +311,13 @@ type CouncilConfig struct {
 	// development: any login links, and plate changes land after a short delay so
 	// the pending → settled UX runs end to end. Never set in production.
 	Sandbox bool
+	// SandboxApplyDelay is how long a sandbox plate change takes to land
+	// (COUNCIL_SANDBOX_APPLY_DELAY, default 6s). The fake reports a delayed write
+	// as transient, so the app only settles it on the NEXT reconcile tick — up to
+	// a minute of "applying" — which is the retry pipeline the sandbox exists to
+	// exercise. 0 lands writes inside the call, which is how a healthy council
+	// behaves and what a screen recording of the app should show.
+	SandboxApplyDelay time.Duration
 }
 
 // Load reads and validates configuration from the environment.
@@ -391,6 +398,7 @@ func Load() (*Config, error) {
 			GovLoginBurst:       envInt("COUNCIL_GOV_LOGIN_BURST", 6),
 			GovConcurrency:      envInt("COUNCIL_GOV_CONCURRENCY", 4),
 			Sandbox:             env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
+			SandboxApplyDelay:   envDurationOff("COUNCIL_SANDBOX_APPLY_DELAY", 6*time.Second),
 			ReminderLead:        time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
 			ExpiryLead:          time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
 		},

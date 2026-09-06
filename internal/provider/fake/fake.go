@@ -141,15 +141,18 @@ func (f *Provider) ListPermits(ctx context.Context, s *provider.Session) ([]prov
 		return nil, 0, f.ListErr
 	}
 	// Two permits, matching households that hold a 1st and a 2nd visitor permit —
-	// the account shape the multi-permit UI needs a sandbox for.
+	// the account shape the multi-permit UI needs a sandbox for. The numbers are
+	// shaped like the council's rather than labelled "sandbox" so a recording of
+	// the local app reads as the real thing; only the plates give it away, and
+	// they are gone after the first roster apply.
 	now := time.Now()
 	reg1, _ := f.Current("90001")
 	reg2, _ := f.Current("90002")
 	ps := []provider.Permit{{
-		CouncilPermitID: "90001", PermitTypeID: "14", PermitNumber: "VPP-SANDBOX", PermitType: "(A) 1st Visitor Permit",
+		CouncilPermitID: "90001", PermitTypeID: "14", PermitNumber: "VPP-104233", PermitType: "(A) 1st Visitor Permit",
 		Status: "Granted", CurrentRego: reg1, StartDate: now.AddDate(0, -1, 0), EndDate: now.AddDate(0, 6, 0), CanChangeVehicle: true,
 	}, {
-		CouncilPermitID: "90002", PermitTypeID: "15", PermitNumber: "VPP-SANDBOX-2", PermitType: "(A) 2nd Visitor Permit",
+		CouncilPermitID: "90002", PermitTypeID: "15", PermitNumber: "VPP-104234", PermitType: "(A) 2nd Visitor Permit",
 		Status: "Granted", CurrentRego: reg2, StartDate: now.AddDate(0, -1, 0), EndDate: now.AddDate(0, 6, 0), CanChangeVehicle: true,
 	}}
 	ps = append(ps, f.Extra...)

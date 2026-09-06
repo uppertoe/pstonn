@@ -32,6 +32,7 @@ import (
 	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
+	"github.com/uppertoe/pstonn/internal/provider/fake"
 	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/server"
@@ -150,6 +151,11 @@ func run() error {
 		prov, err := connectors.Build(tenant, transport)
 		if err != nil {
 			return err
+		}
+		// The sandbox's landing delay is an operator setting (see the config field),
+		// not a property of the connector, so it is applied here rather than in Build.
+		if fp, ok := prov.(*fake.Provider); ok {
+			fp.ApplyDelay = cfg.Council.SandboxApplyDelay
 		}
 		if tenant.Enabled {
 			clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)

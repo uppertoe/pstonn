@@ -139,7 +139,7 @@ func TestTenantLinkOverHTTP(t *testing.T) {
 		}
 		// The landing page after ?linked=1 is the picker with the account's permits.
 		page := r.get("/schedule?linked=1", rigUser)
-		if page.Code != 200 || !strings.Contains(page.Body.String(), "VPP-SANDBOX") || !strings.Contains(page.Body.String(), "Council account linked.") {
+		if page.Code != 200 || !strings.Contains(page.Body.String(), "VPP-104233") || !strings.Contains(page.Body.String(), "Council account linked.") {
 			t.Fatalf("picker after link: code=%d body=%s", page.Code, excerpt(page.Body.String()))
 		}
 	})
@@ -197,7 +197,7 @@ func TestAddPermitOverHTTP(t *testing.T) {
 			t.Fatalf("code=%d location=%q body=%s", rr.Code, rr.Header().Get("Location"), excerpt(rr.Body.String()))
 		}
 		ps, _ := r.st.ListPermitsFor(r.ctx, rigUser)
-		if len(ps) != 1 || ps[0].CouncilPermitID != "90001" || ps[0].PermitTypeID != "14" || ps[0].ActiveRegistration != "SBX1AB" || ps[0].PermitNumber != "VPP-SANDBOX" {
+		if len(ps) != 1 || ps[0].CouncilPermitID != "90001" || ps[0].PermitTypeID != "14" || ps[0].ActiveRegistration != "SBX1AB" || ps[0].PermitNumber != "VPP-104233" {
 			t.Fatalf("stored permit = %+v", ps)
 		}
 	})

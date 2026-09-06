@@ -166,7 +166,10 @@ is set to is the real upper bound on how long deleted data stays recoverable, an
 ```bash
 # No auth layer needed locally: use the dev identity escape hatch.
 # COUNCIL_SANDBOX=1 fakes the council in memory (any login links; plate changes
-# land after ~6s) so the full apply pipeline works without council credentials.
+# land after ~6s, settled on the next reconcile tick) so the full apply pipeline
+# works without council credentials. COUNCIL_SANDBOX_APPLY_DELAY=0 lands them
+# inside the call instead — use that for a screen recording, where a minute of
+# "applying" misrepresents the app.
 COUNCIL_SANDBOX=1 DEV_IDENTITY_EMAIL=you@example.com \
   COOKIE_SECURE=false LISTEN_ADDR=127.0.0.1:8099 SQLITE_PATH=./local.db \
   go run .
