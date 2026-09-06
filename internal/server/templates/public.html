@@ -15,7 +15,7 @@
   <div class="demos">
     <div class="dm-mini dm-showcase" data-demo="showcase">
       <div class="dm-phone">
-        <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample</span></div>
+        <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-calendar"}}</span> This week</div><span class="dm-sample">Sample</span></div>
         <div class="dm-week" data-week></div>
         <div class="dm-permit">
           <div><div class="plab">Visitor permit</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
@@ -42,6 +42,10 @@
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
   </section>
   <section class="paper" style="max-width:640px;margin:44px auto 0;padding:26px 32px">
+    <h2 class="about-h2" style="margin-top:0">Guides</h2>
+    {{template "guide-links" (guidesFor .Tenant)}}
+  </section>
+  <section class="paper" style="max-width:640px;margin:20px auto 0;padding:26px 32px">
     <h2 class="about-h2" style="margin-top:0">In another council area?</h2>
     <p style="color:var(--muted);font-size:14.5px;margin:0;line-height:1.55">{{T "public.other_area" . (slots "contact" (link "/contact"))}}</p>
   </section>
@@ -164,7 +168,7 @@
       <div class="feature-demo">
         <figure class="dm" data-demo="connect">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-link"}}</span> Link your council account</h2></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-link"}}</span> Link your council account</div></div>
           <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
           <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
           <div class="dm-btn">{{template "ic-link"}} Link account</div>
@@ -236,7 +240,7 @@
       <div class="feature-demo">
         <figure class="dm" data-demo="notify">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-bell"}}</span> Notifications</h2></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-bell"}}</span> Notifications</div></div>
           <div class="dm-toggles">
             <div class="dm-toggle">Email <span class="dm-swi"></span></div>
             <div class="dm-toggle">Phone <span class="dm-swi"></span></div>
@@ -271,6 +275,10 @@
     </ul>
     <p>Once your council account has a visitor permit, <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false">sign in to p.stonn</a> with that account&rsquo;s email address and connect it.</p>
   </section>
+  <section class="paper">
+    <h2 class="about-h2" style="margin-top:0">Guides</h2>
+    {{template "guide-links" (guidesFor .Tenant)}}
+  </section>
   {{end}}
 
   {{if .SignedIn}}
@@ -300,11 +308,7 @@
     {{end}}
     <p class="faq-more">More detail on what is stored and how it is protected is on the <a href="/security" hx-boost="false">Security &amp; data</a> page.</p>
     <h2 class="about-h2" style="margin-top:28px">Guides</h2>
-    <ul class="guide-list">
-      {{- range guidesFor .Tenant}}
-      <li><a href="/guide/{{.Slug}}" hx-boost="false">{{.H1}}</a></li>
-      {{- end}}
-    </ul>
+    {{template "guide-links" (guidesFor .Tenant)}}
   </section>
 </main>
 {{end}}
@@ -318,12 +322,28 @@
 {{template "publicheader" .}}
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
+    {{/* Every guide, numbered, current one marked, so a reader who landed on the
+         wrong question sees the right one before reading a word. A numbered
+         index rather than a cloud of pills: the titles are whole questions, and
+         four of those wrapped into chips read as clutter, not as a series. */}}
+    <nav class="guide-nav" aria-label="Guides">
+      <span class="guide-nav-h">Guides</span>
+      <ol>
+      {{- $cur := .Guide.Slug}}
+      {{- range guidesFor .Tenant}}
+        <li><a href="/guide/{{.Slug}}" hx-boost="false"{{if eq .Slug $cur}} aria-current="page"{{end}}>{{.H1}}</a></li>
+      {{- end}}
+      </ol>
+    </nav>
     <h1 class="about-h1">{{.Guide.H1}}</h1>
     {{range .Guide.Paras}}<p>{{.}}</p>{{end}}
     <h2 class="about-h2">{{.Guide.TenantHeading}}</h2>
-    <ol class="guide-steps">
-      {{range .Guide.Steps}}<li>{{.}}</li>{{end}}
-    </ol>
+    <div class="guide-council">
+      <ol class="guide-steps">
+        {{range .Guide.Steps}}<li>{{.}}</li>{{end}}
+      </ol>
+      {{if eq .Guide.Figure "council-login"}}{{template "fig-council-login" .}}{{end}}
+    </div>
     {{if .Guide.TenantNote}}<p>{{.Guide.TenantNote}}</p>{{end}}
     <h2 class="about-h2">With p.stonn</h2>
     <div class="feature" style="margin-top:8px">
@@ -334,8 +354,39 @@
     </div>
     <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
     <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor (newtab)) "faq" (link .Tenant.Links.FAQ (newtab)) "how" (link "/features" (noboost)) "faq_page" (link "/faq" (noboost)))}}</p>
+    {{with neighbouringGuides .Tenant .Guide.Slug}}
+    <nav class="guide-pager" aria-label="Previous and next guide">
+      {{with .Prev}}<a class="prev" href="/guide/{{.Slug}}" hx-boost="false"><span class="dir">Previous</span>{{.H1}}</a>{{end}}
+      {{with .Next}}<a class="next" href="/guide/{{.Slug}}" hx-boost="false"><span class="dir">Next</span>{{.H1}}</a>{{end}}
+    </nav>
+    {{end}}
   </section>
 </main>
+{{end}}
+
+{{define "fig-council-login"}}
+{{/* The council's sign-in screen, drawn rather than screenshotted: the council's
+     name in place of its logo, its white-card-on-pale-blue look kept in both of
+     our themes (it is a picture of their page, not part of ours), and the
+     markers tie each control to its numbered step alongside. The whole card is
+     the link to the real thing. Static — nothing here animates. */}}
+<a class="dm-councillink" href="{{.Tenant.Links.Portal}}" target="_blank" rel="noopener noreferrer" aria-label="Open the council’s sign-in page in a new tab">
+  <figure class="dm dm-static">
+    <div class="dm-council" aria-hidden="true">
+      <div class="dm-councilcard">
+        <div class="dm-cbrand">{{.Tenant.Name}}</div>
+        <div class="dm-cfld"><div class="k"><span class="dm-mark">1</span>Email</div><div class="val">Email</div></div>
+        <div class="dm-cfld"><div class="k">Password</div><div class="val">Password</div></div>
+        <div class="dm-cbtn">Login</div>
+        <div class="dm-clinks">
+          <span><span class="dm-mark">2</span>Register as a new user</span>
+          <span><span class="dm-mark">3</span>Forgot your password?</span>
+        </div>
+      </div>
+    </div>
+    <figcaption class="dm-static-cap">The council’s sign-in screen. Tap it to open the real one in a new tab.</figcaption>
+  </figure>
+</a>
 {{end}}
 
 {{define "page-contact"}}
@@ -367,7 +418,7 @@
 {{define "demo-roster"}}
         <figure class="dm" data-demo="roster">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> This week</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-calendar"}}</span> This week</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
           <div class="dm-picker">
             <div class="ph">Which car?</div>
@@ -387,7 +438,7 @@
 {{define "demo-oneoff"}}
         <figure class="dm" data-demo="oneoff">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
           <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
           <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
@@ -403,7 +454,7 @@
              their car. Mirrors templates/guest.html (the /g/ page). */}}
         <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-users"}}</span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-users"}}</span> Your guest&rsquo;s phone</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
           {{/* One pass, one household: these are the grandparents' two cars, not
                a mix of unrelated helpers — a pass goes to one person, who taps
@@ -430,7 +481,7 @@
              qr-card + guest.html. */}}
         <figure class="dm" data-demo="visitorqr">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> Add a visitor</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-qr"}}</span> Add a visitor</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-permit" style="margin-top:0;margin-bottom:12px">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-vqdot style="background:var(--v1)"></span> <span class="dm-rego" data-vqrego>ABC123</span></div><div class="dm-guntil" data-vquntil></div></div>
             <div class="dm-sync">{{template "ic-check"}}</div>
@@ -461,7 +512,7 @@
              notification for the outcome never reflows. */}}
         <figure class="dm" data-demo="doorqr">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic">{{template "ic-qr"}}</span> A printed QR</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-qr"}}</span> A printed QR</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-duo">
             <div class="dm-fridge">
               <div class="dm-fridge-seam"></div>
@@ -494,4 +545,16 @@
         </div>
         <div class="dm-caption"><span></span></div>
         </figure>
+{{end}}
+
+{{define "guide-links"}}
+{{/* The guide pages are the long-tail search entry points, and a page linked
+     from one place two clicks deep is a page the crawler never gets round to.
+     Every public surface lists them with the question itself as the anchor
+     text. Takes the guide slice from (guidesFor .Tenant). */}}
+<ul class="guide-list">
+  {{- range .}}
+  <li><a href="/guide/{{.Slug}}" hx-boost="false">{{.H1}}</a></li>
+  {{- end}}
+</ul>
 {{end}}

@@ -39,7 +39,9 @@
   border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 16px 16px 18px; overflow: hidden;
 }
 .dm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
-.dm-head h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; color: var(--ink); }
+/* The frame label is chrome, not a heading: as an h2 it put "This week" and
+   "One-off booking" into the document outline beside the real section titles. */
+.dm-head .dm-title { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .dm-ic { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); flex: 0 0 auto; }
 .dm-ic svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .dm-sample { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); border: 1px dashed var(--line); border-radius: 999px; padding: 3px 8px; }
@@ -97,6 +99,24 @@
 .dm-fade { opacity: 0; transition: opacity .3s; }
 .dm-fade.show { opacity: 1; }
 .dm-btn { margin-top: 4px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--primary); color: var(--on-primary); font-weight: 650; font-size: 13px; padding: 9px; border-radius: var(--radius-sm); transition: transform .15s, filter .15s; }
+/* Static illustration for the guides: the council's sign-in page, drawn. Fixed
+   light colours on purpose — it depicts another site, so it does not follow
+   our theme — with the council's own navy for the button and links so the real
+   page is recognisable when it opens. */
+.dm-councillink { display: block; color: inherit; text-decoration: none; border-radius: var(--radius); }
+.dm-councillink:hover .dm-councilcard, .dm-councillink:focus-visible .dm-councilcard { box-shadow: 0 6px 22px rgba(20, 50, 90, .18); }
+.dm-councillink:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.dm-council { background: linear-gradient(180deg, #eef3fb, #f7f9fd); border: 1px solid #dfe6f1; border-radius: var(--radius); padding: 18px 16px; }
+.dm-councilcard { background: #fff; border: 1px solid #e3e8ef; border-radius: 6px; padding: 16px 14px 14px; box-shadow: 0 2px 10px rgba(20, 50, 90, .08); transition: box-shadow .2s; }
+.dm-cbrand { color: #235789; font-weight: 800; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; text-align: center; margin-bottom: 14px; }
+.dm-cfld { margin-bottom: 10px; }
+.dm-cfld .k { display: flex; align-items: center; font-size: 11.5px; font-weight: 600; color: #333; margin-bottom: 4px; }
+.dm-cfld .val { border: 1px solid #ccd3dc; border-radius: 4px; padding: 7px 9px; font-size: 12px; color: #8a929c; background: #fff; }
+.dm-cbtn { margin-top: 12px; background: #235789; color: #fff; text-align: center; font-weight: 600; font-size: 12.5px; padding: 8px; border-radius: 4px; }
+.dm-clinks { display: grid; gap: 9px; justify-items: center; margin-top: 13px; font-size: 12px; color: #235789; }
+.dm-clinks > span { display: inline-flex; align-items: center; text-decoration: underline; text-underline-offset: 2px; }
+.dm-mark { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--primary); color: var(--on-primary); font-size: 10.5px; font-weight: 700; margin-right: 7px; flex: 0 0 auto; text-decoration: none; }
+.dm-static-cap { margin-top: 10px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.4; }
 .dm-btn svg { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .dm-btn.press { transform: scale(.97); filter: brightness(1.06); }
 .dm-uph { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin: 14px 0 8px; }

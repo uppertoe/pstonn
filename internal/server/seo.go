@@ -185,7 +185,7 @@ func (s *Server) siteManifest(w http.ResponseWriter, r *http.Request) {
 // public pages last changed in a way a search engine should re-crawl for. Bump
 // it by hand with such a change — an automatic stamp (build time, process start)
 // would move on every deploy and teach crawlers the field is noise.
-const publicContentRev = "2026-09-05"
+const publicContentRev = "2026-09-07"
 
 // sitemapXML lists the indexable public pages so a search engine discovers them
 // without guessing. Only the four content pages plus the FAQ — nothing behind auth.
@@ -222,6 +222,28 @@ type guidePage struct {
 	TenantNote    template.HTML
 	Pstonn        string
 	Demo          string // "roster" | "oneoff" | "guest" — the How page demo to embed
+	Figure        string // optional static illustration beside the steps: "council-login"
+}
+
+// guideNeighbours is the guide before and after one in the tenant's list, for
+// the previous/next pager at the foot of each guide. Either is nil at an end.
+type guideNeighbours struct{ Prev, Next *guidePage }
+
+func neighbouringGuides(c tenantView, slug string) guideNeighbours {
+	gs := guidesFor(c)
+	var n guideNeighbours
+	for i := range gs {
+		if gs[i].Slug != slug {
+			continue
+		}
+		if i > 0 {
+			n.Prev = &gs[i-1]
+		}
+		if i+1 < len(gs) {
+			n.Next = &gs[i+1]
+		}
+	}
+	return n
 }
 
 // The tenant's own instructions (its visitor-permits page, read 2026-08-29):
@@ -290,6 +312,30 @@ func guidesFor(c tenantView) []guidePage {
 			TenantNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
 			Pstonn:     "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
 			Demo:       "oneoff",
+		},
+		{
+			// Search Console (2026-09-07): the site is shown for "<council> parking
+			// permit login" and its variants far more than for anything else, and
+			// never clicked — the person wants the council's sign-in page, not a
+			// scheduler. Answer that first; the pitch comes after.
+			Slug:          "parking-permit-login",
+			Title:         trText(c, "guide.login_title"),
+			Desc:          trText(c, "guide.login_desc"),
+			H1:            trText(c, "guide.login_h1"),
+			Paras:         []string{trText(c, "guide.login_para1"), trText(c, "guide.login_para2")},
+			TenantHeading: "At the council",
+			Steps: []template.HTML{
+				tr(c, "guide.login_step_open", nil, i18n.Slots{"portal": i18n.Link(c.Links.Portal, i18n.NewTab())}),
+				// Register before reset: that is the order the links sit on the
+				// screen, and the illustration's markers count down the page.
+				tr(c, "guide.login_step_register", nil, i18n.Slots{"register": i18n.Link(c.Links.Register, i18n.NewTab())}),
+				tr(c, "guide.login_step_reset", nil, i18n.Slots{"reset": i18n.Link(c.Links.ResetPassword, i18n.NewTab())}),
+				tr(c, "guide.login_step_permits", nil, i18n.Slots{"b": i18n.Strong()}),
+			},
+			TenantNote: tr(c, "guide.login_note", nil, nil),
+			Pstonn:     "p.stonn is for the people who log in most. Sign in to the council once, and from then on the permit follows your weekly roster, one-off bookings and guest links without you opening the site again.",
+			Demo:       "roster",
+			Figure:     "council-login",
 		},
 	}
 }

@@ -49,7 +49,9 @@
         "portal": "ePermits",
         "portal_site": "ePermits site",
         "epermit": "ePermit",
-        "parking_brand": "Stonnington Parking"
+        "parking_brand": "Stonnington Parking",
+        "app": "MyStonnington app",
+        "manage_button": "Pay or manage your parking permits"
       }
     },
     {

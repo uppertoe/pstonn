@@ -88,8 +88,9 @@ var weekdaysDisplay = []time.Weekday{
 var catalog = i18n.Default()
 
 var templateFuncs = template.FuncMap{
-	"asset":     asset,
-	"guidesFor": guidesFor, // the tenant's guide pages, for the landing list
+	"asset":              asset,
+	"guidesFor":          guidesFor,          // the tenant's guide pages, for the public "Guides" lists
+	"neighbouringGuides": neighbouringGuides, // previous/next for the guide pager
 	// T renders a catalog message for the page's locale and tenant: the page's
 	// data (which carries Tenant) is the message's data.
 	"T": func(key string, data any, slots ...i18n.Slots) (template.HTML, error) {

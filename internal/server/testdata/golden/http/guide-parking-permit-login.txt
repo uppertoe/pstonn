@@ -1,0 +1,424 @@
+GET /guide/parking-permit-login
+Status: 200
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-NONCE' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+Content-Type: text/html; charset=utf-8
+Permissions-Policy: screen-wake-lock=(self), camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()
+Referrer-Policy: same-origin
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="htmx-config" content='{"globalViewTransitions":true}'>
+<title>Stonnington parking permit login: where to sign in — p.stonn</title>
+
+<meta name="description" content="The City of Stonnington’s parking permit login is its ePermits site. What to sign in with, how to reset the password, what to do if you have never registered, and how to stop logging in at all.">
+<link rel="canonical" href="https://p.stonn.org/guide/parking-permit-login">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="p.stonn">
+<meta property="og:title" content="Stonnington parking permit login: where to sign in — p.stonn">
+<meta property="og:description" content="The City of Stonnington’s parking permit login is its ePermits site. What to sign in with, how to reset the password, what to do if you have never registered, and how to stop logging in at all.">
+<meta property="og:url" content="https://p.stonn.org/guide/parking-permit-login">
+<meta property="og:locale" content="en_AU">
+<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=2b93a2a933">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="p.stonn — schedule your City of Stonnington visitor parking permit">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Stonnington parking permit login: where to sign in — p.stonn">
+<meta name="twitter:description" content="The City of Stonnington’s parking permit login is its ePermits site. What to sign in with, how to reset the password, what to do if you have never registered, and how to stop logging in at all.">
+<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=2b93a2a933">
+
+<script type="application/ld+json" nonce="NONCE">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","acceptedAnswer":{"@type":"Answer","text":"Stonnington parking permits live on the council’s ePermits site, parkingpermits.stonnington.vic.gov.au. The council’s own website reaches it through the ‘Pay or manage your parking permits’ button on its parking permits page, and the MyStonnington app through its ‘Parking permits’ tile. All three open the same login screen. You sign in with the email address you registered with and a password of at least fifteen characters. There is no separate username; where the site asks for one, it means your email."},"name":"Where do I log in to my Stonnington parking permit?"}]}</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=2b93a2a933">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=2b93a2a933">
+<meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
+<meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
+<link rel="stylesheet" href="/static/app.css?v=2b93a2a933">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
+<script nonce="NONCE">
+  
+  (function () {
+    var KEY = 'pstonn-theme', saved = localStorage.getItem(KEY);
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    function toggle() {
+      var cur = document.documentElement.getAttribute('data-theme');
+      var sysDark = matchMedia('(prefers-color-scheme:dark)').matches;
+      var isDark = cur ? cur === 'dark' : sysDark;
+      var next = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem(KEY, next);
+    }
+    
+    
+    
+    
+    
+    document.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('[data-theme-toggle]')) toggle();
+    });
+    
+    
+    
+    
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('[data-share-pstonn]');
+      if (!btn) return;
+      
+      
+      var url = location.origin;
+      var msg = 'Schedule your Stonnington visitor parking permit';
+      if (navigator.share) {
+        navigator.share({ title: 'p.stonn', text: msg, url: url }).catch(function () {});
+      } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function () {
+          btn.textContent = 'Link copied';
+        }).catch(function () {});
+      }
+    });
+  })();
+</script>
+<script nonce="NONCE">
+  
+  
+  
+  
+  
+  
+  
+  (function () {
+    var native = document.startViewTransition;
+    if (!native) return;
+    var noop = function () {};
+    document.startViewTransition = function () {
+      var t = native.apply(document, arguments);
+      if (t) {
+        if (t.ready && t.ready.catch) t.ready.catch(noop);
+        if (t.finished && t.finished.catch) t.finished.catch(noop);
+      }
+      return t;
+    };
+  })();
+
+  
+  
+  
+  
+  
+  
+  
+  
+  window.pstonnWake = (function () {
+    var lock = null, want = false;
+    function acquire() {
+      if (!want || lock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+      navigator.wakeLock.request('screen').then(function (l) {
+        if (!want) { try { l.release(); } catch (e) {} return; }
+        lock = l;
+        l.addEventListener('release', function () { lock = null; });
+      }).catch(function () {}); 
+    }
+    function release() {
+      want = false;
+      if (lock) { try { lock.release(); } catch (e) {} lock = null; }
+    }
+    
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') acquire();
+    });
+    return {
+      on: function () { want = true; acquire(); },
+      off: release,
+      
+      
+      
+      
+      sync: function () {
+        var live = Array.prototype.some.call(
+          document.querySelectorAll('[data-keep-awake]'),
+          function (el) { return el.getClientRects().length > 0; });
+        if (live) { this.on(); } else { release(); }
+      }
+    };
+  })();
+  document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
+  document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
+</script>
+<script nonce="NONCE" src="/static/htmx.min.js?v=2b93a2a933"></script>
+<script nonce="NONCE" defer src="/static/alpine.min.js?v=2b93a2a933"></script>
+<link rel="stylesheet" href="/static/demos.css?v=2b93a2a933">
+<script nonce="NONCE" defer src="/static/demos.js?v=2b93a2a933"></script>
+
+<script nonce="NONCE">
+  
+  
+  addEventListener('htmx:beforeRequest', function (e) { var el = e.detail && e.detail.elt; if (el && el.classList && el.classList.contains('hx-quiet')) return; var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
+  addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  addEventListener('htmx:sendError', function (e) {
+    var cfg = e.detail && e.detail.requestConfig;
+    if (!cfg || !cfg.boosted) return;
+    if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
+    else { window.location.reload(); }
+  });
+  
+  
+  
+  
+  
+  
+  addEventListener('htmx:beforeSwap', function (e) {
+    var x = e.detail && e.detail.xhr;
+    if (!x || x.status < 400) return;
+    e.detail.shouldSwap = false;
+    if (x.status === 422) {
+      e.detail.isError = false;
+      showToast((x.responseText || 'Something needs your attention.').trim());
+      return;
+    }
+    var msg = 'Something went wrong. Please try again.';
+    var body = x.responseText || '';
+    if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
+      try {
+        var p = new DOMParser().parseFromString(body, 'text/html').querySelector('p');
+        if (p && p.textContent.trim()) msg = p.textContent.trim();
+      } catch (err) {}
+    }
+    
+    
+    
+    
+    showToast(msg, true);
+  });
+  var toastTimer;
+  
+  function showToast(msg, sticky) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    clearTimeout(toastTimer);
+    t.textContent = msg;
+    t.classList.toggle('sticky', !!sticky);
+    if (sticky) {
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'toast-x';
+      x.setAttribute('aria-label', 'Dismiss');
+      x.textContent = '×';
+      x.addEventListener('click', function () { t.classList.remove('on'); });
+      t.appendChild(x);
+    } else {
+      toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
+    }
+    t.classList.add('on');
+  }
+</script>
+<script nonce="NONCE">
+
+window.popClamp = window.popClamp || function (el) {
+  el.style.removeProperty('--pop-shift');
+  var pad = 12, vw = document.documentElement.clientWidth;
+  var r = el.getBoundingClientRect(), dx = 0;
+  if (r.left < pad) dx = pad - r.left;
+  else if (r.right > vw - pad) dx = vw - pad - r.right;
+  if (dx) el.style.setProperty('--pop-shift', dx + 'px');
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
+(function () {
+  if (window.appConfirm) return; 
+  var pending = null;
+  function dlg() { return document.getElementById('confirm-dlg'); }
+  function settle(ok) {
+    var d = dlg(), res = pending;
+    pending = null;
+    if (d && d.open) d.close();
+    if (res) res(ok);
+  }
+  window.appConfirm = function (message, okLabel) {
+    var d = dlg();
+    if (!d || typeof d.showModal !== 'function') return Promise.resolve(window.confirm(message));
+    if (pending) pending(false);
+    d.querySelector('.dlg-msg').textContent = message;
+    d.querySelector('.dlg-ok').textContent = okLabel || 'Confirm';
+    d.showModal();
+    return new Promise(function (res) { pending = res; });
+  };
+  document.addEventListener('click', function (e) {
+    var d = dlg();
+    if (!d || !d.open) return;
+    if (e.target.closest('.dlg-ok')) settle(true);
+    else if (e.target.closest('.dlg-cancel') || e.target === d) settle(false); 
+  });
+  document.addEventListener('cancel', function (e) { 
+    if (e.target === dlg() && pending) { var res = pending; pending = null; res(false); }
+  }, true);
+  
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest ? e.target.closest('[data-print],[data-dispatch]') : null;
+    if (!el) return;
+    if (el.hasAttribute('data-print')) window.print();
+    var name = el.getAttribute('data-dispatch');
+    
+    if (name) window.dispatchEvent(new CustomEvent(name, {detail:{permit: el.getAttribute('data-dispatch-permit') || ''}}));
+  });
+  
+  document.addEventListener('submit', function (e) {
+    var f = e.target, field = f.dataset && f.dataset.plateConfirm;
+    if (!field || f.__confirmed) return;
+    var inp = f.querySelector('[name="' + field + '"]');
+    var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
+    if (!inp || inp.offsetParent === null || !v) { delete f.dataset.confirm; return; }
+    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
+      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches — continue';
+  }, true);
+  
+  document.addEventListener('submit', function (e) {
+    var f = e.target, msg = f.dataset && f.dataset.confirm;
+    if (!msg) return;
+    if (f.__confirmed) { f.__confirmed = false; return; }
+    e.preventDefault();
+    e.stopPropagation();
+    appConfirm(msg, f.dataset.confirmOk).then(function (ok) {
+      if (!ok) return;
+      f.__confirmed = true;
+      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+    });
+  }, true);
+  document.addEventListener('htmx:confirm', function (e) {
+    if (!e.detail.question) return; 
+    e.preventDefault();
+    var elt = e.detail.elt;
+    appConfirm(e.detail.question, elt && elt.dataset ? elt.dataset.confirmOk : null)
+      .then(function (ok) { if (ok) e.detail.issueRequest(true); });
+  });
+})();
+</script>
+</head>
+<body hx-boost="true">
+<a href="#main" class="skip-link">Skip to content</a>
+<div id="htmx-bar" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+
+
+
+
+<header class="appbar pubbar">
+  
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
+  <nav class="pubnav">
+    <a href="/features" hx-boost="false" class="link-quiet">Features</a>
+    <a href="/faq" class="link-quiet">FAQ</a>
+    <a href="/security" class="link-quiet">Security &amp; data</a>
+    
+  </nav>
+  <div class="appbar-r">
+    <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle light / dark"><span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span></button>
+    <a href="/signin" hx-boost="false"><button type="button">Sign in</button></a>
+  </div>
+</header>
+
+<main id="main" tabindex="-1" class="landing about">
+  <section class="paper">
+    
+    <nav class="guide-nav" aria-label="Guides">
+      <span class="guide-nav-h">Guides</span>
+      <ol>
+        <li><a href="/guide/change-car-on-visitor-permit" hx-boost="false">How do I change the car on my Stonnington visitor permit?</a></li>
+        <li><a href="/guide/visitor-parking-cleaner-nanny-carer" hx-boost="false">Visitor parking for a cleaner, nanny or carer in Stonnington</a></li>
+        <li><a href="/guide/paper-visitor-permits" hx-boost="false">Do visitors need a paper permit in Stonnington?</a></li>
+        <li><a href="/guide/parking-permit-login" hx-boost="false" aria-current="page">Where do I log in to my Stonnington parking permit?</a></li>
+      </ol>
+    </nav>
+    <h1 class="about-h1">Where do I log in to my Stonnington parking permit?</h1>
+    <p>Stonnington parking permits live on the council’s ePermits site, parkingpermits.stonnington.vic.gov.au. The council’s own website reaches it through the ‘Pay or manage your parking permits’ button on its parking permits page, and the MyStonnington app through its ‘Parking permits’ tile. All three open the same login screen.</p><p>You sign in with the email address you registered with and a password of at least fifteen characters. There is no separate username; where the site asks for one, it means your email.</p>
+    <h2 class="about-h2">At the council</h2>
+    <div class="guide-council">
+      <ol class="guide-steps">
+        <li>Open <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer">the ePermits site</a> and enter your email and password.</li><li>Never registered? Choose <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/Register" target="_blank" rel="noopener noreferrer">Register as a new user</a>. The account comes first and you apply for permits from inside it; a permit from the paper days does not come with a login.</li><li>Forgotten the password? Choose <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer">Forgot your password?</a> The username it asks for is your email address, and the reset link arrives by email.</li><li>Once you are in, your permits are listed under Current Permits. <strong>Update Vehicle</strong> on the visitor permit is where a visitor’s number plate goes.</li>
+      </ol>
+      
+
+<a class="dm-councillink" href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer" aria-label="Open the council’s sign-in page in a new tab">
+  <figure class="dm dm-static">
+    <div class="dm-council" aria-hidden="true">
+      <div class="dm-councilcard">
+        <div class="dm-cbrand">City of Stonnington</div>
+        <div class="dm-cfld"><div class="k"><span class="dm-mark">1</span>Email</div><div class="val">Email</div></div>
+        <div class="dm-cfld"><div class="k">Password</div><div class="val">Password</div></div>
+        <div class="dm-cbtn">Login</div>
+        <div class="dm-clinks">
+          <span><span class="dm-mark">2</span>Register as a new user</span>
+          <span><span class="dm-mark">3</span>Forgot your password?</span>
+        </div>
+      </div>
+    </div>
+    <figcaption class="dm-static-cap">The council’s sign-in screen. Tap it to open the real one in a new tab.</figcaption>
+  </figure>
+</a>
+
+    </div>
+    <p>If the site will not let you in, the council’s Customer Service team on 03 8290 1333 can help during business hours, and can put a visitor’s registration on your permit over the phone.</p>
+    <h2 class="about-h2">With p.stonn</h2>
+    <div class="feature" style="margin-top:8px">
+      <div class="feature-text"><p>p.stonn is for the people who log in most. Sign in to the council once, and from then on the permit follows your weekly roster, one-off bookings and guest links without you opening the site again.</p></div>
+      <div class="feature-demo">
+        
+        <figure class="dm" data-demo="roster">
+        <div class="dm-phone">
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> This week</div><span class="dm-sample">Sample data</span></div>
+          <div class="dm-week" data-week></div>
+          <div class="dm-picker">
+            <div class="ph">Which car?</div>
+            <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
+            <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
+            <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+            <div class="dm-sync"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
+          </div>
+          <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+        </figure>
+
+      </div>
+    </div>
+    <p style="margin-top:22px"><a href="/signin" hx-boost="false"><button type="button"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Get started</button></a></p>
+    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council’s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener noreferrer">parking permit FAQs</a>. See also <a href="/features" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
+    
+    <nav class="guide-pager" aria-label="Previous and next guide">
+      <a class="prev" href="/guide/paper-visitor-permits" hx-boost="false"><span class="dir">Previous</span>Do visitors need a paper permit in Stonnington?</a>
+      
+    </nav>
+    
+  </section>
+</main>
+
+
+
+<dialog id="confirm-dlg" class="confirm">
+  <div class="dlg-box">
+    <p class="dlg-msg"></p>
+    <div class="dlg-actions">
+      <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
+      <button type="button" class="danger dlg-ok">Confirm</button>
+    </div>
+  </div>
+</dialog>
+</body>
+</html>
