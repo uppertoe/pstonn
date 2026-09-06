@@ -224,6 +224,12 @@ type appData struct {
 	// manually doing exactly what a guest link automates. Server-gated on the
 	// change log, dismissed per-browser in the template like the other hints.
 	ShowGuestHint bool
+	// ShowPassItOnHint puts the referral pointer on the Schedule page once the
+	// household has passItOnHintAfterApplies successful council writes behind it
+	// — the ask to vouch for p.stonn waits until the tool has earned it. Links
+	// to /share (which holds the share sheet, email invite and printable card);
+	// server-gated here, dismissed per-browser in the template like its siblings.
+	ShowPassItOnHint bool
 	// GuestActive gates the page-level "add your plates first" banner: a
 	// household already using guest QRs (which need no saved cars) shouldn't be
 	// told to add plates — the roster and one-off surfaces explain their own

@@ -35,6 +35,13 @@ func councilTroubled(state string) bool {
 // 90-day window reads as a habit; one or two could be a single visit.
 const guestHintAfterOverrides = 3
 
+// passItOnHintAfterApplies is how many successful council writes a household has
+// before the Schedule page suggests passing p.stonn on. Higher than the guest
+// hint's threshold on purpose: a referral asks the household to vouch for the
+// tool to someone else, which needs more proof behind it than a pointer to a
+// feature of their own account.
+const passItOnHintAfterApplies = 5
+
 // schedule is the primary day-to-day page: permit status, weekly roster, 14-day
 // calendar, and the chronological one-offs.
 func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +160,12 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	if len(pvs) > 0 {
 		if n, cerr := s.store.CountSuccessfulApplies(ctx, owner); cerr == nil && n > 0 {
 			base.App.ShowInstallHint = true
+			// The pass-it-on hint rides the same count: by the fifth write the
+			// household has a story worth telling, and the gate keeps the ask
+			// away from accounts the tool hasn't yet done anything for.
+			if n >= passItOnHintAfterApplies {
+				base.App.ShowPassItOnHint = true
+			}
 		}
 	}
 	// Guest-pass pointer, gated on proven need: a household that keeps making

@@ -148,6 +148,17 @@
             @click="hide=true; localStorage.setItem('pstonn-install-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
+  {{if .App.ShowPassItOnHint}}
+  {{/* Referral pointer, deliberately last in the strip order and gated on five
+       successful applies (see schedule.go): the ask to vouch for p.stonn to a
+       neighbour waits until the tool has plainly earned it. */}}
+  <p class="share-hint" style="--hue:var(--sec-activity)" x-data="{hide: localStorage.getItem('pstonn-passiton-hint')==='1'}" x-show="!hide" x-cloak>
+    {{template "ic-link"}}
+    <span>Has p.stonn spared you a parking fine? Neighbours can use it too &mdash; <a href="/share">pass it on</a>.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-passiton-hint','1')">{{template "ic-x"}}</button>
+  </p>
+  {{end}}
   {{if .App.Permits}}
   {{if gt (len .App.Permits) 1}}
   {{/* More than one permit: the FAB can't know which one the booking is for, so

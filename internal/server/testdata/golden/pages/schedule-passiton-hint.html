@@ -968,15 +968,13 @@ window.popClamp = window.popClamp || function (el) {
   
   
   
-  <p class="share-hint" x-data="{hide: localStorage.getItem('pstonn-install-hint')==='1' || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
-                                  ios: /iPhone|iPad|iPod/.test(navigator.userAgent)}" x-show="!hide" x-cloak>
-    <svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"/><path d="M13 6v12"/></svg>
-    <span x-show="ios">Tip: add p.stonn to your home screen for one-tap access &mdash; <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>
-    <span x-show="!ios">Tip: add p.stonn to your home screen for one-tap access &mdash; the browser menu, then <strong>Add to Home screen</strong> (or <strong>Install app</strong>).</span>
-    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
-            @click="hide=true; localStorage.setItem('pstonn-install-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-  </p>
   
+  <p class="share-hint" style="--hue:var(--sec-activity)" x-data="{hide: localStorage.getItem('pstonn-passiton-hint')==='1'}" x-show="!hide" x-cloak>
+    <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>
+    <span>Has p.stonn spared you a parking fine? Neighbours can use it too &mdash; <a href="/share">pass it on</a>.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-passiton-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </p>
   
   
   
