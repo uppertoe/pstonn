@@ -24,22 +24,22 @@ X-Frame-Options: DENY
 <meta property="og:description" content="A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.">
 <meta property="og:url" content="https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer">
 <meta property="og:locale" content="en_AU">
-<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=b27421ff7b">
+<meta property="og:image" content="https://p.stonn.org/static/og-card.png?v=2b93a2a933">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="p.stonn — schedule your City of Stonnington visitor parking permit">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Visitor parking for a cleaner, nanny or carer in Stonnington — p.stonn">
 <meta name="twitter:description" content="A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.">
-<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=b27421ff7b">
+<meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=2b93a2a933">
 
 <script type="application/ld+json" nonce="NONCE">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","acceptedAnswer":{"@type":"Answer","text":"A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn't, they will not be covered by the permit."},"name":"Visitor parking for a cleaner, nanny or carer in Stonnington"}]}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=b27421ff7b">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=b27421ff7b">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=2b93a2a933">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=2b93a2a933">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=b27421ff7b">
+<link rel="stylesheet" href="/static/app.css?v=2b93a2a933">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script nonce="NONCE">
   
@@ -149,10 +149,10 @@ X-Frame-Options: DENY
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script nonce="NONCE" src="/static/htmx.min.js?v=b27421ff7b"></script>
-<script nonce="NONCE" defer src="/static/alpine.min.js?v=b27421ff7b"></script>
-<link rel="stylesheet" href="/static/demos.css?v=b27421ff7b">
-<script nonce="NONCE" defer src="/static/demos.js?v=b27421ff7b"></script>
+<script nonce="NONCE" src="/static/htmx.min.js?v=2b93a2a933"></script>
+<script nonce="NONCE" defer src="/static/alpine.min.js?v=2b93a2a933"></script>
+<link rel="stylesheet" href="/static/demos.css?v=2b93a2a933">
+<script nonce="NONCE" defer src="/static/demos.js?v=2b93a2a933"></script>
 
 <script nonce="NONCE">
   
@@ -333,12 +333,25 @@ window.popClamp = window.popClamp || function (el) {
 
 <main id="main" tabindex="-1" class="landing about">
   <section class="paper">
+    
+    <nav class="guide-nav" aria-label="Guides">
+      <span class="guide-nav-h">Guides</span>
+      <ol>
+        <li><a href="/guide/change-car-on-visitor-permit" hx-boost="false">How do I change the car on my Stonnington visitor permit?</a></li>
+        <li><a href="/guide/visitor-parking-cleaner-nanny-carer" hx-boost="false" aria-current="page">Visitor parking for a cleaner, nanny or carer in Stonnington</a></li>
+        <li><a href="/guide/paper-visitor-permits" hx-boost="false">Do visitors need a paper permit in Stonnington?</a></li>
+        <li><a href="/guide/parking-permit-login" hx-boost="false">Where do I log in to my Stonnington parking permit?</a></li>
+      </ol>
+    </nav>
     <h1 class="about-h1">Visitor parking for a cleaner, nanny or carer in Stonnington</h1>
     <p>A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn&#39;t, they will not be covered by the permit.</p>
     <h2 class="about-h2">At the council, each visit</h2>
-    <ol class="guide-steps">
-      <li>Sign in at <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer">parkingpermits.stonnington.vic.gov.au</a> — <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/Register" target="_blank" rel="noopener noreferrer">register</a> first if you haven’t, or <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer">reset your password</a> if you’ve never used it.</li><li>In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.</li><li>Enter the new registration and the state it&rsquo;s registered in, and save.</li>
-    </ol>
+    <div class="guide-council">
+      <ol class="guide-steps">
+        <li>Sign in at <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer">parkingpermits.stonnington.vic.gov.au</a> — <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/Register" target="_blank" rel="noopener noreferrer">register</a> first if you haven’t, or <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer">reset your password</a> if you’ve never used it.</li><li>In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.</li><li>Enter the new registration and the state it&rsquo;s registered in, and save.</li>
+      </ol>
+      
+    </div>
     <p>Carer arrangements can also qualify for a physical permit under the council’s <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">exceptional circumstances</a> provision — worth asking about if the online system doesn’t suit your household.</p>
     <h2 class="about-h2">With p.stonn</h2>
     <div class="feature" style="margin-top:8px">
@@ -348,7 +361,7 @@ window.popClamp = window.popClamp || function (el) {
         
         <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
-          <div class="dm-head"><h2><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</h2><span class="dm-sample">Sample data</span></div>
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
           
           <div class="dm-gsub">Tap your car to put it on the permit.</div>
@@ -368,6 +381,12 @@ window.popClamp = window.popClamp || function (el) {
     </div>
     <p style="margin-top:22px"><a href="/signin" hx-boost="false"><button type="button"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Get started</button></a></p>
     <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council’s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener noreferrer">parking permit FAQs</a>. See also <a href="/features" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
+    
+    <nav class="guide-pager" aria-label="Previous and next guide">
+      <a class="prev" href="/guide/change-car-on-visitor-permit" hx-boost="false"><span class="dir">Previous</span>How do I change the car on my Stonnington visitor permit?</a>
+      <a class="next" href="/guide/paper-visitor-permits" hx-boost="false"><span class="dir">Next</span>Do visitors need a paper permit in Stonnington?</a>
+    </nav>
+    
   </section>
 </main>
 

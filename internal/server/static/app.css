@@ -126,10 +126,23 @@ button.menu-item:hover { background:var(--surface-2); filter:none; box-shadow:no
 /* ---- modal ---- */
 .modal-wrap { position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:16px; }
 .scrim { position:absolute; inset:0; background:rgba(8,12,22,.62); }
-.modal { position:relative; z-index:1; width:min(620px,100%); max-height:88vh; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-lg); padding:22px; }
+/* Height is the small (toolbar-shown) phone viewport where dvh exists: vh is
+   the toolbar-hidden height on iOS, so 88vh put the bottom of a tall modal —
+   the row with the Book button — behind Safari's toolbar. */
+.modal { position:relative; z-index:1; width:min(620px,100%); max-height:88vh; max-height:min(88vh, calc(100dvh - 32px)); overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-lg); padding:22px; }
 .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
 .modal-head strong { font-size:16px; letter-spacing:-.01em; }
-.modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+/* Pinned to the bottom of the modal's own scroll: on a short phone screen the
+   booking form is taller than the viewport, and a submit row that only appears
+   after scrolling inside the modal reads as a cut-off dialog. The negative
+   margins let the row own the modal's bottom padding; the gradient fades content
+   out beneath it while scrolling and is invisible once the row sits in place.
+   bottom:-22px because the sticky rectangle is the scroller's CONTENT box, so
+   bottom:0 would float the row 22px above the modal's edge with the next field
+   peeking out beneath it; the 22px the offset reaches into is the row's own
+   bottom padding, so an engine that measures the padding box instead hides
+   nothing but padding. */
+.modal-actions { position:sticky; bottom:-22px; display:flex; justify-content:flex-end; gap:10px; margin:6px -22px -22px; padding:14px 22px 22px; background:linear-gradient(to bottom, transparent, var(--surface) 14px); }
 /* Shared confirm dialog: native <dialog> for the focus trap / Esc / top-layer
    guarantees, styled with the app's own surface instead of browser chrome. */
 dialog.confirm { border:0; padding:0; border-radius:16px; background:var(--surface); color:var(--ink); box-shadow:var(--shadow-lg); width:min(92vw,360px); }
@@ -222,6 +235,12 @@ button { font:inherit; font-weight:560; padding:9px 15px; border:0; border-radiu
 button:hover { filter:brightness(1.05); box-shadow:var(--shadow-lg); }
 button:active { transform:translateY(1px) scale(.99); }
 button svg { width:16px; height:16px; }
+/* A leading icon sits inside a 16px box its strokes never reach, so with equal
+   padding both sides the label reads as shoved right ("+ Book" next to a centred
+   "Cancel"). Pull the icon in by the dead space. Icon-only buttons keep their
+   centring: they are excluded by class, so a new icon-only button needs one
+   (.wkadd-first is excluded because it has no padding to trim). */
+button:not(.icon):not(.icon-btn):not(.wkadd):not(.wkadd-first):not(.fab) > svg:first-child { margin-left:-3px; }
 button.ghost { background:var(--surface-2); color:var(--ink); box-shadow:none; border:1px solid var(--line); }
 button.ghost:hover { background:var(--line); filter:none; box-shadow:none; }
 button.danger { background:var(--danger-soft); color:var(--danger); box-shadow:none; }
@@ -600,6 +619,27 @@ button:disabled { opacity:.55; cursor:progress; }
 .guide-list { padding-left:18px; margin:8px 0 0; display:grid; gap:8px; }
 .guide-steps { padding-left:22px; margin:6px 0 0; display:grid; gap:8px; }
 .guide-steps li { padding-left:4px; }
+/* Steps beside their illustration (when the guide has one); stacked on phones. */
+.guide-council { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px 32px; align-items:start; }
+.guide-council .dm { width:250px; margin-top:6px; }
+@media (max-width:640px) { .guide-council { grid-template-columns:1fr; } .guide-council .dm { width:auto; max-width:320px; } }
+/* Guide index at the top of each guide: a numbered, two-column contents panel.
+   The current entry is the one filled row with an accent bar. */
+.guide-nav { margin:0 0 22px; padding:10px 10px 8px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-2); }
+.guide-nav-h { display:block; margin:0 0 6px 6px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+.guide-nav ol { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:2px 8px; counter-reset:guide; }
+.guide-nav li { counter-increment:guide; }
+.guide-nav a { display:flex; gap:9px; align-items:baseline; padding:6px 8px; border-radius:6px; font-size:13.5px; line-height:1.35; color:var(--ink); text-decoration:none; }
+.guide-nav a::before { content:counter(guide); flex:none; width:14px; font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--muted); }
+.guide-nav a:hover { background:var(--surface); color:var(--primary-2); }
+.guide-nav a[aria-current="page"] { background:var(--primary-soft); color:var(--primary-2); font-weight:600; box-shadow:inset 3px 0 0 var(--primary); }
+.guide-nav a[aria-current="page"]::before { color:var(--primary-2); }
+@media (max-width:640px) { .guide-nav ol { grid-template-columns:1fr; } }
+.guide-pager { display:flex; justify-content:space-between; gap:12px; margin-top:24px; }
+.guide-pager a { flex:1 1 0; max-width:48%; border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px 14px; text-decoration:none; color:var(--ink); display:grid; align-content:start; gap:2px; font-size:14px; line-height:1.35; }
+.guide-pager a:hover { border-color:var(--primary); }
+.guide-pager a .dir { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; }
+.guide-pager .next { margin-left:auto; text-align:right; }
 .poster-qr { display:block; width:240px; height:240px; margin:16px auto 8px; background:#fff; border-radius:12px; padding:10px; box-sizing:content-box; }
 .poster-url { text-align:center; font-weight:700; font-size:22px; letter-spacing:.01em; margin:4px 0 14px; color:var(--pp-ink); }
 /* the share card: one lead line, the code, the address, a short note — spaced as a card, not a poster */

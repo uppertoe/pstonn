@@ -60,7 +60,7 @@
        roster tap swaps the fragment, and state inside it would snap back to the
        server default mid-edit. Seeded with the week the cycle is currently in. */}}
   <section class="card" id="permit-{{.Permit.ID}}" style="--hue:var(--sec-schedule)"
-           x-data="{addOpen:false, qrOpen:false, wk:{{.CurrentWeek}}}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '{{.Permit.ID}}') addOpen=true"
+           x-data="{addOpen:false, qrOpen:false, nowPlate:'', wk:{{.CurrentWeek}}}" @open-oneoff.window="if (($event.detail && $event.detail.permit) === '{{.Permit.ID}}') addOpen=true"
            @htmx:after-request="if($event.detail.successful && $event.detail.requestConfig && $event.detail.requestConfig.verb !== 'get' && !$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     {{/* #pbody is the swap target for every card re-render (plate poll, roster edits,
          one-off add/delete). The teleported modals are rendered as a sibling OUTSIDE
@@ -549,7 +549,12 @@
 {{/* Add-one-off modal, teleported to <body> so it escapes the card's transform
      (an animated/transformed ancestor becomes the containing block for position:fixed). */}}
 <template x-teleport="body">
-<div class="modal-wrap" x-show="addOpen" x-cloak @keydown.escape.window="addOpen=false" @htmx:after-request="if($event.detail.successful) addOpen=false">
+<div class="modal-wrap" x-show="addOpen" x-cloak @keydown.escape.window="addOpen=false" @htmx:after-request="if($event.detail.successful) addOpen=false"
+     {{/* The modal lives outside #pbody (see the section), so nothing re-renders
+          it: a plate that landed after page load — a roster tap, the poll — would
+          leave this line naming the plate from before. Read the live badge each
+          time the modal opens instead of trusting the render. */}}
+     x-effect="if (addOpen) { const b = document.querySelector('#pbody-{{.Permit.ID}} .nowbadge .plate'); nowPlate = b ? b.textContent.trim() : '' }">
   <div class="scrim" x-show="addOpen" x-transition.opacity @click="addOpen=false"></div>
   <div class="modal" x-show="addOpen" x-transition>
   <div class="modal-head"><strong>Add a one-off booking</strong>
@@ -558,7 +563,7 @@
   {{/* The modal covers the card that gave it context, so it names its permit
        itself — on a multi-permit account this is the only line saying where the
        booking will land. */}}
-  <p class="empty-note" style="margin:-10px 0 12px">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}} &middot; on permit now: {{if .Permit.ActiveRegistration}}<span class="reg">{{.Permit.ActiveRegistration}}</span>{{else}}no car{{end}}</p>
+  <p class="empty-note" style="margin:-10px 0 12px">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}} &middot; on permit now: <span class="reg" x-show="nowPlate" x-text="nowPlate"></span><span x-show="!nowPlate">no car</span></p>
   {{/* method/action are a native fallback: this form is teleported into <body> by
        Alpine, and htmx's async MutationObserver sometimes hasn't processed it by
        the time it's submitted — in which case the browser would do a useless GET
