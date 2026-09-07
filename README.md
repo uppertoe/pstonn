@@ -1,15 +1,16 @@
-# p.stonn
+# p.stonn, a scheduler for Stonnington visitor parking permits
 
 **[p.stonn.org](https://p.stonn.org)** — a free scheduler for City of Stonnington
 visitor parking permits.
 
 ## The problem
 
-A Stonnington visitor permit covers **one number plate at a time**. If different
-cars use it on different days — a nanny on weekdays, grandparents on the weekend,
-a friend staying over — someone has to log into the council portal and re-type
-the plate at every changeover. Forget once and the person parked outside cops a
-fine.
+A City of Stonnington visitor parking permit covers **one number plate at a
+time**. If different cars use it on different days — a nanny on weekdays,
+grandparents on the weekend, a friend staying over — someone has to log in to the
+council's ePermits site at parkingpermits.stonnington.vic.gov.au, open the permit
+and re-type the plate at every changeover. Forget once and the person parked
+outside cops a fine.
 
 ## What p.stonn does
 
@@ -67,6 +68,20 @@ clicking it (or simply signing in) resets the clock. Ignore it and the session
 lapses, the app stops managing the permit, and you re-link in the app. The point
 is to stop holding a council session for someone who has moved away or stopped
 using the service.
+
+## Guides
+
+The site also answers the questions residents actually search for. Each of these
+pages sets out the council's own steps first and what p.stonn does second.
+
+- [How do I change the car on my Stonnington visitor permit?](https://p.stonn.org/guide/change-car-on-visitor-permit)
+- [Visitor parking for a cleaner, nanny or carer in Stonnington](https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer)
+- [Do visitors need a paper permit in Stonnington?](https://p.stonn.org/guide/paper-visitor-permits)
+- [Where do I log in to my Stonnington parking permit?](https://p.stonn.org/guide/parking-permit-login)
+
+The [features page](https://p.stonn.org/features) shows everything the app can do
+in short animations, and the [FAQ](https://p.stonn.org/faq) covers the common
+questions.
 
 ## How it works
 
