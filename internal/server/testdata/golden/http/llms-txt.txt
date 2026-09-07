@@ -1,0 +1,30 @@
+GET /llms.txt
+Status: 200
+Cache-Control: public, max-age=86400
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-NONCE' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+Content-Type: text/markdown; charset=utf-8
+Permissions-Policy: screen-wake-lock=(self), camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()
+Referrer-Policy: same-origin
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+
+# p.stonn
+
+> Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.
+
+p.stonn is a free, unofficial tool for residents of the City of Stonnington who hold a visitor parking permit on the council's ePermits site. The resident signs in to the council once; from then on p.stonn puts the right number plate on the permit for them — a weekly roster for regular visitors, one-off bookings, an on-screen QR code a visitor scans at the door, a printable QR code that asks the resident to approve each visitor, and standing guest links for family and carers. It changes only which car is on the permit, exactly as the resident could by hand on the council's site. It is not run by or affiliated with the council.
+
+## Pages
+
+- [Stonnington visitor parking permits, on a schedule — p.stonn](https://p.stonn.org/): Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.
+- [What p.stonn can do with your Stonnington visitor permit](https://p.stonn.org/features): Connect your Stonnington ePermits login once; p.stonn sets your visitor permit to your car schedule, with one-off bookings, visitor QR codes, a printable QR and guest passes.
+- [Frequently asked questions](https://p.stonn.org/faq): Answers about scheduling your City of Stonnington visitor parking permit with p.stonn — recurring visitor parking, sharing with family, cost, and safety.
+- [Security and privacy](https://p.stonn.org/security): What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial Stonnington parking tool.
+- [Contact](https://p.stonn.org/contact): Questions about p.stonn, the free scheduler for City of Stonnington visitor parking permits? Get in touch.
+
+## Guides
+
+- [How do I change the car on my Stonnington visitor permit?](https://p.stonn.org/guide/change-car-on-visitor-permit): Changing the vehicle on a City of Stonnington visitor parking permit: the steps on the council's ePermits site, and how to stop doing it by hand.
+- [Visitor parking for a cleaner, nanny or carer in Stonnington](https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer): A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.
+- [Do visitors need a paper permit in Stonnington?](https://p.stonn.org/guide/paper-visitor-permits): City of Stonnington visitor parking permits are digital by default: nothing to display, but the number plate has to be right before each visitor parks. What that means in practice.
+- [Where do I log in to my Stonnington parking permit?](https://p.stonn.org/guide/parking-permit-login): The City of Stonnington’s parking permit login is its ePermits site. What to sign in with, how to reset the password, what to do if you have never registered, and how to stop logging in at all.

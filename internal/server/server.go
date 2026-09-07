@@ -430,6 +430,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)            // public question pages
 	s.handle(mux, "GET /robots.txt", guardPublic, s.robotsTxt)          // public (SEO)
 	s.handle(mux, "GET /sitemap.xml", guardPublic, s.sitemapXML)        // public (SEO)
+	s.handle(mux, "GET /llms.txt", guardPublic, s.llmsTxt)              // public (SEO)
 	s.handle(mux, "GET /favicon.ico", guardPublic, s.faviconICO)        // public
 	s.handle(mux, "GET /site.webmanifest", guardPublic, s.siteManifest) // public
 	s.handle(mux, "GET /contact", guardPublic, s.contactPage)           // public

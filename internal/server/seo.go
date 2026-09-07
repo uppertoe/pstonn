@@ -144,6 +144,44 @@ func (s *Server) robotsTxt(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(b.String()))
 }
 
+// llmsTxt is the /llms.txt convention: a short Markdown brief for the AI crawlers
+// that already fetch the sitemap daily, so an assistant asked about Stonnington
+// visitor permits describes the tool accurately and links the page that answers
+// the question. It is built from the same copy as the pages (meta descriptions
+// and guide titles) so it cannot drift from them, and lists only what the sitemap
+// lists — nothing behind auth, no token-bearing paths.
+func (s *Server) llmsTxt(w http.ResponseWriter, r *http.Request) {
+	c := s.tenantViewFor(r.Context(), "")
+	base := s.cfg.PublicBaseURL
+	var b strings.Builder
+	fmt.Fprintf(&b, "# p.stonn\n\n> %s\n\n", trText(c, "seo.landing_desc"))
+	fmt.Fprintf(&b, "p.stonn is a free, unofficial tool for residents of the %s who hold a "+
+		"visitor parking permit on the council's %s site. The resident signs in to the council "+
+		"once; from then on p.stonn puts the right number plate on the permit for them — "+
+		"a weekly roster for regular visitors, one-off bookings, an on-screen QR code a "+
+		"visitor scans at the door, a printable QR code that asks the resident to approve "+
+		"each visitor, and standing guest links for family and carers. It changes only "+
+		"which car is on the permit, exactly as the resident could by hand on the council's "+
+		"site. It is not run by or affiliated with the council.\n\n", c.Name, c.Terms["portal"])
+	b.WriteString("## Pages\n\n")
+	for _, p := range []struct{ path, title, desc string }{
+		{"/", trText(c, "seo.landing_title"), trText(c, "seo.landing_desc")},
+		{"/features", trText(c, "seo.how_title"), trText(c, "seo.how_desc")},
+		{"/faq", "Frequently asked questions", trText(c, "seo.faq_desc")},
+		{"/security", "Security and privacy", trText(c, "seo.security_desc")},
+		{"/contact", "Contact", trText(c, "seo.contact_desc")},
+	} {
+		fmt.Fprintf(&b, "- [%s](%s%s): %s\n", p.title, base, p.path, p.desc)
+	}
+	b.WriteString("\n## Guides\n\n")
+	for _, g := range guidesFor(c) {
+		fmt.Fprintf(&b, "- [%s](%s/guide/%s): %s\n", g.H1, base, g.Slug, g.Desc)
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write([]byte(b.String()))
+}
+
 // faviconICO answers the /favicon.ico that browsers and crawlers request at the
 // root regardless of the <link> tags. The inline SVG icon covers modern tabs; this
 // serves the 192px PNG so the bare .ico fetch is a 200, not a 404, everywhere else.

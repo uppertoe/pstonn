@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,36 @@ func TestRobotsAndSitemap(t *testing.T) {
 	}
 	if got, want := strings.Count(sitemap, "<lastmod>"+publicContentRev+"</lastmod>"), strings.Count(sitemap, "<loc>"); got != want {
 		t.Errorf("sitemap has %d lastmod entries for %d locs:\n%s", got, want, sitemap)
+	}
+}
+
+// llms.txt mirrors the sitemap: every indexable page and nothing else, so an AI
+// crawler is handed the same set a search engine is, with no token-bearing path.
+func TestLLMsTxt(t *testing.T) {
+	s := &Server{cfg: &config.Config{PublicBaseURL: "https://p.stonn.org"}}
+	rr := httptest.NewRecorder()
+	s.llmsTxt(rr, httptest.NewRequest("GET", "/llms.txt", nil))
+	body := rr.Body.String()
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
+		t.Errorf("llms.txt Content-Type = %q, want text/markdown", ct)
+	}
+	if !strings.HasPrefix(body, "# p.stonn\n\n> ") {
+		t.Errorf("llms.txt must open with the H1 and blockquote summary:\n%s", body)
+	}
+	rr = httptest.NewRecorder()
+	s.sitemapXML(rr, httptest.NewRequest("GET", "/sitemap.xml", nil))
+	for _, loc := range regexp.MustCompile(`<loc>([^<]+)</loc>`).FindAllStringSubmatch(rr.Body.String(), -1) {
+		if !strings.Contains(body, "]("+loc[1]+")") {
+			t.Errorf("llms.txt missing sitemap page %s:\n%s", loc[1], body)
+		}
+	}
+	if got, want := strings.Count(body, "](https://p.stonn.org"), strings.Count(rr.Body.String(), "<loc>"); got != want {
+		t.Errorf("llms.txt links %d pages, sitemap lists %d — they must match", got, want)
+	}
+	for _, leak := range []string{"/g/", "/u/", "/r/", "/schedule", "/admin"} {
+		if strings.Contains(body, "https://p.stonn.org"+leak) {
+			t.Errorf("llms.txt links a non-public path %q", leak)
+		}
 	}
 }
 
