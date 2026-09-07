@@ -15,22 +15,63 @@ outside cops a fine.
 ## What p.stonn does
 
 You tell it which car should be on the permit and when; it makes the change in
-the council's own system for you and confirms when it's done.
+the council's own system for you and confirms when it's done. The animations
+below are the ones from the [features page](https://p.stonn.org/features), with
+sample plates and names throughout.
 
-- **Weekly roster** — which registration is on the permit each day of the week.
-- **One-off bookings** — override the roster for a visit, an overnight stay, a
-  holiday.
-- **Guest links** — send a visitor a private link so they can put their own car
-  on the permit when they arrive, without an account. There's also a printable
-  door QR: a visitor scans it and *requests* a plate, and nothing changes until
-  you approve it from your phone.
-- **Notifications** — the app tries to tell you by email and/or push whenever it
-  changes your permit, or can't. Brief hiccups it expects to resolve are retried
-  before you're bothered, and delivery is never guaranteed, so treat notifications
-  as a convenience rather than a guarantee — you remain responsible for your
-  permit. Success is only reported after the council's own record confirms the
-  change.
-- **Shared access** — household members can manage the same schedule.
+### A car for each day
+
+Set which registration is on the permit for each day of the week — the nanny on
+weekdays, grandparents on the weekend. If the help alternates, the roster holds
+up to four weeks and rotates them. p.stonn keeps the council permit in sync, so
+you're not logging in every time the car changes.
+
+<img src="docs/demos/roster.webp" width="380" alt="Choosing a car for each day of the week; the permit follows the roster.">
+
+### One-off bookings
+
+When something breaks the routine — a weekend visitor, an overnight stay, a
+holiday — book a car for a set window. Your roster takes back over the moment it
+ends.
+
+<img src="docs/demos/oneoff.webp" width="380" alt="Booking a car from Saturday morning to Sunday evening.">
+
+### Add a visitor with a QR
+
+Tap **Show visitor QR** and hold up your phone. Your visitor scans it, types
+their number plate, and their car is on the permit until the end of the day — no
+account, nothing to install. The code stops working after 15 minutes, so it only
+ever works for the person standing in front of you.
+
+<img src="docs/demos/visitorqr.webp" width="380" alt="Showing a visitor QR; the visitor types their plate and it goes on the permit.">
+
+### A printed QR that asks first
+
+Print a QR code once and stick it on the fridge or by the hallway door — wherever
+your visitors will see it. It keeps working indefinitely, and a scan only *asks*:
+your phone gets a notification with the visitor's plate, and nothing goes on the
+permit until you approve.
+
+<img src="docs/demos/doorqr.webp" width="380" alt="A visitor scans the printed QR; the resident approves the request on their phone.">
+
+### A pass for regular visitors
+
+For the people who come every week — the nanny, your parents — send a guest
+pass. They keep the link; when they arrive they tap their car and it's on the
+permit until the end of the day, and you're told each time. A pass is standing
+access — it works whenever they choose, until you delete it — so only send it to
+people you trust.
+
+<img src="docs/demos/guestpass.webp" width="380" alt="A guest opens their pass and taps their car to put it on the permit.">
+
+### Know it happened
+
+The app tries to tell you by email and/or push whenever it changes your permit,
+or can't. Brief hiccups it expects to resolve are retried before you're
+bothered, and delivery is never guaranteed, so treat notifications as a
+convenience rather than a guarantee — you remain responsible for your permit.
+Success is only reported after the council's own record confirms the change.
+Household members can share the account and manage the same schedule.
 
 It's free, has no ads, collects nothing it doesn't need, and doesn't sell
 anything. It exists because re-typing number plates into a council portal is a
@@ -79,9 +120,7 @@ pages sets out the council's own steps first and what p.stonn does second.
 - [Do visitors need a paper permit in Stonnington?](https://p.stonn.org/guide/paper-visitor-permits)
 - [Where do I log in to my Stonnington parking permit?](https://p.stonn.org/guide/parking-permit-login)
 
-The [features page](https://p.stonn.org/features) shows everything the app can do
-in short animations, and the [FAQ](https://p.stonn.org/faq) covers the common
-questions.
+The [FAQ](https://p.stonn.org/faq) covers the common questions.
 
 ## How it works
 
