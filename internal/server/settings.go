@@ -20,6 +20,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	base.BookFAB = s.hasLivePermit(ctx, base.Owner)
 	owner := base.Owner
 	user := base.User.Email // the signed-in person; notification prefs are theirs
 	base.Settings = &settingsData{}

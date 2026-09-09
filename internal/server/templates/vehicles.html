@@ -49,5 +49,11 @@
     </form>
     <p class="empty-note" style="margin-top:10px">A driver email is optional. It pre-fills guest passes, and (unless you untick it above) tells that driver when their car goes on the permit. See <a href="/guests">Guests</a>.</p>
   </section>
+{{if .BookFAB}}
+{{/* Same corner, same words as the Schedule page's button. hx-push-url drops
+     the ?book=1 flag from the address bar so a refresh of the schedule does
+     not reopen the modal. */}}
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></a>
+{{end}}
 
 {{end}}

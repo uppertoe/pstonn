@@ -166,9 +166,9 @@
        the plate is how a household actually tells its permits apart, and it shows
        what the booking is about to displace. Picking a row dispatches the same
        scoped open-oneoff event the single-permit FAB sends. */}}
-  <div x-data="{pickOpen:false}" @open-oneoff.window="pickOpen=false">
+  <div x-data="{pickOpen:false}" @open-oneoff.window="pickOpen=false"{{if .App.OpenBook}} x-init="$nextTick(() => pickOpen = true)"{{end}}>
     <button class="fab" type="button"
-            @click="pickOpen=true">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
+            @click="pickOpen=true">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></button>
     <template x-teleport="body">
     <div class="modal-wrap" x-show="pickOpen" x-cloak @keydown.escape.window="pickOpen=false">
       <div class="scrim" x-show="pickOpen" x-transition.opacity @click="pickOpen=false"></div>
@@ -191,8 +191,11 @@
   </div>
   {{else}}
   {{range .App.Permits}}
-  <button class="fab" type="button"
-          data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">{{template "ic-plus"}}<span class="fab-label">Add one-off booking</span></button>
+  {{/* ?book=1 (the Vehicles/Guests FAB) opens the modal on arrival: the same
+       scoped event a tap sends, after Alpine has walked the card above so its
+       listener is in place. */}}
+  <button class="fab" type="button"{{if $.App.OpenBook}} x-data x-init="$nextTick(() => window.dispatchEvent(new CustomEvent('open-oneoff', {detail:{permit:'{{.Permit.ID}}'}})))"{{end}}
+          data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></button>
   {{end}}
   {{end}}
   {{end}}

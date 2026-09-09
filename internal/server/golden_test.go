@@ -282,6 +282,20 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 			d.Vehicles = []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", Email: "van@example.com"}, {ID: 2, Label: "Mum", Registration: "AAA111", Color: "#127a49"}}
 		}), ""},
 		{"vehicles empty", app("vehicles", func(d *dashboardData) { d.Vehicles = nil }), ""},
+		// The floating "Add booking now" link on the pages that are not the Schedule,
+		// and the Schedule opening the booking on arrival from it (?book=1).
+		{"vehicles booking fab", app("vehicles", func(d *dashboardData) { d.BookFAB = true }), ""},
+		{"activity booking fab", app("activity", func(d *dashboardData) { d.BookFAB = true }), ""},
+		{"settings booking fab", app("settings", func(d *dashboardData) {
+			d.Settings = &settingsData{TenantLinked: true, Notify: notifyView{EmailAvailable: true, EmailEnabled: true}}
+			d.Terms = termsView{Version: "2026-07-18", Accepted: "v2026-07-18 on 18 Jul 2026"}
+			d.BookFAB = true
+		}), ""},
+		{"guests booking fab", app("guests", func(d *dashboardData) {
+			d.GuestMgmt = &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}}
+			d.BookFAB = true
+		}), ""},
+		{"schedule opens booking", app("schedule", func(d *dashboardData) { d.App.OpenBook = true }), ""},
 		{"schedule multi-area", app("schedule", func(d *dashboardData) {
 			// Two LINKED areas: the switcher offers "Switch to…" between them, the
 			// app-bar shows the current area, and "Connect another area…" leads to the

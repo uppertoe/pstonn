@@ -121,6 +121,9 @@
          configured, matching every other link to it. */}}
     {{if .Contact}}<p class="empty-note" style="margin-top:8px">Something wrong, or a question? <a href="/contact">Get in touch</a>.</p>{{end}}
   </section>
+{{if .BookFAB}}
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></a>
+{{end}}
 
 {{end}}
 

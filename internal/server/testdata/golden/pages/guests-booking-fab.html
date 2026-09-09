@@ -305,64 +305,114 @@ window.popClamp = window.popClamp || function (el) {
         
         <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
         
-        <span class="menu-note">Session handled by your login provider</span>
+        <a href="https://auth.example.com/logout" class="menu-item"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</a>
+        
       </div>
     </div>
   </div>
 </header>
 
+
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/guests" class="nav-item active" style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+
 <main id="main" tabindex="-1">
   
   
-  
-  
-  
-  
-  <section class="card hero">
-    <div class="ring"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></div>
-    
-    
-    <h2>Link your council account</h2>
-    <p>
-      Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.
-    </p>
-    
-    
-    <form class="stack" method="post" action="/tenant/link"
-          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
-      <label class="fld">Council email (your verified sign-in)
-        <input type="email" value="a@b.com" autocomplete="username" disabled>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email — it can’t be changed here.
-        If your council account uses a different address, sign out and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
-        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
-      </p>
-      <label class="fld">Council password
-        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">Forgot it — or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then link here.</p>
-      <label class="optin">
-        
-        <input type="checkbox" name="save_password" value="1" checked>
-        <span>
-          <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
-          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
-        </span>
-      </label>
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</button>
-    </form>
-    
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
-    
-    
-  </section>
-</main>
 
+  
+  
+  <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Guest passes</div>
+  <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
+  
+  
+  
+
+  
+
+  
+
+  
+  
+
+  
+  <section class="card" style="--hue:var(--sec-schedule)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Visitor just arrived?</h2>
+    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a plate on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
+    <div class="qropts">
+      <form method="post" action="/guests/qr" class="qropt">
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
+        <input type="hidden" name="permit_id" value="1">
+        <button type="submit"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Show a visitor QR</button>
+      </form>
+      <form method="post" action="/guests/printed" class="qropt">
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Stick it on the fridge, or wherever your visitors will see it. A scan only <em>asks</em> you to approve. It keeps working until you remove it.</span></div>
+        <input type="hidden" name="permit_id" value="1">
+        <button type="submit" class="ghost"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Print a QR</button>
+      </form>
+    </div>
+  </section>
+  
+
+  
+
+  
+
+  
+  <section class="card" style="--hue:var(--sec-vehicles)" id="new">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg></span> Create a new guest pass</h2>
+    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
+    
+    
+    <form method="post" action="/guests" class="stack"
+          x-data="{recips:'', sent:false,
+                   hasRecip() { return this.recips.split(/[,;\s]+/).some(t => { const at = t.indexOf('@'); if (at <= 0 || at !== t.lastIndexOf('@') || at === t.length - 1) return false; const d = t.slice(at + 1); return d.includes('.') && !d.endsWith('.') }) }}"
+          @submit="if (sent || !hasRecip()) { $event.preventDefault(); return } sent = true"
+          @htmx:after-request="if ($event.detail.xhr && $event.detail.xhr.status >= 400) sent = false">
+      <label class="fld"><span>Permit</span>
+        <select name="permit_id"><option value="1">Visitor Permit</option></select>
+      </label>
+      <label class="fld"><span>Label (optional)</span><input name="label" placeholder="e.g. Friday helpers"></label>
+      <div class="fld"><span>Cars this pass may activate</span>
+        <div class="checks">
+          
+          <label class="check">
+            <input type="checkbox" name="vehicle_id" value="1">
+            <span class="dot" style="background:#2f6feb"></span>
+            <span class="cname">Van</span>
+            <span class="plate" style="--plate:#2f6feb">ABC123</span>
+          </label>
+          
+        </div>
+        <p class="empty-note" style="margin-top:8px">Need another car? <a href="/vehicles">Add it on the Vehicles page</a> and it appears here.</p>
+      </div>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="fld"><span>People to send the link to</span>
+        <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
+        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+        <span class="empty-note" style="margin-top:4px" x-show="!hasRecip()" x-cloak>Add at least one email to create the pass.</span>
+      </label>
+      <button type="submit" :disabled="sent || !hasRecip()"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Create pass and send links</button>
+    </form>
+  </section>
+  
+  
+
+
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg><span class="fab-label">Add booking now</span></a>
+
+
+
+</main>
 
 
 

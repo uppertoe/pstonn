@@ -115,6 +115,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 		labelByPermit[p.ID] = permitLabel(p)
 		base.GuestMgmt.PermitOpts = append(base.GuestMgmt.PermitOpts, permitOpt{ID: p.ID, Label: permitLabel(p)})
 	}
+	base.BookFAB = len(base.GuestMgmt.PermitOpts) > 0
 	vehicles, err := s.store.ListVehiclesFor(ctx, owner)
 	if err != nil {
 		return err

@@ -305,64 +305,158 @@ window.popClamp = window.popClamp || function (el) {
         
         <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
         
-        <span class="menu-note">Session handled by your login provider</span>
+        <a href="https://auth.example.com/logout" class="menu-item"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</a>
+        
       </div>
     </div>
   </div>
 </header>
 
+
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item active" style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+
 <main id="main" tabindex="-1">
   
   
+
   
   
-  
-  
-  <section class="card hero">
-    <div class="ring"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></div>
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></span> Settings</div>
+  <p class="subtitle">Your council connection and account.</p>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span> Council connection</h2>
     
     
-    <h2>Link your council account</h2>
-    <p>
-      Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.
-    </p>
     
-    
-    <form class="stack" method="post" action="/tenant/link"
-          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
-      <label class="fld">Council email (your verified sign-in)
-        <input type="email" value="a@b.com" autocomplete="username" disabled>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email — it can’t be changed here.
-        If your council account uses a different address, sign out and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
-        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
-      </p>
-      <label class="fld">Council password
-        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">Forgot it — or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then link here.</p>
-      <label class="optin">
+    <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="max-width:60ch">
+        <strong>Auto-reconnect</strong>
+        <span class="pill">Off</span>
+        <p class="empty-note" style="margin-top:4px">Your password isn't saved. If the council ends your session — including when you sign in to the ePermits site yourself — you'll need to re-link by hand. To turn this on, unlink and link again with “Save my password” ticked.</p>
         
-        <input type="checkbox" name="save_password" value="1" checked>
-        <span>
-          <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
-          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
-        </span>
-      </label>
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</button>
-    </form>
+      </div>
+      
+    </div>
     
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
+    <div class="row" style="margin-top:14px" x-data="{del:false}">
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
+        <button type="submit" class="ghost"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Unlink account</button>
+      </form>
+      <button type="button" class="danger" @click="del=!del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Delete all my data</button>
+      <form method="post" action="/account/delete" class="row" x-show="del" x-cloak style="gap:8px">
+        <input name="confirm" placeholder="Type DELETE" autocomplete="off" style="width:130px">
+        <button type="submit" class="danger">Confirm</button>
+      </form>
+    </div>
+    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything from the live database straight away; backup copies age out afterwards.</p>
+    
+  </section>
+  
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span> Shared access</h2>
+    
+    <p class="subtitle">Let up to two other people help manage this account. They sign in with their own email, so there is nothing to share but the access itself.</p>
+    
+    <p class="empty-note" style="margin-top:12px">No one else has access yet.</p>
+    
+    
+    <form method="post" action="/account/members" class="row" style="margin-top:14px;gap:8px">
+      <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
+      <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Add person</button>
+    </form>
+    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do. p.stonn emails them to let them know. Once they accept they can set the schedule and manage vehicles, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
     
     
   </section>
-</main>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span> Notifications</h2>
+    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
+    
+    <div id="notify-body">
 
+
+
+<form hx-post="/notifications" hx-target="#notify-body" hx-swap="none" hx-trigger="change"
+      class="stack notify-form"
+      x-data="{ntfy: false,
+               confirmed: false,
+               refuse(e, msg) {
+                 e.target.checked = true;
+                 if (e.target.name === 'ntfy_enabled') this.ntfy = true;
+                 e.stopPropagation();
+                 const row = e.target.closest('.toggle');
+                 row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake');
+                 this.$refs.status.textContent = '⚠ ' + msg;
+                 this.$refs.status.className = 'notify-status err';
+               },
+               guard(e) {
+                 if (e.target.checked) return;
+                 if (![...e.target.form.querySelectorAll('.chan')].some(c => c.checked)) return this.refuse(e, 'Keep at least one method on.');
+                 
+                 if (e.target.name === 'email_enabled' && this.ntfy && !this.confirmed) return this.refuse(e, 'You can turn off email once you\'ve confirmed push notifications on your phone: tap Send a test to my phone, then Confirm on the notification.');
+               }}"
+      @htmx:after-request="if ($event.target === $root && $event.detail.successful) { $refs.status.textContent = '✓ Saved'; $refs.status.className = 'notify-status ok'; }">
+  
+  <label class="toggle"><input type="checkbox" class="chan" name="email_enabled" checked @change="guard($event)"> <span>Email me at <strong></strong></span></label>
+  
+  
+  
+  <p class="notify-status" x-ref="status" role="status" aria-live="polite">
+    At least one method must stay on.
+  </p>
+  
+  
+  
+  <p class="empty-note">Whatever you choose here, safety alerts always come by email: a change p.stonn couldn&rsquo;t make, a council connection that needs re-linking, a permit about to expire, and outage notices.</p>
+  
+  <label class="toggle"><input type="checkbox" name="failures_only" > <span>Only tell me when something needs attention &mdash; skip the &ldquo;plate changed as scheduled&rdquo; confirmations</span></label>
+  <div class="quiet" x-data="{quiet: false}">
+    <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" > <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
+    <div class="quiet-times" x-show="quiet" x-cloak>
+      <span>Hold notices from</span>
+      <select name="quiet_from" aria-label="Start holding notices at">
+        <option value="0" selected>12:00 am</option><option value="1" >1:00 am</option><option value="2" >2:00 am</option><option value="3" >3:00 am</option><option value="4" >4:00 am</option><option value="5" >5:00 am</option><option value="6" >6:00 am</option><option value="7" >7:00 am</option><option value="8" >8:00 am</option><option value="9" >9:00 am</option><option value="10" >10:00 am</option><option value="11" >11:00 am</option><option value="12" >12:00 pm</option><option value="13" >1:00 pm</option><option value="14" >2:00 pm</option><option value="15" >3:00 pm</option><option value="16" >4:00 pm</option><option value="17" >5:00 pm</option><option value="18" >6:00 pm</option><option value="19" >7:00 pm</option><option value="20" >8:00 pm</option><option value="21" >9:00 pm</option><option value="22" >10:00 pm</option><option value="23" >11:00 pm</option>
+      </select>
+      <span>until</span>
+      <select name="quiet_until" aria-label="Deliver held notices at">
+        <option value="0" selected>12:00 am</option><option value="1" >1:00 am</option><option value="2" >2:00 am</option><option value="3" >3:00 am</option><option value="4" >4:00 am</option><option value="5" >5:00 am</option><option value="6" >6:00 am</option><option value="7" >7:00 am</option><option value="8" >8:00 am</option><option value="9" >9:00 am</option><option value="10" >10:00 am</option><option value="11" >11:00 am</option><option value="12" >12:00 pm</option><option value="13" >1:00 pm</option><option value="14" >2:00 pm</option><option value="15" >3:00 pm</option><option value="16" >4:00 pm</option><option value="17" >5:00 pm</option><option value="18" >6:00 pm</option><option value="19" >7:00 pm</option><option value="20" >8:00 pm</option><option value="21" >9:00 pm</option><option value="22" >10:00 pm</option><option value="23" >11:00 pm</option>
+      </select>
+      <span>&mdash; then they're delivered.</span>
+    </div>
+    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. Anything that needs your action is sent straight away.</p>
+  </div>
+</form>
+</div>
+    <form method="post" action="/notifications/test" class="notify-test"><button type="submit" class="ghost"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Send a test notification</button></form>
+    
+  </section>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span> Account</h2>
+    <div class="row" style="justify-content:space-between">
+      <span class="muted">Signed in as <strong style="color:var(--ink)">a@b.com</strong></span>
+      <a href="https://auth.example.com/logout"><button type="button" class="ghost"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</button></a>
+    </div>
+    <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
+    <p class="empty-note" style="margin-top:8px">Terms accepted: v2026-07-18 on 18 Jul 2026.</p>
+    
+    
+  </section>
+
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg><span class="fab-label">Add booking now</span></a>
+
+
+
+
+</main>
 
 
 

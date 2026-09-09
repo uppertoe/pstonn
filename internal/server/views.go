@@ -110,6 +110,13 @@ type dashboardData struct {
 	OIDCEnabled bool
 	State       string // "landing" | "terms" | "onboarding" | "picker" | "app"
 	Page        string // when State=="app": "schedule" | "vehicles" | "activity" | "settings"
+	// BookFAB floats the "Add booking now" button on the Vehicles and Guests pages,
+	// as a link to the Schedule with the booking open (?book=1). Set only when the
+	// account manages a permit a booking could land on, mirroring the Schedule
+	// page's own FAB gate. One household (2026-09-09) added a car, went back to
+	// the schedule, did not find the bare "+" within 25 seconds and went hunting
+	// through Guests for a way to put the car on the permit.
+	BookFAB bool
 	// SEO fields, filled by render() from the State (see seoFor). BaseURL is the
 	// public origin (PUBLIC_BASE_URL); CanonicalPath is "" for non-indexable pages
 	// (app/guest/token), which suppresses the canonical/OG tags and emits noindex.
@@ -208,6 +215,11 @@ type appData struct {
 	// read the list); passed via ?more=1 so it rides the post-add landing, not every
 	// later visit (a manual refresh of that URL re-shows it, like the added=1 flash).
 	MoreToSetUp bool
+	// OpenBook opens the one-off booking on arrival (the chooser on a multi-permit
+	// account, the modal on a single one). Set by ?book=1, which the floating
+	// button on the Vehicles and Guests pages sends; the link pushes the bare
+	// /schedule URL so a refresh does not reopen it.
+	OpenBook bool
 	// ShowShareHint puts a quiet shared-access pointer on the Schedule page for a
 	// primary with no members. The feature's only other surface is a card in
 	// Settings, which new households demonstrably never open; the hint is

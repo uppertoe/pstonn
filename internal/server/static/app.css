@@ -191,9 +191,12 @@ main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap
   .nav-item.active::after { top:0; bottom:auto; left:22%; right:22%; border-radius:0 0 3px 3px; }
   /* Reserve the bar's height (~60px) plus a small gap under the last card. */
   main { margin-bottom:calc(76px + env(safe-area-inset-bottom, 0px)); }
-  /* The schedule page's FAB floats above the bar (bottom 74px, height 52px);
-     reserve past its top edge so it can't cover the page's last control. */
-  main:has(> .fab) { margin-bottom:calc(142px + env(safe-area-inset-bottom, 0px)); }
+  /* A page with the floating "Add booking now" button (bottom 74px, height 52px)
+     reserves past its top edge so it can't cover the page's last control. Any
+     descendant, not a direct child: the multi-permit chooser wraps its FAB in a
+     div, and with the direct-child form the button sat over the last row of the
+     roster on a fully scrolled phone (2026-09-10). */
+  main:has(.fab) { margin-bottom:calc(142px + env(safe-area-inset-bottom, 0px)); }
 }
 .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); animation:rise .28s ease both; }
 .card > h2 { margin:0 0 16px; font-size:15px; display:flex; align-items:center; gap:9px; letter-spacing:-.01em; }
@@ -932,9 +935,13 @@ form.stack { display:grid; gap:11px; max-width:none; margin:0; text-align:left; 
 /* FAB */
 .fab { position:fixed; right:22px; bottom:24px; z-index:25; height:52px; padding:0 20px 0 17px; border:0; border-radius:16px; background:linear-gradient(135deg,var(--accent-fill),color-mix(in srgb,var(--accent-fill) 82%, #000)); color:var(--on-accent); display:inline-flex; align-items:center; gap:9px; font-weight:600; font-size:14.5px; box-shadow:var(--shadow-lg); cursor:pointer; transition:transform .12s, filter .15s, box-shadow .15s; }
 .fab svg { width:20px; height:20px; stroke-width:2.1; }
+a.fab { text-decoration:none; }
 .fab:hover { filter:brightness(1.06); transform:translateY(-2px); }
 .fab:active { transform:scale(.97); }
-@media (max-width:520px){ .fab .fab-label { display:none; } .fab { padding:0; width:52px; justify-content:center; } }
+/* The label stays on at every width. A bare "+" circle on a phone told one
+   household nothing (2026-09-09: they cleared the plate, added the car, and
+   went hunting through Guests for a way to put it on); the pill is 215px and
+   fits above the bottom bar on a 375px screen. */
 /* Below 640px the nav is a fixed bottom bar (z-index 30), so lift the FAB above
    it. Declared after the base .fab so it wins at equal specificity. */
 @media (max-width:640px){ .fab { bottom:calc(74px + env(safe-area-inset-bottom, 0px)); z-index:35; } }

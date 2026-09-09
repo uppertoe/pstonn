@@ -23,6 +23,7 @@ func (s *Server) activityPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base.App = &appData{}
+	base.BookFAB = s.hasLivePermit(r.Context(), base.Owner)
 	limit := activityRows
 	if r.URL.Query().Get("all") == "1" {
 		limit = activityAllRows

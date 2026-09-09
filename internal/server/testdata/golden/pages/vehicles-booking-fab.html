@@ -305,64 +305,77 @@ window.popClamp = window.popClamp || function (el) {
         
         <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
         
-        <span class="menu-note">Session handled by your login provider</span>
+        <a href="https://auth.example.com/logout" class="menu-item"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</a>
+        
       </div>
     </div>
   </div>
 </header>
 
+
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item active" style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+
 <main id="main" tabindex="-1">
   
   
-  
-  
-  
-  
-  <section class="card hero">
-    <div class="ring"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></div>
-    
-    
-    <h2>Link your council account</h2>
-    <p>
-      Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.
-    </p>
-    
-    
-    <form class="stack" method="post" action="/tenant/link"
-          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
-      <label class="fld">Council email (your verified sign-in)
-        <input type="email" value="a@b.com" autocomplete="username" disabled>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email — it can’t be changed here.
-        If your council account uses a different address, sign out and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
-        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
-      </p>
-      <label class="fld">Council password
-        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">Forgot it — or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then link here.</p>
-      <label class="optin">
-        
-        <input type="checkbox" name="save_password" value="1" checked>
-        <span>
-          <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
-          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
-        </span>
-      </label>
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</button>
-    </form>
-    
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
-    
-    
-  </section>
-</main>
 
+  
+  
+  <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg></span> Vehicles</div>
+  <p class="subtitle">The plates that may share your permit. Each gets a colour used across the schedule.</p>
+  <section class="card" style="--hue:var(--sec-vehicles)">
+    <div class="vlist">
+      
+      
+      <div class="vrow" x-data="{saved: &#34;&#34;, email: &#34;&#34;, flash: false}">
+        <div class="vmain">
+          <span class="veh"><span class="dot" style="background:#2f6feb"></span>Van <span class="vstate-chip" title="Registration state">&middot; NSW</span></span>
+          <span class="plate" style="--plate:#2f6feb;margin-left:auto">ABC123</span>
+          <form method="post" action="/vehicles/1/delete" data-confirm="Remove this vehicle?" data-confirm-ok="Remove">
+            <button class="danger icon" type="submit" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg></button>
+          </form>
+        </div>
+        
+        <form class="vemail" method="post" action="/vehicles/1/email" hx-post="/vehicles/1/email" hx-swap="none"
+              @htmx:after-request="if($event.detail.successful){saved=email; flash=true; setTimeout(()=>flash=false, 1800)}">
+          <input type="email" name="email" value="" placeholder="driver email (optional)" autocomplete="off" x-model="email">
+          <button type="submit" class="ghost sm" :disabled="email === saved">Save</button>
+          <span class="vstatus">
+            <span class="vsaved" x-show="flash" x-cloak x-transition>Saved</span>
+            <button type="button" class="vrevert" x-show="email !== saved && !flash" x-cloak @click="email = saved" title="Discard this change">revert</button>
+          </span>
+        </form>
+        <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
+          <input type="checkbox" name="notify" hx-post="/vehicles/1/notify" hx-trigger="change" hx-swap="none">
+          <span>Email this driver when their car goes on the permit</span>
+        </label>
+      
+    </div>
+    <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
+      <input class="grow" name="label" placeholder="Label (e.g. Mum's Corolla)" required>
+      <input name="registration" placeholder="PLATE" required maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:130px">
+      <select name="state" class="vstate" aria-label="Registration state" title="Registration state"><option value="VIC">VIC</option><option value="NSW">NSW</option><option value="SA">SA</option></select>
+      <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Add</button>
+    </form>
+    <p class="empty-note" style="margin-top:10px">A driver email is optional. It pre-fills guest passes, and (unless you untick it above) tells that driver when their car goes on the permit. See <a href="/guests">Guests</a>.</p>
+  </section>
+
+
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg><span class="fab-label">Add booking now</span></a>
+
+
+
+
+</main>
 
 
 

@@ -62,5 +62,8 @@
   {{if .App.ShowingAll}}
   <p class="empty-note" style="margin-top:14px;text-align:center"><a href="/activity">&larr; Back to the recent view</a></p>
   {{end}}
+{{if .BookFAB}}
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></a>
+{{end}}
 
 {{end}}

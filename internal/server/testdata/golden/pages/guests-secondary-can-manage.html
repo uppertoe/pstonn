@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=2b93a2a933">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=2b93a2a933">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=27978720b4">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=27978720b4">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=2b93a2a933">
+<link rel="stylesheet" href="/static/app.css?v=27978720b4">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=2b93a2a933"></script>
-<script defer src="/static/alpine.min.js?v=2b93a2a933"></script>
+<script src="/static/htmx.min.js?v=27978720b4"></script>
+<script defer src="/static/alpine.min.js?v=27978720b4"></script>
 
 
 <script>
@@ -371,8 +371,11 @@ window.popClamp = window.popClamp || function (el) {
     <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg></span> Create a new guest pass</h2>
     <div class="banner warn" style="margin-bottom:16px;align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     
-    <form method="post" action="/guests" class="stack" x-data="{recips:'', sent:false}"
-          @submit="if (sent) { $event.preventDefault(); return } sent = true"
+    
+    <form method="post" action="/guests" class="stack"
+          x-data="{recips:'', sent:false,
+                   hasRecip() { return this.recips.split(/[,;\s]+/).some(t => { const at = t.indexOf('@'); if (at <= 0 || at !== t.lastIndexOf('@') || at === t.length - 1) return false; const d = t.slice(at + 1); return d.includes('.') && !d.endsWith('.') }) }}"
+          @submit="if (sent || !hasRecip()) { $event.preventDefault(); return } sent = true"
           @htmx:after-request="if ($event.detail.xhr && $event.detail.xhr.status >= 400) sent = false">
       <label class="fld"><span>Permit</span>
         <select name="permit_id"><option value="1">Visitor Permit</option></select>
@@ -395,12 +398,14 @@ window.popClamp = window.popClamp || function (el) {
       <label class="fld"><span>People to send the link to</span>
         <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
         <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+        <span class="empty-note" style="margin-top:4px" x-show="!hasRecip()" x-cloak>Add at least one email to create the pass.</span>
       </label>
-      <button type="submit" :disabled="sent"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Create pass and send links</button>
+      <button type="submit" :disabled="sent || !hasRecip()"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Create pass and send links</button>
     </form>
   </section>
   
   
+
 
 
 </main>

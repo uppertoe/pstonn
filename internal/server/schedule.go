@@ -64,6 +64,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	// like the flash above, a manual refresh of this URL re-shows it, but any normal
 	// navigation to /schedule (no query) drops it.
 	base.App.MoreToSetUp = r.URL.Query().Get("more") == "1"
+	base.App.OpenBook = r.URL.Query().Get("book") == "1"
 	ctx := r.Context()
 	owner := base.Owner
 	now := time.Now().In(s.locFor(ctx, owner))
@@ -1373,4 +1374,21 @@ func windowEndText(end time.Time, loc *time.Location) string {
 		return "the end of " + l.AddDate(0, 0, -1).Format("2 Jan")
 	}
 	return l.Format("2 Jan 3:04pm")
+}
+
+// hasLivePermit reports whether the account manages a permit a booking could
+// land on — the gate for the floating "Add booking now" link on pages other than
+// the Schedule (which gates its own FAB on the permits it renders).
+func (s *Server) hasLivePermit(ctx context.Context, owner string) bool {
+	permits, err := s.store.ListPermitsFor(ctx, owner)
+	if err != nil {
+		return false
+	}
+	now, loc := time.Now(), s.locFor(ctx, owner)
+	for _, p := range permits {
+		if !p.Inactive(now, loc) {
+			return true
+		}
+	}
+	return false
 }

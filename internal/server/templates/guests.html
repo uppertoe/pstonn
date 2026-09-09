@@ -232,8 +232,16 @@
          until a reload. Keyed on the status, not detail.successful: the toast
          handler in layout.html clears isError for 422 so htmx does not log it,
          which also makes htmx report the request as successful. */}}
-    <form method="post" action="/guests" class="stack" x-data="{recips:'', sent:false}"
-          @submit="if (sent) { $event.preventDefault(); return } sent = true"
+    {{/* The submit is gated on at least one recipient that looks like an email,
+         mirroring the server's parseEmails/looksLikeEmail. One household (2026-09-09,
+         on a phone) ticked a car and pressed the button with the box empty; the
+         only feedback was the 422 toast, a five-second flash, and they left. A
+         greyed button with a note under the field says the same thing while
+         they are still looking at the form. */}}
+    <form method="post" action="/guests" class="stack"
+          x-data="{recips:'', sent:false,
+                   hasRecip() { return this.recips.split(/[,;\s]+/).some(t => { const at = t.indexOf('@'); if (at <= 0 || at !== t.lastIndexOf('@') || at === t.length - 1) return false; const d = t.slice(at + 1); return d.includes('.') && !d.endsWith('.') }) }}"
+          @submit="if (sent || !hasRecip()) { $event.preventDefault(); return } sent = true"
           @htmx:after-request="if ($event.detail.xhr && $event.detail.xhr.status >= 400) sent = false">
       <label class="fld"><span>Permit</span>
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
@@ -256,14 +264,21 @@
       <label class="fld"><span>People to send the link to</span>
         <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
         <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+        <span class="empty-note" style="margin-top:4px" x-show="!hasRecip()" x-cloak>Add at least one email to create the pass.</span>
       </label>
-      <button type="submit" :disabled="sent">{{template "ic-link"}} Create pass and send links</button>
+      <button type="submit" :disabled="sent || !hasRecip()">{{template "ic-link"}} Create pass and send links</button>
     </form>
   </section>
   {{else}}
   <section class="card"><p class="empty-note">Add at least one <a href="/vehicles">vehicle</a> and manage a permit on the <a href="/schedule">Schedule</a> first, then you can create a guest pass.</p></section>
   {{end}}
   {{end}}{{/* mode */}}
+{{if .BookFAB}}
+{{/* Same corner, same words as the Schedule page's button. hx-push-url drops
+     the ?book=1 flag from the address bar so a refresh of the schedule does
+     not reopen the modal. */}}
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></a>
+{{end}}
 {{end}}
 
 {{define "page-doorqr"}}
