@@ -151,8 +151,8 @@ func TestSESHookSuppresses(t *testing.T) {
 		t.Fatalf("dead@example.com suppressed=%v reason=%q, want true/bounce", bad, reason)
 	}
 
-	transient := `{"notificationType":"Bounce","bounce":{"bounceType":"Transient","bounceSubType":"MailboxFull",
-	  "bouncedRecipients":[{"emailAddress":"full@example.com"}]}}`
+	transient := `{"notificationType":"Bounce","mail":{"messageId":"0108-abc"},"bounce":{"bounceType":"Transient","bounceSubType":"MailboxFull",
+	  "bouncedRecipients":[{"emailAddress":"full@example.com","status":"4.2.2","diagnosticCode":"smtp; 452 4.2.2 The mailbox for full@example.com is full"}]}}`
 	body = signSNS(t, key, &snsMessage{
 		Type: "Notification", MessageID: "m2", TopicARN: testTopic,
 		Message: transient, Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -640,5 +640,30 @@ func TestSESHookIgnoresNotSpam(t *testing.T) {
 	}
 	if bad, reason, _ := s.store.IsSuppressed(ctx, "angry@example.com"); !bad || reason != store.SuppressComplaint {
 		t.Fatalf("real complaint suppressed=%v reason=%q, want true/complaint", bad, reason)
+	}
+}
+
+// A retryable bounce stores nothing, so its log line is the only record of why
+// the receiving server refused. The diagnostic is third-party free text that
+// echoes the recipient: it must be logged redacted, collapsed and bounded.
+func TestRedactDiagnostic(t *testing.T) {
+	cases := map[string]string{
+		"": "(no diagnostic)",
+		"5.7.1 smtp; 550 5.7.1 Message rejected: content filter (Bob.Smith@Example.com.au)": `"5.7.1 smtp; 550 5.7.1 Message rejected: content filter (B***@example.com.au)"`,
+		"4.2.2   line one\n\tline two": `"4.2.2 line one line two"`,
+	}
+	for in, want := range cases {
+		parts := strings.SplitN(in, " ", 2)
+		status, diag := parts[0], ""
+		if len(parts) == 2 {
+			diag = parts[1]
+		}
+		if got := redactDiagnostic(status, diag); got != want {
+			t.Errorf("redactDiagnostic(%q) = %s, want %s", in, got, want)
+		}
+	}
+	long := redactDiagnostic("", strings.Repeat("x", 500))
+	if len(long) > 310 {
+		t.Errorf("long diagnostic not bounded: %d bytes", len(long))
 	}
 }

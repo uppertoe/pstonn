@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,7 +45,10 @@ type snsMessage struct {
 type sesEvent struct {
 	NotificationType string `json:"notificationType"`
 	EventType        string `json:"eventType"` // config-set events use this name instead
-	Bounce           struct {
+	Mail             struct {
+		MessageID string `json:"messageId"` // SES message id: the key for message insights / support
+	} `json:"mail"`
+	Bounce struct {
 		BounceType        string `json:"bounceType"`    // Permanent | Transient | Undetermined
 		BounceSubType     string `json:"bounceSubType"` // e.g. General, NoEmail, Suppressed
 		BouncedRecipients []struct {
@@ -184,7 +188,21 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 	switch strings.ToLower(kind) {
 	case "bounce":
 		if !strings.EqualFold(ev.Bounce.BounceType, "Permanent") {
-			alog.Infof("ses hook: %s/%s bounce — not suppressing (retryable)", ev.Bounce.BounceType, ev.Bounce.BounceSubType)
+			// Nothing is stored for a retryable bounce, so the log is the only
+			// record. Keep what would let someone work out WHY next time: the
+			// receiving server's reply (a content filter's verdict, a policy
+			// rejection, a full mailbox), the SES message id, and the address —
+			// all redacted the way the rest of the app logs them. On 2026-09-09 a
+			// Transient/ContentRejected bounce was logged as just that, and the
+			// reason was gone for good (this hook is SNS's only subscriber).
+			for _, rcpt := range ev.Bounce.BouncedRecipients {
+				alog.Infof("ses hook: %s/%s bounce for %s — not suppressing (retryable); ses message id %s; server said: %s",
+					ev.Bounce.BounceType, ev.Bounce.BounceSubType, notify.RedactEmail(rcpt.EmailAddress), ev.Mail.MessageID,
+					redactDiagnostic(rcpt.Status, rcpt.DiagnosticCode))
+			}
+			if len(ev.Bounce.BouncedRecipients) == 0 {
+				alog.Infof("ses hook: %s/%s bounce — not suppressing (retryable); ses message id %s", ev.Bounce.BounceType, ev.Bounce.BounceSubType, ev.Mail.MessageID)
+			}
 			return nil
 		}
 		for _, rcpt := range ev.Bounce.BouncedRecipients {
@@ -604,4 +622,26 @@ func confirmSNSSubscription(ctx context.Context, subscribeURL string) error {
 		return fmt.Errorf("confirm returned %s", resp.Status)
 	}
 	return nil
+}
+
+// emailInText matches anything shaped like an address inside free text, so a
+// receiving server's diagnostic (which often quotes the recipient back) can be
+// logged without the address.
+var emailInText = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
+
+// redactDiagnostic composes the SMTP status and the receiving server's reply for
+// a log line: addresses redacted (the reply is third-party free text and
+// routinely echoes the recipient), whitespace collapsed, and bounded in length
+// so a chatty server cannot bloat the log. Empty when the server said nothing.
+func redactDiagnostic(status, diagnostic string) string {
+	d := strings.Join(strings.Fields(strings.TrimSpace(status+" "+diagnostic)), " ")
+	if d == "" {
+		return "(no diagnostic)"
+	}
+	d = emailInText.ReplaceAllStringFunc(d, notify.RedactEmail)
+	const max = 300
+	if len(d) > max {
+		d = d[:max] + "…"
+	}
+	return strconv.Quote(d)
 }
