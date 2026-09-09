@@ -1,0 +1,24 @@
+=== OUTBOX account= recipients=primary@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: drift|primary@example.com|primary@example.com|Visitor||email|primary@example.com
+Subject: The car was removed from your Visitor at the council
+
+The car on your Visitor was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
+
+https://p.stonn.org
+
+=== OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: drift|primary@example.com|primary@example.com|Visitor||ntfy
+Subject: The car was removed from your Visitor at the council
+
+The car on your Visitor was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
+
+https://p.stonn.org
+
+=== OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+Dedup: drift|sam@example.com|primary@example.com|Visitor||email|sam@example.com
+Subject: The car was removed from your Visitor at the council
+
+The car on your Visitor was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
+
+https://p.stonn.org
+

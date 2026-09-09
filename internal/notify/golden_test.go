@@ -240,6 +240,10 @@ func TestGoldenEmails(t *testing.T) {
 		_ = svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: true})
 	})
 	run("relink-required", func() { svc.NotifyRelinkRequired(ctx, owner, "") })
+	// The council-side change notice (drift.go): the one email a household gets
+	// for a change p.stonn did not make. Was missing from this set until 2026-09-10.
+	run("drift-changed", func() { _ = svc.NotifyDriftChanged(ctx, owner, "", "Visitor", "AMY602") })
+	run("drift-removed", func() { _ = svc.NotifyDriftChanged(ctx, owner, "", "Visitor", "") })
 	run("reconnect-stalled", func() { svc.NotifyReconnectStalled(ctx, owner, "") })
 	run("permit-expiry", func() { svc.NotifyPermitExpiry(ctx, owner, "", "Visitor", at.Add(14*24*time.Hour)) })
 	run("renewal-reminder", func() {
