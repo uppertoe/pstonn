@@ -10,6 +10,28 @@ import (
 	"github.com/uppertoe/pstonn/internal/parking"
 )
 
+// waitNotifyIdle blocks until no notice delivery is in flight. A failure notice
+// is delivered on a goroutine and the episode is marked told only after it
+// lands, so a test that fires the next failure on a fixed sleep raced that
+// write: under the race detector on a loaded runner 20ms was not always enough,
+// and the second call minted a second notice (CI, 2026-09-10).
+func waitNotifyIdle(t *testing.T, s *Scheduler) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.notifyMu.Lock()
+		n := len(s.notifyInFlight)
+		s.notifyMu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d notice deliveries still in flight after 5s", n)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // outcomesAfter waits for the async deliveries to settle at n outcomes, or
 // reports what arrived.
 func outcomesAfter(fn *fakeNotifier, n int) []notify.ApplyOutcome {
@@ -171,7 +193,7 @@ func TestOutageNoticesArePlateAgnostic(t *testing.T) {
 	s.notifyRetry = 0
 	fail := func(reg string, down bool, tier failTier) {
 		s.notifyFailure(ctx, p, notify.ApplyOutcome{Owner: p.Owner, PermitLabel: "Permit", Reg: reg, OK: false, CouncilDown: down, Transient: true}, tier)
-		time.Sleep(20 * time.Millisecond)
+		waitNotifyIdle(t, s)
 	}
 	fail("AAA111", true, tierSoft) // council down: told once
 	fail("BBB222", true, tierSoft) // booking flips the plate mid-outage: same episode
@@ -219,7 +241,7 @@ func TestDriverHearsOnceWhenTheirCarDoesNotLand(t *testing.T) {
 	s.notifyRetry = 0
 	fail := func(reg string, down bool, tier failTier) {
 		s.notifyFailure(ctx, p, notify.ApplyOutcome{Owner: owner, PermitLabel: "Permit", Reg: reg, OK: false, CouncilDown: down, Transient: true}, tier)
-		time.Sleep(20 * time.Millisecond)
+		waitNotifyIdle(t, s)
 	}
 	fail("AAA111", false, tierSoft)
 	fail("AAA111", true, tierSoft)    // cause flip: nothing new for anyone
