@@ -57,9 +57,6 @@ func (m *Mailer) Enabled() bool { return m != nil }
 
 // Options carries the per-message extras. Zero value = a plain notice.
 type Options struct {
-	// ReplyTo sets Reply-To, so a reply reaches a submitter rather than the From
-	// address (the contact form).
-	ReplyTo string
 	// UnsubscribeURL adds List-Unsubscribe and RFC 8058 one-click support, plus a
 	// visible footer line. REQUIRED on anything sent to a person rather than to
 	// the operator: most of our recipients (a guest handed a pass, a driver whose
@@ -87,11 +84,6 @@ type Hero struct {
 // Send delivers a plain-text email. A nil *Mailer is a no-op.
 func (m *Mailer) Send(to, subject, body string) error {
 	return m.SendOpts(to, subject, body, Options{})
-}
-
-// SendWithReplyTo is Send with a Reply-To header. A nil *Mailer is a no-op.
-func (m *Mailer) SendWithReplyTo(to, replyTo, subject, body string) error {
-	return m.SendOpts(to, subject, body, Options{ReplyTo: replyTo})
 }
 
 // SendOpts delivers a plain-text email with the extras in o. A nil *Mailer is a
@@ -131,9 +123,6 @@ func (m *Mailer) send(to, subject, body string, o Options) error {
 		// These are machine-generated notices: tell mail systems so, so that
 		// auto-responders and vacation replies don't bounce back at us.
 		"Auto-Submitted: auto-generated",
-	}
-	if o.ReplyTo != "" {
-		headers = append(headers, "Reply-To: "+headerValue(o.ReplyTo))
 	}
 	if o.UnsubscribeURL != "" {
 		// RFC 2369 + RFC 8058. The One-Click header is what makes Gmail/Yahoo show

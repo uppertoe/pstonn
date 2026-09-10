@@ -265,7 +265,8 @@ The `deploy/` directory contains a complete example for the
    `PUBLIC_BASE_URL` directly, because every link the app mails — the
    re-authorise confirm link, guest passes, the door QR — is absolute. Set the
    SMTP and ntfy settings, `ADMIN_EMAIL` / `ADMIN_NTFY_TOPIC` for operator
-   alerts, and `CONTACT_TO` if you want the public contact form. If you run the
+   alerts, and `CONTACT_FORM=1` if you want the public contact form (messages
+   are kept for `/admin` and pushed to the admin ntfy topic). If you run the
    outage watchdog, `STATUS_TOKEN` and `ROSTER_KEY` go together — the app will
    not start with one and not the other.
 4. Add DNS for `p.<domain>` and deploy, **DNS-only** (no CDN proxy in front of

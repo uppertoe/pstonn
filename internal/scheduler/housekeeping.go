@@ -105,6 +105,11 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if _, err := s.store.PruneChangeLog(ctx, s.now().Add(-logRetention)); err != nil {
 		alog.Infof("prune change log: %v", err)
 	}
+	// Contact-form messages name a third party (the reply address); operator-only
+	// reading, so a bounded window (store.ContactMessageRetention).
+	if _, err := s.store.PruneContactMessages(ctx, s.now().Add(-store.ContactMessageRetention)); err != nil {
+		alog.Infof("prune contact messages: %v", err)
+	}
 	// Referral invites name the inviter and a third party who never signed up;
 	// same 90-day window as the other logs (store.ReferralInviteRetention).
 	if _, err := s.store.PruneReferralInvites(ctx, s.now().Add(-store.ReferralInviteRetention)); err != nil {

@@ -85,10 +85,13 @@ type Config struct {
 	// container). Disabled when BaseURL is unset.
 	Ntfy NtfyConfig
 
-	// ContactTo is the operator address the public contact form delivers to
-	// (CONTACT_TO). It is never shown to users. The form is enabled only when this
-	// is set and outbound email (SMTP) is configured.
-	ContactTo string
+	// ContactForm offers the public /contact page (CONTACT_FORM=1). Messages are
+	// stored for /admin and pushed to ADMIN_NTFY_TOPIC; they are never emailed,
+	// so the form needs no address and no SMTP. CONTACT_TO, the old address
+	// setting, still switches the form on for an unchanged deployment but is
+	// otherwise ignored (see ContactEnabled).
+	ContactForm bool
+	ContactTo   string // CONTACT_TO (deprecated: only enables the form now)
 
 	// Admin alerting: where systemic-failure alerts go (API-shape change, a
 	// notification that could not be delivered to a user, keep-warm collapse,
@@ -145,9 +148,11 @@ type Config struct {
 // SESHookEnabled reports whether the SES bounce/complaint webhook is configured.
 func (c *Config) SESHookEnabled() bool { return c.SESTopicARN != "" }
 
-// ContactEnabled reports whether the public contact form should be offered: a
-// destination address plus a working outbound mailer.
-func (c *Config) ContactEnabled() bool { return c.ContactTo != "" && c.SMTP.Enabled() }
+// ContactEnabled reports whether the public contact form should be offered.
+// Submissions are stored and shown on /admin, so no mail channel is required;
+// CONTACT_TO is honoured as an on-switch so a deployment that set it before the
+// form stopped emailing keeps its contact page without an env change.
+func (c *Config) ContactEnabled() bool { return c.ContactForm || c.ContactTo != "" }
 
 // NtfyConfig points at a self-hosted ntfy server for push notifications.
 type NtfyConfig struct {
@@ -417,6 +422,7 @@ func Load() (*Config, error) {
 			BaseURL: strings.TrimRight(os.Getenv("NTFY_BASE_URL"), "/"),
 			Token:   strings.TrimSpace(os.Getenv("NTFY_TOKEN")),
 		},
+		ContactForm:    env("CONTACT_FORM", "") == "1" || env("CONTACT_FORM", "") == "true",
 		ContactTo:      strings.TrimSpace(os.Getenv("CONTACT_TO")),
 		AdminEmail:     strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
 		AdminNtfyTopic: strings.TrimSpace(os.Getenv("ADMIN_NTFY_TOPIC")),

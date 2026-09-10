@@ -97,6 +97,17 @@ type adminView struct {
 	// growing list is the early warning that the sending domain's reputation is
 	// being damaged, which on SES ends in a sending pause.
 	Suppressed []suppressionRow
+	// Messages from the public contact form, newest first. They are stored rather
+	// than emailed (see submitContact), so this is where they are read.
+	ContactMessages []contactMessageRow
+	ContactEnabled  bool
+	ContactPush     bool // whether a new message also reaches the operator as a push
+}
+
+type contactMessageRow struct {
+	Message string
+	ReplyTo string
+	Ago     string
 }
 
 // applyMixView is one apply source's tally for the admin mix table.
@@ -127,7 +138,7 @@ type adminRow struct {
 	NtfyTopic    string
 	Consent      string // accepted terms version, or ""
 	Permits      int
-	Plates       string // active plates, joined
+	PlateList    []string // active plates, one chip each
 	Members      int
 	LastApply    string // e.g. "success · 2 hr ago" / "error · 5 min ago"
 	LastApplyBad bool   // most recent apply was not a success
@@ -198,7 +209,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		row := adminRow{
 			Email: a.Owner, MemberOf: a.MemberOf, InvitedBy: a.InvitedBy, EmailOn: a.EmailEnabled,
 			Consent: a.ConsentVersion, Permits: a.PermitCount, Members: a.MemberCount,
-			Plates: strings.Join(a.Plates, ", "), ApplyOK: a.ApplyOK, Stage: rowStage(a),
+			PlateList: a.Plates, ApplyOK: a.ApplyOK, Stage: rowStage(a),
 		}
 		switch row.Stage {
 		case "applied":
@@ -272,10 +283,26 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		alog.Infof("admin: list suppressions: %v", err)
 	}
+	v.ContactEnabled = s.cfg.ContactEnabled()
+	v.ContactPush = s.notify.ContactPushConfigured()
+	if msgs, err := s.store.ListContactMessages(r.Context(), adminContactMessageLimit); err == nil {
+		for _, m := range msgs {
+			v.ContactMessages = append(v.ContactMessages, contactMessageRow{
+				Message: m.Message, ReplyTo: m.ReplyTo, Ago: agoText(now, m.ReceivedAt),
+			})
+		}
+	} else {
+		alog.Infof("admin: list contact messages: %v", err)
+	}
 	s.render(w, dashboardData{
 		State: "admin", User: u, LogoutURL: s.logoutURL(), Loc: loc, Admin: v,
 	})
 }
+
+// adminContactMessageLimit caps the contact messages shown on /admin. The form
+// sees a few genuine messages a month and a few bot posts a week; older ones age
+// out of the store on their own (store.ContactMessageRetention).
+const adminContactMessageLimit = 40
 
 // adminApplyLogLimit caps the all-accounts apply history on /admin. Enough to
 // see the last day or two of a small fleet at a glance; the per-account view on

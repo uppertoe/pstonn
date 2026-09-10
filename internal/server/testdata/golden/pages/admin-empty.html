@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=27978720b4">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=27978720b4">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=978dbf7c69">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=978dbf7c69">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=27978720b4">
+<link rel="stylesheet" href="/static/app.css?v=978dbf7c69">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=27978720b4"></script>
-<script defer src="/static/alpine.min.js?v=27978720b4"></script>
+<script src="/static/htmx.min.js?v=978dbf7c69"></script>
+<script defer src="/static/alpine.min.js?v=978dbf7c69"></script>
 
 
 <script>
@@ -334,13 +334,13 @@ window.popClamp = window.popClamp || function (el) {
     </div>
     <div class="adm-tablewrap">
       <table class="adm">
+        
         <thead><tr>
-          <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
-          <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+          <th>Account</th><th>Council</th><th>Last warm</th><th>Permits</th><th>Notify</th><th>Last apply</th>
         </tr></thead>
         <tbody>
         
-        <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
+        <tr><td colspan="6" class="empty-note">No accounts yet.</td></tr>
         
         </tbody>
       </table>
@@ -366,6 +366,17 @@ window.popClamp = window.popClamp || function (el) {
     </p>
     
     <p class="empty-note">No undeliverable addresses.</p>
+    
+  </div>
+
+  
+  <div class="card" style="margin-top:18px">
+    <div class="sectitle"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span> Contact messages</div>
+    <p class="subtitle">
+      The contact form is <strong>off</strong> (set CONTACT_FORM=1).
+    </p>
+    
+    <p class="empty-note">No messages.</p>
     
   </div>
 </main>

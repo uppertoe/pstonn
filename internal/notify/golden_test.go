@@ -65,9 +65,6 @@ func (c *capture) email(to, subject, body string, o mailer.Options) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	fmt.Fprintf(&c.buf, "=== EMAIL to %s\nSubject: %s\n", to, subject)
-	if o.ReplyTo != "" {
-		fmt.Fprintf(&c.buf, "Reply-To: %s\n", o.ReplyTo)
-	}
 	if o.UnsubscribeURL != "" {
 		fmt.Fprintf(&c.buf, "Unsubscribe: %s\n", o.UnsubscribeURL)
 	}

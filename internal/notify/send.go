@@ -104,6 +104,49 @@ func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, su
 	return err
 }
 
+// ContactPushConfigured reports whether a contact-form submission can reach the
+// operator as a push. The form itself only needs the store; this is what decides
+// whether anybody is TOLD a message arrived.
+func (s *Service) ContactPushConfigured() bool { return s.adminTopic != "" && s.ntfyBase != "" }
+
+// NotifyContact pushes a contact-form submission to the operator's ntfy topic.
+// Deliberately ntfy ONLY, never email: the form is public, so its content is
+// whatever a stranger (or a bot) typed. Relaying that through the outbound
+// mailer meant every spam submission left the server as a DKIM-signed message
+// from our own domain — the receivers then scored the domain on that content,
+// and one such message was held by Gmail for over three hours. The self-hosted
+// ntfy server carries no such reputation. The full message stays in the store
+// for /admin; the push carries a preview and the offered reply address.
+func (s *Service) NotifyContact(ctx context.Context, message, replyTo string) error {
+	if !s.ContactPushConfigured() {
+		return nil
+	}
+	body := contactPreview(message)
+	if replyTo != "" {
+		body += "\n\nReply to: " + replyTo
+	} else {
+		body += "\n\n(No reply address given.)"
+	}
+	extra := map[string]string{}
+	if s.appURL != "" {
+		extra["Click"] = s.appURL + "/admin"
+	}
+	return s.sendNtfyHeaders(ctx, s.adminTopic, "p.stonn contact form", body, "default", "envelope", extra)
+}
+
+// contactPreviewRunes bounds the push body. A phone notification shows a few
+// lines; the whole message is one tap away on /admin.
+const contactPreviewRunes = 400
+
+// contactPreview collapses a message's whitespace and trims it for a push.
+func contactPreview(message string) string {
+	t := strings.Join(strings.Fields(message), " ")
+	if r := []rune(t); len(r) > contactPreviewRunes {
+		t = strings.TrimSpace(string(r[:contactPreviewRunes])) + "…"
+	}
+	return t
+}
+
 // NotifyAdmin sends an operator alert to every configured admin channel (email
 // AND ntfy), so one channel being down does not blind the operator. Best-effort:
 // errors are returned joined but callers typically just log them.

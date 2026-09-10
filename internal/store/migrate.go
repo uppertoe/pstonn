@@ -456,6 +456,18 @@ CREATE TABLE IF NOT EXISTS mail_suppression (
     hits       INTEGER NOT NULL DEFAULT 1       -- times we've been told
 );
 
+-- Messages from the public /contact form. They are STORED rather than emailed:
+-- relaying whatever a stranger typed through the outbound mailer meant every bot
+-- submission left the server as a DKIM-signed message from our own domain, with
+-- the bot's Reply-To on it, and receivers score the domain on that content.
+-- The operator reads them on /admin and gets an ntfy push when one arrives.
+CREATE TABLE IF NOT EXISTS contact_message (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    message     TEXT NOT NULL,
+    reply_to    TEXT NOT NULL DEFAULT '',   -- the address the submitter offered, if any (never used as a mail header)
+    received_at TEXT NOT NULL
+);
+
 -- The fleet circuit breaker's pause, persisted so a restart cannot clear it. If
 -- Azure Front Door blocks our egress IP the breaker opens; a deploy that recreates
 -- the container would otherwise wipe that in-memory state and resume full traffic

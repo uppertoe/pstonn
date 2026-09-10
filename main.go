@@ -174,6 +174,12 @@ func run() error {
 	decideKey := notify.DeriveDecideKey(cfg.DataEncryptionKey)
 	notifier := notify.New(st, mail, cfg.Ntfy.BaseURL, cfg.Ntfy.Token, cfg.PublicBaseURL, cfg.AdminEmail, cfg.AdminNtfyTopic, cfg.DisplayLocation, unsubKey, decideKey)
 	alog.Infof("notifications: email=%v ntfy=%v contact-form=%v admin-alerts=%v", mail.Enabled(), cfg.Ntfy.Enabled(), cfg.ContactEnabled(), notifier.AdminConfigured())
+	if cfg.ContactEnabled() && !notifier.ContactPushConfigured() {
+		alog.Warnf("the contact form is on but ADMIN_NTFY_TOPIC/NTFY_BASE_URL are not set, so nobody is told when a message arrives; messages still collect on /admin")
+	}
+	if cfg.ContactTo != "" {
+		alog.Warnf("CONTACT_TO is set but contact messages are no longer emailed (they are stored for /admin and pushed to ADMIN_NTFY_TOPIC); set CONTACT_FORM=1 and drop CONTACT_TO")
+	}
 	if !notifier.AdminConfigured() {
 		alog.Warnf("no admin alert channel configured (set ADMIN_EMAIL and/or ADMIN_NTFY_TOPIC); systemic failures will only be logged")
 	}

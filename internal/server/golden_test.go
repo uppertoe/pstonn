@@ -230,8 +230,8 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 			Total: 3, Linked: 2, WarmOK: 1, Failing: 1, SchedulerLast: "2 min ago", StatusEnabled: true, SESHook: true,
 			StageSignedIn: 1, StagePermit: 1, StageApplied: 1,
 			Rows: []adminRow{
-				{Email: "a@b.com", Status: "ok", StatusLabel: "Linked", Warmed: "10 min ago", RelinkBy: "15 Oct 2026", EmailOn: true, Consent: "2026-07-18", Permits: 1, Plates: "ABC123", Members: 1, LastApply: "success · 2 hr ago", ApplyOK: 42, Stage: "applied"},
-				{Email: "c@d.com", Status: "stale", StatusLabel: "Keep-warm stale", Warmed: "9 hr ago", RelinkBy: "1 Sep 2026", NtfyTopic: "pstonn-abc", Permits: 1, Plates: "XYZ789", LastApply: "error · 5 min ago", LastApplyBad: true, Stage: "permit"},
+				{Email: "a@b.com", Status: "ok", StatusLabel: "Linked", Warmed: "10 min ago", RelinkBy: "15 Oct 2026", EmailOn: true, Consent: "2026-07-18", Permits: 2, PlateList: []string{"ABC123", "XYZ 789"}, Members: 1, LastApply: "success · 2 hr ago", ApplyOK: 42, Stage: "applied"},
+				{Email: "c@d.com", Status: "stale", StatusLabel: "Keep-warm stale", Warmed: "9 hr ago", RelinkBy: "1 Sep 2026", NtfyTopic: "pstonn-abc", Permits: 1, PlateList: []string{"XYZ789"}, LastApply: "error · 5 min ago", LastApplyBad: true, Stage: "permit"},
 				{Email: "e@f.com", Status: "unlinked", StatusLabel: "Not linked", InvitedBy: "a@b.com", Stage: "signedin"},
 			},
 			ApplyMix: []applyMixView{
@@ -245,7 +245,12 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 				{ApplyRecord: store.ApplyRecord{PermitID: 9, Registration: "XYZ789", Source: "override", Status: "error", Detail: "council temporarily unavailable", At: now.Add(-5 * time.Hour)}, Owner: "c@d.com"},
 				{ApplyRecord: store.ApplyRecord{PermitID: 9, Registration: "GUEST1", Source: "guest", Status: "success", At: now.Add(-26 * time.Hour)}, Owner: "c@d.com"},
 			},
-			Suppressed: []suppressionRow{{Address: "bounce@example.com", Reason: "bounce", Detail: "550 no such user", Ago: "3 days ago", Hits: 2}},
+			Suppressed:     []suppressionRow{{Address: "bounce@example.com", Reason: "bounce", Detail: "550 no such user", Ago: "3 days ago", Hits: 2}},
+			ContactEnabled: true, ContactPush: true,
+			ContactMessages: []contactMessageRow{
+				{Message: "My permit shows the wrong car.\nCan you check?", ReplyTo: "resident@example.com", Ago: "2 hours ago"},
+				{Message: "<script>alert(1)</script> cheap offers", Ago: "1 day ago"},
+			},
 		}}, ""},
 		{"admin empty", dashboardData{User: user, State: "admin", Loc: loc, Admin: &adminView{SchedulerLast: "never", SchedulerStale: true}}, ""},
 		{"schedule with warn and flash", app("schedule", func(d *dashboardData) { d.Warn = "Couldn't reach the council just now."; d.Flash = "Saved." }), ""},

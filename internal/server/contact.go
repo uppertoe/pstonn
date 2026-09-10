@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/identity"
+	"github.com/uppertoe/pstonn/internal/redact"
 )
 
 // isStateChanging reports whether the request mutates state (so it needs a CSRF
@@ -289,10 +290,16 @@ func (s *Server) contactPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation})
 }
 
-// submitContact validates and delivers a contact-form message to the operator
-// (CONTACT_TO) over the existing SMTP mailer. It is public and unauthenticated,
-// so it is rate-limited per IP and carries a honeypot field; the submitter's
-// address, if given, becomes the Reply-To. No user address is ever exposed.
+// submitContact validates a contact-form message, stores it for the operator's
+// dashboard and pushes a preview to the admin ntfy topic. It is public and
+// unauthenticated, so it is rate-limited per IP and carries a honeypot field.
+//
+// Nothing here is emailed, and the submitter's address is stored, not set as a
+// Reply-To. Both were deliberate changes: relaying the form through SES meant
+// every bot submission left as a DKIM-signed message from our own domain with a
+// stranger's Reply-To on it, which is exactly the content receivers score a
+// sending domain on — and that domain also carries every household's permit
+// notices.
 func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.ContactEnabled() {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -306,8 +313,8 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	base := dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation}
 
 	// Throttle BEFORE parsing: the limiter has to gate the expensive work (the
-	// body parse), not just the send, or an unauthenticated flood still costs a
-	// full form parse per request.
+	// body parse), not just the store write, or an unauthenticated flood still
+	// costs a full form parse per request.
 	if !s.contact.allow(rateLimitKey(r)) {
 		base.Warn = "You've sent a few messages already. Please wait a little while before sending another."
 		s.render(w, base)
@@ -319,8 +326,11 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		s.render(w, base)
 		return
 	}
-	// Honeypot: a hidden field real users leave blank. Pretend success on a hit.
+	// Honeypot: a hidden field real users leave blank. Pretend success on a hit,
+	// and say so in the log — the ratio of trapped to stored is the only measure
+	// of whether the trap still works against whatever is posting this week.
 	if strings.TrimSpace(r.PostForm.Get("website")) != "" {
+		alog.Infof("contact form: honeypot hit, message dropped")
 		base.Flash = "Thanks. Your message has been sent."
 		s.render(w, base)
 		return
@@ -345,19 +355,29 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		s.render(w, base)
 		return
 	}
-	body := message
-	if replyTo != "" {
-		body += "\n\nReply-to: " + replyTo
-	} else {
-		body += "\n\n(No reply address given.)"
-	}
-	if err := s.mail.SendWithReplyTo(s.cfg.ContactTo, replyTo, "p.stonn contact form", body); err != nil {
-		alog.Errorf("contact form send failed: %v", err)
+	id, err := s.store.AddContactMessage(r.Context(), message, replyTo)
+	if err != nil {
+		alog.Errorf("contact form: store message: %v", err)
 		base.Warn = "Sorry, the message could not be sent right now. Please try again later."
 		s.render(w, base)
 		return
 	}
+	alog.Infof("contact form: message %d stored (reply address %s)", id, describeReplyTo(replyTo))
+	// The push is a courtesy on top of the durable row: its failure must not turn
+	// a stored message into a "could not be sent" for the person who wrote it.
+	if err := s.notify.NotifyContact(r.Context(), message, replyTo); err != nil {
+		alog.Errorf("contact form: admin push for message %d failed: %v", id, err)
+	}
 	base.ContactVal, base.ContactFrom = "", "" // clear on success
 	base.Flash = "Thanks. Your message has been sent."
 	s.render(w, base)
+}
+
+// describeReplyTo words a submitter's optional address for the log without
+// putting the address itself there.
+func describeReplyTo(replyTo string) string {
+	if replyTo == "" {
+		return "not given"
+	}
+	return "given, " + redact.Email(replyTo)
 }

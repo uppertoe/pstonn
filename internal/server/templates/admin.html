@@ -26,26 +26,25 @@
     </div>
     <div class="adm-tablewrap">
       <table class="adm">
+        {{/* Six columns, so a desktop row fits without sideways scrolling. The
+             rarer facts ride as a second line under the fact they qualify: who an
+             account shares with, the re-link deadline under the council status,
+             the terms version under notify. */}}
         <thead><tr>
-          <th>Account</th><th>Council</th><th>Last warm</th><th>Re-link by</th>
-          <th>Permits</th><th>On permit</th><th>Notify</th><th>Terms</th><th>Shared</th><th>Last apply</th>
+          <th>Account</th><th>Council</th><th>Last warm</th><th>Permits</th><th>Notify</th><th>Last apply</th>
         </tr></thead>
         <tbody>
         {{range .Admin.Rows}}
         <tr x-show="f==='all' || f==='{{.Stage}}'">
-          <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{else if .InvitedBy}}<div class="adm-sub">invited by {{.InvitedBy}} &mdash; not yet accepted</div>{{end}}</td>
-          <td data-label="Council"><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span></td>
+          <td class="adm-acct">{{.Email}}{{if .MemberOf}}<div class="adm-sub">shares {{.MemberOf}}</div>{{else if .InvitedBy}}<div class="adm-sub">invited by {{.InvitedBy}} &mdash; not yet accepted</div>{{end}}{{if .Members}}<div class="adm-sub">shared with {{.Members}}</div>{{end}}</td>
+          <td data-label="Council"><span class="adm-pill {{.Status}}">{{.StatusLabel}}</span>{{if .RelinkBy}}<div class="adm-sub">re-link by {{.RelinkBy}}</div>{{end}}</td>
           <td data-label="Last warm">{{if .Warmed}}{{.Warmed}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-          <td data-label="Re-link by">{{if .RelinkBy}}{{.RelinkBy}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-          <td data-label="Permits">{{.Permits}}</td>
-          <td data-label="On permit">{{if .Plates}}<span class="reg">{{.Plates}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-          <td class="adm-notify" data-label="Notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}</td>
-          <td data-label="Terms">{{if .Consent}}{{.Consent}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-          <td data-label="Shared">{{if .Members}}{{.Members}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
-          <td data-label="Last apply">{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{if .ApplyOK}}<div class="adm-sub">{{.ApplyOK}} successful in 90 days</div>{{end}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td class="adm-wrap" data-label="Permits">{{if .Permits}}{{.Permits}}{{if .PlateList}} <span class="adm-sub">on permit</span><div>{{range .PlateList}}<span class="reg">{{.}}</span>{{end}}</div>{{else}} <span class="adm-sub">nothing on permit</span>{{end}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          <td class="adm-notify" data-label="Notify">{{if .EmailOn}}<span class="tag">email</span>{{end}}{{if .NtfyTopic}}<span class="tag">ntfy</span>{{end}}{{if and (not .EmailOn) (not .NtfyTopic)}}<span class="muted">off</span>{{end}}<div class="adm-sub">{{if .Consent}}terms {{.Consent}}{{else}}terms not accepted{{end}}</div></td>
+          <td class="adm-wrap" data-label="Last apply">{{if .LastApply}}<span class="{{if .LastApplyBad}}bad{{end}}">{{.LastApply}}</span>{{if .ApplyOK}}<div class="adm-sub">{{.ApplyOK}} successful in 90 days</div>{{end}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
         </tr>
         {{else}}
-        <tr><td colspan="10" class="empty-note">No accounts yet.</td></tr>
+        <tr><td colspan="6" class="empty-note">No accounts yet.</td></tr>
         {{end}}
         </tbody>
       </table>
@@ -86,7 +85,7 @@
           <td class="adm-acct">{{.Owner}}</td>
           <td data-label="Plate">{{if .Registration}}<span class="reg">{{.Registration}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
           <td data-label="Type"><span class="tag">{{sourceLabel .Source}}</span></td>
-          <td class="logst" data-label="Outcome"><span class="s-{{.Status}}">{{.Status}}</span>{{if .Detail}} <span class="adm-sub">{{.Detail}}</span>{{end}}</td>
+          <td class="logst adm-wrap" data-label="Outcome"><span class="s-{{.Status}}">{{.Status}}</span>{{if .Detail}} <span class="adm-sub">{{.Detail}}</span>{{end}}</td>
         </tr>
         {{end}}
         </tbody>
@@ -126,6 +125,33 @@
     </div>
     {{else}}
     <p class="empty-note">No undeliverable addresses.</p>
+    {{end}}
+  </div>
+
+  {{/* Contact-form messages. Stored here rather than emailed, so a bot's text
+       never leaves the server as DKIM-signed mail from our domain. */}}
+  <div class="card" style="margin-top:18px">
+    <div class="sectitle"><span class="ic">{{template "ic-mail"}}</span> Contact messages</div>
+    <p class="subtitle">
+      {{if .Admin.ContactEnabled}}Messages from the public contact form, newest first. A new one {{if .Admin.ContactPush}}is <strong>pushed</strong> to the admin ntfy topic{{else}}is <strong>not pushed</strong> anywhere (set ADMIN_NTFY_TOPIC){{end}}; the reply address is what the sender typed and has not been checked.{{else}}The contact form is <strong>off</strong> (set CONTACT_FORM=1).{{end}}
+    </p>
+    {{if .Admin.ContactMessages}}
+    <div class="adm-tablewrap">
+      <table class="adm">
+        <thead><tr><th>Received</th><th>Reply to</th><th>Message</th></tr></thead>
+        <tbody>
+        {{range .Admin.ContactMessages}}
+        <tr>
+          <td data-label="Received">{{.Ago}}</td>
+          <td class="adm-acct" data-label="Reply to">{{if .ReplyTo}}{{.ReplyTo}}{{else}}<span class="muted">none given</span>{{end}}</td>
+          <td class="adm-sub adm-wrap" data-label="Message" style="white-space:pre-wrap;max-width:none">{{.Message}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <p class="empty-note">No messages.</p>
     {{end}}
   </div>
 </main>
