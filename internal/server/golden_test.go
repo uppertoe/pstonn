@@ -207,7 +207,10 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 	}
 	return []renderCase{
 		{"faq", dashboardData{State: "faq", Loc: loc, Contact: true, FAQ: faqFor(defaultTenantView)}, ""},
-		{"faq signed in", dashboardData{State: "faq", Loc: loc, SignedIn: true, FAQ: faqFor(defaultTenantView)}, ""},
+		{"faq signed in", dashboardData{State: "faq", Loc: loc, SignedIn: true, User: user, LogoutURL: "https://auth.example.com/logout", FAQ: faqFor(defaultTenantView)}, ""},
+		{"contact signed in", dashboardData{State: "contact", Loc: loc, Contact: true, SignedIn: true, User: user, LogoutURL: "https://auth.example.com/logout"}, ""},
+		{"security signed in", dashboardData{State: "security", Loc: loc, Contact: true, SignedIn: true, User: user, LogoutURL: "https://auth.example.com/logout"}, ""},
+		{"guide signed in", dashboardData{State: "guide", Loc: loc, Contact: true, SignedIn: true, User: user, LogoutURL: "https://auth.example.com/logout", Guide: guideBySlug(guidesFor(defaultTenantView)[0].Slug, defaultTenantView)}, ""},
 		{"message plain", dashboardData{State: "message", Loc: loc, Contact: true, Message: &messageView{Text: "Something happened."}}, ""},
 		{"message with link", dashboardData{State: "message", Loc: loc, Message: &messageView{Text: "Done.", LinkLabel: "Back to schedule", LinkHref: "/schedule", After: "or close this tab."}}, ""},
 		{"confirm ask", dashboardData{State: "confirm", Loc: loc, Confirm: &confirmView{Token: "tok", Until: "15 Oct 2026"}}, ""},

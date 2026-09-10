@@ -47,8 +47,23 @@ func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 // security and data page, and filing it under "about" hid the one thing a visitor
 // most wants before handing over a tenant password.
 func (s *Server) security(w http.ResponseWriter, r *http.Request) {
-	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "security", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+	s.render(w, s.publicPage(r, "security"))
+}
+
+// publicPage is the view for a page that serves both audiences at one address
+// (features, security, FAQ, guides, contact). The edge passes a session-cookie
+// holder through forward_auth on these paths, so when identity is present it is
+// real, and the page draws the app chrome: that needs the user and the logout
+// URL for the account menu. The tenant/area fields stay empty, which the appbar
+// renders as "no area switcher", correct on a page that is not about a permit.
+func (s *Server) publicPage(r *http.Request, state string) dashboardData {
+	u, signedIn := identity.FromContext(r.Context())
+	d := dashboardData{State: state, SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation}
+	if signedIn {
+		d.User = u
+		d.LogoutURL = s.logoutURL()
+	}
+	return d
 }
 
 // features is the "what p.stonn can do" page, serving two audiences from one
@@ -59,13 +74,7 @@ func (s *Server) security(w http.ResponseWriter, r *http.Request) {
 // appbar renders as "no area switcher", correct here. The internal State stays
 // "how" (template names, asset conditions and goldens all key on it).
 func (s *Server) features(w http.ResponseWriter, r *http.Request) {
-	u, signedIn := identity.FromContext(r.Context())
-	d := dashboardData{State: "how", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation}
-	if signedIn {
-		d.User = u
-		d.LogoutURL = s.logoutURL()
-	}
-	s.render(w, d)
+	s.render(w, s.publicPage(r, "how"))
 }
 
 // howRedirect keeps the page's original address alive: /how is indexed and

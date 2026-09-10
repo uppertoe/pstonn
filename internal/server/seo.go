@@ -8,8 +8,6 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
-
-	"github.com/uppertoe/pstonn/internal/identity"
 )
 
 // SEO lives here because the public pages are how a Stonnington resident actually
@@ -119,8 +117,9 @@ func jsonLDFor(state, baseURL string, c tenantView) template.JS {
 // faq is the PUBLIC FAQ page: resident-phrased questions, kept in step with the
 // FAQPage structured data so an answer can surface directly in search results.
 func (s *Server) faq(w http.ResponseWriter, r *http.Request) {
-	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "faq", SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation, FAQ: faqFor(s.tenantViewFor(r.Context(), ""))})
+	d := s.publicPage(r, "faq")
+	d.FAQ = faqFor(s.tenantViewFor(r.Context(), ""))
+	s.render(w, d)
 }
 
 // robotsTxt lets crawlers index the public pages while keeping them off the app,
@@ -395,8 +394,9 @@ func (s *Server) guide(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "guide", Guide: g, SignedIn: signedIn, Contact: s.cfg.ContactEnabled(), Loc: s.cfg.DisplayLocation})
+	d := s.publicPage(r, "guide")
+	d.Guide = g
+	s.render(w, d)
 }
 
 // guideJSONLD is a one-question FAQPage: the page IS the answer to its title.

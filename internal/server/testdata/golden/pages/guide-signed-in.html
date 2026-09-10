@@ -124,7 +124,8 @@
 </script>
 <script src="/static/htmx.min.js?v=978dbf7c69"></script>
 <script defer src="/static/alpine.min.js?v=978dbf7c69"></script>
-
+<link rel="stylesheet" href="/static/demos.css?v=978dbf7c69">
+<script defer src="/static/demos.js?v=978dbf7c69"></script>
 
 <script>
   
@@ -287,83 +288,102 @@ window.popClamp = window.popClamp || function (el) {
 
 
 
-<header class="appbar pubbar">
+
+<header class="appbar">
   
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></a>
-  <nav class="pubnav">
-    <a href="/features" hx-boost="false" class="link-quiet">Features</a>
-    <a href="/faq" class="link-quiet">FAQ</a>
-    <a href="/security" class="link-quiet active" aria-current="page">Security &amp; data</a>
-    
-  </nav>
+  
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
   <div class="appbar-r">
-    <button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle light / dark"><span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span></button>
-    <a href="/signin" hx-boost="false"><button type="button">Sign in</button></a>
+    
+    <a href="/features" hx-boost="false" class="howlink" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
+    <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
+      <span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span>
+    </button>
+    <div class="usermenu" x-data="{open:false}" @click.outside="open=false" @keydown.escape.window="open=false">
+      <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></button>
+      <div class="menu" x-show="open" x-cloak>
+        <div class="menu-email">a@b.com</div>
+        <a href="/contact" class="menu-item"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg> Contact</a>
+        
+        <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
+        
+        <a href="https://auth.example.com/logout" class="menu-item"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</a>
+        
+      </div>
+    </div>
   </div>
 </header>
 
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+
 <main id="main" tabindex="-1" class="landing about">
-  
+  <p class="topback"><a class="link-quiet" href="/schedule" hx-boost="false">&larr; Back to Schedule</a></p>
   <section class="paper">
-    <h1 class="about-h1">Security &amp; data</h1>
-    <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. See <a href="/features" hx-boost="false">what p.stonn can do</a>.</p>
+    
+    <nav class="guide-nav" aria-label="Guides">
+      <span class="guide-nav-h">Guides</span>
+      <ol>
+        <li><a href="/guide/change-car-on-visitor-permit" hx-boost="false" aria-current="page">How do I change the car on my Stonnington visitor permit?</a></li>
+        <li><a href="/guide/visitor-parking-cleaner-nanny-carer" hx-boost="false">Visitor parking for a cleaner, nanny or carer in Stonnington</a></li>
+        <li><a href="/guide/paper-visitor-permits" hx-boost="false">Do visitors need a paper permit in Stonnington?</a></li>
+        <li><a href="/guide/parking-permit-login" hx-boost="false">Where do I log in to my Stonnington parking permit?</a></li>
+      </ol>
+    </nav>
+    <h1 class="about-h1">How do I change the car on my Stonnington visitor permit?</h1>
+    <p>On the council&#39;s ePermits site: sign in, choose Update Vehicle on the permit, enter the new plate, save. It has to be done before each visitor parks.</p>
+    <h2 class="about-h2">At the council</h2>
+    <div class="guide-council">
+      <ol class="guide-steps">
+        <li>Sign in at <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer">parkingpermits.stonnington.vic.gov.au</a> — <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/Register" target="_blank" rel="noopener noreferrer">register</a> first if you haven’t, or <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer">reset your password</a> if you’ve never used it.</li><li>In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.</li><li>Enter the new registration and the state it&rsquo;s registered in, and save.</li><li>Repeat for each new visitor, before they park.</li>
+      </ol>
+      
+    </div>
+    <p>You can also ring the council on 03 8290 1333 to have the vehicle changed.</p>
+    <h2 class="about-h2">With p.stonn</h2>
+    <div class="feature" style="margin-top:8px">
+      <div class="feature-text"><p>Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.</p></div>
+      <div class="feature-demo">
+        
+        <figure class="dm" data-demo="roster">
+        <div class="dm-phone">
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> This week</div><span class="dm-sample">Sample data</span></div>
+          <div class="dm-week" data-week></div>
+          <div class="dm-picker">
+            <div class="ph">Which car?</div>
+            <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
+            <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
+            <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-pdot style="background:var(--line)"></span> <span class="dm-rego" data-prego>&middot;</span></div></div>
+            <div class="dm-sync"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
+          </div>
+          <div class="dm-cursor"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 3l14 8-6 1.6L9.6 19 5 3z" fill="#fff" stroke="#1a2233" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+        </figure>
 
-    <h2 class="about-h2">The short version</h2>
-    <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
-    <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and you can delete everything you&rsquo;ve stored on request. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
-    <p class="sec-more">The detail is below &mdash; open any section that matters to you.</p>
-
-    <details class="sec"><summary>What&rsquo;s encrypted, and what isn&rsquo;t</summary>
-      <p>Encrypted with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your printed and visitor QR links.</p>
-      <p>Stored as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it. It is kept readable because that is what running the service reliably needs.</p>
-    </details>
-
-    <details class="sec"><summary>How the connection ends</summary>
-      <p>It lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). About a week before, p.stonn emails a one-click link to keep it going. This is deliberate: it should not hold access to the council account of someone who has moved away or stopped using it.</p>
-      <p>You can also end it yourself any time &mdash; disconnect in Settings (immediate), or change your council password, which ends the stored session (an access token already issued may keep working for up to about an hour).</p>
-    </details>
-
-    <details class="sec"><summary>Your council password, and signing in</summary>
-      <p>Saved by default, encrypted, so p.stonn can sign back in on its own when the council ends a session &mdash; without it, a lapsed session stops your schedule until you reconnect by hand. Untick &ldquo;Save my password&rdquo; when you link, or turn it off later in Settings, and it is erased and never stored again.</p>
-      <p>Your p.stonn sign-in is separate: a one-time code to your verified email. You can only ever link the council account whose email matches it. (Self-hosters: the app trusts whatever verified email its sign-in layer supplies.)</p>
-    </details>
-
-    <details class="sec"><summary>What data p.stonn holds</summary>
-      <p><strong>About you:</strong> your email, your vehicles and their plates, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
-      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the plates visitors typed at a printed QR code. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
-    </details>
-
-    <details class="sec"><summary>How long it is kept</summary>
-      <p>Activity and change logs: 90 days. A visitor&rsquo;s plate from a printed QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
-    </details>
-
-    <details class="sec"><summary>How your data is used</summary>
-      <p>Only to run this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where a feature needs it: with the email provider that delivers your notifications, the push server if you turn push on, and the council itself when it changes your permit.</p>
-      <p>The server administrator can technically see what is stored on the server &mdash; that is true of any self-hosted tool. p.stonn is small and personal, and your data is used only to run the service for you: never sold, never shared beyond what a feature needs, and never looked at for anything else.</p>
-    </details>
-
-    <details class="sec"><summary>Deleting your data</summary>
-      <p>&ldquo;Delete all my data&rdquo; in Settings clears everything from the live database straight away: your session, saved password, schedule, vehicles, guest passes, logs, and anything queued to be emailed to you. It also removes your traces from any account you were a member of, including guest passes you created there.</p>
-      <p>Backups are the exception: encrypted backups run daily and thin out over time (roughly the last week daily, the last month weekly, then monthly for about three months), so deleted data can linger in a backup for up to about three months before it is gone for good. Backups are not reachable through the app and are encrypted with a key held separately from the server.</p>
-    </details>
-
-    <details class="sec"><summary>If the server were compromised</summary>
-      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can &mdash; to view what is held in your ePermits account and manage the permits in it. Changing your ePermits password shuts the session out immediately. Encryption makes that exposure unlikely, using a password that is unique to your council account keeps any fallout contained there, and &mdash; as with any online service &mdash; none of this is an absolute guarantee.</p>
-    </details>
-
-    <h2 class="about-h2">Notifications</h2>
-    <p>p.stonn tries to tell you, by email and/or push, each time it changes your permit or can&rsquo;t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Treat it as a convenience, not a guarantee &mdash; you remain responsible for your permit and for any fines.</p>
-
-    <h2 class="about-h2">For the City of Stonnington</h2>
-    <p>If you work for the council and have questions about this service, please get in touch &mdash; happy to talk. p.stonn acts only with each resident&rsquo;s own login, on their own permit, and only when that resident&rsquo;s schedule needs a change. It signs in the same way the ePermits website does, then uses the council&rsquo;s own permit API to change the vehicle &mdash; and on those API requests it identifies itself as p.stonn, with a link back to this site. It keeps its load light: a single plate change is three requests (read the current vehicle, change it, read back to confirm), fewer than a resident doing the same by hand in a browser; between changes it touches the council only a handful of times a day &mdash; one request roughly every eight hours to keep the session from lapsing, and a permit read twice a day to stay in sync. All told that is on the order of a dozen requests across a whole day for one household, spaced out and backing off if the portal is busy. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
-
-    <h2 class="about-h2">No promises</h2>
-    <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
+      </div>
+    </div>
+    <p style="margin-top:22px"><a href="/schedule" hx-boost="false"><button type="button"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Open the app</button></a></p>
+    <p class="faq-more">p.stonn is a free, unofficial tool and is not affiliated with the City of Stonnington. The council’s own pages: <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">visitor parking permits</a> and <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs" target="_blank" rel="noopener noreferrer">parking permit FAQs</a>. See also <a href="/features" hx-boost="false">how p.stonn works</a> and the <a href="/faq" hx-boost="false">FAQ</a>.</p>
+    
+    <nav class="guide-pager" aria-label="Previous and next guide">
+      
+      <a class="next" href="/guide/visitor-parking-cleaner-nanny-carer" hx-boost="false"><span class="dir">Next</span>Visitor parking for a cleaner, nanny or carer in Stonnington</a>
+    </nav>
+    
   </section>
-
-  <p class="ldisclaimer" style="margin-top:26px"><a href="/" hx-boost="false">&larr; Back</a></p>
 </main>
-
 
 
 

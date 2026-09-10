@@ -332,6 +332,7 @@ window.popClamp = window.popClamp || function (el) {
 
 <main id="main" tabindex="-1" class="landing about">
   
+  
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
     <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>

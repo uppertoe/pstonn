@@ -66,10 +66,15 @@
 
 {{end}}
 
+{{define "pageheader"}}{{/* A public page that also serves signed-in visitors: the edge now passes a session-cookie holder through forward_auth on these pages (Caddy @pubpages), so identity is real here. Draw the app chrome for them and the public header for everyone else -- swapping only the header's button to "Open the app" read as the signed-out page with one odd button (2026-09-10). */}}{{if .SignedIn}}{{template "appbar" .}}{{template "appnav" .}}{{else}}{{template "publicheader" .}}{{end}}{{end}}
+
+{{define "topback"}}{{if .SignedIn}}<p class="topback"><a class="link-quiet" href="/schedule" hx-boost="false">&larr; Back to Schedule</a></p>{{end}}{{end}}
+
 {{define "page-security"}}
 {{/* ================= PUBLIC SECURITY & DATA ================= */}}
-{{template "publicheader" .}}
+{{template "pageheader" .}}
 <main id="main" tabindex="-1" class="landing about">
+  {{template "topback" .}}
   <section class="paper">
     <h1 class="about-h1">Security &amp; data</h1>
     <p>{{T "public.about_unofficial" . (slots "how" (link "/features" (noboost)))}}</p>
@@ -139,10 +144,10 @@
      app header and get the app chrome and just the feature demos — most households
      use only the roster and one-off bookings, and the three visitor features go
      undiscovered, so this page is the discovery surface for them. */}}
-{{if .SignedIn}}{{template "appbar" .}}{{template "appnav" .}}{{else}}{{template "publicheader" .}}{{end}}
+{{template "pageheader" .}}
 <main id="main" tabindex="-1" class="landing about">
+  {{template "topback" .}}
   {{if .SignedIn}}
-  <p class="topback"><a class="link-quiet" href="/schedule" hx-boost="false">&larr; Back to Schedule</a></p>
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
     <p>Everything p.stonn can do, in five short animations &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
@@ -295,8 +300,9 @@
 {{/* Questions in a resident's own words. The Q&A come from the same Go slice that
      builds the FAQPage structured data (see seo.go), so a search result and this
      page can never drift apart. */}}
-{{template "publicheader" .}}
+{{template "pageheader" .}}
 <main id="main" tabindex="-1" class="landing about">
+  {{template "topback" .}}
   <section class="paper">
     <h1 class="about-h1">Frequently asked questions</h1>
     <p>{{T "public.faq_unofficial" . (slots "how" (link "/features" (noboost)))}}</p>
@@ -319,8 +325,9 @@
      p.stonn does it with the matching animated demo from the How page, then the
      door in. Content lives in seo.go (guides) so the page and its structured data
      cannot drift apart. */}}
-{{template "publicheader" .}}
+{{template "pageheader" .}}
 <main id="main" tabindex="-1" class="landing about">
+  {{template "topback" .}}
   <section class="paper">
     {{/* Every guide, numbered, current one marked, so a reader who landed on the
          wrong question sees the right one before reading a word. A numbered
@@ -391,8 +398,9 @@
 
 {{define "page-contact"}}
 {{/* ================= PUBLIC CONTACT ================= */}}
-{{template "publicheader" .}}
+{{template "pageheader" .}}
 <main id="main" tabindex="-1" class="landing about">
+  {{template "topback" .}}
   <h1 class="about-h1">Contact</h1>
   <p>Questions, problems, or feedback about p.stonn? Send a message and it reaches the person running this server. Leaving your email is optional, but it's the only way to get a reply.</p>
   {{if .Flash}}<div class="banner ok" style="margin:16px 0">{{template "ic-check"}} <span>{{.Flash}}</span></div>{{end}}

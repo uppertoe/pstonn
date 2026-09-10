@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/uppertoe/pstonn/internal/identity"
 	"github.com/uppertoe/pstonn/internal/redact"
 )
 
@@ -286,8 +285,7 @@ func (s *Server) contactPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	_, signedIn := identity.FromContext(r.Context())
-	s.render(w, dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation})
+	s.render(w, s.publicPage(r, "contact"))
 }
 
 // submitContact validates a contact-form message, stores it for the operator's
@@ -309,8 +307,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
 		return
 	}
-	_, signedIn := identity.FromContext(r.Context())
-	base := dashboardData{State: "contact", SignedIn: signedIn, Contact: true, Loc: s.cfg.DisplayLocation}
+	base := s.publicPage(r, "contact")
 
 	// Throttle BEFORE parsing: the limiter has to gate the expensive work (the
 	// body parse), not just the store write, or an unauthenticated flood still
