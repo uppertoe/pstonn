@@ -132,3 +132,16 @@ func TestContactFormOffWithoutSwitch(t *testing.T) {
 		t.Fatal("CONTACT_TO alone should keep the form on")
 	}
 }
+
+// TestFeaturesAppForwardsHome: the retired signed-in twin address forwards
+// permanently to /features, where the edge now delivers identity directly.
+func TestFeaturesAppForwardsHome(t *testing.T) {
+	s := newAuthzServer(t)
+	r := httptest.NewRequest("GET", "/features/app", nil)
+	r.Host = "app.example.com"
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 301 || w.Header().Get("Location") != "/features" {
+		t.Fatalf("/features/app = %d -> %q, want 301 -> /features", w.Code, w.Header().Get("Location"))
+	}
+}

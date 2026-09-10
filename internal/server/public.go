@@ -73,3 +73,8 @@ func (s *Server) features(w http.ResponseWriter, r *http.Request) {
 func (s *Server) howRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/features", http.StatusMovedPermanently)
 }
+
+// featuresAppRedirect retires the signed-in twin address (see the route).
+func (s *Server) featuresAppRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/features", http.StatusMovedPermanently)
+}

@@ -420,11 +420,12 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "/", guardPublic, s.notFound)
 	s.handle(mux, "GET /security", guardPublic, s.security) // public
 	s.handle(mux, "GET /features", guardPublic, s.features) // public
-	// The signed-in twin of /features. The edge's public block strips identity
-	// on purpose, so /features itself can never know who you are; Caddy
-	// redirects session-cookie holders here, where the protected catch-all
-	// delivers full identity and the same handler renders the app chrome.
-	s.handle(mux, "GET /features/app", guardPublic, s.features)
+	// /features/app was the signed-in twin of /features while the edge's public
+	// block stripped identity from /features itself (5–10 Sep 2026). The edge
+	// now passes session-cookie holders through forward_auth at /features, so
+	// the twin forwards home; it stays only for the app header and schedule
+	// links people have in their history.
+	s.handle(mux, "GET /features/app", guardPublic, s.featuresAppRedirect)
 	s.handle(mux, "GET /how", guardPublic, s.howRedirect)               // public; the page's old address
 	s.handle(mux, "GET /faq", guardPublic, s.faq)                       // public
 	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)            // public question pages
