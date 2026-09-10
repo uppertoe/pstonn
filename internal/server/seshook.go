@@ -63,6 +63,26 @@ type sesEvent struct {
 			EmailAddress string `json:"emailAddress"`
 		} `json:"complainedRecipients"`
 	} `json:"complaint"`
+	// DeliveryDelay is a config-set event: the receiver deferred the message
+	// (greylisting, a rate limit, a reputation hold) and SES is still retrying.
+	// Nothing to store; it is logged because a deferral is the earliest visible
+	// sign of a domain losing standing with a receiver — Gmail held one message
+	// for over three hours on 2026-09-10 and only the headers of the eventual
+	// delivery showed it.
+	DeliveryDelay struct {
+		DelayType         string `json:"delayType"` // InternalFailure | General | MailboxFull | SpamDetected | RecipientServerError | IPFailure | TransientCommunicationFailure | BYOIPHostNameLookupUnavailable | Undetermined | SendingDeferral
+		ExpirationTime    string `json:"expirationTime"`
+		DelayedRecipients []struct {
+			EmailAddress   string `json:"emailAddress"`
+			DiagnosticCode string `json:"diagnosticCode"`
+			Status         string `json:"status"`
+		} `json:"delayedRecipients"`
+	} `json:"deliveryDelay"`
+	// Reject is a config-set event: SES itself refused the message before sending
+	// (its virus scan, in practice). Logged so a silently dropped notice has a trace.
+	Reject struct {
+		Reason string `json:"reason"`
+	} `json:"reject"`
 }
 
 // maxSNSBody bounds the POST body. SES notifications are a few KB; the endpoint
@@ -240,6 +260,17 @@ func (s *Server) handleSESEvent(r *http.Request, raw string) error {
 		}
 	case "delivery":
 		// Nothing to do; subscribing to deliveries is optional and harmless.
+	case "deliverydelay":
+		for _, rcpt := range ev.DeliveryDelay.DelayedRecipients {
+			alog.Warnf("ses hook: delivery to %s delayed (%s; SES retries until %s); ses message id %s; server said: %s",
+				notify.RedactEmail(rcpt.EmailAddress), ev.DeliveryDelay.DelayType, ev.DeliveryDelay.ExpirationTime, ev.Mail.MessageID,
+				redactDiagnostic(rcpt.Status, rcpt.DiagnosticCode))
+		}
+		if len(ev.DeliveryDelay.DelayedRecipients) == 0 {
+			alog.Warnf("ses hook: delivery delayed (%s); ses message id %s", ev.DeliveryDelay.DelayType, ev.Mail.MessageID)
+		}
+	case "reject":
+		alog.Errorf("ses hook: SES rejected a message before sending (%s); ses message id %s", ev.Reject.Reason, ev.Mail.MessageID)
 	default:
 		alog.Infof("ses hook: ignoring SES event %q", kind)
 	}

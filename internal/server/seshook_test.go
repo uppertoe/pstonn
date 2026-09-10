@@ -164,6 +164,21 @@ func TestSESHookSuppresses(t *testing.T) {
 		t.Fatal("a transient bounce must not suppress — retry is the correct response")
 	}
 
+	// A config-set delivery delay is acknowledged and logged, and suppresses
+	// nothing: SES is still retrying the message.
+	delayed := `{"eventType":"DeliveryDelay","mail":{"messageId":"0108-dly"},"deliveryDelay":{"delayType":"TransientCommunicationFailure","expirationTime":"2026-09-11T00:00:00Z",
+	  "delayedRecipients":[{"emailAddress":"slow@example.com","status":"4.7.0","diagnosticCode":"smtp; 421-4.7.0 Try again later"}]}}`
+	body = signSNS(t, key, &snsMessage{
+		Type: "Notification", MessageID: "m2b", TopicARN: testTopic,
+		Message: delayed, Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	if w := postSNS(s, body); w.Code != http.StatusOK {
+		t.Fatalf("delivery delay = %d, want 200", w.Code)
+	}
+	if bad, _, _ := s.store.IsSuppressed(ctx, "slow@example.com"); bad {
+		t.Fatal("a delivery delay must not suppress")
+	}
+
 	complaint := `{"notificationType":"Complaint","complaint":{"complaintFeedbackType":"abuse",
 	  "complainedRecipients":[{"emailAddress":"Annoyed@Example.com"}]}}`
 	body = signSNS(t, key, &snsMessage{
