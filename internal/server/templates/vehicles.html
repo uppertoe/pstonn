@@ -1,7 +1,7 @@
 {{define "page-vehicles"}}
   {{/* ---------- VEHICLES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic">{{template "ic-cars"}}</span> Vehicles</div>
-  <p class="subtitle">The plates that may share your permit. Each gets a colour used across the schedule.</p>
+  <p class="subtitle">The number plates of the people who visit you. Each plate gets a colour that is used across the schedule.</p>
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
       {{range .Vehicles}}
@@ -35,10 +35,10 @@
         </form>
         <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
           <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none">
-          <span>Email this driver when their car goes on the permit</span>
+          <span>Email this person when the permit is set to their plate</span>
         </label>
       {{else}}
-      <p class="empty-note">No vehicles yet. Add the plates that may share a permit.</p>
+      <p class="empty-note">No number plates saved yet. Add the plates of the people who visit you.</p>
       {{end}}
     </div>
     <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
@@ -47,13 +47,13 @@
       {{if .Regions}}<select name="state" class="vstate" aria-label="{{T "vehicle.state_label" .}}" title="{{T "vehicle.state_label" .}}">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>{{end}}
       <button type="submit">{{template "ic-plus"}} Add</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">A driver email is optional. It pre-fills guest passes, and (unless you untick it above) tells that driver when their car goes on the permit. See <a href="/guests">Guests</a>.</p>
+    <p class="empty-note" style="margin-top:10px">An email address is optional. It pre-fills guest passes and, unless you untick it above, tells that person when the permit is set to their plate. See <a href="/guests">Guests</a>.</p>
   </section>
 {{if .BookFAB}}
 {{/* Same corner, same words as the Schedule page's button. hx-push-url drops
      the ?book=1 flag from the address bar so a refresh of the schedule does
      not reopen the modal. */}}
-<a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></a>
+<a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Set the permit now</span></a>
 {{end}}
 
 {{end}}

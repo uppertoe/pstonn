@@ -331,7 +331,7 @@ window.popClamp = window.popClamp || function (el) {
   
   
   <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg></span> Vehicles</div>
-  <p class="subtitle">The plates that may share your permit. Each gets a colour used across the schedule.</p>
+  <p class="subtitle">The number plates of the people who visit you. Each plate gets a colour that is used across the schedule.</p>
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
       
@@ -356,7 +356,7 @@ window.popClamp = window.popClamp || function (el) {
         </form>
         <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
           <input type="checkbox" name="notify" hx-post="/vehicles/1/notify" hx-trigger="change" hx-swap="none">
-          <span>Email this driver when their car goes on the permit</span>
+          <span>Email this person when the permit is set to their plate</span>
         </label>
       
       
@@ -380,7 +380,7 @@ window.popClamp = window.popClamp || function (el) {
         </form>
         <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
           <input type="checkbox" name="notify" hx-post="/vehicles/2/notify" hx-trigger="change" hx-swap="none">
-          <span>Email this driver when their car goes on the permit</span>
+          <span>Email this person when the permit is set to their plate</span>
         </label>
       
     </div>
@@ -390,7 +390,7 @@ window.popClamp = window.popClamp || function (el) {
       <select name="state" class="vstate" aria-label="Registration state" title="Registration state"><option value="VIC">VIC</option><option value="NSW">NSW</option><option value="SA">SA</option></select>
       <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Add</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">A driver email is optional. It pre-fills guest passes, and (unless you untick it above) tells that driver when their car goes on the permit. See <a href="/guests">Guests</a>.</p>
+    <p class="empty-note" style="margin-top:10px">An email address is optional. It pre-fills guest passes and, unless you untick it above, tells that person when the permit is set to their plate. See <a href="/guests">Guests</a>.</p>
   </section>
 
 

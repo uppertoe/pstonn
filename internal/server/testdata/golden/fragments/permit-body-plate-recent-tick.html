@@ -19,6 +19,8 @@
     </div>
     
     
+    
+    
     <div class="permit-actions">
       <button type="button" class="qrtrigger sm"
               hx-post="/guests/qr" hx-vals='{"permit_id": "7"}'
@@ -28,9 +30,10 @@
       
       
     </div>
+    
   </div>
   <div class="nowbadge">
-    <span class="muted" style="font-size:12.5px">on permit now</span>
+    <span class="muted" style="font-size:12.5px">permit set to</span>
     
     <span class="plate">ABC123</span>
     
@@ -57,6 +60,7 @@
 
 
 <p class="sub">Weekly roster</p>
+<p class="empty-note rostercap">The plate the permit is set to on each day of the week.</p>
 
 <div class="segpanes">
   
@@ -76,10 +80,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Sun: pick a vehicle</p>
+      <p class="tt">Sun: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Sun</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -100,10 +104,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Mon: pick a vehicle</p>
+      <p class="tt">Mon: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Mon</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -124,10 +128,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Tue: pick a vehicle</p>
+      <p class="tt">Tue: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Tue</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -148,10 +152,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Wed: pick a vehicle</p>
+      <p class="tt">Wed: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Wed</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -172,10 +176,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Thu: pick a vehicle</p>
+      <p class="tt">Thu: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Thu</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -196,10 +200,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Fri: pick a vehicle</p>
+      <p class="tt">Fri: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Fri</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -220,10 +224,10 @@
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Sat: pick a vehicle</p>
+      <p class="tt">Sat: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Sat</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -463,7 +467,7 @@
 </div>
 
 
-<p class="sub" style="margin-top:20px">One-off bookings</p>
+<p class="sub" style="margin-top:20px">One-off changes</p>
 
 <div class="oneoff-list">
   

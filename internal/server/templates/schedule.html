@@ -42,12 +42,10 @@
   {{/* ---------- SCHEDULE ---------- */}}
   {{if .Vehicles}}
   {{template "legend" .}}
-  {{else if not .App.GuestActive}}
-  {{/* A household already living on guest QRs doesn't need saved cars — the
-       roster and one-off surfaces explain their own prerequisite at the moment
-       of use, so this page-level hint stays quiet for them. */}}
-  <div class="banner warn">{{template "ic-cars"}} <span>Add your plates on the <a href="/vehicles">Vehicles</a> page first, then pick which vehicle covers each day of the week.</span></div>
   {{end}}
+  {{/* No page-level "add your plates first" nudge any more: a first visit gets
+       the card's own "Start with the number plates" panel, and the roster
+       picker and the dialog explain the prerequisite at the moment of use. */}}
   {{range .App.Permits}}
   {{/* The one-off modal closes itself after a SUCCESSFUL SUBMIT and nothing else.
        The guard used to close it after any htmx request that bubbled through the
@@ -168,20 +166,20 @@
        scoped open-oneoff event the single-permit FAB sends. */}}
   <div x-data="{pickOpen:false}" @open-oneoff.window="pickOpen=false"{{if .App.OpenBook}} x-init="$nextTick(() => pickOpen = true)"{{end}}>
     <button class="fab" type="button"
-            @click="pickOpen=true">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></button>
+            @click="pickOpen=true">{{template "ic-plus"}}<span class="fab-label">Set the permit now</span></button>
     <template x-teleport="body">
     <div class="modal-wrap" x-show="pickOpen" x-cloak @keydown.escape.window="pickOpen=false">
       <div class="scrim" x-show="pickOpen" x-transition.opacity @click="pickOpen=false"></div>
       <div class="modal" x-show="pickOpen" x-transition>
-        <div class="modal-head"><strong>Add a one-off booking</strong>
+        <div class="modal-head"><strong>Set the permit to a plate</strong>
           <button type="button" class="icon-btn" @click="pickOpen=false" aria-label="Close">{{template "ic-x"}}</button>
         </div>
-        <p class="empty-note" style="margin:-6px 0 12px">You manage more than one permit &mdash; which one is the booking for? Next to each is the car on it right now.</p>
+        <p class="empty-note" style="margin:-6px 0 12px">You manage more than one permit &mdash; which one is this for? Next to each is the plate it is set to right now.</p>
         <div class="pick">
           {{range .App.Permits}}
           <button type="button" class="pick-item" data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">
             <span class="pick-name">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}}</span>
-            {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no car</span>{{end}}
+            {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no plate</span>{{end}}
           </button>
           {{end}}
         </div>
@@ -195,7 +193,7 @@
        scoped event a tap sends, after Alpine has walked the card above so its
        listener is in place. */}}
   <button class="fab" type="button"{{if $.App.OpenBook}} x-data x-init="$nextTick(() => window.dispatchEvent(new CustomEvent('open-oneoff', {detail:{permit:'{{.Permit.ID}}'}})))"{{end}}
-          data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">{{template "ic-plus"}}<span class="fab-label">Add booking now</span></button>
+          data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">{{template "ic-plus"}}<span class="fab-label">Set the permit now</span></button>
   {{end}}
   {{end}}
   {{end}}
@@ -242,6 +240,10 @@
          multi-permit account never has to pick one, which is exactly where the old
          path was slowest), and it sits beside the "on permit now" badge, so you can
          see what you are about to displace before you show the code. */}}
+    {{/* A household with no saved plates and nothing set is on its first visit:
+         the QR and the clear action are hidden until then, so the one thing the
+         card asks for is the plates (see the panel below the badge). */}}
+    {{if or .Vehicles (not .ShowSetupNudge)}}
     <div class="permit-actions">
       <button type="button" class="qrtrigger sm"
               hx-post="/guests/qr" hx-vals='{"permit_id": "{{.Permit.ID}}"}'
@@ -261,20 +263,21 @@
       <form method="post" action="/permits/{{.Permit.ID}}/clear"
             hx-post="/permits/{{.Permit.ID}}/clear" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
             data-confirm="Take {{.Permit.ActiveRegistration}} off this permit? The permit will have no vehicle, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until you set or schedule a car." data-confirm-ok="Take it off">
-        <button type="submit" class="ghost sm">{{template "ic-x"}} Remove {{.Permit.ActiveRegistration}}</button>
+        <button type="submit" class="ghost sm">{{template "ic-x"}} Clear {{.Permit.ActiveRegistration}}</button>
       </form>
       {{end}}
     </div>
+    {{end}}
   </div>
   <div class="nowbadge">
-    <span class="muted" style="font-size:12.5px">on permit now</span>
+    <span class="muted" style="font-size:12.5px">permit set to</span>
     {{/* The plate carries its car's own colour, like every other plate in the app.
          It used to render as .reg, which is teal-tinted whatever is on the permit —
          a colour cue that looked meaningful and wasn't, on the one line whose whole
          job is "which car is on the permit right now". An empty ActiveColor leaves
          the neutral .plate default, which is how a visitor's one-off plate reads as
          "not one of your cars". */}}
-    {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no car</span>{{end}}
+    {{if .Permit.ActiveRegistration}}<span class="plate"{{if .ActiveColor}} style="--plate:{{.ActiveColor}}"{{end}}>{{.Permit.ActiveRegistration}}</span>{{else}}<span class="noplate">no plate</span>{{end}}
     {{/* Fixed-size status slot: an "applying" spinner while a change is landing, a
          "checking" spinner while a background council read runs with nothing recent
          to lean on, a tick once the shown plate IS the council's confirmed state —
@@ -363,16 +366,27 @@
      account is scheduled) — and NOT to a household that hands visitors the QR
      (a valid way to use the permit); ShowSetupNudge encodes all of this (see
      buildPermitView). */}}
-{{if .ShowSetupNudge}}
+{{if and .ShowSetupNudge (not .Vehicles)}}
+{{/* First visit: no plates saved yet. The roster and the dialog both need a
+     plate, so the one step asked for here is the plates. Says what the council
+     holds now and that p.stonn will not touch it, rather than alluding to it. */}}
+<div class="banner warn firstvisit" style="margin:14px 0 20px;align-items:flex-start">{{template "ic-alert"}} <span>
+  <strong>Start with the number plates.</strong>
+  Save the number plates of the people who visit you, such as a parent or a nanny, on the Vehicles page. Once they are saved you can set the permit to one of them for a day, or give each day of the week its own plate.
+  <span style="display:block;margin:10px 0 8px"><a class="ghost sm btnlike" href="/vehicles">{{template "ic-plus"}} Add number plates</a></span>
+  <span style="display:block">{{if .Permit.ActiveRegistration}}The council&rsquo;s permit currently lists {{.Permit.ActiveRegistration}}.{{else}}The council&rsquo;s permit currently lists no plate.{{end}} p.stonn will not change it until you set a plate here.</span>
+</span></div>
+{{else if .ShowSetupNudge}}
 <div class="banner warn" style="margin:14px 0 20px;align-items:flex-start">{{template "ic-alert"}} <span>
-  <strong>This permit isn't on a schedule yet.</strong>
-  Pick a car for each day below or add a one-off booking and p.stonn will keep the permit matching &mdash; or just show a visitor the QR when they arrive. Until then the permit stays exactly as it is at the council.
+  <strong>Nothing is set yet.</strong>
+  {{if .Permit.ActiveRegistration}}The council&rsquo;s permit still lists {{.Permit.ActiveRegistration}}, and{{else}}The council&rsquo;s permit lists no plate, and{{end}} p.stonn will not change it until you set a plate here. Tap a day in the roster to give that day a plate, or press Set the permit now for today.
 </span></div>
 {{end}}
 
 {{$cycling := gt .CycleWeeks 1}}
 {{if $cycling}}
 <p class="sub">Roster &mdash; repeats every {{.CycleWeeks}} weeks</p>
+<p class="empty-note rostercap">The plate the permit is set to on each day of the week.</p>
 {{/* Week tabs: fixed positions and numbers for the life of the roster (weeks
      are only ever added or removed at the END). The tab for the week the cycle
      is currently in carries the "now" mark and is the server-rendered default;
@@ -401,6 +415,7 @@
 </div>
 {{else}}
 <p class="sub">Weekly roster</p>
+<p class="empty-note rostercap">The plate the permit is set to on each day of the week.</p>
 {{end}}
 <div class="segpanes">
   {{$vehicles := .Vehicles}}{{$pv := .}}
@@ -414,16 +429,16 @@
     <div class="day">{{.Name}}</div>
     <button type="button" class="chip {{if not .Reg}}empty{{end}}" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no vehicle, choose one{{end}}">
-      {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else}}<span class="lab muted">none</span>{{end}}
+            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no plate, choose one{{end}}">
+      {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else}}<span class="lab muted">choose</span>{{end}}
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       {{if $vehicles}}
-      <p class="tt">{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: pick a vehicle</p>
+      <p class="tt">{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: choose a plate</p>
       <div class="vopts">
         <button type="button" class="vopt {{if not $sel}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">clear day</button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">No plate on {{.Name}}</button>
         {{range $vehicles}}
         <button type="button" class="vopt {{if eq $sel .ID}}sel{{end}}" @click="open=false"
           hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
@@ -432,9 +447,9 @@
       {{else}}
       {{/* Empty garage: the only thing this popover could offer is "clear", a
            no-op that reads as broken. Say what the roster runs on instead. */}}
-      <p class="tt">The roster runs on your saved cars</p>
-      <p class="empty-note" style="margin:2px 0 10px">Add a car once, then set it for any day with one tap.</p>
-      <a class="vopt" href="/vehicles" style="text-decoration:none">{{template "ic-plus"}} <span class="lab">Add your cars</span></a>
+      <p class="tt">The roster uses your saved number plates</p>
+      <p class="empty-note" style="margin:2px 0 10px">Save a plate once, then give it to any day with one tap.</p>
+      <a class="vopt" href="/vehicles" style="text-decoration:none">{{template "ic-plus"}} <span class="lab">Add number plates</span></a>
       {{end}}
     </div>
   </div>
@@ -477,7 +492,7 @@
 </div>
 {{end}}
 
-<p class="sub" style="margin-top:20px">One-off bookings</p>
+<p class="sub" style="margin-top:20px">One-off changes</p>
 {{if .Overrides}}
 <div class="oneoff-list">
   {{range .Overrides}}
@@ -498,7 +513,7 @@
   {{end}}
 </div>
 {{else}}
-<p class="empty-note">No one-off bookings scheduled.</p>
+<p class="empty-note">No one-off changes set.</p>
 {{end}}
 
 {{/* Owner-only: retiring a permit is irreversible (schedule + history) and a
@@ -560,13 +575,13 @@
      x-effect="if (addOpen) { const b = document.querySelector('#pbody-{{.Permit.ID}} .nowbadge .plate'); nowPlate = b ? b.textContent.trim() : '' }">
   <div class="scrim" x-show="addOpen" x-transition.opacity @click="addOpen=false"></div>
   <div class="modal" x-show="addOpen" x-transition>
-  <div class="modal-head"><strong>Add a one-off booking</strong>
+  <div class="modal-head"><strong>Set the permit to a plate</strong>
     <button type="button" class="icon-btn" @click="addOpen=false" aria-label="Close">{{template "ic-x"}}</button>
   </div>
   {{/* The modal covers the card that gave it context, so it names its permit
        itself — on a multi-permit account this is the only line saying where the
        booking will land. */}}
-  <p class="empty-note" style="margin:-10px 0 12px">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}} &middot; on permit now: <span class="reg" x-show="nowPlate" x-text="nowPlate"></span><span x-show="!nowPlate">no car</span></p>
+  <p class="empty-note" style="margin:-10px 0 12px">{{if .Permit.Label}}{{.Permit.Label}}{{else}}Permit {{.Permit.CouncilPermitID}}{{end}} &middot; currently set to <span class="reg" x-show="nowPlate" x-text="nowPlate"></span><span x-show="!nowPlate">no plate</span></p>
   {{/* method/action are a native fallback: this form is teleported into <body> by
        Alpine, and htmx's async MutationObserver sometimes hasn't processed it by
        the time it's submitted — in which case the browser would do a useless GET
@@ -588,8 +603,8 @@
                  }}">
     {{if .Vehicles}}
     <div class="seg">
-      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved car</button>
-      <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">One-off plate</button>
+      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved plate</button>
+      <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Another plate</button>
     </div>
     {{end}}{{/* Empty garage: no toggle — the modal opens straight on the plate
          field, which needs no saved cars, instead of an empty vehicle picker. */}}
@@ -597,12 +612,12 @@
          height (the taller pane's) and doesn't jump when you switch tabs. */}}
     <div class="segpanes">
       <div class="segpane" :class="{hide: mode!='car'}">
-        <label class="fld">Vehicle
+        <label class="fld">Saved plate
           <div class="vpick">
             <input type="hidden" name="vehicle_id" :value="sel">
             <button type="button" class="vpick-btn" @click="open=!open">
               <span class="dot" x-show="col" :style="`background:${col}`"></span>
-              <span x-text="lbl || 'Choose a vehicle…'" :class="{'ph': !lbl}"></span>
+              <span x-text="lbl || 'Choose a saved plate…'" :class="{'ph': !lbl}"></span>
               <span class="vpick-caret">▾</span>
             </button>
             <div class="vpick-list" x-show="open" x-cloak @click.outside="open=false">
@@ -612,7 +627,7 @@
             </div>
           </div>
         </label>
-        <p class="empty-note" style="margin-top:6px">One of the cars saved on your Vehicles page.</p>
+        <p class="empty-note" style="margin-top:6px">One of the plates saved on your Vehicles page.</p>
       </div>
       <div class="segpane" :class="{hide: mode!='plate'}">
         <label class="fld">Number plate
@@ -624,9 +639,9 @@
         </label>
         {{end}}
         {{if .Vehicles}}
-        <p class="empty-note" style="margin-top:6px">For a visitor's car that isn't one of your saved vehicles (a friend, a hire car, a tradie). Used just for this booking, not saved.</p>
+        <p class="empty-note" style="margin-top:6px">For a plate that is not one of your saved plates, such as a friend, a hire car or a tradie. It is used this once and not saved.</p>
         {{else}}
-        <p class="empty-note" style="margin-top:6px">Used just for this booking, not saved. Booking your own cars often? <a href="/vehicles">Save your cars</a> for one-tap booking and the weekly roster.</p>
+        <p class="empty-note" style="margin-top:6px">Used this once and not saved. If you set the permit to the same plates often, <a href="/vehicles">save them</a> for one-tap use and the weekly roster.</p>
         {{end}}
       </div>
     </div>
@@ -663,7 +678,7 @@
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       {{/* Can't submit with neither a car nor a plate — the server refuses that
            anyway, but a button that fires only to bounce reads as broken. */}}
-      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()">{{template "ic-plus"}} Book</button>
+      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()">{{template "ic-plus"}} Set the permit</button>
     </div>
   </form>
   </div>
