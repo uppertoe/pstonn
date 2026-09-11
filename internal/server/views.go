@@ -117,6 +117,9 @@ type dashboardData struct {
 	// the schedule, did not find the bare "+" within 25 seconds and went hunting
 	// through Guests for a way to put the car on the permit.
 	BookFAB bool
+	// NeedsRegos marks the Regos tab with a dot while the account has a permit
+	// but no saved rego: the one thing a new household must do next.
+	NeedsRegos bool
 	// SEO fields, filled by render() from the State (see seoFor). BaseURL is the
 	// public origin (PUBLIC_BASE_URL); CanonicalPath is "" for non-indexable pages
 	// (app/guest/token), which suppresses the canonical/OG tags and emits noindex.
@@ -1048,6 +1051,9 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 	if len(managed) == 0 {
 		s.renderPicker(w, r, base)
 		return dashboardData{}, false
+	}
+	if vs, err := s.store.ListVehiclesFor(ctx, owner); err == nil && len(vs) == 0 {
+		base.NeedsRegos = true
 	}
 	base.State = "app"
 	return base, true

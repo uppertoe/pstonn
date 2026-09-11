@@ -144,14 +144,14 @@ func TestTemplatesRender(t *testing.T) {
 	if err := templates.ExecuteTemplate(&buf, "permit-body", samplePermitView(loc)); err != nil {
 		t.Fatalf("render permit-body: %v", err)
 	}
-	for _, want := range []string{"Weekly roster", "This week and next", "One-off change", "ABC123", "→"} {
+	for _, want := range []string{"Weekly roster", "This week and next", "Bookings", "ABC123", "→"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("permit-body output missing %q", want)
 		}
 	}
 	// With ShowSetupNudge unset (the sample has a roster), the empty-schedule nudge
 	// must be absent — a QR-only or already-scheduled household never sees it.
-	if strings.Contains(buf.String(), "Nothing is set yet") {
+	if strings.Contains(buf.String(), "Nothing is scheduled yet") {
 		t.Fatal("setup nudge shown when ShowSetupNudge is false")
 	}
 	// The teleported modals must NOT live in the swap fragment. Every card
@@ -344,11 +344,13 @@ func TestEmptyGarageNudges(t *testing.T) {
 	if err := templates.ExecuteTemplate(&body, "permit-body", empty); err != nil {
 		t.Fatalf("render permit-body: %v", err)
 	}
-	if !strings.Contains(body.String(), "The roster uses your saved number plates") {
-		t.Fatal("empty-garage roster popover does not explain what the roster needs")
+	// With no rego saved the card is an empty state: one step and no roster at
+	// all, so there is no popover and no no-op clear button to get wrong.
+	if !strings.Contains(body.String(), "Add the regos of the people who visit you") {
+		t.Fatal("empty-garage card does not ask for the regos")
 	}
-	if strings.Contains(body.String(), "No plate on") {
-		t.Fatal("empty-garage roster popover still offers the no-op clear button")
+	if strings.Contains(body.String(), "No rego on") || strings.Contains(body.String(), "Weekly roster") {
+		t.Fatal("empty-garage card still renders the roster")
 	}
 
 	var modal bytes.Buffer
@@ -358,7 +360,7 @@ func TestEmptyGarageNudges(t *testing.T) {
 	if !strings.Contains(modal.String(), "mode:'plate'") {
 		t.Fatal("empty-garage one-off modal does not default to the plate field")
 	}
-	if strings.Contains(modal.String(), "A saved plate") {
+	if strings.Contains(modal.String(), "A saved rego") {
 		t.Fatal("empty-garage one-off modal still shows the saved-car toggle")
 	}
 	if !strings.Contains(modal.String(), "save them") {
@@ -371,7 +373,7 @@ func TestEmptyGarageNudges(t *testing.T) {
 	if err := templates.ExecuteTemplate(&modalFull, "permit-modals", full); err != nil {
 		t.Fatalf("render permit-modals (full): %v", err)
 	}
-	if !strings.Contains(modalFull.String(), "mode:'car'") || !strings.Contains(modalFull.String(), "A saved plate") {
+	if !strings.Contains(modalFull.String(), "mode:'car'") || !strings.Contains(modalFull.String(), "A saved rego") {
 		t.Fatal("stocked-garage one-off modal lost its saved-car default")
 	}
 
@@ -410,7 +412,7 @@ func TestClearButtonGating(t *testing.T) {
 	if err := templates.ExecuteTemplate(&b, "permit-body", lingering); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(b.String(), "/clear") || !strings.Contains(b.String(), "Clear OLD999") {
+	if !strings.Contains(b.String(), "/clear") || !strings.Contains(b.String(), "Remove OLD999") {
 		t.Fatalf("lingering-plate card missing the take-off action:\n%s", b.String())
 	}
 	if !strings.Contains(b.String(), "permit-actions") {
@@ -816,7 +818,7 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p := samplePermitViewAt(loc, now)
 			p.ShowSetupNudge = true
 			return p
-		}, `Nothing is set yet`},
+		}, `Nothing is scheduled yet`},
 		// A cycling roster renders the week tabs (with the "now" mark on the
 		// current week), per-week panes, and the labelled calendar rows.
 		{"cycle-tabs", func() permitView {

@@ -172,6 +172,10 @@ button.sm { padding:7px 12px; font-size:13px; }
 .nav { display:flex; gap:2px; padding:6px 12px 0; max-width:960px; margin:0 auto; overflow-x:auto; }
 .nav-item { display:inline-flex; align-items:center; gap:8px; padding:11px 15px 13px; color:var(--muted); font-size:14px; font-weight:550; border-radius:10px 10px 0 0; position:relative; white-space:nowrap; transition:color .15s,background .15s; }
 .nav-item svg { width:19px; height:19px; }
+/* A dot on the Regos tab while no rego is saved: the one thing a new household
+   has to do next, shown where they have to go to do it. */
+.nav-item { position:relative; }
+.nav-dot { position:absolute; top:9px; right:9px; width:8px; height:8px; border-radius:50%; background:var(--primary); box-shadow:0 0 0 2px var(--surface); }
 .nav-item:hover { color:var(--ink); background:color-mix(in srgb, var(--surface) 60%, transparent); }
 .nav-item.active { color:var(--hue,var(--primary)); }
 .nav-item.active::after { content:""; position:absolute; left:12px; right:12px; bottom:0; height:3px; border-radius:3px 3px 0 0; background:var(--hue,var(--primary)); }
@@ -439,6 +443,11 @@ tr:last-child td { border-bottom:0; }
 .addcard { border:1px dashed var(--line); border-radius:var(--radius-sm); padding:14px; margin-top:12px; }
 
 .empty-note { color:var(--muted); font-size:13.5px; }
+/* The permit card with no regos saved: one step, centred, in place of the roster. */
+.regos-empty { text-align:center; padding:22px 12px 10px; }
+.regos-empty-lead { font-weight:600; margin:0 0 4px; }
+.regos-empty .empty-note { margin:0 0 14px; }
+.notyet { margin:8px 0 14px; }
 .toggle { display:flex; align-items:center; gap:11px; font-size:14px; cursor:pointer; }
 .toggle input[type=checkbox] { width:22px; height:22px; flex:0 0 auto; accent-color:var(--primary); }
 /* Refused-toggle feedback (e.g. unticking the last notification channel). */

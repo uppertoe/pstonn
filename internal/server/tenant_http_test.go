@@ -193,7 +193,7 @@ func TestAddPermitOverHTTP(t *testing.T) {
 		rr := add("90001")
 		// The fake portal offers a second visitor permit (90002) still unmanaged, so
 		// the landing carries the set-up-another nudge (see TestAddPermitNudges...).
-		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/schedule?added=1&more=1" {
+		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/vehicles?added=1&more=1" {
 			t.Fatalf("code=%d location=%q body=%s", rr.Code, rr.Header().Get("Location"), excerpt(rr.Body.String()))
 		}
 		ps, _ := r.st.ListPermitsFor(r.ctx, rigUser)

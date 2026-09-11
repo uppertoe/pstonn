@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=978dbf7c69">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=978dbf7c69">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=550ff9b10f">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=550ff9b10f">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=978dbf7c69">
+<link rel="stylesheet" href="/static/app.css?v=550ff9b10f">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=978dbf7c69"></script>
-<script defer src="/static/alpine.min.js?v=978dbf7c69"></script>
+<script src="/static/htmx.min.js?v=550ff9b10f"></script>
+<script defer src="/static/alpine.min.js?v=550ff9b10f"></script>
 
 
 <script>
@@ -317,7 +317,7 @@ window.popClamp = window.popClamp || function (el) {
 <div class="navwrap">
   <nav class="nav">
     <a href="/schedule" class="nav-item active" style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
-    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Vehicles</span></a>
+    <a href="/vehicles" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Regos</span></a>
     <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
     <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
     <a href="/settings" class="nav-item " style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
@@ -385,7 +385,7 @@ window.popClamp = window.popClamp || function (el) {
     
   </div>
   <div class="nowbadge">
-    <span class="muted" style="font-size:12.5px">permit set to</span>
+    <span class="muted" style="font-size:12.5px">on the permit now</span>
     
     <span class="plate">ABC123</span>
     
@@ -408,8 +408,9 @@ window.popClamp = window.popClamp || function (el) {
 
 
 
+
 <p class="sub">Weekly roster</p>
-<p class="empty-note rostercap">The plate the permit is set to on each day of the week.</p>
+<p class="empty-note rostercap">Which rego is on the permit each day of the week.</p>
 
 <div class="segpanes">
   
@@ -429,10 +430,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Sun: choose a plate</p>
+      <p class="tt">Sun: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Sun</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Sun</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -453,10 +454,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Mon: choose a plate</p>
+      <p class="tt">Mon: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Mon</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Mon</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -477,10 +478,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Tue: choose a plate</p>
+      <p class="tt">Tue: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Tue</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Tue</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -501,10 +502,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Wed: choose a plate</p>
+      <p class="tt">Wed: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Wed</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Wed</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -525,10 +526,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Thu: choose a plate</p>
+      <p class="tt">Thu: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Thu</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Thu</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -549,10 +550,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Fri: choose a plate</p>
+      <p class="tt">Fri: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Fri</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Fri</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -573,10 +574,10 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
-      <p class="tt">Sat: choose a plate</p>
+      <p class="tt">Sat: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No plate on Sat</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Sat</button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
@@ -816,7 +817,7 @@ window.popClamp = window.popClamp || function (el) {
 </div>
 
 
-<p class="sub" style="margin-top:20px">One-off changes</p>
+<p class="sub" style="margin-top:20px">Bookings</p>
 
 <div class="oneoff-list">
   
@@ -831,6 +832,8 @@ window.popClamp = window.popClamp || function (el) {
   </div>
   
 </div>
+
+
 
 
 
@@ -865,11 +868,11 @@ window.popClamp = window.popClamp || function (el) {
      x-effect="if (addOpen) { const b = document.querySelector('#pbody-7 .nowbadge .plate'); nowPlate = b ? b.textContent.trim() : '' }">
   <div class="scrim" x-show="addOpen" x-transition.opacity @click="addOpen=false"></div>
   <div class="modal" x-show="addOpen" x-transition>
-  <div class="modal-head"><strong>Set the permit to a plate</strong>
+  <div class="modal-head"><strong>Make a booking</strong>
     <button type="button" class="icon-btn" @click="addOpen=false" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   
-  <p class="empty-note" style="margin:-10px 0 12px">Visitor &middot; currently set to <span class="reg" x-show="nowPlate" x-text="nowPlate"></span><span x-show="!nowPlate">no plate</span></p>
+  <p class="empty-note" style="margin:-10px 0 12px">Visitor &middot; on the permit now: <span class="reg" x-show="nowPlate" x-text="nowPlate"></span><span x-show="!nowPlate">no plate</span></p>
   
   <form class="stack" method="post" action="/permits/7/override" data-plate-confirm="plate"
         hx-post="/permits/7/override" hx-target="#pbody-7" hx-swap="innerHTML"
@@ -886,19 +889,19 @@ window.popClamp = window.popClamp || function (el) {
                  }}">
     
     <div class="seg">
-      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved plate</button>
-      <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Another plate</button>
+      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>
+      <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Type a rego</button>
     </div>
     
     
     <div class="segpanes">
       <div class="segpane" :class="{hide: mode!='car'}">
-        <label class="fld">Saved plate
+        <label class="fld">Rego
           <div class="vpick">
             <input type="hidden" name="vehicle_id" :value="sel">
             <button type="button" class="vpick-btn" @click="open=!open">
               <span class="dot" x-show="col" :style="`background:${col}`"></span>
-              <span x-text="lbl || 'Choose a saved plate…'" :class="{'ph': !lbl}"></span>
+              <span x-text="lbl || 'Choose a rego…'" :class="{'ph': !lbl}"></span>
               <span class="vpick-caret">▾</span>
             </button>
             <div class="vpick-list" x-show="open" x-cloak @click.outside="open=false">
@@ -908,7 +911,7 @@ window.popClamp = window.popClamp || function (el) {
             </div>
           </div>
         </label>
-        <p class="empty-note" style="margin-top:6px">One of the plates saved on your Vehicles page.</p>
+        <p class="empty-note" style="margin-top:6px">One of the regos saved on your Regos page.</p>
       </div>
       <div class="segpane" :class="{hide: mode!='plate'}">
         <label class="fld">Number plate
@@ -920,7 +923,7 @@ window.popClamp = window.popClamp || function (el) {
         </label>
         
         
-        <p class="empty-note" style="margin-top:6px">For a plate that is not one of your saved plates, such as a friend, a hire car or a tradie. It is used this once and not saved.</p>
+        <p class="empty-note" style="margin-top:6px">For a rego that is not one of your saved regos, such as a friend, a hire car or a tradie. It is used for this booking only and not saved.</p>
         
       </div>
     </div>
@@ -946,7 +949,7 @@ window.popClamp = window.popClamp || function (el) {
     <div class="modal-actions">
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       
-      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Set the permit</button>
+      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Book</button>
     </div>
   </form>
   </div>
@@ -981,7 +984,7 @@ window.popClamp = window.popClamp || function (el) {
   
   
   <button class="fab" type="button" x-data x-init="$nextTick(() => window.dispatchEvent(new CustomEvent('open-oneoff', {detail:{permit:'7'}})))"
-          data-dispatch="open-oneoff" data-dispatch-permit="7"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg><span class="fab-label">Set the permit now</span></button>
+          data-dispatch="open-oneoff" data-dispatch-permit="7"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg><span class="fab-label">Make a booking</span></button>
   
   
   

@@ -45,6 +45,10 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 	base.Vehicles, _, _, _ = vehicleViews(vehicles)
 	base.Regions = s.tenant.Regions(r.Context(), base.Owner, "")
 	base.BookFAB = s.hasLivePermit(r.Context(), base.Owner)
+	if r.URL.Query().Get("added") == "1" {
+		// The landing after adding a permit with no rego saved yet (see addPermit).
+		base.Flash = "Permit added. Add the regos of the people who visit you, then set up the schedule."
+	}
 	if r.URL.Query().Get("saved") == "1" {
 		// Saving a driver email otherwise changes nothing visible on the page.
 		base.Flash = "Driver email saved."

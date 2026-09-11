@@ -55,13 +55,9 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	// active one's next step (set a roster) is not self-evident to a newcomer.
 	switch r.URL.Query().Get("added") {
 	case "1":
-		// The next step depends on whether any plates are saved yet: the roster and
-		// the dialog both need one, so a household with none is sent to save them.
-		if vs, err := s.store.ListVehiclesFor(r.Context(), base.Owner); err == nil && len(vs) == 0 {
-			base.Flash = "Permit added. Next, save the number plates of the people who visit you on the Vehicles page."
-		} else {
-			base.Flash = "Permit added. Tap a day in the roster to give it a plate, or press Set the permit now for today."
-		}
+		// addPermit lands here only when a rego is already saved (otherwise on
+		// the Regos page), so the next step is the schedule itself.
+		base.Flash = "Permit added. Tap a day in the roster to give it a rego, or make a booking."
 	case "expired":
 		base.Warn = s.say(r.Context(), base.Owner, "schedule.added_expired")
 	}

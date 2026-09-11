@@ -567,6 +567,13 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/schedule?added=expired"+more, http.StatusSeeOther)
 		return
 	}
+	// The natural order is permit, regos, schedule: a household with no rego
+	// saved yet lands on the Regos page, since the roster and a booking both
+	// start from one.
+	if vs, err := s.store.ListVehiclesFor(ctx, owner); err == nil && len(vs) == 0 {
+		http.Redirect(w, r, "/vehicles?added=1"+more, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/schedule?added=1"+more, http.StatusSeeOther)
 }
 
