@@ -21,12 +21,6 @@ func TestPortalThatCannotClearOverHTTP(t *testing.T) {
 	if rr := r.post("/permits", rigUser, url.Values{"council_permit_id": {"90001"}}); rr.Code != http.StatusSeeOther {
 		t.Fatalf("add: %d %s", rr.Code, excerpt(rr.Body.String()))
 	}
-	// A saved plate: with none saved and nothing set, the card is in its
-	// first-visit state and offers only "add number plates", so the clear action
-	// under test would be absent for a reason unrelated to the portal.
-	if rr := r.post("/vehicles", rigUser, url.Values{"registration": {"NAN123"}, "label": {"Nana"}}); rr.Code != http.StatusSeeOther {
-		t.Fatalf("save a plate: code=%d", rr.Code)
-	}
 	ps, _ := r.st.ListPermitsFor(r.ctx, rigUser)
 	pid := ps[0].ID
 	clearPath := "/permits/" + strconv.FormatInt(pid, 10) + "/clear"

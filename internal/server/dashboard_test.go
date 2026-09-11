@@ -352,6 +352,10 @@ func TestEmptyGarageNudges(t *testing.T) {
 	if strings.Contains(body.String(), "No rego on") || strings.Contains(body.String(), "Weekly roster") {
 		t.Fatal("empty-garage card still renders the roster")
 	}
+	// The visitor QR needs no saved rego (a visitor types their own), so it stays.
+	if !strings.Contains(body.String(), "Show visitor QR") {
+		t.Fatal("empty-garage card lost the visitor QR button")
+	}
 
 	var modal bytes.Buffer
 	if err := templates.ExecuteTemplate(&modal, "permit-modals", empty); err != nil {

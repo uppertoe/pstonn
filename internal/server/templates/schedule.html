@@ -240,9 +240,6 @@
          multi-permit account never has to pick one, which is exactly where the old
          path was slowest), and it sits beside the "on permit now" badge, so you can
          see what you are about to displace before you show the code. */}}
-    {{/* With no regos saved the card is an empty state (below): the QR and the
-         remove action wait until the first rego exists. */}}
-    {{if .Vehicles}}
     <div class="permit-actions">
       <button type="button" class="qrtrigger sm"
               hx-post="/guests/qr" hx-vals='{"permit_id": "{{.Permit.ID}}"}'
@@ -266,7 +263,6 @@
       </form>
       {{end}}
     </div>
-    {{end}}
   </div>
   <div class="nowbadge">
     <span class="muted" style="font-size:12.5px">on the permit now</span>
@@ -359,8 +355,9 @@
 {{end}}
 
 {{/* No regos saved: the roster and the calendar would be meaningless, so the
-     card stops here with one step. Everything a schedule needs starts with a
-     rego, and the Regos tab carries a dot until the first one exists. */}}
+     card stops here with one step. The visitor QR and the remove action above
+     still work without a saved rego, so they stay. The Regos tab carries a dot
+     until the first rego exists. */}}
 {{if not .Vehicles}}
 <div class="regos-empty">
   <p class="regos-empty-lead">Add the regos of the people who visit you.</p>
