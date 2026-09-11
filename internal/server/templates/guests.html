@@ -34,7 +34,7 @@
           </label>
           {{end}}
         </div>
-        <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/vehicles">Add it on the Regos page</a> and it appears here.</p>
+        <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/regos">Add it on the Regos page</a> and it appears here.</p>
       </div>
       <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight"{{if .Edit.AllowOvernight}} checked{{end}} style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
       <label class="fld"><span>Add more people (optional)</span>
@@ -258,7 +258,7 @@
           </label>
           {{end}}
         </div>
-        <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/vehicles">Add it on the Regos page</a> and it appears here.</p>
+        <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/regos">Add it on the Regos page</a> and it appears here.</p>
       </div>
       <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
       <label class="fld"><span>People to send the link to</span>
@@ -270,7 +270,7 @@
     </form>
   </section>
   {{else}}
-  <section class="card"><p class="empty-note">Add at least one <a href="/vehicles">vehicle</a> and manage a permit on the <a href="/schedule">Schedule</a> first, then you can create a guest pass.</p></section>
+  <section class="card"><p class="empty-note">Add at least one <a href="/regos">rego</a> and manage a permit on the <a href="/schedule">Schedule</a> first, then you can create a guest pass.</p></section>
   {{end}}
   {{end}}{{/* mode */}}
 {{if .BookFAB}}

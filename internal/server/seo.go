@@ -129,7 +129,7 @@ func (s *Server) robotsTxt(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	b.WriteString("User-agent: *\n")
 	for _, p := range []string{
-		"/schedule", "/account", "/vehicles", "/permits", "/guests",
+		"/schedule", "/account", "/vehicles", "/regos", "/permits", "/guests",
 		"/settings", "/notifications", "/admin", "/auth/", "/tenant/",
 		"/g/", "/u/", "/r/", "/status",
 	} {

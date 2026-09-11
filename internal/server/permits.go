@@ -571,7 +571,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// saved yet lands on the Regos page, since the roster and a booking both
 	// start from one.
 	if vs, err := s.store.ListVehiclesFor(ctx, owner); err == nil && len(vs) == 0 {
-		http.Redirect(w, r, "/vehicles?added=1"+more, http.StatusSeeOther)
+		http.Redirect(w, r, "/regos?added=1"+more, http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/schedule?added=1"+more, http.StatusSeeOther)

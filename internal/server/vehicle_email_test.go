@@ -36,7 +36,7 @@ func TestVehicleEmailOnMissingCarLogsNothing(t *testing.T) {
 		return out
 	}
 
-	w := s.doReq("POST", "/vehicles/999/email", owner, origin, url.Values{"email": {"driver@example.com"}})
+	w := s.doReq("POST", "/regos/999/email", owner, origin, url.Values{"email": {"driver@example.com"}})
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("email on a missing car = %d, want the tolerant redirect", w.Code)
 	}
@@ -48,7 +48,7 @@ func TestVehicleEmailOnMissingCarLogsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := s.doReq("POST", "/vehicles/"+itoa64(vid)+"/email", owner, origin, url.Values{"email": {"driver@example.com"}}); w.Code != http.StatusSeeOther {
+	if w := s.doReq("POST", "/regos/"+itoa64(vid)+"/email", owner, origin, url.Values{"email": {"driver@example.com"}}); w.Code != http.StatusSeeOther {
 		t.Fatalf("email on a real car = %d", w.Code)
 	}
 	rows := emailRows(t)

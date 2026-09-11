@@ -32,6 +32,16 @@ func capLabel(label string) string {
 }
 
 // vehiclesPage manages the owner's plates.
+// vehiclesRedirect keeps the page's old address alive: /vehicles became /regos
+// when the tab was renamed, and it sits in bookmarks and browser history.
+func (s *Server) vehiclesRedirect(w http.ResponseWriter, r *http.Request) {
+	target := "/regos"
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
+}
+
 func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 	base, ok := s.appShell(w, r, "vehicles")
 	if !ok {
@@ -106,7 +116,7 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logChange(r.Context(), owner, user, store.ActionVehicleAdd, reg, label)
-	http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
+	http.Redirect(w, r, "/regos", http.StatusSeeOther)
 }
 
 func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +146,7 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 		// probe with someone else's id). Nothing was removed, so write no audit row and
 		// send no "a car was deleted" notification — those would be a false record of a
 		// destructive change, replayable to bury the household's real activity.
-		http.Redirect(w, r, "/vehicles", http.StatusSeeOther)
+		http.Redirect(w, r, "/regos", http.StatusSeeOther)
 		return
 	}
 	// The delete happened, so the household hears about it.
@@ -161,7 +171,7 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 		"days":     {strconv.Itoa(len(usage.Rules))},
 		"bookings": {strconv.Itoa(usage.LiveOverrides)},
 	}
-	http.Redirect(w, r, "/vehicles?"+q.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, "/regos?"+q.Encode(), http.StatusSeeOther)
 }
 
 // usageSentence describes what a vehicle deletion took with it, naming the roster

@@ -145,3 +145,16 @@ func TestFeaturesAppForwardsHome(t *testing.T) {
 		t.Fatalf("/features/app = %d -> %q, want 301 -> /features", w.Code, w.Header().Get("Location"))
 	}
 }
+
+// TestVehiclesRedirectsToRegos: the old page address forwards permanently,
+// query string included, so a bookmark or a stale tab still lands.
+func TestVehiclesRedirectsToRegos(t *testing.T) {
+	s := newAuthzServer(t)
+	r := httptest.NewRequest("GET", "/vehicles?added=1", nil)
+	r.Host = "app.example.com"
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 301 || w.Header().Get("Location") != "/regos?added=1" {
+		t.Fatalf("/vehicles = %d -> %q, want 301 -> /regos?added=1", w.Code, w.Header().Get("Location"))
+	}
+}

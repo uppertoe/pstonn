@@ -23,7 +23,7 @@ func identityMiddlewareFor(s *Server) func(http.Handler) http.Handler {
 // out and pressing Back shows the previous person's dashboard.
 func TestAuthenticatedPagesAreNotCacheable(t *testing.T) {
 	s := newAuthzServer(t)
-	for _, path := range []string{"/schedule", "/vehicles", "/activity", "/settings", "/guests"} {
+	for _, path := range []string{"/schedule", "/regos", "/activity", "/settings", "/guests"} {
 		t.Run(path, func(t *testing.T) {
 			w := s.doReq("GET", path, "user@example.com", "", nil)
 			cc := w.Header().Get("Cache-Control")

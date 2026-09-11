@@ -14,7 +14,7 @@
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}{{if .State}} <span class="vstate-chip" title="{{T "vehicle.state_label" .}}">&middot; {{.State}}</span>{{end}}</span>
           <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
-          <form method="post" action="/vehicles/{{.ID}}/delete" data-confirm="Remove this vehicle?" data-confirm-ok="Remove">
+          <form method="post" action="/regos/{{.ID}}/delete" data-confirm="Remove this vehicle?" data-confirm-ok="Remove">
             <button class="danger icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button>
           </form>
         </div>
@@ -24,7 +24,7 @@
              trailing slot holds either "revert" (dirty) or a brief "Saved"
              (after a save), reserved-width so nothing to its left shifts. Saves
              via htmx (204, no reload); a 422 surfaces as the global toast. */}}
-        <form class="vemail" method="post" action="/vehicles/{{.ID}}/email" hx-post="/vehicles/{{.ID}}/email" hx-swap="none"
+        <form class="vemail" method="post" action="/regos/{{.ID}}/email" hx-post="/regos/{{.ID}}/email" hx-swap="none"
               @htmx:after-request="if($event.detail.successful){saved=email; flash=true; setTimeout(()=>flash=false, 1800)}">
           <input type="email" name="email" value="{{.Email}}" placeholder="driver email (optional)" autocomplete="off" x-model="email">
           <button type="submit" class="ghost sm" :disabled="email === saved">Save</button>
@@ -34,14 +34,14 @@
           </span>
         </form>
         <label class="vnotify empty-note" x-show="email.trim() !== ''" x-cloak>
-          <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/vehicles/{{.ID}}/notify" hx-trigger="change" hx-swap="none">
+          <input type="checkbox" name="notify"{{if .NotifyDriver}} checked{{end}} hx-post="/regos/{{.ID}}/notify" hx-trigger="change" hx-swap="none">
           <span>Email this person when their rego goes on the permit</span>
         </label>
       {{else}}
       <p class="empty-note">No regos saved yet. Add the regos of the people who visit you.</p>
       {{end}}
     </div>
-    <form method="post" action="/vehicles" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
+    <form method="post" action="/regos" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
       <input class="grow" name="label" placeholder="Label (e.g. Nana)" required>
       <input name="registration" placeholder="REGO" required maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:130px">
       {{if .Regions}}<select name="state" class="vstate" aria-label="{{T "vehicle.state_label" .}}" title="{{T "vehicle.state_label" .}}">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>{{end}}

@@ -12,6 +12,7 @@ User-agent: *
 Disallow: /schedule
 Disallow: /account
 Disallow: /vehicles
+Disallow: /regos
 Disallow: /permits
 Disallow: /guests
 Disallow: /settings

@@ -437,7 +437,9 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /contact", guardPublic, s.contactPage)           // public
 	s.handle(mux, "POST /contact", guardPublic, s.submitContact)        // public, rate-limited
 	s.handle(mux, "GET /schedule", guardUser, s.schedule)               // appShell gates internally too; wrapped for uniformity with the other app pages
-	s.handle(mux, "GET /vehicles", guardUser, s.vehiclesPage)
+	s.handle(mux, "GET /regos", guardUser, s.vehiclesPage)
+	// The page was /vehicles until 2026-09-12; bookmarks and history keep working.
+	s.handle(mux, "GET /vehicles", guardPublic, s.vehiclesRedirect) // a redirect reveals nothing; the edge gates /regos
 	s.handle(mux, "GET /activity", guardUser, s.activityPage)
 	s.handle(mux, "GET /settings", guardUser, s.settingsPage)
 	s.handle(mux, "GET /share", guardConsent, s.sharePage)
@@ -461,10 +463,10 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /guests/{id}/delete", guardConsent, s.deleteGuestGrant)
 	s.handle(mux, "POST /guests/{id}/resend", guardConsent, s.resendGuestLink)
 	s.handle(mux, "POST /guests/tokens/{tid}/revoke", guardConsent, s.revokeGuestToken)
-	s.handle(mux, "POST /vehicles", guardConsent, s.addVehicle)
-	s.handle(mux, "POST /vehicles/{id}/delete", guardConsent, s.deleteVehicle)
-	s.handle(mux, "POST /vehicles/{id}/email", guardConsent, s.setVehicleEmail)
-	s.handle(mux, "POST /vehicles/{id}/notify", guardConsent, s.setVehicleNotify)
+	s.handle(mux, "POST /regos", guardConsent, s.addVehicle)
+	s.handle(mux, "POST /regos/{id}/delete", guardConsent, s.deleteVehicle)
+	s.handle(mux, "POST /regos/{id}/email", guardConsent, s.setVehicleEmail)
+	s.handle(mux, "POST /regos/{id}/notify", guardConsent, s.setVehicleNotify)
 	s.handle(mux, "POST /permits", guardConsent, s.addPermit)
 	s.handle(mux, "POST /permits/{id}/delete", guardConsent, s.deletePermit)
 	s.handle(mux, "POST /permits/{id}/name", guardConsent, s.renamePermit)

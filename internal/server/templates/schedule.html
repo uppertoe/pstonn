@@ -2,7 +2,7 @@
   {{if .App.LegendVehicles}}
   <div class="legend">
     {{range .App.LegendVehicles}}<span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}} <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span></span>{{end}}
-    {{if .App.LegendMore}}<a class="legend-more" href="/vehicles">+{{.App.LegendMore}} more</a>{{end}}
+    {{if .App.LegendMore}}<a class="legend-more" href="/regos">+{{.App.LegendMore}} more</a>{{end}}
   </div>
   {{end}}
 {{end}}
@@ -362,7 +362,7 @@
 <div class="regos-empty">
   <p class="regos-empty-lead">Add the regos of the people who visit you.</p>
   <p class="empty-note">The roster and bookings choose from these.</p>
-  <a class="btnlike" href="/vehicles">{{template "ic-plus"}} Add a rego</a>
+  <a class="btnlike" href="/regos">{{template "ic-plus"}} Add a rego</a>
 </div>
 {{else}}
 {{if .ShowSetupNudge}}
@@ -438,7 +438,7 @@
            no-op that reads as broken. Say what the roster runs on instead. */}}
       <p class="tt">The roster uses your saved regos</p>
       <p class="empty-note" style="margin:2px 0 10px">Save a rego once, then give it to any day with one tap.</p>
-      <a class="vopt" href="/vehicles" style="text-decoration:none">{{template "ic-plus"}} <span class="lab">Add a rego</span></a>
+      <a class="vopt" href="/regos" style="text-decoration:none">{{template "ic-plus"}} <span class="lab">Add a rego</span></a>
       {{end}}
     </div>
   </div>
@@ -632,7 +632,7 @@
         {{if .Vehicles}}
         <p class="empty-note" style="margin-top:6px">For a rego that is not one of your saved regos, such as a friend, a hire car or a tradie. It is used for this booking only and not saved.</p>
         {{else}}
-        <p class="empty-note" style="margin-top:6px">Used for this booking only and not saved. If you book the same regos often, <a href="/vehicles">save them</a> for one-tap booking and the weekly roster.</p>
+        <p class="empty-note" style="margin-top:6px">Used for this booking only and not saved. If you book the same regos often, <a href="/regos">save them</a> for one-tap booking and the weekly roster.</p>
         {{end}}
       </div>
     </div>

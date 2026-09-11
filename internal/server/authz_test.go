@@ -115,28 +115,28 @@ func TestAuthorizationMatrix(t *testing.T) {
 	})
 
 	t.Run("unauthenticated mutation is rejected", func(t *testing.T) {
-		w := s.doReq("POST", "/vehicles", "", goodOrigin, url.Values{"registration": {"NEW111"}})
+		w := s.doReq("POST", "/regos", "", goodOrigin, url.Values{"registration": {"NEW111"}})
 		if w.Code == http.StatusOK || w.Code == http.StatusSeeOther {
-			t.Fatalf("unauthenticated POST /vehicles = %d, want a rejection", w.Code)
+			t.Fatalf("unauthenticated POST /regos = %d, want a rejection", w.Code)
 		}
 	})
 
 	t.Run("cross-origin mutation is CSRF-rejected", func(t *testing.T) {
 		// A state-changing POST with no matching Origin/Referer is refused.
-		w := s.doReq("POST", "/vehicles", owner, "", url.Values{"registration": {"NEW222"}})
+		w := s.doReq("POST", "/regos", owner, "", url.Values{"registration": {"NEW222"}})
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("no-origin POST = %d, want 403", w.Code)
 		}
-		w = s.doReq("POST", "/vehicles", owner, "http://evil.example.com", url.Values{"registration": {"NEW222"}})
+		w = s.doReq("POST", "/regos", owner, "http://evil.example.com", url.Values{"registration": {"NEW222"}})
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("cross-origin POST = %d, want 403", w.Code)
 		}
 	})
 
 	t.Run("same-origin mutation is allowed", func(t *testing.T) {
-		w := s.doReq("POST", "/vehicles", owner, goodOrigin, url.Values{"registration": {"NEW333"}, "label": {"Second"}})
+		w := s.doReq("POST", "/regos", owner, goodOrigin, url.Values{"registration": {"NEW333"}, "label": {"Second"}})
 		if w.Code != http.StatusSeeOther {
-			t.Fatalf("same-origin POST /vehicles = %d, want 303", w.Code)
+			t.Fatalf("same-origin POST /regos = %d, want 303", w.Code)
 		}
 	})
 
@@ -168,7 +168,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	})
 
 	t.Run("cross-owner IDOR cannot delete another account's vehicle", func(t *testing.T) {
-		w := s.doReq("POST", "/vehicles/"+strconv.FormatInt(vehID, 10)+"/delete", other, goodOrigin, url.Values{})
+		w := s.doReq("POST", "/regos/"+strconv.FormatInt(vehID, 10)+"/delete", other, goodOrigin, url.Values{})
 		if w.Code == http.StatusInternalServerError {
 			t.Fatalf("cross-owner delete errored: %d", w.Code)
 		}
@@ -241,7 +241,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 			{"/guests/" + gid + "/delete", url.Values{}},
 			{"/guests/qr", url.Values{"permit_id": {pid}}},
 			{"/guests/printed", url.Values{"permit_id": {pid}}},
-			{"/vehicles/" + strconv.FormatInt(vehID, 10) + "/email", url.Values{"email": {"attacker@example.com"}}},
+			{"/regos/" + strconv.FormatInt(vehID, 10) + "/email", url.Values{"email": {"attacker@example.com"}}},
 		}
 		for _, m := range mutations {
 			if w := s.doReq("POST", m.path, other, goodOrigin, m.form); w.Code == http.StatusInternalServerError {
@@ -291,7 +291,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		pid := strconv.FormatInt(permitID, 10)
 		for _, tc := range []struct{ method, path string }{
 			{"GET", "/permits/" + pid + "/card"},
-			{"POST", "/vehicles"},
+			{"POST", "/regos"},
 			{"POST", "/guests/qr"},
 		} {
 			w := s.doReq(tc.method, tc.path, fresh, goodOrigin, url.Values{"registration": {"NEW999"}, "permit_id": {pid}})

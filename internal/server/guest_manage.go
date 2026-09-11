@@ -896,7 +896,7 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent) // live save from the Vehicles page; no reload
 		return
 	}
-	http.Redirect(w, r, "/vehicles?saved=1", http.StatusSeeOther)
+	http.Redirect(w, r, "/regos?saved=1", http.StatusSeeOther)
 }
 
 // setVehicleNotify toggles the per-car "email the driver when this car goes on
