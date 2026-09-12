@@ -19,6 +19,44 @@ func (s *Server) logChange(ctx context.Context, owner, actor, action, target, de
 	if err := s.store.RecordChange(ctx, owner, actor, action, target, detail); err != nil {
 		alog.Infof("changelog %s %s: %v", action, redact.Email(owner), err)
 	}
+	// Every action that satisfies a "still to try" line is logged here after it
+	// succeeded, so this is where its once-ever milestone is recorded — the
+	// durable record the checklist reads, where the change log itself ages out.
+	if m, ok := milestoneForChange(action, target); ok {
+		if err := s.store.MarkMilestone(ctx, owner, m); err != nil {
+			alog.Infof("milestone %s %s: %v", m, redact.Email(owner), err)
+		}
+	}
+}
+
+// milestoneForChange maps a successful change to the milestone it earns. A
+// cleared household name or an emptied permit name earns nothing.
+func milestoneForChange(action, target string) (store.Milestone, bool) {
+	switch action {
+	case store.ActionRosterSet:
+		return store.MilestoneRoster, true
+	case store.ActionOverrideAdd:
+		return store.MilestoneBooking, true
+	case store.ActionCycleAdd:
+		return store.MilestoneWeeks, true
+	case store.ActionVehicleAdd:
+		return store.MilestoneRego, true
+	case store.ActionVehicleEmail:
+		return store.MilestoneRegoEmail, target != ""
+	case store.ActionDoorQRShow:
+		return store.MilestoneVisitorQR, true
+	case store.ActionGuestCreate:
+		return store.MilestoneGuestPass, true
+	case store.ActionDoorQRCreate:
+		return store.MilestonePrintedQR, true
+	case store.ActionPermitRename:
+		return store.MilestonePermitName, target != ""
+	case store.ActionHouseholdName:
+		return store.MilestoneHouseholdName, target != ""
+	case store.ActionMemberAdd:
+		return store.MilestoneShared, true
+	}
+	return "", false
 }
 
 // notifyDestructive tells the account's OTHER members that someone removed

@@ -64,6 +64,14 @@ func TestChecklistTicksAndRetires(t *testing.T) {
 	if m := s.checklistFor(ctx, owner, owner, false, "settings"); m == nil || len(m.Items) != 2 {
 		t.Fatalf("member settings card = %+v, want the two lines a member can act on", m)
 	}
+	// A successful action records its milestone directly, through logChange.
+	s.logChange(ctx, owner, owner, store.ActionOverrideAdd, "GUEST1", "today")
+	if got, _ := s.store.Milestones(ctx, owner); !got[store.MilestoneBooking] {
+		t.Fatal("a booking did not record its milestone")
+	}
+	if v := s.checklistFor(ctx, owner, owner, true, "schedule"); v == nil || !v.Items[1].Done {
+		t.Fatalf("booking line not ticked from its milestone: %+v", v)
+	}
 	// A milestone outlives its evidence: once the guests line ticked from the
 	// change log, pruning that log leaves it ticked.
 	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(time.Hour)); err != nil {

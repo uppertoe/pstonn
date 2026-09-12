@@ -3,54 +3,67 @@ package server
 import (
 	"context"
 
+	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
 // checklistView is the quiet per-tab card that shows what the tab can do, ticks
 // each line as the household uses it, and goes away once everything is ticked.
-// It replaces the explanatory strips: a line that ticks itself teaches the
-// feature by showing it, where a sentence only describes it.
+// It replaces explanatory strips: a line that ticks itself teaches the feature
+// by showing it, where a sentence only describes it.
 type checklistView struct {
-	Key   string      // localStorage dismiss key suffix, one per tab
+	Key   string      // localStorage key suffix, one per tab
 	Items []checkItem // in the order a household would naturally do them
 	Done  int
 }
 
 type checkItem struct {
-	Key   string // milestone key; recorded once the line is first seen done
-	Label string // the outcome, in the household's words
-	Href  string // where it is done; "" once done
-	Done  bool
+	Milestone store.Milestone
+	Label     string // the outcome, in the household's words
+	Href      string // where it is done; "" once done
+	Done      bool
 }
 
-// checklistFor builds the card for one tab from what the account has actually
-// done. Every input is a count or a row the page already needs, so the card
-// costs a few index reads. A tab whose lines are all ticked returns nil, and so
-// does one with nothing to offer yet (no permit managed).
-// isPrimary drops the lines only the account owner can act on (naming the
-// household, sharing access) for a member, who would otherwise be sent to a
-// form they cannot see.
+// checklistFor builds the card for one tab.
 //
-// Each line is satisfied by a durable milestone first (see store.MarkMilestone)
-// and by current evidence second. The evidence tables are pruned at 90 days, so
-// the first time evidence says "done" the milestone is written, and from then on
-// the line stays ticked whatever the housekeeping removes.
+// A line is satisfied by its milestone, which the successful action records
+// (see logChange and milestoneForChange). Current state is consulted only as a
+// healing path for accounts that did things before milestones existed: when it
+// shows a line done and no milestone is recorded, the milestone is written
+// then, while the evidence still exists. That path can go once every old
+// account has been visited; nothing new should rely on it.
+//
+// Any read failing makes the card unavailable rather than wrong: "unknown" is
+// not "not done", and telling a household to try what it has done is worse
+// than a missing card. One warning covers the whole render.
 func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary bool, tab string) *checklistView {
+	var readErr error
+	note := func(err error) {
+		if err != nil && readErr == nil {
+			readErr = err
+		}
+	}
 	did := func(action string) bool {
 		n, err := s.store.CountChanges(ctx, owner, action)
+		note(err)
 		return err == nil && n > 0
 	}
-	ms, _ := s.store.Milestones(ctx, owner)
+	ms, err := s.store.Milestones(ctx, owner)
+	note(err)
+
 	var items []checkItem
 	switch tab {
 	case "schedule":
-		permits, _ := s.store.ListPermitsFor(ctx, owner)
+		permits, err := s.store.ListPermitsFor(ctx, owner)
+		note(err)
 		if len(permits) == 0 {
 			return nil
 		}
 		roster, weeks := false, false
 		for _, p := range permits {
-			if rs, err := s.store.ListRules(ctx, p.ID); err == nil && len(rs) > 0 {
+			rs, err := s.store.ListRules(ctx, p.ID)
+			note(err)
+			if len(rs) > 0 {
 				roster = true
 			}
 			if p.CycleWeeks > 1 {
@@ -58,14 +71,15 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 			}
 		}
 		items = []checkItem{
-			{Key: "roster", Label: "Add a number plate to the weekly schedule", Href: "#roster", Done: roster},
-			{Key: "booking", Label: "Make a booking for a visitor who does not fit the roster", Href: "/schedule?book=1", Done: did(store.ActionOverrideAdd)},
+			{Milestone: store.MilestoneRoster, Label: "Add a number plate to the weekly schedule", Href: "#roster", Done: roster},
+			{Milestone: store.MilestoneBooking, Label: "Make a booking for a visitor who does not fit the roster", Href: "/schedule?book=1", Done: did(store.ActionOverrideAdd)},
 		}
-		if roster {
-			items = append(items, checkItem{Key: "weeks", Label: "Add a second week, if the roster differs week to week", Href: "#roster", Done: weeks})
+		if roster || ms[store.MilestoneRoster] {
+			items = append(items, checkItem{Milestone: store.MilestoneWeeks, Label: "Add a second week, if the roster differs week to week", Href: "#roster", Done: weeks})
 		}
 	case "vehicles":
-		vs, _ := s.store.ListVehiclesFor(ctx, owner)
+		vs, err := s.store.ListVehiclesFor(ctx, owner)
+		note(err)
 		email := false
 		for _, v := range vs {
 			if v.Email != "" {
@@ -73,50 +87,57 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 			}
 		}
 		items = []checkItem{
-			{Key: "rego", Label: "Save the rego of someone who visits you", Href: "#add", Done: len(vs) > 0},
-			{Key: "rego-email", Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add", Done: email},
+			{Milestone: store.MilestoneRego, Label: "Save the rego of someone who visits you", Href: "#add", Done: len(vs) > 0},
+			{Milestone: store.MilestoneRegoEmail, Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add", Done: email},
 		}
 	case "guests":
-		// The grant rows outlive the change log (pruned at 90 days, and younger than
-		// some accounts), so each line reads the durable row first and the log only
-		// as a second opinion.
-		passes, printed, shown, _ := s.store.GuestGrantKinds(ctx, owner)
+		passes, printed, shown, err := s.store.GuestGrantKinds(ctx, owner)
+		note(err)
 		items = []checkItem{
-			{Key: "visitor-qr", Label: "Show a visitor QR to someone at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
-			{Key: "guest-pass", Label: "Send a guest pass to a household that visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
-			{Key: "printed-qr", Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
+			{Milestone: store.MilestoneVisitorQR, Label: "Show a visitor QR to someone at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
+			{Milestone: store.MilestoneGuestPass, Label: "Send a guest pass to a household that visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
+			{Milestone: store.MilestonePrintedQR, Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
 		}
 	case "settings":
-		permits, _ := s.store.ListPermitsFor(ctx, owner)
+		permits, err := s.store.ListPermitsFor(ctx, owner)
+		note(err)
 		named := false
 		for _, p := range permits {
 			if p.Label != "" && p.Label != p.PermitNumber {
 				named = true
 			}
 		}
-		household, _ := s.store.HouseholdName(ctx, owner)
-		members, _ := s.store.CountMembers(ctx, owner)
-		prefs, _ := s.store.HasNotifyPref(ctx, user)
+		prefs, err := s.store.HasNotifyPref(ctx, user)
+		note(err)
 		items = []checkItem{
-			{Key: "permit-name", Label: "Name the permit, as it appears on the schedule and in your emails", Href: "/schedule", Done: named},
+			{Milestone: store.MilestonePermitName, Label: "Name the permit, as it appears on the schedule and in your emails", Href: "/schedule", Done: named},
 		}
 		if isPrimary {
+			household, err := s.store.HouseholdName(ctx, owner)
+			note(err)
+			members, err := s.store.CountMembers(ctx, owner)
+			note(err)
 			items = append(items,
-				checkItem{Key: "household-name", Label: "Name the household, so visitors see it instead of your email", Href: "#household", Done: household != ""},
-				checkItem{Key: "shared", Label: "Give someone else in the house access", Href: "#shared", Done: members > 0})
+				checkItem{Milestone: store.MilestoneHouseholdName, Label: "Name the household, so visitors see it instead of your email", Href: "#household", Done: household != ""},
+				checkItem{Milestone: store.MilestoneShared, Label: "Give someone else in the house access", Href: "#shared", Done: members > 0})
 		}
-		items = append(items, checkItem{Key: "notify:" + user, Label: "Set how you want to be told about changes", Href: "#notifications", Done: prefs})
+		items = append(items, checkItem{Milestone: store.MilestoneNotify(user), Label: "Set how you want to be told about changes", Href: "#notifications", Done: prefs})
 	default:
+		return nil
+	}
+	if readErr != nil {
+		alog.Warnf("checklist for %s (%s) unavailable: %v", redact.Email(owner), tab, readErr)
 		return nil
 	}
 	v := &checklistView{Key: tab, Items: items}
 	for i := range items {
-		if ms[items[i].Key] {
+		if ms[items[i].Milestone] {
 			items[i].Done = true
 		} else if items[i].Done {
-			// Evidence says done and no milestone yet: record it now, while the
-			// evidence still exists.
-			_ = s.store.MarkMilestone(ctx, owner, items[i].Key)
+			// Healing: the account did this before milestones were recorded.
+			if err := s.store.MarkMilestone(ctx, owner, items[i].Milestone); err != nil {
+				alog.Infof("milestone backfill %s %s: %v", items[i].Milestone, redact.Email(owner), err)
+			}
 		}
 		if items[i].Done {
 			v.Done++

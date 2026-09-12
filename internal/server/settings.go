@@ -300,6 +300,11 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	if _, owner, _, ok := s.accountForWrite(w, r); ok {
+		if err := s.store.MarkMilestone(r.Context(), owner, store.MilestoneNotify(user)); err != nil {
+			alog.Infof("milestone notify %s: %v", redact.Email(user), err)
+		}
+	}
 	if nudged {
 		// The saved value differs from what the form shows; re-render to sync.
 		w.Header().Set("HX-Retarget", "#notify-body")
