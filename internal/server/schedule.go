@@ -158,7 +158,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	base.Checklist = s.checklistFor(ctx, owner, base.User.Email, "schedule")
+	base.Checklist = s.checklistFor(ctx, owner, base.User.Email, base.IsPrimary, "schedule")
 	s.render(w, base)
 }
 

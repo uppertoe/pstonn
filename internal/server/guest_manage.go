@@ -31,7 +31,7 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	base.Checklist = s.checklistFor(r.Context(), base.Owner, base.User.Email, "guests")
+	base.Checklist = s.checklistFor(r.Context(), base.Owner, base.User.Email, base.IsPrimary, "guests")
 	// Success feedback after deciding a printed-QR request. These values land in the
 	// green success banner — the most trusted element on a page whose whole premise is
 	// custody of a tenant password — and although our own redirects write them, nothing

@@ -26,7 +26,10 @@ type checkItem struct {
 // done. Every input is a count or a row the page already needs, so the card
 // costs a few index reads. A tab whose lines are all ticked returns nil, and so
 // does one with nothing to offer yet (no permit managed).
-func (s *Server) checklistFor(ctx context.Context, owner, user, tab string) *checklistView {
+// isPrimary drops the lines only the account owner can act on (naming the
+// household, sharing access) for a member, who would otherwise be sent to a
+// form they cannot see.
+func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary bool, tab string) *checklistView {
 	did := func(action string) bool {
 		n, err := s.store.CountChanges(ctx, owner, action)
 		return err == nil && n > 0
@@ -85,10 +88,13 @@ func (s *Server) checklistFor(ctx context.Context, owner, user, tab string) *che
 		prefs, _ := s.store.HasNotifyPref(ctx, user)
 		items = []checkItem{
 			{Label: "Name the permit, as it appears on the schedule and in your emails", Href: "/schedule", Done: named},
-			{Label: "Name the household, so visitors see it instead of your email", Href: "#household", Done: household != ""},
-			{Label: "Give someone else in the house access", Href: "#shared", Done: members > 0},
-			{Label: "Set how you want to be told about changes", Href: "#notifications", Done: prefs},
 		}
+		if isPrimary {
+			items = append(items,
+				checkItem{Label: "Name the household, so visitors see it instead of your email", Href: "#household", Done: household != ""},
+				checkItem{Label: "Give someone else in the house access", Href: "#shared", Done: members > 0})
+		}
+		items = append(items, checkItem{Label: "Set how you want to be told about changes", Href: "#notifications", Done: prefs})
 	default:
 		return nil
 	}

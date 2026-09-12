@@ -65,9 +65,9 @@
 
 {{define "checklist"}}{{/* The per-tab "still to try" strip: one collapsed line in the
      tab's own hue, opening into the list. Rendered from server state on page
-     load only (never swapped live), so ticks never move anything mid-visit; the
-     open state is remembered per browser and per tab. */}}
-{{if .Checklist}}<section class="todo" style="--hue:var(--sec-{{.Checklist.Key}})" x-data="{open: localStorage.getItem('pstonn-todo-{{.Checklist.Key}}')==='1', hide: localStorage.getItem('pstonn-todo-{{.Checklist.Key}}-hide')==='1'}" x-show="!hide" x-cloak>
+     load only (never swapped live), so ticks never move anything mid-visit. Open
+     by default; collapsing or dismissing is remembered per browser and per tab. */}}
+{{if .Checklist}}<section class="todo" style="--hue:var(--sec-{{.Checklist.Key}})" x-data="{open: localStorage.getItem('pstonn-todo-{{.Checklist.Key}}')!=='0', hide: localStorage.getItem('pstonn-todo-{{.Checklist.Key}}-hide')==='1'}" x-show="!hide" x-cloak>
   <button type="button" class="todo-head" :aria-expanded="open" @click="open=!open; localStorage.setItem('pstonn-todo-{{.Checklist.Key}}', open ? '1' : '0')">
     <span class="todo-title">Still to try</span><span class="todo-count">{{.Checklist.Done}} of {{len .Checklist.Items}}</span>
     <svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
