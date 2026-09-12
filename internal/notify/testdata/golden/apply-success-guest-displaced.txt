@@ -6,7 +6,7 @@ Your Visitor is now set to GUEST1.
 
 dad@example.com activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.
 
-This replaced ABC123, which an active booking had put on — we've emailed the person responsible for that car a heads-up.
+This replaced ABC123, which an active booking had put on. We have emailed the person whose rego that is.
 
 https://p.stonn.org
 
@@ -19,7 +19,7 @@ Your Visitor is now set to GUEST1.
 
 dad@example.com activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.
 
-This replaced ABC123, which an active booking had put on — we've emailed the person responsible for that car a heads-up.
+This replaced ABC123, which an active booking had put on. We have emailed the person whose rego that is.
 
 === EMAIL to sam@example.com
 Subject: Permit updated: Visitor now shows GUEST1
@@ -29,7 +29,7 @@ Your Visitor is now set to GUEST1.
 
 dad@example.com activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.
 
-This replaced ABC123, which an active booking had put on — we've emailed the person responsible for that car a heads-up.
+This replaced ABC123, which an active booking had put on. We have emailed the person whose rego that is.
 
 https://p.stonn.org
 

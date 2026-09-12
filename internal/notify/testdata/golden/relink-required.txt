@@ -4,7 +4,7 @@ Provenance: You received this at primary@example.com because this address manage
 
 Your council connection has expired, so p.stonn has stopped updating your visitor permit.
 
-Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
+Please open the app and re-link your council account so your schedule keeps running. Until you do, set the rego on your permit directly with the council to avoid a fine.
 
 Re-link: https://p.stonn.org
 Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
@@ -16,7 +16,7 @@ Tags: warning
 
 Your council connection has expired, so p.stonn has stopped updating your visitor permit.
 
-Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
+Please open the app and re-link your council account so your schedule keeps running. Until you do, set the rego on your permit directly with the council to avoid a fine.
 
 Re-link: https://p.stonn.org
 Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
@@ -27,7 +27,7 @@ Provenance: You received this at sam@example.com because this address manages, o
 
 Your council connection has expired, so p.stonn has stopped updating your visitor permit.
 
-Please open the app and re-link your council account so your schedule keeps running. Until you do, set your permit's vehicle directly with the council to avoid a fine.
+Please open the app and re-link your council account so your schedule keeps running. Until you do, set the rego on your permit directly with the council to avoid a fine.
 
 Re-link: https://p.stonn.org
 Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/

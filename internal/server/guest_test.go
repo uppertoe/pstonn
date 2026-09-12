@@ -853,7 +853,7 @@ func TestGuestRefusalMessage(t *testing.T) {
 		{"refused with the portal's reason", provider.FailDetail(provider.FailRejected, provider.OpSetVehicle, "Vehicle Registration has invalid pattern", errors.New("400")), false,
 			[]string{"wouldn't accept ABC123: Vehicle Registration has invalid pattern", "Nothing has changed"}, []string{"reconnect", "try again"}},
 		{"refused, no reason", provider.Fail(provider.FailRejected, provider.OpSetVehicle, errors.New("400")), false,
-			[]string{"wouldn't accept ABC123 on this permit", "the plate against the car"}, []string{"reconnect"}},
+			[]string{"wouldn't accept ABC123 on this permit", "the rego against the car"}, []string{"reconnect"}},
 		{"unexpected shape", provider.Fail(provider.FailUnexpected, provider.OpSetVehicle, errors.New("?")), false,
 			[]string{"unexpected answer from the council", "hasn't changed the permit"}, []string{"reconnect", "wouldn't accept"}},
 		{"refused while restoring", provider.Fail(provider.FailRejected, provider.OpSetVehicle, errors.New("400")), true,

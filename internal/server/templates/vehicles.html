@@ -14,7 +14,7 @@
         <div class="vmain">
           <span class="veh"><span class="dot" style="background:{{.Color}}"></span>{{.Label}}{{if .State}} <span class="vstate-chip" title="{{T "vehicle.state_label" .}}">&middot; {{.State}}</span>{{end}}</span>
           <span class="plate" style="--plate:{{.Color}};margin-left:auto">{{.Registration}}</span>
-          <form method="post" action="/regos/{{.ID}}/delete" data-confirm="Remove this vehicle?" data-confirm-ok="Remove">
+          <form method="post" action="/regos/{{.ID}}/delete" data-confirm="Remove this rego?" data-confirm-ok="Remove">
             <button class="danger icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button>
           </form>
         </div>

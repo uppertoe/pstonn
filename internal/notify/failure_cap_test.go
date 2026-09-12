@@ -253,7 +253,7 @@ func TestDriverFailedNoticeCopy(t *testing.T) {
 		t.Fatalf("queued = %d, want 2", len(rows))
 	}
 	bodies := rows[0].Body + "\n" + rows[1].Body
-	for _, want := range []string{"Your car AAA111 couldn't be put on the", "the council's system is down right now", "Your car BBB222 couldn't be put on the", "p.stonn couldn't update the permit", "It may not be covered right now"} {
+	for _, want := range []string{"Your rego AAA111 could not be put on the", "the council's system is down right now", "Your rego BBB222 could not be put on the", "p.stonn couldn't update the permit", "It may not be covered right now"} {
 		if !strings.Contains(bodies, want) {
 			t.Fatalf("driver notice missing %q in:\n%s", want, bodies)
 		}

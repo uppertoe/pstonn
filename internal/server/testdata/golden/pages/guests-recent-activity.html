@@ -330,7 +330,7 @@ window.popClamp = window.popClamp || function (el) {
   
   
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Guest passes</div>
-  <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
+  <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
   
   
   
@@ -373,9 +373,9 @@ window.popClamp = window.popClamp || function (el) {
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
         <strong>Guest passes are active</strong>
-        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor car still on a permit comes off now.</div>
+        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor's rego still on a permit comes off now.</div>
       </div>
-      <form method="post" action="/guests/toggle" data-confirm="Pause all guest passes? Every link stops working, and any visitor car still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all">
+      <form method="post" action="/guests/toggle" data-confirm="Pause all guest passes? Every link stops working, and any visitor's rego still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all">
         <input type="hidden" name="enabled" value="">
         <button type="submit" class="danger">Pause all</button>
       </form>
@@ -386,11 +386,11 @@ window.popClamp = window.popClamp || function (el) {
   
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Visitor just arrived?</h2>
-    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
-    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a plate on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
+    <p class="subtitle">Let a visitor, a tradie or a friend, put <em>their own rego</em> on the permit. No saved rego is needed.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a rego on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
-        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter their rego, and it goes on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
         <input type="hidden" name="permit_id" value="1">
         <button type="submit"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Show a visitor QR</button>
       </form>

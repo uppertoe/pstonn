@@ -20,7 +20,7 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner, tenantID stri
 	subject := "Action needed: reconnect your p.stonn council account"
 	body := "Your council connection has expired, so p.stonn has stopped updating your visitor permit.\n\n" +
 		"Please open the app and re-link your council account so your schedule keeps running. " +
-		"Until you do, set your permit's vehicle directly with the council to avoid a fine."
+		"Until you do, set the rego on your permit directly with the council to avoid a fine."
 	if s.appURL != "" {
 		body += "\n\nRe-link: " + s.appURL
 	}
@@ -39,8 +39,8 @@ func (s *Service) NotifyReconnectStalled(ctx context.Context, owner, tenantID st
 	subject := "p.stonn can't reach the council — your permit schedule is paused"
 	body := "p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. " +
 		"Until it can, your visitor permit schedule is NOT being applied.\n\n" +
-		"That means any change your schedule should make will not happen: if a different car needs to be on the permit, " +
-		"change the vehicle yourself on the council website now, or that car is not covered and can be fined.\n\n" +
+		"That means any change your schedule should make will not happen: if a different rego needs to be on the permit, " +
+		"change it yourself on the council website now, or that car is not covered and can be fined.\n\n" +
 		"p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. " +
 		"If this persists, it will email you again if re-linking becomes necessary."
 	body += "\n\nCouncil portal: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
@@ -90,7 +90,7 @@ func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permi
 	date := expiry.Format("2 Jan 2006")
 	subject := fmt.Sprintf("Your %s expires on %s", permitLabel, date)
 	body := fmt.Sprintf("Your %s is due to expire on %s.\n\n", permitLabel, date) +
-		"p.stonn keeps setting the vehicle, but it can't renew the permit itself — renew it with the council so it stays valid. " +
+		"p.stonn keeps setting the rego, but it cannot renew the permit itself — renew it with the council so it stays valid. " +
 		"Once you renew, you can copy your schedule onto the new permit in the app."
 	if s.appURL != "" {
 		body += "\n\nOpen p.stonn: " + s.appURL
@@ -559,7 +559,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, tenantID, p
 	if !s.mail.Enabled() {
 		return nil
 	}
-	subject := "Your link to set a car on " + ownerEmail + "'s parking permit"
+	subject := "Your link to put a rego on " + ownerEmail + "'s parking permit"
 	lines := []string{
 		// The label is free text the owner typed, and this recipient is whoever the
 		// owner named — so it goes in stripped of anything the mail layer would turn
@@ -568,7 +568,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, tenantID, p
 		// household with more than one.
 		say(s.tenantOf(ctx, ownerEmail, tenantID), "mail.guest_lead", map[string]any{"Owner": ownerEmail, "Label": neutraliseLinks(permitLabel)}),
 		"",
-		"When you arrive, open the link and choose your car. It stays on the permit until the end of the day.",
+		"When you arrive, open the link and choose your rego. It stays on the permit until the end of the day.",
 		"",
 		url,
 		"",
@@ -595,7 +595,7 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 	subject := fmt.Sprintf("Heads up: %s is no longer covered on the visitor permit", oldReg)
 	when := at.In(s.loc).Format("3:04pm")
 	lines := []string{
-		fmt.Sprintf("Your car %s came off the visitor parking permit for %s at %s — %s.", oldReg, permitLabel, when, how),
+		fmt.Sprintf("Your rego %s came off the visitor parking permit for %s at %s: %s.", oldReg, permitLabel, when, how),
 		"",
 		"If your car is still parked there it's no longer covered. Move it, or put it back on with your link, or check with the permit holder.",
 	}
@@ -625,7 +625,7 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 	// blank lines; a "---" block becomes a section separator in the HTML render.
 	subject := fmt.Sprintf("%s is on a %s visitor parking permit", plate, c.Short)
 	lines := []string{
-		fmt.Sprintf("Your car is now on a %s visitor parking permit, so you're covered to park where the permit applies.", c.Name),
+		fmt.Sprintf("Your rego is now on a %s visitor parking permit, so you are covered to park where the permit applies.", c.Name),
 		"",
 		"---",
 		"",
@@ -665,7 +665,7 @@ func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, p
 	}
 	subject := fmt.Sprintf("%s couldn't be put on a %s visitor parking permit", plate, c.Short)
 	lines := []string{
-		fmt.Sprintf("Your car %s couldn't be put on the %s visitor parking permit — %s. It may not be covered right now; p.stonn keeps trying and will put it on as soon as it can.", plate, c.Name, cause),
+		fmt.Sprintf("Your rego %s could not be put on the %s visitor parking permit: %s. It may not be covered right now; p.stonn keeps trying and will put it on as soon as it can.", plate, c.Name, cause),
 		"",
 		"---",
 		"",
@@ -691,11 +691,11 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permi
 	c := s.tenantOf(ctx, owner, tenantID)
 	var subject, body string
 	if plate == "" {
-		subject = fmt.Sprintf("The car was removed from your %s at the council", permitLabel)
-		body = fmt.Sprintf("The car on your %s was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel)
+		subject = fmt.Sprintf("The rego was removed from your %s at the council", permitLabel)
+		body = fmt.Sprintf("The rego on your %s was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel)
 	} else {
 		subject = fmt.Sprintf("Your %s was changed to %s at the council", permitLabel, plate)
-		body = fmt.Sprintf("The car on your %s was changed to %s at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel, plate)
+		body = fmt.Sprintf("The rego on your %s was changed to %s at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel, plate)
 	}
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL

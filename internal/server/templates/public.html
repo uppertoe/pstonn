@@ -4,7 +4,7 @@
 <main id="main" tabindex="-1" class="landing">
   <section class="lhero">
     <h1>{{T "public.hero" .}}</h1>
-    <p class="lead">p.stonn sets your visitor permit to the vehicle you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
+    <p class="lead">p.stonn sets your visitor permit to the rego you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
     <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
     <p class="lnote">{{T "public.hero_note" .}}</p>
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
@@ -29,7 +29,7 @@
         </div>
         <div class="dm-push dm-over" data-guest>
           <div class="badge" style="background:var(--v2)">{{template "ic-link"}}</div>
-          <div class="bd"><div class="ttl">Guest link shared</div><div class="msg">A visitor sets <b>their own car</b> &mdash; no account needed.</div></div>
+          <div class="bd"><div class="ttl">Guest link shared</div><div class="msg">A visitor puts <b>their own rego</b> on. No account needed.</div></div>
         </div>
       </div>
       <div class="dm-caption" data-cap><span></span></div>
@@ -38,7 +38,7 @@
   </div>
   <section class="lsteps">
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>{{T "public.step_link" .}}</p></div>
-    <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which vehicle is on the permit each day of the week, and add one-off bookings.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which rego is on the permit each day of the week, and add one-off bookings.</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
   </section>
   <section class="paper" style="max-width:640px;margin:44px auto 0;padding:26px 32px">
@@ -80,7 +80,7 @@
     <p>{{T "public.about_unofficial" . (slots "how" (link "/features" (noboost)))}}</p>
 
     <h2 class="about-h2">The short version</h2>
-    <p>p.stonn signs in to your council account and changes which car is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
+    <p>p.stonn signs in to your council account and changes which rego is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
     <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and you can delete everything you&rsquo;ve stored on request. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
     <p class="sec-more">The detail is below &mdash; open any section that matters to you.</p>
 
@@ -100,12 +100,12 @@
     </details>
 
     <details class="sec"><summary>What data p.stonn holds</summary>
-      <p><strong>About you:</strong> your email, your vehicles and their plates, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
-      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any driver email you attached to a car, and the plates visitors typed at a printed QR code. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
+      <p><strong>About you:</strong> your email, your regos and their labels, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
+      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any email you attached to a rego, and the number plates visitors typed at a printed QR code. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
     </details>
 
     <details class="sec"><summary>How long it is kept</summary>
-      <p>Activity and change logs: 90 days. A visitor&rsquo;s plate from a printed QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
+      <p>Activity and change logs: 90 days. A visitor&rsquo;s number plate from a printed QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
     </details>
 
     <details class="sec"><summary>How your data is used</summary>
@@ -114,7 +114,7 @@
     </details>
 
     <details class="sec"><summary>Deleting your data</summary>
-      <p>&ldquo;Delete all my data&rdquo; in Settings clears everything from the live database straight away: your session, saved password, schedule, vehicles, guest passes, logs, and anything queued to be emailed to you. It also removes your traces from any account you were a member of, including guest passes you created there.</p>
+      <p>&ldquo;Delete all my data&rdquo; in Settings clears everything from the live database straight away: your session, saved password, schedule, regos, guest passes, logs, and anything queued to be emailed to you. It also removes your traces from any account you were a member of, including guest passes you created there.</p>
       <p>Backups are the exception: encrypted backups run daily and thin out over time (roughly the last week daily, the last month weekly, then monthly for about three months), so deleted data can linger in a backup for up to about three months before it is gone for good. Backups are not reachable through the app and are encrypted with a key held separately from the server.</p>
     </details>
 
@@ -150,15 +150,15 @@
   {{if .SignedIn}}
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
-    <p>Everything p.stonn can do, in five short animations &mdash; sample plates and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
+    <p>Everything p.stonn can do, in five short animations &mdash; sample regos and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
   </section>
   {{else}}
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
     <p>{{T "public.history" .}}</p>
-    <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
+    <p>The old paper permits could be moved between cars as needed. The digital permit holds one rego at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
     <p>{{T "public.attempt" .}}</p>
-    <p>I got tired of logging in to swap the plate every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
+    <p>I got tired of logging in to swap the rego every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
   </section>
   {{end}}
 
@@ -186,8 +186,8 @@
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A car for each day</h2>
-        <p>Set which registration is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster holds up to four weeks and rotates them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
+        <h2>A rego for each day</h2>
+        <p>Set which rego is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster holds up to four weeks and rotates them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-roster" .}}
@@ -197,7 +197,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>One-off bookings</h2>
-        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; book a car for a set window. Your roster takes back over the moment it ends.</p>
+        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; make a booking for a set window. Your roster takes back over the moment it ends.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-oneoff" .}}
@@ -207,7 +207,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>Add a visitor with a QR</h2>
-        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and their car is on the permit until the end of the day &mdash; no account, nothing to install.</p>
+        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and it is on the permit until the end of the day &mdash; no account, nothing to install.</p>
         <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
       <div class="feature-demo">
@@ -228,7 +228,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>A pass for regular visitors</h2>
-        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their car and it&rsquo;s on the permit until the end of the day, and you&rsquo;re told each time.</p>
+        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their rego and it is on the permit until the end of the day, and you&rsquo;re told each time.</p>
         <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
       </div>
       <div class="feature-demo">
@@ -429,7 +429,7 @@
           <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-calendar"}}</span> This week</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
           <div class="dm-picker">
-            <div class="ph">Which car?</div>
+            <div class="ph">Which rego?</div>
             <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
             <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
             <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
@@ -447,7 +447,7 @@
         <figure class="dm" data-demo="oneoff">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-calendar"}}</span> One-off booking</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
+          <div class="dm-fld"><div class="k">Rego</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
           <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
           <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
           <div class="dm-btn">{{template "ic-plus"}} Book</div>
@@ -463,11 +463,11 @@
         <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-users"}}</span> Your guest&rsquo;s phone</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to put a rego on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your rego. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
           {{/* One pass, one household: these are the grandparents' two cars, not
                a mix of unrelated helpers — a pass goes to one person, who taps
                whichever car they came in. */}}
-          <div class="dm-gsub">Tap your car to put it on the permit.</div>
+          <div class="dm-gsub">Tap your rego to put it on the permit.</div>
           <div class="dm-gcars">
             <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Margaret&rsquo;s Camry</span><span class="dm-tick">{{template "ic-check"}}</span></div>
             <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Peter&rsquo;s ute</span><span class="dm-tick">{{template "ic-check"}}</span></div>
@@ -504,7 +504,7 @@
           <div class="dm-screen dm-over" data-vqguest>
             <div class="dm-vlabel">Your visitor&rsquo;s phone</div>
             <div class="dm-fld" data-vqfld style="margin-top:10px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
-            <div class="dm-btn" data-vqput>{{template "ic-check"}} Put my car on the permit</div>
+            <div class="dm-btn" data-vqput>{{template "ic-check"}} Put my rego on the permit</div>
             <div class="dm-vstat" data-vqstat></div>
           </div>
         </div>

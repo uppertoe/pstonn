@@ -443,7 +443,7 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" removed a printed QR code on your p.stonn account. Any copy already printed and put up has stopped working, and p.stonn is taking any car approved through it back off the permit now — check the permit directly if this is urgent.")
+			user+" removed a printed QR code on your p.stonn account. Any copy already printed and put up has stopped working, and p.stonn is taking any rego approved through it back off the permit now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)

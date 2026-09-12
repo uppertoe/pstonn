@@ -72,7 +72,7 @@
     {{else}}
     <h2>{{if .Relink}}Reconnect your council account{{else}}Link your council account{{end}}</h2>
     <p>
-      {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, cars and schedule are all still here.
+      {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, regos and schedule are all still here.
       {{else}}{{T "onboarding.intro" .}}{{end}}
     </p>
     {{if .Onboard.InAppBrowser}}
@@ -182,9 +182,9 @@
          would contradict the two-or-more shown — an unanswerable choice — so lead
          with a "set up both" line instead. */}}
     {{if gt .Picker.OfferedCount 1}}
-    <p class="subtitle">You have more than one visitor permit &mdash; each one holds a car. You can set up both; pick either to start, and add the other whenever you like.</p>
+    <p class="subtitle">You have more than one visitor permit. Each one holds a rego. You can set up both; pick either to start, and add the other whenever you like.</p>
     {{else}}
-    <p class="subtitle">Pick the permit whose plate you want to schedule. This is usually your visitor permit.</p>
+    <p class="subtitle">Pick the permit you want to schedule. This is usually your visitor permit.</p>
     {{end}}
     {{if .Picker.Pick}}
     {{/* A first-timer with a full picker had no reassurance here and no way to
@@ -258,7 +258,7 @@
     <p class="empty-note">We couldn't load your permit list from the council just now, so we can't tell what's on your account. Nothing has changed &mdash; please try again in a few minutes.</p>
     <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_error" .}} <a href="/features" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else if .Picker.HasPermits}}
-    <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits that your account is allowed to change the vehicle on &mdash; the reason for each is shown above.</p>
+    <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits whose rego your account is allowed to change &mdash; the reason for each is shown above.</p>
     <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/features" hx-boost="false">What p.stonn can and cannot do</a></p>
     {{else}}
     <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
@@ -282,7 +282,7 @@
   <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. You share your own account with someone else, so you can&rsquo;t also join another. Remove them first, or decline the invitation.</p>
   {{else}}
   <p class="subtitle"><strong>{{.Invite.Owner}}</strong> has invited you to help manage their p.stonn account. Nothing is shared until you accept, and you can decline without anything happening.</p>
-  <p class="empty-note" style="margin-top:12px">If you accept, you will see and manage their permits, vehicles and schedule instead of your own, and they will see what you change. You will not be able to connect your own council account while you share theirs. You can leave at any time.</p>
+  <p class="empty-note" style="margin-top:12px">If you accept, you will see and manage their permits, regos and schedule instead of your own, and they will see what you change. You will not be able to connect your own council account while you share theirs. You can leave at any time.</p>
   {{end}}
   <div class="row" style="margin-top:14px;gap:8px">
     {{if not .Invite.Blocked}}

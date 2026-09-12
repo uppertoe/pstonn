@@ -1,7 +1,7 @@
 {{define "page-guests"}}
   {{/* ---------- GUEST PASSES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
-  <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
+  <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
   {{if .QR}}
   {{/* ---- ON-SCREEN VISITOR QR ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
@@ -23,7 +23,7 @@
     <form method="post" action="/guests/{{.Edit.ID}}" class="stack" x-data="{recips:''}">
       <div class="fld"><span>Permit</span><div class="ro">{{.Edit.PermitLabel}}</div></div>
       <label class="fld"><span>Label (optional)</span><input name="label" value="{{.Edit.Label}}" placeholder="e.g. Friday helpers"></label>
-      <div class="fld"><span>Cars this pass may activate</span>
+      <div class="fld"><span>Regos this pass may put on the permit</span>
         <div class="checks">
           {{range .Vehicles}}
           <label class="check">
@@ -36,10 +36,10 @@
         </div>
         <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/regos">Add it on the Regos page</a> and it appears here.</p>
       </div>
-      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight"{{if .Edit.AllowOvernight}} checked{{end}} style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight"{{if .Edit.AllowOvernight}} checked{{end}} style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep their rego on until the end of tomorrow rather than the end of today. It is never applied for them. When the time is up the roster takes over; if nothing is scheduled, the rego stays on the permit until the next change.</span></span></label>
       <label class="fld"><span>Add more people (optional)</span>
         <textarea name="recipients" rows="2" x-model="recips" placeholder="grandma@example.com"></textarea>
-        <span class="empty-note" style="margin-top:6px">Each new person gets their own link by email. Ticking a car with a saved driver email adds it here automatically.</span>
+        <span class="empty-note" style="margin-top:6px">Each new person gets their own link by email. Ticking a rego that has a saved email adds that person here automatically.</span>
       </label>
       <div class="row" style="gap:10px">
         <button type="submit">{{template "ic-check"}} Save changes</button>
@@ -50,7 +50,7 @@
     {{range .Edit.Recipients}}
     <div class="grecip">
       <span class="{{if .Revoked}}muted{{end}}"{{if .Revoked}} style="text-decoration:line-through"{{end}}>{{.Email}}</span>
-      {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<form method="post" action="/guests/tokens/{{.TokenID}}/revoke" data-confirm="Revoke this link? It stops working, and any car they still have on the permit comes off now." data-confirm-ok="Revoke link"><button class="ghost sm" type="submit">Revoke link</button></form>{{end}}
+      {{if .Revoked}}<span class="muted" style="font-size:12px">revoked</span>{{else}}<form method="post" action="/guests/tokens/{{.TokenID}}/revoke" data-confirm="Revoke this link? It stops working, and if their rego is on the permit it comes off now." data-confirm-ok="Revoke link"><button class="ghost sm" type="submit">Revoke link</button></form>{{end}}
     </div>
     {{else}}
     <p class="empty-note">No one has a link yet. Add someone above.</p>
@@ -72,7 +72,7 @@
   {{if .GuestMgmt.PendingRequests}}
   <section class="card" style="--hue:var(--danger)">
     <h2><span class="ic">{{template "ic-bell"}}</span> Waiting for you</h2>
-    <p class="subtitle">Someone scanned a printed code and wants to use a permit. Approve to put their plate on until the end of today.</p>
+    <p class="subtitle">Someone scanned a printed code and wants to use a permit. Approve to put their rego on until the end of today.</p>
     {{range .GuestMgmt.PendingRequests}}
     <div class="req">
       <div class="req-main">
@@ -116,9 +116,9 @@
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
         <strong>Guest passes are {{if .GuestMgmt.GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
-        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor car still on a permit comes off now.</div>
+        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor's rego still on a permit comes off now.</div>
       </div>
-      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor car still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
+      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor's rego still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
         <input type="hidden" name="enabled" value="{{if .GuestMgmt.GuestsEnabled}}{{else}}1{{end}}">
         <button type="submit" class="{{if .GuestMgmt.GuestsEnabled}}danger{{end}}">{{if .GuestMgmt.GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
       </form>
@@ -129,11 +129,11 @@
   {{if .GuestMgmt.PermitOpts}}
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Visitor just arrived?</h2>
-    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
-    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a plate on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
+    <p class="subtitle">Let a visitor, a tradie or a friend, put <em>their own rego</em> on the permit. No saved rego is needed.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a rego on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
-        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter their rego, and it goes on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
@@ -162,7 +162,7 @@
       </div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <a href="/guests/door/{{.GrantID}}/view" hx-boost="false"><button type="button">{{template "ic-qr"}} View &amp; print</button></a>
-        <form method="post" action="/guests/door/{{.GrantID}}/revoke" data-confirm="Remove this printed QR? Any copy you printed stops working, and any visitor car you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button class="ghost icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button></form>
+        <form method="post" action="/guests/door/{{.GrantID}}/revoke" data-confirm="Remove this printed QR? Any copy you printed stops working, and any visitor's rego you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button class="ghost icon" type="submit" title="Remove" aria-label="Remove">{{template "ic-trash"}}</button></form>
       </div>
     </div>
     {{end}}
@@ -180,7 +180,7 @@
         <h2 style="margin:0">{{if .Label}}{{.Label}}{{else}}{{.PermitLabel}}{{end}}</h2>
         <div class="row" style="gap:6px">
           <a href="/guests/{{.ID}}/edit"><button type="button" class="ghost sm">{{template "ic-edit"}} Edit</button></a>
-          <form method="post" action="/guests/{{.ID}}/delete" data-confirm="Delete this guest pass? All its links stop working, and any visitor car still on the permit through it comes off now." data-confirm-ok="Delete pass">
+          <form method="post" action="/guests/{{.ID}}/delete" data-confirm="Delete this guest pass? All its links stop working, and any visitor's rego still on the permit through it comes off now." data-confirm-ok="Delete pass">
             <button class="ghost icon" type="submit" title="Delete pass" aria-label="Delete pass">{{template "ic-trash"}}</button>
           </form>
         </div>
@@ -192,7 +192,7 @@
            that revives it — the copy moves the pass, tokens unchanged. */}}
       <div class="banner warn" style="margin:6px 0 12px">{{template "ic-alert"}} <span><strong>Permit no longer active.</strong> Copy the schedule to your new permit and this pass moves with it.</span></div>
       {{end}}
-      <p class="sub">Cars</p>
+      <p class="sub">Regos</p>
       <div class="legend" style="gap:8px">{{range .Cars}}<span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>{{end}}</div>
       <p class="sub" style="margin-top:16px">People</p>
       {{$gid := .ID}}
@@ -222,7 +222,7 @@
   {{if and .GuestMgmt.PermitOpts .Vehicles}}
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
-    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
+    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these regos on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     {{/* Boosted POST (the body is hx-boost), so the double-submit guard is Alpine:
          the first submit marks the form sent and later ones are dropped, and the
          button greys so the wait reads as progress. One household created two
@@ -247,7 +247,7 @@
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
       </label>
       <label class="fld"><span>Label (optional)</span><input name="label" placeholder="e.g. Friday helpers"></label>
-      <div class="fld"><span>Cars this pass may activate</span>
+      <div class="fld"><span>Regos this pass may put on the permit</span>
         <div class="checks">
           {{range .Vehicles}}
           <label class="check">
@@ -260,10 +260,10 @@
         </div>
         <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/regos">Add it on the Regos page</a> and it appears here.</p>
       </div>
-      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep their rego on until the end of tomorrow rather than the end of today. It is never applied for them. When the time is up the roster takes over; if nothing is scheduled, the rego stays on the permit until the next change.</span></span></label>
       <label class="fld"><span>People to send the link to</span>
         <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
-        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a rego that has a saved email adds that person here automatically.</span>
         <span class="empty-note" style="margin-top:4px" x-show="!hasRecip()" x-cloak>Add at least one email to create the pass.</span>
       </label>
       <button type="submit" :disabled="sent || !hasRecip()">{{template "ic-link"}} Create pass and send links</button>
@@ -295,7 +295,7 @@
     <p class="posterfor">Printed QR for <strong>{{.DoorQR.PermitLabel}}</strong></p>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" data-print>{{template "ic-qr"}} Print</button>
-      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this printed QR? Any copy you printed stops working, and any visitor car you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
+      <form method="post" action="/guests/door/{{.DoorQR.GrantID}}/revoke" data-confirm="Remove this printed QR? Any copy you printed stops working, and any visitor's rego you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm">{{template "ic-trash"}} Remove</button></form>
     </div>
   </div>
 
@@ -311,7 +311,7 @@
       <ol class="poster-steps">
         <li>Point your phone camera at the code</li>
         <li>Enter your number plate</li>
-        <li>The resident gets a notification and approves it &mdash; then your plate is on the permit</li>
+        <li>The resident gets a notification and approves it &mdash; then your rego is on the permit</li>
       </ol>
       <p class="poster-note">Nothing goes on the permit until the resident approves.</p>
     </div>
@@ -332,7 +332,7 @@
 {{/* data-keep-awake: this code is held up for someone else to scan, so the screen
      must not dim mid-scan. The printable poster deliberately has no marker. */}}
 <div data-keep-awake style="display:inline-block;background:#fff;padding:18px;border-radius:14px;box-shadow:var(--shadow);max-width:100%">
-  <img src="{{.QR.ImageURI}}" alt="Scan to add your car to the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
+  <img src="{{.QR.ImageURI}}" alt="Scan to put your rego on the permit" width="220" height="220" style="width:220px;height:220px;max-width:100%;image-rendering:pixelated;display:block">
 </div>
 <p class="empty-note" style="margin-top:12px">This code stops working at <strong>{{.QR.StopsAt}}</strong> &mdash; your permit itself is unchanged.</p>
 <p class="empty-note" style="word-break:break-all;margin-top:10px">Or share this link: <a href="{{.QR.URL}}">{{.QR.URL}}</a></p>

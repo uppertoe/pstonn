@@ -140,7 +140,7 @@ var templateFuncs = template.FuncMap{
 		case "doorqr":
 			return "printed QR"
 		case "manual":
-			return "plate removed"
+			return "rego removed"
 		default:
 			return src
 		}

@@ -101,14 +101,14 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := s.store.CreateVehicle(r.Context(), owner, reg, label, state); err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
-			s.message(w, http.StatusConflict, "You already have a vehicle with that plate.")
+			s.message(w, http.StatusConflict, "You already have that rego saved.")
 			return
 		}
 		if errors.Is(err, store.ErrSecondaryAccount) {
 			// They joined a household while this request was in flight; a 500 would be a
 			// lie about whose fault it is, and they need to know where their cars live now.
 			s.message(w, http.StatusConflict,
-				"You've joined another p.stonn household, so cars are managed on that household's account now. "+
+				"You've joined another p.stonn household, so regos are managed on that household's account now. "+
 					"Add it there, or leave the shared household from Settings to manage your own again.")
 			return
 		}

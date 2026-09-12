@@ -412,7 +412,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// reg/label/colour, or an ad-hoc one-off plate (no saved name, neutral colour).
 	dispReg := func(vid int64, plate string) (reg, label, color string) {
 		if plate != "" {
-			return plate, "One-off plate", ""
+			return plate, "Typed rego", ""
 		}
 		return regByID[vid], labelByID[vid], colorByID[vid]
 	}
@@ -711,7 +711,7 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.FormValue("vehicle_id")); raw != "" {
 		v, verr := strconv.ParseInt(raw, 10, 64)
 		if verr != nil || v < 0 {
-			s.formError(w, r, "That car isn't valid. Please reload the page and try again.")
+			s.formError(w, r, "That saved rego isn't valid. Please reload the page and try again.")
 			return
 		}
 		vehicleID = v
@@ -1098,7 +1098,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		s.formError(w, r, "Choose a saved car or enter a one-off plate.")
+		s.formError(w, r, "Choose a saved rego or type one.")
 		return
 	}
 	// Record the window too: an open-ended booking beats the roster indefinitely,
@@ -1177,7 +1177,7 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 		return false
 	}
 	if !ok {
-		s.message(w, http.StatusNotFound, "Vehicle not found.")
+		s.message(w, http.StatusNotFound, "Rego not found.")
 		return false
 	}
 	return true

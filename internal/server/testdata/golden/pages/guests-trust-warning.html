@@ -330,7 +330,7 @@ window.popClamp = window.popClamp || function (el) {
   
   
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Guest passes</div>
-  <p class="subtitle">Give someone a link that lets them put one of your cars on the permit when they arrive, without an account. They can only pick a car you allow, and each activation lasts until the end of the day.</p>
+  <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
   
   
   
@@ -345,11 +345,11 @@ window.popClamp = window.popClamp || function (el) {
   
   <section class="card" style="--hue:var(--sec-schedule)">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span> Visitor just arrived?</h2>
-    <p class="subtitle">Let a visitor (a tradie, a friend's car) put <em>their own plate</em> on the permit &mdash; no saved car needed.</p>
-    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a plate on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
+    <p class="subtitle">Let a visitor, a tradie or a friend, put <em>their own rego</em> on the permit. No saved rego is needed.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a rego on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
-        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter a plate, and it's on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter their rego, and it goes on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
         <input type="hidden" name="permit_id" value="1">
         <button type="submit"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Show a visitor QR</button>
       </form>
@@ -369,7 +369,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg></span> Create a new guest pass</h2>
-    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these cars on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
+    <div class="banner warn" style="margin-bottom:16px;align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these regos on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     
     
     <form method="post" action="/guests" class="stack"
@@ -381,7 +381,7 @@ window.popClamp = window.popClamp || function (el) {
         <select name="permit_id"><option value="1">Visitor Permit</option></select>
       </label>
       <label class="fld"><span>Label (optional)</span><input name="label" placeholder="e.g. Friday helpers"></label>
-      <div class="fld"><span>Cars this pass may activate</span>
+      <div class="fld"><span>Regos this pass may put on the permit</span>
         <div class="checks">
           
           <label class="check">
@@ -394,10 +394,10 @@ window.popClamp = window.popClamp || function (el) {
         </div>
         <p class="empty-note" style="margin-top:8px">Need another rego? <a href="/regos">Add it on the Regos page</a> and it appears here.</p>
       </div>
-      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep a car on until the end of tomorrow. It is never automatic; without this, every activation ends at the end of the day.</span></span></label>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Recipients can then choose to keep their rego on until the end of tomorrow rather than the end of today. It is never applied for them. When the time is up the roster takes over; if nothing is scheduled, the rego stays on the permit until the next change.</span></span></label>
       <label class="fld"><span>People to send the link to</span>
         <textarea name="recipients" rows="2" x-model="recips" placeholder="mum@example.com, dad@example.com"></textarea>
-        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a car with a saved driver email adds it here automatically.</span>
+        <span class="empty-note" style="margin-top:6px">One per line or comma-separated. Ticking a rego that has a saved email adds that person here automatically.</span>
         <span class="empty-note" style="margin-top:4px" x-show="!hasRecip()" x-cloak>Add at least one email to create the pass.</span>
       </label>
       <button type="submit" :disabled="sent || !hasRecip()"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Create pass and send links</button>

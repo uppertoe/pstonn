@@ -12,7 +12,7 @@ X-Frame-Options: DENY
 
 > Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.
 
-p.stonn is a free, unofficial tool for residents of the City of Stonnington who hold a visitor parking permit on the council's ePermits site. The resident signs in to the council once; from then on p.stonn puts the right number plate on the permit for them — a weekly roster for regular visitors, one-off bookings, an on-screen QR code a visitor scans at the door, a printable QR code that asks the resident to approve each visitor, and standing guest links for family and carers. It changes only which car is on the permit, exactly as the resident could by hand on the council's site. It is not run by or affiliated with the council.
+p.stonn is a free, unofficial tool for residents of the City of Stonnington who hold a visitor parking permit on the council's ePermits site. The resident signs in to the council once; from then on p.stonn puts the right number plate on the permit for them — a weekly roster for regular visitors, one-off bookings, an on-screen QR code a visitor scans at the door, a printable QR code that asks the resident to approve each visitor, and standing guest links for family and carers. It changes only which rego is on the permit, exactly as the resident could by hand on the council's site. It is not run by or affiliated with the council.
 
 ## Pages
 

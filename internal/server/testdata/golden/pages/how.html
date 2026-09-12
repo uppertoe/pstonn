@@ -309,9 +309,9 @@ window.popClamp = window.popClamp || function (el) {
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
     <p>Stonnington Council changed how resident and visitor parking permits work in 2026. Paper visitor permits have been phased out in favour of a digital system. The digital permit requires you to enter vehicle registration numbers into the council's online system, which is checked by parking officers as they patrol the streets.</p>
-    <p>The old paper permits could be moved between cars as needed. The digital permit holds one vehicle registration at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
+    <p>The old paper permits could be moved between cars as needed. The digital permit holds one rego at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
     <p>p.stonn is an attempt to make that easier. Once you have a permit set up with Stonnington Parking, you can use it to set which car is on the permit each day of the week, add one-off bookings, and hand a visitor a QR link that puts their car on when they arrive.</p>
-    <p>I got tired of logging in to swap the plate every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
+    <p>I got tired of logging in to swap the rego every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
   </section>
   
 
@@ -339,8 +339,8 @@ window.popClamp = window.popClamp || function (el) {
 
     <section class="feature">
       <div class="feature-text">
-        <h2>A car for each day</h2>
-        <p>Set which registration is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster holds up to four weeks and rotates them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
+        <h2>A rego for each day</h2>
+        <p>Set which rego is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster holds up to four weeks and rotates them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
       </div>
       <div class="feature-demo">
         
@@ -349,7 +349,7 @@ window.popClamp = window.popClamp || function (el) {
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> This week</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
           <div class="dm-picker">
-            <div class="ph">Which car?</div>
+            <div class="ph">Which rego?</div>
             <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
             <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
             <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
@@ -369,14 +369,14 @@ window.popClamp = window.popClamp || function (el) {
     <section class="feature">
       <div class="feature-text">
         <h2>One-off bookings</h2>
-        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; book a car for a set window. Your roster takes back over the moment it ends.</p>
+        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; make a booking for a set window. Your roster takes back over the moment it ends.</p>
       </div>
       <div class="feature-demo">
         
         <figure class="dm" data-demo="oneoff">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> One-off booking</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
+          <div class="dm-fld"><div class="k">Rego</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
           <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
           <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
           <div class="dm-btn"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Book</div>
@@ -392,7 +392,7 @@ window.popClamp = window.popClamp || function (el) {
     <section class="feature">
       <div class="feature-text">
         <h2>Add a visitor with a QR</h2>
-        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and their car is on the permit until the end of the day &mdash; no account, nothing to install.</p>
+        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and it is on the permit until the end of the day &mdash; no account, nothing to install.</p>
         <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
       <div class="feature-demo">
@@ -415,7 +415,7 @@ window.popClamp = window.popClamp || function (el) {
           <div class="dm-screen dm-over" data-vqguest>
             <div class="dm-vlabel">Your visitor&rsquo;s phone</div>
             <div class="dm-fld" data-vqfld style="margin-top:10px"><div class="k">Your number plate</div><div class="val"><span class="dm-fade"><span class="dm-rego">XYZ789</span></span></div></div>
-            <div class="dm-btn" data-vqput><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Put my car on the permit</div>
+            <div class="dm-btn" data-vqput><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Put my rego on the permit</div>
             <div class="dm-vstat" data-vqstat></div>
           </div>
         </div>
@@ -475,7 +475,7 @@ window.popClamp = window.popClamp || function (el) {
     <section class="feature">
       <div class="feature-text">
         <h2>A pass for regular visitors</h2>
-        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their car and it&rsquo;s on the permit until the end of the day, and you&rsquo;re told each time.</p>
+        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their rego and it is on the permit until the end of the day, and you&rsquo;re told each time.</p>
         <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
       </div>
       <div class="feature-demo">
@@ -484,9 +484,9 @@ window.popClamp = window.popClamp || function (el) {
         <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to set a car on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your car. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to put a rego on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your rego. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
           
-          <div class="dm-gsub">Tap your car to put it on the permit.</div>
+          <div class="dm-gsub">Tap your rego to put it on the permit.</div>
           <div class="dm-gcars">
             <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Margaret&rsquo;s Camry</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>
             <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Peter&rsquo;s ute</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>

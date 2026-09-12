@@ -185,7 +185,7 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		}
 		if o.DisplacedReg != "" {
 			if o.DisplacedTold {
-				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on — we've emailed the person responsible for that car a heads-up.", o.DisplacedReg)
+				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on. We have emailed the person whose rego that is.", o.DisplacedReg)
 			} else {
 				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on. We had no way to reach whoever drives it — if %s is still parked there, please let them know it's no longer covered.", o.DisplacedReg, o.DisplacedReg)
 			}
@@ -212,9 +212,9 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		}
 		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
 		if o.CurrentReg != "" {
-			lines = append(lines, fmt.Sprintf("The permit still shows %s, so that is the vehicle currently covered.", o.CurrentReg))
+			lines = append(lines, fmt.Sprintf("The permit still shows %s, so that is the rego currently covered.", o.CurrentReg))
 		} else {
-			lines = append(lines, "The vehicle on the permit has not been changed.")
+			lines = append(lines, "The rego on the permit has not been changed.")
 		}
 		if o.Reason != "" {
 			lines = append(lines, "", o.Reason)
@@ -227,7 +227,7 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		// pointing them at it would be impossible advice — the honest Action already
 		// stands on its own.
 		if !o.CouncilDown {
-			lines = append(lines, "", "You can set the vehicle on your permit yourself at the council:", portalURL)
+			lines = append(lines, "", "You can set the rego on your permit yourself at the council:", portalURL)
 		}
 		body = strings.Join(lines, "\n")
 	}
@@ -252,7 +252,7 @@ func onboardNudgeMessage(to, appURL string, c mailTenant) (subject, body string)
 	// button's label in the HTML alternative (see mailer/html.go). Folding the
 	// label into the preceding sentence puts the whole sentence on the button.
 	lines := []string{
-		"You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly plate schedule, guest QR codes and one-off bookings all start from that one connection.",
+		"You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly roster, guest QR codes and one-off bookings all start from that one connection.",
 		"",
 		say(c, "mail.nudge_connect", nil),
 		"",
@@ -277,7 +277,7 @@ func onboardNudgeMessage(to, appURL string, c mailTenant) (subject, body string)
 			"")
 	}
 	lines = append(lines,
-		"One thing to know: p.stonn manages VISITOR permits only — the permit your guests' cars go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.",
+		"One thing to know: p.stonn manages VISITOR permits only — the permit your visitors' regos go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.",
 		"",
 		say(c, "mail.nudge_apply", nil),
 		"Register with the council:",

@@ -269,7 +269,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	recipients, droppedEmails := parseEmails(r.FormValue("recipients"))
 	if len(vehicleIDs) == 0 {
-		s.formError(w, r, "Choose at least one car this link may activate.")
+		s.formError(w, r, "Choose at least one rego this link may put on the permit.")
 		return
 	}
 	if len(recipients) == 0 {
@@ -302,7 +302,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	recs, links := s.mintLinks(recipients)
 	if _, err := s.store.CreateGuestGrant(r.Context(), owner, user, permitID, label, allowOvernight, vehicleIDs, recs); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			s.message(w, http.StatusForbidden, "That permit or car isn't one you manage.")
+			s.message(w, http.StatusForbidden, "That permit or rego isn't one you manage.")
 			return
 		}
 		s.serverError(w, err)
@@ -468,7 +468,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(vehicleIDs) == 0 {
-		s.formError(w, r, "Choose at least one car this pass may activate.")
+		s.formError(w, r, "Choose at least one rego this pass may put on the permit.")
 		return
 	}
 	// Parse and validate the recipients BEFORE mutating anything: returning an error
@@ -482,7 +482,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 	swept, err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			s.message(w, http.StatusForbidden, "That pass or car isn't one you manage.")
+			s.message(w, http.StatusForbidden, "That pass or rego isn't one you manage.")
 			return
 		}
 		s.serverError(w, err)
@@ -856,7 +856,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 		// Pausing kills every guest link at once — a visitor at the kerb just sees
 		// "no longer active", so the household should know it was deliberate.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" paused all guest passes on your p.stonn account. Existing guest links and printed QR codes will not work until they are resumed, and p.stonn is taking any car a guest had put on a permit back off now — check the permit directly if this is urgent.")
+			user+" paused all guest passes on your p.stonn account. Existing guest links and printed QR codes will not work until they are resumed, and p.stonn is taking any rego a guest had put on a permit back off now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)

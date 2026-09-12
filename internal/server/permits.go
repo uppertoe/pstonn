@@ -260,7 +260,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		case !visitor:
 			reason = "Only visitor permits can be scheduled."
 		case !p.CanChangeVehicle:
-			reason = "Your council account can't change this permit's vehicle."
+			reason = "Your council account can't change the rego on this permit."
 		}
 		// A permit another p.stonn account at this address already manages is visible
 		// here but cannot be taken (addPermit refuses it, claimedByAnotherAccount).
@@ -430,7 +430,7 @@ func (s *Server) visitorSchedulable(ctx context.Context, owner string, p parking
 }
 
 // fallbackWarn is the caution shown on a permit offered via the name fallback.
-const fallbackWarn = "This permit isn't named as a visitor permit, but the council allows its vehicle to be changed. " +
+const fallbackWarn = "This permit isn't named as a visitor permit, but the council allows its rego to be changed. " +
 	"Only add it if it's the permit your visitors park on."
 
 func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
@@ -499,7 +499,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !match.CanChangeVehicle {
-		s.message(w, http.StatusForbidden, "Your council account can't change the vehicle on that permit.")
+		s.message(w, http.StatusForbidden, "Your council account can't change the rego on that permit.")
 		return
 	}
 
@@ -821,7 +821,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	// offers the action then, and this is the authoritative refusal (a stale tab,
 	// a hand-built request). Checked before any claim or tenant call.
 	if !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
-		s.formError(w, r, "This council's permit can't be left with no vehicle on it — put a different car on instead.")
+		s.formError(w, r, "This council's permit can't be left with no rego on it. Put a different rego on instead.")
 		return
 	}
 	now := time.Now().In(s.locForPermit(r.Context(), p))
@@ -848,7 +848,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	if res := model.Resolve(now, p.Cycle(), rules, ovs); res.Source != model.SourceNone {
 		release()
-		s.formError(w, r, "This permit has a car scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
+		s.formError(w, r, "This permit has a rego scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
 		return
 	}
 	err := s.tenant.ClearVehicle(applyCtx, owner, p)
@@ -872,13 +872,13 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 			s.formError(w, r, "Couldn't reach the council just now — nothing was changed. Please try again shortly.")
 			return
 		}
-		s.formError(w, r, "The council didn't accept removing the vehicle. The account holder may need to reconnect their council login.")
+		s.formError(w, r, "The council didn't accept removing the rego. The account holder may need to reconnect their council login.")
 		return
 	}
-	_ = s.store.RecordApply(bg, p.ID, "", "manual", "success", "vehicle removed by "+user)
+	_ = s.store.RecordApply(bg, p.ID, "", "manual", "success", "rego removed by "+user)
 	s.logChange(bg, owner, user, store.ActionVehicleClear, label, "")
 	s.notifyDestructive(bg, owner, user,
-		user+" removed the car from the permit \""+label+"\". It now has no vehicle — nothing is covered on that permit until a car is set or scheduled.")
+		user+" removed the rego from the permit \""+label+"\". It now has no rego; nothing is covered on that permit until a rego is set or scheduled.")
 	s.respondPermit(w, r, owner, p)
 }
 

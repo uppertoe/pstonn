@@ -261,7 +261,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		rr := r.post(path, rigUser, nil)
-		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "has a car scheduled right now") {
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "has a rego scheduled right now") {
 			t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 		}
 		if reg, _ := r.fake.Current("90001"); reg != "SBX1AB" {

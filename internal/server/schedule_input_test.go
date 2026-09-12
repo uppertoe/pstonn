@@ -75,7 +75,7 @@ func TestSetRuleVehicleIDIsParsedStrictly(t *testing.T) {
 		t.Fatalf("Monday = vehicle %d, want %d", got, vid)
 	}
 	w := r.s.doHX(http.MethodPost, rules, user, origin, url.Values{"weekday": {"1"}, "vehicle_id": {"abc"}})
-	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "That car isn't valid") {
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "That saved rego isn't valid") {
 		t.Fatalf("garbage vehicle id = %d %q, want 422", w.Code, w.Body.String())
 	}
 	if got := monday(t); got != vid {

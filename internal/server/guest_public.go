@@ -598,7 +598,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if chosen == nil {
-			s.renderGuestMenu(w, r, gc, permit, current, "", "Please choose one of the cars on your link.")
+			s.renderGuestMenu(w, r, gc, permit, current, "", "Please choose one of the regos on your link.")
 			return
 		}
 		reg, name, createdBy, regState = chosen.Registration, chosen.Label, gc.Recipient, chosen.State
@@ -678,9 +678,9 @@ func guestRefusalMessage(err error, plate string, restoring bool) string {
 		return "The council wouldn't accept putting " + plate + " back, so nothing has changed. Please ask the resident to check the permit."
 	}
 	if d := provider.DetailOf(err); d != "" {
-		return "The council wouldn't accept " + plate + ": " + d + ". Nothing has changed on the permit — check the plate against the car, or ask the resident."
+		return "The council wouldn't accept " + plate + ": " + d + ". Nothing has changed on the permit. Check the rego against the car, or ask the resident."
 	}
-	return "The council wouldn't accept " + plate + " on this permit, so nothing has changed. Check the plate against the car, or ask the resident."
+	return "The council wouldn't accept " + plate + " on this permit, so nothing has changed. Check the rego against the car, or ask the resident."
 }
 
 // guestRevert restores the plate that was on the permit before this link's run
@@ -754,7 +754,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 			alog.Errorf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
 			s.kickScheduler()
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
-				"Your car was taken off the permit, but we couldn't put the previous one back automatically — it will be restored shortly.")
+				"Your rego was taken off the permit, but the previous one could not be put back automatically. It will be restored shortly.")
 			return
 		}
 	}
@@ -946,7 +946,7 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 		}
 		return d, false // undeliverable (or unknown): ask the account to pass it on
 	}
-	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, "another car has been put on it", time.Now()); err != nil {
+	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, "another rego has been put on it", time.Now()); err != nil {
 		alog.Infof("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return d, false
 	}
@@ -992,7 +992,7 @@ func (s *Server) renderStatus(w http.ResponseWriter, code int, data dashboardDat
 // that would be exactly as dead. What they need to hear is that the permit
 // itself is finished — parking on its say-so no longer protects anyone.
 func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request) {
-	const msg = "This permit is no longer active, so this code can't put cars on it right now. Please check with your host before parking."
+	const msg = "This permit is no longer active, so this code cannot put a rego on it right now. Please check with your host before parking."
 	if isHX(r) && !isBoosted(r) {
 		// The permit died mid-session: swap the menu for the notice in place.
 		noStore(w)

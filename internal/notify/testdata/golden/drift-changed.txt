@@ -2,7 +2,7 @@
 Dedup: drift|primary@example.com|primary@example.com|Visitor|AMY602|email|primary@example.com
 Subject: Your Visitor was changed to AMY602 at the council
 
-The car on your Visitor was changed to AMY602 at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
+The rego on your Visitor was changed to AMY602 at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
 
 https://p.stonn.org
 
@@ -10,7 +10,7 @@ https://p.stonn.org
 Dedup: drift|primary@example.com|primary@example.com|Visitor|AMY602|ntfy
 Subject: Your Visitor was changed to AMY602 at the council
 
-The car on your Visitor was changed to AMY602 at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
+The rego on your Visitor was changed to AMY602 at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
 
 https://p.stonn.org
 
@@ -18,7 +18,7 @@ https://p.stonn.org
 Dedup: drift|sam@example.com|primary@example.com|Visitor|AMY602|email|sam@example.com
 Subject: Your Visitor was changed to AMY602 at the council
 
-The car on your Visitor was changed to AMY602 at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
+The rego on your Visitor was changed to AMY602 at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.
 
 https://p.stonn.org
 

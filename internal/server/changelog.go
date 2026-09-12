@@ -123,7 +123,7 @@ func changeText(c store.Change) string {
 	case store.ActionOverrideDelete:
 		return "cancelled a one-off booking" + optional(c.Target, " for ")
 	case store.ActionVehicleAdd:
-		return "added the car " + c.Target
+		return "added the rego " + c.Target
 	case store.ActionVehicleDelete:
 		// Target can be empty when the plate could not be read at delete time; the
 		// row is still worth writing, so degrade to "a car" rather than a gap.
@@ -144,7 +144,7 @@ func changeText(c store.Change) string {
 	case store.ActionReferralSend:
 		return "sent a p.stonn invitation to " + c.Target
 	case store.ActionVehicleClear:
-		return "removed the car from " + c.Target + ", leaving it with no vehicle"
+		return "removed the rego from " + c.Target + ", leaving it with no rego"
 	case store.ActionGuestCreate:
 		return "created a guest pass" + optional(c.Target, " for ")
 	case store.ActionGuestUpdate:

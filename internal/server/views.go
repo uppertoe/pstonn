@@ -1031,7 +1031,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// the plain signup rendering: wrongly quiet beats wrongly alarming.
 		if known, err := s.store.HasOwnData(ctx, owner); err == nil && known {
 			base.Relink = true
-			base.Warn = "Your permit schedule is paused: p.stonn is not connected to the council, so no plate changes are being made. Reconnect below to resume it."
+			base.Warn = "Your permit schedule is paused: p.stonn is not connected to the council, so no changes are being made to the permit. Reconnect below to resume it."
 		} else if err == nil && s.cfg.MaxAccounts > 0 {
 			// A genuinely new household gets the capacity refusal HERE, before
 			// terms and a typed password — tenantLink re-checks under the

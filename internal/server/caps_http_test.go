@@ -35,7 +35,7 @@ func TestPortalThatCannotClearOverHTTP(t *testing.T) {
 		t.Fatalf("the state chooser vanished with the clear action:\n%s", excerpt(page))
 	}
 	rr := r.post(clearPath, rigUser, nil)
-	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "be left with no vehicle on it") {
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "be left with no rego on it") {
 		t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 	}
 	if reg, _ := r.fake.Current("90001"); reg != "SBX1AB" {

@@ -4,7 +4,7 @@ Provenance: You received this at primary@example.com because this address manage
 
 p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
 
-That means any change your schedule should make will not happen: if a different car needs to be on the permit, change the vehicle yourself on the council website now, or that car is not covered and can be fined.
+That means any change your schedule should make will not happen: if a different rego needs to be on the permit, change it yourself on the council website now, or that car is not covered and can be fined.
 
 p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
 
@@ -18,7 +18,7 @@ Tags: warning
 
 p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
 
-That means any change your schedule should make will not happen: if a different car needs to be on the permit, change the vehicle yourself on the council website now, or that car is not covered and can be fined.
+That means any change your schedule should make will not happen: if a different rego needs to be on the permit, change it yourself on the council website now, or that car is not covered and can be fined.
 
 p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
 
@@ -31,7 +31,7 @@ Provenance: You received this at sam@example.com because this address manages, o
 
 p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
 
-That means any change your schedule should make will not happen: if a different car needs to be on the permit, change the vehicle yourself on the council website now, or that car is not covered and can be fined.
+That means any change your schedule should make will not happen: if a different rego needs to be on the permit, change it yourself on the council website now, or that car is not covered and can be fined.
 
 p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
 

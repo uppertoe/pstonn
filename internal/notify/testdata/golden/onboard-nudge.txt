@@ -2,7 +2,7 @@
 Subject: One step left to start managing your visitor permit
 Provenance: You received this at guest@example.com because you signed up for p.stonn with it but haven't connected a council account yet. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly plate schedule, guest QR codes and one-off bookings all start from that one connection.
+You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly roster, guest QR codes and one-off bookings all start from that one connection.
 
 Connecting takes one sign-in with your City of Stonnington ePermits details. Three things trip most people up:
 
@@ -16,7 +16,7 @@ https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword
 Open p.stonn in Safari or Chrome:
 https://p.stonn.org
 
-One thing to know: p.stonn manages VISITOR permits only — the permit your guests' cars go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.
+One thing to know: p.stonn manages VISITOR permits only — the permit your visitors' regos go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.
 
 No ePermits account or visitor permit yet? Apply for a visitor permit on the council's ePermits site first, then come back.
 Register with the council:

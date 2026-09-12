@@ -33,7 +33,7 @@ X-Frame-Options: DENY
 <meta name="twitter:description" content="City of Stonnington visitor parking permits are digital by default: nothing to display, but the number plate has to be right before each visitor parks. What that means in practice.">
 <meta name="twitter:image" content="https://p.stonn.org/static/og-card.png?v=550ff9b10f">
 
-<script type="application/ld+json" nonce="NONCE">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","acceptedAnswer":{"@type":"Answer","text":"Not usually. Permits are digital by default: there's nothing to display, and parking officers check the plate against your permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access."},"name":"Do visitors need a paper permit in Stonnington?"}]}</script>
+<script type="application/ld+json" nonce="NONCE">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","acceptedAnswer":{"@type":"Answer","text":"Not usually. Permits are digital by default: there's nothing to display, and parking officers check your rego against the permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access."},"name":"Do visitors need a paper permit in Stonnington?"}]}</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=550ff9b10f">
 <link rel="apple-touch-icon" href="/static/icon-180.png?v=550ff9b10f">
@@ -345,8 +345,8 @@ window.popClamp = window.popClamp || function (el) {
       </ol>
     </nav>
     <h1 class="about-h1">Do visitors need a paper permit in Stonnington?</h1>
-    <p>Not usually. Permits are digital by default: there&#39;s nothing to display, and parking officers check the plate against your permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.</p>
-    <h2 class="about-h2">To see which plate is on your permit now</h2>
+    <p>Not usually. Permits are digital by default: there&#39;s nothing to display, and parking officers check your rego against the permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.</p>
+    <h2 class="about-h2">To see which rego is on your permit now</h2>
     <div class="guide-council">
       <ol class="guide-steps">
         <li>Sign in at <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer">parkingpermits.stonnington.vic.gov.au</a> — <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/Register" target="_blank" rel="noopener noreferrer">register</a> first if you haven’t, or <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer">reset your password</a> if you’ve never used it.</li><li>Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.</li><li>If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.</li>
@@ -356,13 +356,13 @@ window.popClamp = window.popClamp || function (el) {
     <p>Physical permits: see <a href="https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits" target="_blank" rel="noopener noreferrer">the council’s visitor-permit page</a> for the exceptional-circumstances application, or ring 03 8290 1333.</p>
     <h2 class="about-h2">With p.stonn</h2>
     <div class="feature" style="margin-top:8px">
-      <div class="feature-text"><p>A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who&#39;s covered.</p></div>
+      <div class="feature-text"><p>A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the rego changes, so you know who&#39;s covered.</p></div>
       <div class="feature-demo">
         
         <figure class="dm" data-demo="oneoff">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> One-off booking</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-fld"><div class="k">Car</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
+          <div class="dm-fld"><div class="k">Rego</div><div class="val"><span class="dm-fade"><span class="dm-dot" style="background:var(--v2)"></span> <span class="dm-rego">XYZ789</span> <span class="dm-cname">Nanny</span></span></div></div>
           <div class="dm-fld"><div class="k">From</div><div class="val"><span class="dm-fade">Sat 12 Jul, 9:00am</span></div></div>
           <div class="dm-fld"><div class="k">Until</div><div class="val"><span class="dm-fade">Sun 13 Jul, 6:00pm</span></div></div>
           <div class="dm-btn"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Book</div>

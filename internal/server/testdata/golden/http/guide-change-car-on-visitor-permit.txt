@@ -356,7 +356,7 @@ window.popClamp = window.popClamp || function (el) {
     <p>You can also ring the council on 03 8290 1333 to have the vehicle changed.</p>
     <h2 class="about-h2">With p.stonn</h2>
     <div class="feature" style="margin-top:8px">
-      <div class="feature-text"><p>Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.</p></div>
+      <div class="feature-text"><p>Set it once. A weekly roster puts the right rego on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own rego on when they arrive.</p></div>
       <div class="feature-demo">
         
         <figure class="dm" data-demo="roster">
@@ -364,7 +364,7 @@ window.popClamp = window.popClamp || function (el) {
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> This week</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
           <div class="dm-picker">
-            <div class="ph">Which car?</div>
+            <div class="ph">Which rego?</div>
             <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
             <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
             <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>

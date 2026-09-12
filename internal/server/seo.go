@@ -47,7 +47,7 @@ func faqFor(c tenantView) []faqItem {
 	return []faqItem{
 		{
 			"Can I set up recurring visitor parking for a carer or family member?",
-			"Yes. Set a weekly roster — say a carer's car every Tuesday and Thursday — or share a permanent guest link so a trusted person can put their own car on the permit when they arrive, with no account needed on their end.",
+			"Yes. Set a weekly roster — say a carer's rego every Tuesday and Thursday, or share a permanent guest link so a trusted person can put their own rego on the permit when they arrive, with no account needed on their end.",
 		},
 		{
 			trText(c, "faq.affiliated_q"),
@@ -160,7 +160,7 @@ func (s *Server) llmsTxt(w http.ResponseWriter, r *http.Request) {
 		"a weekly roster for regular visitors, one-off bookings, an on-screen QR code a "+
 		"visitor scans at the door, a printable QR code that asks the resident to approve "+
 		"each visitor, and standing guest links for family and carers. It changes only "+
-		"which car is on the permit, exactly as the resident could by hand on the council's "+
+		"which rego is on the permit, exactly as the resident could by hand on the council's "+
 		"site. It is not run by or affiliated with the council.\n\n", c.Name, c.Terms["portal"])
 	b.WriteString("## Pages\n\n")
 	for _, p := range []struct{ path, title, desc string }{
@@ -315,7 +315,7 @@ func guidesFor(c tenantView) []guidePage {
 			Steps: append(append([]template.HTML{}, steps...),
 				template.HTML(`Repeat for each new visitor, before they park.`)),
 			TenantNote: tr(c, "guide.change_note", nil, nil),
-			Pstonn:     "Set it once. A weekly roster puts the right car on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own car on when they arrive.",
+			Pstonn:     "Set it once. A weekly roster puts the right rego on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own rego on when they arrive.",
 			Demo:       "roster",
 		},
 		{
@@ -324,12 +324,12 @@ func guidesFor(c tenantView) []guidePage {
 			Desc:  trText(c, "guide.carer_desc"),
 			H1:    trText(c, "guide.carer_h1"),
 			Paras: []string{
-				"A visitor permit covers one car at a time, so for someone who comes every week the vehicle has to be updated before each visit. If it isn't, they will not be covered by the permit.",
+				"A visitor permit covers one rego at a time, so for someone who comes every week the rego has to be updated before each visit. If it isn't, they will not be covered by the permit.",
 			},
 			TenantHeading: "At the council, each visit",
 			Steps:         steps,
 			TenantNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
-			Pstonn:        "Put their day on the weekly roster and the permit switches to their car that morning. Or send them a link, and they put their car on themselves when they pull up — no account, nothing for them to set up.",
+			Pstonn:        "Put their day on the weekly roster and the permit switches to their rego that morning. Or send them a link, and they put their rego on themselves when they pull up — no account, nothing for them to set up.",
 			Demo:          "guest",
 		},
 		{
@@ -338,16 +338,16 @@ func guidesFor(c tenantView) []guidePage {
 			Desc:  trText(c, "guide.paper_desc"),
 			H1:    trText(c, "guide.paper_h1"),
 			Paras: []string{
-				"Not usually. Permits are digital by default: there's nothing to display, and parking officers check the plate against your permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.",
+				"Not usually. Permits are digital by default: there's nothing to display, and parking officers check your rego against the permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.",
 			},
-			TenantHeading: "To see which plate is on your permit now",
+			TenantHeading: "To see which rego is on your permit now",
 			Steps: []template.HTML{
 				steps[0],
 				template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
 				template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
 			},
 			TenantNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
-			Pstonn:     "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the plate changes, so you know who's covered.",
+			Pstonn:     "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the rego changes, so you know who's covered.",
 			Demo:       "oneoff",
 		},
 		{

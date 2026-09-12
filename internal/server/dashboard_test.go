@@ -613,10 +613,10 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"activity-source-label", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			App: &appData{Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now}}},
 		}, "weekly roster"},
-		// A removal has no plate: it reads "plate removed", not "manual" with an empty pill.
+		// A removal has no plate: it reads "rego removed", not "manual" with an empty pill.
 		{"activity-removal", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			App: &appData{Log: []store.ApplyRecord{{PermitID: 7, Registration: "", Source: "manual", Status: "success", Detail: "vehicle removed by a@b.com", At: now}}},
-		}, "plate removed"},
+		}, "rego removed"},
 		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{RelinkBy: "15 Oct 2026"}}, "Council connection"},
 		{"settings-quiet-hours", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
 			Settings: &settingsData{Notify: notifyView{EmailAvailable: true, EmailEnabled: true, QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}}, "hold overnight notices"},
