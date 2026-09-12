@@ -62,3 +62,15 @@
   </div>
 </header>
 {{end}}
+
+{{define "checklist"}}{{/* The per-tab what-you-can-do card. Fixed row height so a
+     tick never moves anything; the whole card leaves only on a fresh page load
+     (it is rendered from server state, never swapped live) or when dismissed.
+     Dismiss is remembered per browser, like the other hint strips. */}}
+{{if .Checklist}}<section class="todo" x-data="{hide: localStorage.getItem('pstonn-check-{{.Checklist.Key}}')==='1'}" x-show="!hide" x-cloak aria-label="Things to try on this page">
+  <div class="todo-head"><span class="todo-title">Still to try</span><span class="todo-count">{{.Checklist.Done}} of {{len .Checklist.Items}} done</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss" @click="hide=true; localStorage.setItem('pstonn-check-{{.Checklist.Key}}','1')">{{template "ic-x"}}</button></div>
+  <ul class="todo-list">
+  {{range .Checklist.Items}}<li class="{{if .Done}}done{{end}}">{{if .Done}}<span class="todo-tick">{{template "ic-check"}}</span><span>{{.Label}}</span>{{else}}<span class="todo-ring"></span><a href="{{.Href}}"{{if eq .Href "/schedule?book=1"}} hx-boost="false"{{end}}>{{.Label}}</a>{{end}}</li>
+  {{end}}</ul>
+</section>{{end}}{{end}}

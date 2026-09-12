@@ -2,6 +2,7 @@
   {{/* ---------- SETTINGS ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Settings</div>
   <p class="subtitle">Your council connection and account.</p>
+  {{template "checklist" .}}
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-link"}}</span> Council connection</h2>
     {{if .IsPrimary}}
@@ -58,7 +59,7 @@
   {{- end}}
   {{if .Invite}}{{template "invite-card" .}}{{end}}
   <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic">{{template "ic-user"}}</span> Shared access</h2>
+    <h2 id="shared"><span class="ic">{{template "ic-user"}}</span> Shared access</h2>
     {{if .IsPrimary}}
     <p class="subtitle">Let up to two other people help manage this account. They sign in with their own email, so there is nothing to share but the access itself.</p>
     {{if .Members}}
@@ -98,7 +99,7 @@
     {{end}}
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
-    <h2><span class="ic">{{template "ic-bell"}}</span> Notifications</h2>
+    <h2 id="notifications"><span class="ic">{{template "ic-bell"}}</span> Notifications</h2>
     <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
     {{if or .Settings.Notify.EmailAvailable .Settings.Notify.NtfyAvailable}}
     <div id="notify-body">{{template "notify-body" .Settings.Notify}}</div>
@@ -115,7 +116,7 @@
     </div>
     <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
     {{if .IsPrimary}}
-    <form method="post" action="/account/household-name" class="row" style="margin-top:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+    <form method="post" action="/account/household-name" id="household" class="row" style="margin-top:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
       <label class="fld" style="flex:1 1 220px;margin:0"><span>Household name</span>
         <input type="text" name="household_name" value="{{.Settings.HouseholdName}}" maxlength="40" placeholder="e.g. the Nguyens" autocomplete="off">
       </label>

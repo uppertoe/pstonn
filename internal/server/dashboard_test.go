@@ -149,11 +149,6 @@ func TestTemplatesRender(t *testing.T) {
 			t.Fatalf("permit-body output missing %q", want)
 		}
 	}
-	// With ShowSetupNudge unset (the sample has a roster), the empty-schedule nudge
-	// must be absent — a QR-only or already-scheduled household never sees it.
-	if strings.Contains(buf.String(), "Nothing is scheduled yet") {
-		t.Fatal("setup nudge shown when ShowSetupNudge is false")
-	}
 	// The teleported modals must NOT live in the swap fragment. Every card
 	// re-render (the plate poll's timer swap, roster edits, one-off add/delete)
 	// replaces #pbody with a fresh permit-body — if a modal were inside it, that
@@ -590,14 +585,6 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Cancelled"}}},
 		}, "Got a new permit instead?"},
-		{"schedule-share-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			App:      &appData{ShowShareHint: true, Permits: []permitView{samplePermitViewAt(loc, now)}},
-		}, "Shared access"},
-		{"schedule-guest-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
-			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
-			App:      &appData{ShowGuestHint: true, Permits: []permitView{samplePermitViewAt(loc, now)}},
-		}, "guest pass"},
 		{"schedule-passiton-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{ShowPassItOnHint: true, Permits: []permitView{samplePermitViewAt(loc, now)}},
@@ -817,12 +804,6 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
 			return p
 		}, `usually ABC123`},
-		// The empty-schedule setup nudge shows only when ShowSetupNudge is set.
-		{"setup-nudge-shown", func() permitView {
-			p := samplePermitViewAt(loc, now)
-			p.ShowSetupNudge = true
-			return p
-		}, `Nothing is scheduled yet`},
 		// A cycling roster renders the week tabs (with the "now" mark on the
 		// current week), per-week panes, and the labelled calendar rows.
 		{"cycle-tabs", func() permitView {

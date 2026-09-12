@@ -117,6 +117,8 @@ type dashboardData struct {
 	// the schedule, did not find the bare "+" within 25 seconds and went hunting
 	// through Guests for a way to put the car on the permit.
 	BookFAB bool
+	// Checklist is the tab's quiet what-you-can-do card (nil when all done).
+	Checklist *checklistView
 	// NeedsRegos marks the Regos tab with a dot while the account has a permit
 	// but no saved rego: the one thing a new household must do next.
 	NeedsRegos bool
@@ -223,22 +225,11 @@ type appData struct {
 	// button on the Vehicles and Guests pages sends; the link pushes the bare
 	// /schedule URL so a refresh does not reopen it.
 	OpenBook bool
-	// ShowShareHint puts a quiet shared-access pointer on the Schedule page for a
-	// primary with no members. The feature's only other surface is a card in
-	// Settings, which new households demonstrably never open; the hint is
-	// server-gated here and dismissed per-browser in the template (localStorage),
-	// because seeing it once more on a new device is harmless.
-	ShowShareHint bool
 	// ShowInstallHint offers the add-to-home-screen tip on the Schedule page once
 	// the household has had a successful apply (the morning glance is the dominant
 	// use, and a home-screen icon makes it one tap). Dismissed per browser in the
 	// template; hidden by the template when already running standalone.
 	ShowInstallHint bool
-	// ShowGuestHint points a household at guest passes once its behaviour proves
-	// the need: several one-off bookings and no guest activity means someone is
-	// manually doing exactly what a guest link automates. Server-gated on the
-	// change log, dismissed per-browser in the template like the other hints.
-	ShowGuestHint bool
 	// ShowPassItOnHint puts the referral pointer on the Schedule page once the
 	// household has passItOnHintAfterApplies successful council writes behind it
 	// — the ask to vouch for p.stonn waits until the tool has earned it. Links
@@ -727,7 +718,10 @@ type permitView struct {
 	// never on a council name: a new tenant whose portal differs gets the right UI
 	// by declaring so in its connector.
 	Caps capsView
-	// ShowSetupNudge gates the "nothing scheduled yet" banner: an empty roster with
+	// ShowSetupNudge marks an empty schedule with no guest activity. The banner it
+	// once gated is gone (the per-tab checklist carries that role); kept as the
+	// signal buildPermitView computes, for the next surface that needs it.
+	// Originally: an empty roster with
 	// no one-off bookings AND no history of using the guest/QR path. A QR-only
 	// household is using the permit as intended, so the nudge is suppressed for them.
 	ShowSetupNudge bool

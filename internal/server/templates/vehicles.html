@@ -2,6 +2,7 @@
   {{/* ---------- VEHICLES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic">{{template "ic-cars"}}</span> Regos</div>
   <p class="subtitle">The regos of the people who visit you. Each gets a colour that is used across the schedule.</p>
+  {{template "checklist" .}}
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
       {{range .Vehicles}}
@@ -41,7 +42,7 @@
       <p class="empty-note">No regos saved yet. Add the regos of the people who visit you.</p>
       {{end}}
     </div>
-    <form method="post" action="/regos" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
+    <form method="post" action="/regos" id="add" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
       <input class="grow" name="label" placeholder="Label (e.g. Nana)" required>
       <input name="registration" placeholder="REGO" required maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase;width:130px">
       {{if .Regions}}<select name="state" class="vstate" aria-label="{{T "vehicle.state_label" .}}" title="{{T "vehicle.state_label" .}}">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>{{end}}

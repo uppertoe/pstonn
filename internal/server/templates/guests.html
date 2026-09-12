@@ -2,6 +2,7 @@
   {{/* ---------- GUEST PASSES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
   <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
+  {{template "checklist" .}}
   {{if .QR}}
   {{/* ---- ON-SCREEN VISITOR QR ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
@@ -127,10 +128,10 @@
   {{end}}
 
   {{if .GuestMgmt.PermitOpts}}
-  <section class="card" style="--hue:var(--sec-schedule)">
+  <section class="card" id="now" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Visitor just arrived?</h2>
     <p class="subtitle">Let a visitor, a tradie or a friend, put <em>their own rego</em> on the permit. No saved rego is needed.</p>
-    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a rego on straight away), and a printed code only ever <em>asks</em> you to approve each scan, so nothing goes on the permit until you say yes.</p>
+    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a rego on straight away), and a printed code makes your phone ask you to confirm each scan, so nothing goes on the permit until you say yes.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
         <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter their rego, and it goes on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
@@ -140,7 +141,7 @@
         <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
       </form>
       <form method="post" action="/guests/printed" class="qropt">
-        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Stick it on the fridge, or wherever your visitors will see it. A scan only <em>asks</em> you to approve. It keeps working until you remove it.</span></div>
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Stick it on the fridge, or wherever your visitors will see it. Each scan asks you to confirm on your phone. It keeps working until you remove it.</span></div>
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
@@ -306,7 +307,7 @@
     </div>
     <div class="poster-body">
       <h1 class="poster-title">Visitor parking permit</h1>
-      <p class="poster-lead">Scan to ask to use this parking permit</p>
+      <p class="poster-lead">Scan to use this parking permit. The household confirms on their phone.</p>
       <div class="poster-qbox"><img src="{{.DoorQR.ImageURI}}" alt="Scan to request the visitor parking permit" width="240" height="240"></div>
       <ol class="poster-steps">
         <li>Point your phone camera at the code</li>

@@ -24,6 +24,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	owner := base.Owner
 	user := base.User.Email // the signed-in person; notification prefs are theirs
 	base.Settings = &settingsData{}
+	base.Checklist = s.checklistFor(ctx, owner, user, "settings")
 	base.Settings.HouseholdName = s.householdOrEmpty(ctx, owner)
 	if r.URL.Query().Get("named") == "1" {
 		if base.Settings.HouseholdName == "" {

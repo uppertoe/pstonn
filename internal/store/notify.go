@@ -33,6 +33,14 @@ func (p NotifyPref) NtfyConfirmed() bool { return p.NtfyConfirmedAt != "" }
 
 // GetNotifyPref returns the user's notification preferences, or a sensible
 // default (email on, ntfy off) when they have never set them.
+// HasNotifyPref reports whether this person has ever saved their notification
+// settings (a row exists), as opposed to living on the defaults.
+func (s *Store) HasNotifyPref(ctx context.Context, owner string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notify_pref WHERE owner = ?`, owner).Scan(&n)
+	return n > 0, err
+}
+
 func (s *Store) GetNotifyPref(ctx context.Context, owner string) (NotifyPref, error) {
 	p := NotifyPref{Owner: owner, EmailEnabled: true, QuietFrom: 22, QuietUntil: 6}
 	var email, ntfy, failures int

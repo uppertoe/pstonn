@@ -30,11 +30,6 @@ func councilTroubled(state string) bool {
 	return false
 }
 
-// guestHintAfterOverrides is how many one-off bookings a household makes before
-// the Schedule page points it at guest passes. Three within the change log's
-// 90-day window reads as a habit; one or two could be a single visit.
-const guestHintAfterOverrides = 3
-
 // passItOnHintAfterApplies is how many successful council writes a household has
 // before the Schedule page suggests passing p.stonn on. Higher than the guest
 // hint's threshold on purpose: a referral asks the household to vouch for the
@@ -148,14 +143,6 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 		base.CouncilTrouble = true
 		base.CouncilName = s.tenantViewFor(ctx, owner).Name
 	}
-	// Shared-access hint: only for a primary far enough along to have a live
-	// permit card on screen, with no members yet. A pending invite counts as a
-	// member here — that household has already found the feature.
-	if base.IsPrimary && len(pvs) > 0 {
-		if n, cerr := s.store.CountMembers(ctx, owner); cerr == nil && n == 0 {
-			base.App.ShowShareHint = true
-		}
-	}
 	// The home-screen tip waits for the first successful apply: it drip-feeds the
 	// setup information rather than piling every tip on at once, and by then the
 	// household has something worth glancing at, so it lands as a reward rather than
@@ -171,17 +158,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// Guest-pass pointer, gated on proven need: a household that keeps making
-	// one-off bookings but has never touched a guest surface is doing by hand
-	// what a guest link automates. The activity check runs only once the booking
-	// habit is established, so set-up households cost nothing extra here.
-	if len(pvs) > 0 {
-		if n, cerr := s.store.CountChanges(ctx, owner, store.ActionOverrideAdd); cerr == nil && n >= guestHintAfterOverrides {
-			if ga, gerr := s.store.HasGuestActivity(ctx, owner); gerr == nil && !ga {
-				base.App.ShowGuestHint = true
-			}
-		}
-	}
+	base.Checklist = s.checklistFor(ctx, owner, base.User.Email, "schedule")
 	s.render(w, base)
 }
 
