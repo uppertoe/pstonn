@@ -365,6 +365,18 @@ WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
 }
 
 // ListGuestGrants returns the owner's grants with their cars and recipient tokens.
+// GuestGrantKinds counts the account's grants by kind: emailed passes, printed
+// (request-only) QRs and on-screen visitor QRs. The rows are durable where the
+// change log is pruned, so "has this household ever used X" is read from here.
+func (s *Store) GuestGrantKinds(ctx context.Context, owner string) (passes, printed, onScreen int, err error) {
+	err = s.db.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(on_screen = 0 AND request_only = 0), 0),
+       COALESCE(SUM(request_only = 1), 0),
+       COALESCE(SUM(on_screen = 1), 0)
+FROM guest_grant WHERE owner = ?`, owner).Scan(&passes, &printed, &onScreen)
+	return
+}
+
 func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrantDetail, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 AND request_only = 0 ORDER BY id DESC`, owner)

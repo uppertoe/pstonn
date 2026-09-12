@@ -70,10 +70,14 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 			{Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add", Done: email},
 		}
 	case "guests":
+		// The grant rows outlive the change log (pruned at 90 days, and younger than
+		// some accounts), so each line reads the durable row first and the log only
+		// as a second opinion.
+		passes, printed, shown, _ := s.store.GuestGrantKinds(ctx, owner)
 		items = []checkItem{
-			{Label: "Show a visitor QR to someone at the door", Href: "#now", Done: did(store.ActionDoorQRShow)},
-			{Label: "Send a guest pass to a household that visits often", Href: "#new", Done: did(store.ActionGuestCreate)},
-			{Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: did(store.ActionDoorQRCreate)},
+			{Label: "Show a visitor QR to someone at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
+			{Label: "Send a guest pass to a household that visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
+			{Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
 		}
 	case "settings":
 		permits, _ := s.store.ListPermitsFor(ctx, owner)
