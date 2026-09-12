@@ -468,6 +468,18 @@ CREATE TABLE IF NOT EXISTS contact_message (
     received_at TEXT NOT NULL
 );
 
+-- Once-ever milestones for the per-tab "still to try" lines: the first booking,
+-- the first roster day, and so on. Written when first observed and NEVER pruned,
+-- because every other record of those events (account_log, override, apply_log)
+-- ages out at 90 days and would tell a long-time household to try what it has
+-- done for months. Removed only with the account.
+CREATE TABLE IF NOT EXISTS account_milestone (
+    owner TEXT NOT NULL,
+    key   TEXT NOT NULL,
+    at    TEXT NOT NULL,
+    PRIMARY KEY (owner, key)
+);
+
 -- The fleet circuit breaker's pause, persisted so a restart cannot clear it. If
 -- Azure Front Door blocks our egress IP the breaker opens; a deploy that recreates
 -- the container would otherwise wipe that in-memory state and resume full traffic

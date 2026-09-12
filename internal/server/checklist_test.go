@@ -64,6 +64,14 @@ func TestChecklistTicksAndRetires(t *testing.T) {
 	if m := s.checklistFor(ctx, owner, owner, false, "settings"); m == nil || len(m.Items) != 2 {
 		t.Fatalf("member settings card = %+v, want the two lines a member can act on", m)
 	}
+	// A milestone outlives its evidence: once the guests line ticked from the
+	// change log, pruning that log leaves it ticked.
+	if _, err := s.store.PruneChangeLog(ctx, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.checklistFor(ctx, owner, owner, true, "guests"); v == nil || !v.Items[0].Done {
+		t.Fatalf("guests line lost after the log was pruned: %+v", v)
+	}
 	if s.checklistFor(ctx, owner, owner, true, "activity") != nil {
 		t.Fatal("a tab without a card returned one")
 	}

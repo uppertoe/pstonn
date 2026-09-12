@@ -64,6 +64,9 @@ func (s *Store) DeleteAllForOwner(ctx context.Context, owner string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM guest_request WHERE owner = ?`, owner); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM account_milestone WHERE owner = ?`, owner); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM account_flags WHERE owner = ?`, owner); err != nil {
 		return err
 	}

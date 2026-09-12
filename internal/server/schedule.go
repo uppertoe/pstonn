@@ -1091,6 +1091,9 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		window += " until " + windowEndText(*endsAt, s.locForPermit(r.Context(), p))
 	}
 	s.logChange(r.Context(), owner, user, store.ActionOverrideAdd, reg, window)
+	// The once-ever marker for the schedule's "make a booking" line, written at
+	// the moment rather than inferred later from rows that age out at 90 days.
+	_ = s.store.MarkMilestone(r.Context(), owner, "booking")
 	s.sched.KickPermit(p.ID)
 	s.respondPermit(w, r, owner, p)
 }
