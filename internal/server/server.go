@@ -346,6 +346,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /tenant/forget-password", guardUser, s.tenantForgetPassword)
 	s.handle(mux, "POST /account/delete", guardUser, s.accountDelete) // allow leaving without re-consent
 	s.handle(mux, "POST /account/members", guardConsent, s.addMember)
+	s.handle(mux, "POST /account/household-name", guardConsent, s.setHouseholdName)
 	s.handle(mux, "POST /account/members/remove", guardConsent, s.removeMember)
 	s.handle(mux, "POST /account/leave", guardUser, s.leaveAccount) // secondary can always leave
 	// Answering an invitation is the invited person's own consent step, and it must

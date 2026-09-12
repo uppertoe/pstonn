@@ -59,7 +59,7 @@
     "mail.nudge_password": "1. The {{.Tenant.Terms.portal}} password. Forgot it — or never set one?",
     "mail.nudge_email": "2. An {{.Tenant.Terms.portal}} account under a different email address. p.stonn can only connect to the {{.Tenant.Terms.portal}} account registered under the address you signed up with ({{.To}}). If your council account uses a different address, sign in to p.stonn with that one instead.",
     "mail.nudge_apply": "No {{.Tenant.Terms.portal}} account or visitor permit yet? Apply for a visitor permit on the council's {{.Tenant.Terms.portal_site}} first, then come back.",
-    "mail.guest_lead": "{{.Owner}} has given you a link to put a car on their {{.Tenant.Name}} visitor parking permit ({{.Label}}).",
+    "mail.guest_lead": "This link from {{.Owner}} lets you put a rego on their {{.Tenant.Name}} visitor parking permit ({{.Label}}).",
     "mail.guest_promo": "Got a visitor permit of your own? p.stonn is free for {{.Tenant.Name}} residents — p.stonn.org",
     "mail.fortnight_line": "If it's been handy, you might know someone else in {{.Tenant.Short}} with a visitor permit who'd get some use out of it too.",
     "mail.referral_lead": "{{.Sender}} uses p.stonn to look after their {{.Tenant.Name}} visitor parking permit, and thought it might be useful for you too.",

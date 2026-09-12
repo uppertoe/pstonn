@@ -414,7 +414,7 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 	}
 	base.State = "doorqr"
 	base.DoorQR = &doorQRView{
-		GrantID: g.GrantID, PermitLabel: g.PermitLabel, OwnerEmail: owner,
+		GrantID: g.GrantID, PermitLabel: g.PermitLabel,
 		ImageURI: template.URL(img), URL: url,
 		CreatedAt: g.CreatedAt.In(s.locFor(r.Context(), owner)).Format("2 Jan 2006"),
 	}

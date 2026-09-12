@@ -622,7 +622,7 @@ func (s *Server) emailLinks(ctx context.Context, owner, tenantID, permitLabel st
 			alog.Infof("guest link email to %s for %s throttled", notify.RedactEmail(l.Email), notify.RedactEmail(owner))
 			continue
 		}
-		if err := s.notify.SendGuestLink(ctx, l.Email, owner, tenantID, permitLabel, l.URL); err == nil {
+		if err := s.notify.SendGuestLink(ctx, l.Email, owner, s.householdOrEmpty(ctx, owner), tenantID, permitLabel, l.URL); err == nil {
 			sent++
 		} else {
 			alog.Infof("guest link email to %s for %s: %v", notify.RedactEmail(l.Email), notify.RedactEmail(owner), err)

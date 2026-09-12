@@ -515,6 +515,7 @@ button:disabled { opacity:.55; cursor:progress; }
    height) so the "on permit now" row keeps identical geometry with or without a
    car — a plain text label sat at a different height and read as misaligned. A
    dashed, muted outline signals "no plate here" rather than naming one. */
+.plate.masked { letter-spacing:2px; color:var(--muted); border-style:dashed; background:transparent; }
 .noplate { font-size:13px; letter-spacing:.2px; padding:4px 9px; border-radius:6px; border:2px dashed var(--line); color:var(--muted); white-space:nowrap; display:inline-block; }
 /* Guest-pass management */
 .grants { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }

@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=550ff9b10f">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=550ff9b10f">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=86f2628c11">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=86f2628c11">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=550ff9b10f">
+<link rel="stylesheet" href="/static/app.css?v=86f2628c11">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=550ff9b10f"></script>
-<script defer src="/static/alpine.min.js?v=550ff9b10f"></script>
+<script src="/static/htmx.min.js?v=86f2628c11"></script>
+<script defer src="/static/alpine.min.js?v=86f2628c11"></script>
 
 
 <script>
@@ -446,6 +446,15 @@ window.popClamp = window.popClamp || function (el) {
       <a href="https://auth.example.com/logout"><button type="button" class="ghost"><svg viewBox="0 0 24 24"><path d="M15 5h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-3M10 12h9M16 9l3 3-3 3"/></svg> Sign out</button></a>
     </div>
     <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
+    
+    <form method="post" action="/account/household-name" class="row" style="margin-top:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+      <label class="fld" style="flex:1 1 220px;margin:0"><span>Household name</span>
+        <input type="text" name="household_name" value="" maxlength="40" placeholder="e.g. the Nguyens" autocomplete="off">
+      </label>
+      <button type="submit" class="ghost">Save</button>
+    </form>
+    <p class="empty-note" style="margin-top:6px">Shown to your visitors instead of your email, on guest links and QR pages. Leave it blank and they see only the permit.</p>
+    
     <p class="empty-note" style="margin-top:8px">Terms accepted: v2026-07-18 on 18 Jul 2026.</p>
     
     

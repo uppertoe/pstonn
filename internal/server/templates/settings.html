@@ -114,6 +114,15 @@
       {{if .LogoutURL}}<a href="{{.LogoutURL}}"><button type="button" class="ghost">{{template "ic-logout"}} Sign out</button></a>{{end}}
     </div>
     <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
+    {{if .IsPrimary}}
+    <form method="post" action="/account/household-name" class="row" style="margin-top:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+      <label class="fld" style="flex:1 1 220px;margin:0"><span>Household name</span>
+        <input type="text" name="household_name" value="{{.Settings.HouseholdName}}" maxlength="40" placeholder="e.g. the Nguyens" autocomplete="off">
+      </label>
+      <button type="submit" class="ghost">Save</button>
+    </form>
+    <p class="empty-note" style="margin-top:6px">Shown to your visitors instead of your email, on guest links and QR pages. Leave it blank and they see only the permit.</p>
+    {{end}}
     {{if .Terms.Accepted}}<p class="empty-note" style="margin-top:8px">Terms accepted: {{.Terms.Accepted}}.</p>{{end}}
     {{/* A signed-in person had no way to reach the contact form: it is linked from the
          public header and from the footer of outgoing mail, neither of which is in

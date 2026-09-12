@@ -43,9 +43,10 @@ const (
 	ActionRequestOK    = "request.approve"
 	ActionRequestNo    = "request.deny"
 	// Shared access
-	ActionMemberAdd    = "member.add"
-	ActionMemberRemove = "member.remove"
-	ActionMemberLeave  = "member.leave"
+	ActionMemberAdd     = "member.add"
+	ActionHouseholdName = "household.name" // target = the new name, "" when cleared
+	ActionMemberRemove  = "member.remove"
+	ActionMemberLeave   = "member.leave"
 	// Tenant connection
 	ActionCouncilLink   = "council.link"
 	ActionCouncilUnlink = "council.unlink"

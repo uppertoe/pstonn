@@ -129,6 +129,9 @@ var templateFuncs = template.FuncMap{
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	// sourceLabel turns an apply-log source code into words for the Activity page.
 	// The stored codes are internal; the page is read by householders.
+	"possessive": possessive,
+	"maskRego":   maskRego,
+	"sentence":   sentenceCase,
 	"sourceLabel": func(src string) string {
 		switch src {
 		case "roster":

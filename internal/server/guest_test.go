@@ -399,7 +399,7 @@ func TestGuestRequestInvalidPlateStaysRedacted(t *testing.T) {
 	if strings.Contains(body, owner) {
 		t.Fatal("the rejected-plate page leaked the owner's email")
 	}
-	if !strings.Contains(body, "Visitor parking permit") {
+	if !strings.Contains(body, "A City of Stonnington visitor permit") && !strings.Contains(body, "visitor permit</h1>") {
 		t.Fatalf("expected the generic heading, got: %s", body)
 	}
 }

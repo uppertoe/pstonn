@@ -37,7 +37,10 @@ func qrDataURI(text string) (string, error) {
 // guestActView drives the public activation menu (State "guest").
 type guestActView struct {
 	Token          string            // raw token, echoed into the POST form
-	OwnerEmail     string            // account holder, shown for trust
+	Household      string            // the holder's chosen name for visitors ("the Nguyens"); "" = name only the permit
+	Council        string            // the permit's council, for the nameless heading
+	MineReg        string            // the rego THIS link put on the permit, when it is the one on now
+	MaskedReg      string            // someone else's rego on the permit, masked to its last two characters
 	PermitLabel    string            // which permit this affects
 	CurrentReg     string            // what is on the permit right now ("" if unknown)
 	CheckedAgo     string            // how long ago CurrentReg was confirmed with the tenant; "" while fresh ("4 hr ago" turns "on now" into "last known")
@@ -60,13 +63,14 @@ type guestActView struct {
 // guestWaitView drives the visitor's "waiting for approval" page (State
 // "guest-wait"), which polls the status endpoint.
 type guestWaitView struct {
-	tenant     *tenantView // the permit owner's tenant, for the referral line
-	OwnerEmail string
-	Plate      string
-	ReqID      int64
-	Nonce      string
-	Status     string // template-ready state: "pending" | "approved" | "applied" | "stalled" | "denied" | "expired" | "superseded" | "ended"
-	Until      string // set when approved
+	tenant    *tenantView // the permit owner's tenant, for the referral line
+	Household string
+	Council   string
+	Plate     string
+	ReqID     int64
+	Nonce     string
+	Status    string // template-ready state: "pending" | "approved" | "applied" | "stalled" | "denied" | "expired" | "superseded" | "ended"
+	Until     string // set when approved
 	// FP fingerprints the state the 3s poll could change (status, plate, until).
 	// The poll echoes it; an unchanged state answers 204 so htmx swaps nothing —
 	// otherwise identical markup re-entered the aria-live region every tick and
@@ -128,7 +132,6 @@ func (v guestWaitView) Tenant() tenantView {
 type doorQRView struct {
 	GrantID     int64
 	PermitLabel string
-	OwnerEmail  string
 	ImageURI    template.URL
 	URL         string
 	CreatedAt   string // "20 Jul 2026"

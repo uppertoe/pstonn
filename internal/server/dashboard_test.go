@@ -674,8 +674,8 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Edit: &editGrantView{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit", AllowOvernight: true,
 				Selected: map[int64]bool{1: true}, Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}, "Editing pass"},
 		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", OwnerEmail: "held@example.com", PermitLabel: "Visitor Permit", CurrentReg: "ABC123",
-			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "Managed by"},
+			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "The Helds’ visitor permit"},
 		{"guest-bookmark-tip", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", PermitLabel: "Visitor Permit",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "add it to your home screen"},
@@ -707,7 +707,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 					{Plate: "GUEST2", PermitLabel: "Visitor Permit", Outcome: "Not answered", Ago: "3 hr ago"}}}},
 			"since replaced by OWNER9"},
 		{"guest-result-ok", dashboardData{State: "guest-result", Loc: loc,
-			Flash: "AAA111 is now on the permit until the end of today.", Guest: guestActView{OwnerEmail: "held@example.com"}}, "on the permit"},
+			Flash: "AAA111 is now on the permit until the end of today.", Guest: guestActView{Household: "the Helds", Council: "City of Stonnington"}}, "on the permit"},
 		{"guest-gone", dashboardData{State: "guest-result", Loc: loc,
 			Warn: "This link is no longer active. Ask the account holder for a new one."}, "no longer active"},
 	}

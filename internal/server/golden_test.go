@@ -222,13 +222,13 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 		{"guestdecide approved", dashboardData{State: "guestdecide", Loc: loc, Decide: &decideView{Plate: "GUEST1", PermitLabel: "Visitor Permit", Requested: "Mon 10 Aug, 2:15pm", Path: "/r/4/x/tok", Status: "approved", DecidedBy: "mum@example.com", Until: "the end of today", Viewer: "mum@example.com", Outcome: "applied"}}, ""},
 		{"guestdecide denied", dashboardData{State: "guestdecide", Loc: loc, Decide: &decideView{Plate: "GUEST1", PermitLabel: "Visitor Permit", Requested: "Mon 10 Aug, 2:15pm", Path: "/r/4/x/tok", Status: "denied", DecidedBy: "mum@example.com", Viewer: "mum@example.com", Outcome: "declined"}}, ""},
 		{"guestdecide permit gone", dashboardData{State: "guestdecide", Loc: loc, Decide: &decideView{Plate: "GUEST1", Requested: "Mon 10 Aug, 2:15pm", Path: "/r/4/x/tok", Status: "expired", Viewer: "mum@example.com"}}, ""},
-		{"guest-wait pending", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}}, ""},
-		{"guest-wait approved", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "approved", Until: "the end of today"}}, ""},
-		{"guest-wait denied", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "denied"}}, ""},
-		{"guest-wait stalled", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "stalled"}}, ""},
-		{"guest-wait expired", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "expired"}}, ""},
+		{"guest-wait pending", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}}, ""},
+		{"guest-wait approved", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "approved", Until: "the end of today"}}, ""},
+		{"guest-wait denied", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "denied"}}, ""},
+		{"guest-wait stalled", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "stalled"}}, ""},
+		{"guest-wait expired", dashboardData{State: "guest-wait", Loc: loc, Wait: &guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "expired"}}, ""},
 		{"doorqr", dashboardData{User: user, State: "doorqr", Loc: loc, LogoutURL: "https://auth.example.com/logout",
-			DoorQR: &doorQRView{GrantID: 3, PermitLabel: "Visitor Permit", OwnerEmail: "a@b.com", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok", CreatedAt: "20 Jul 2026"}}, ""},
+			DoorQR: &doorQRView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok", CreatedAt: "20 Jul 2026"}}, ""},
 		{"admin", dashboardData{User: user, State: "admin", Loc: loc, LogoutURL: "https://auth.example.com/logout", Admin: &adminView{
 			Total: 3, Linked: 2, WarmOK: 1, Failing: 1, SchedulerLast: "2 min ago", StatusEnabled: true, SESHook: true,
 			StageSignedIn: 1, StagePermit: 1, StageApplied: 1,
@@ -332,10 +332,10 @@ func goldenFragmentCases(loc *time.Location, user identity.User, now time.Time) 
 		{"both with error", "notify-body", notifyView{EmailAvailable: true, EmailEnabled: true, NtfyAvailable: true, NtfyEnabled: true, NtfyTopic: "pstonn-abc", NtfyBase: "https://ntfy.example.com", Status: "Saved.", Error: "Keep at least one method on"}},
 		{"default", "qr-card", dashboardData{Loc: loc, QR: &qrShowView{PermitLabel: "Visitor Permit", ImageURI: template.URL("data:image/png;base64,AAAA"), URL: "https://p.stonn.org/g/tok", StopsAt: "11:59pm"}}},
 		{"menu", "guest-body", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", OwnerEmail: "held@example.com", PermitLabel: "Visitor Permit", CurrentReg: "ABC123",
+			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true, AllowPlate: true,
 			Regions: []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}}}}},
-		{"pending", "guest-req-status", guestWaitView{OwnerEmail: "held@example.com", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}},
+		{"pending", "guest-req-status", guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}},
 	}
 }
 

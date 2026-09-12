@@ -24,6 +24,14 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	owner := base.Owner
 	user := base.User.Email // the signed-in person; notification prefs are theirs
 	base.Settings = &settingsData{}
+	base.Settings.HouseholdName = s.householdOrEmpty(ctx, owner)
+	if r.URL.Query().Get("named") == "1" {
+		if base.Settings.HouseholdName == "" {
+			base.Flash = "Household name cleared. Visitors now see only the permit."
+		} else {
+			base.Flash = "Household name saved. Visitors now see it instead of your email."
+		}
+	}
 	if cs, err := s.store.GetTenantSession(ctx, owner); err == nil {
 		base.Settings.TenantLinked = true
 		base.AutoReconnect = cs.Password != ""

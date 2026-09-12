@@ -3,8 +3,7 @@
 <main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard">
     <div class="gbrand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
-    <h1>{{.Guest.PermitLabel}}</h1>
+    <h1>{{if .Guest.Household}}{{possessive .Guest.Household | sentence}} visitor permit{{else}}A {{.Guest.Council}} visitor permit{{end}}</h1>
     <div id="gbody">{{template "guest-body" .}}</div>
   </section>
   {{/* The one line of marketing in the whole product, and it lives here on
@@ -22,7 +21,7 @@
 <main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard" style="text-align:center">
     <div class="gbrand" style="justify-content:center"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    {{if .Wait.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Wait.OwnerEmail}}</strong></p>{{end}}
+    <h1 style="font-size:19px;margin:6px 0 4px">{{if .Wait.Household}}{{possessive .Wait.Household | sentence}} visitor permit{{else}}A {{.Wait.Council}} visitor permit{{end}}</h1>
     <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">{{.Wait.Plate}}</span> on the permit.</p>
     {{/* Stable live region: the poll swaps #reqstatus inside it, so a screen
          reader announces approved / denied / on-the-permit as it changes. */}}
@@ -51,7 +50,7 @@
     <div class="gring warn">{{template "ic-alert"}}</div>
     <p class="gresult">{{.Warn}}</p>
     {{end}}
-    {{if .Guest.OwnerEmail}}<p class="gmanaged">Managed by <strong>{{.Guest.OwnerEmail}}</strong></p>{{end}}
+    <p class="gmanaged">{{if .Guest.Household}}{{possessive .Guest.Household | sentence}} visitor permit{{else}}A {{.Guest.Council}} visitor permit{{end}}</p>
   </section>
 </main>
 
@@ -90,7 +89,7 @@
        the last council-confirmed reading — because a cached plate has no upper
        age bound during a council outage, and this line is what a visitor trusts
        before walking away from their car. */}}
-  <p class="gnow">{{if .Guest.CheckedAgo}}Last known on the permit:{{else}}On the permit now:{{end}} {{if .Guest.CurrentReg}}<span class="plate">{{.Guest.CurrentReg}}</span>{{else}}<span class="noplate">no rego</span>{{end}}{{if .Guest.CheckedAgo}} <span class="gnuntil">&middot; checked {{.Guest.CheckedAgo}}</span>{{end}}{{if and .Guest.UntilText (not .Guest.PendingReg)}} <span class="gnuntil">&middot; {{.Guest.UntilText}}</span>{{end}}</p>
+  <p class="gnow">{{if .Guest.CheckedAgo}}Last known on the permit:{{else}}On the permit now:{{end}} {{if .Guest.MineReg}}<span class="plate">{{.Guest.MineReg}}</span>{{else if .Guest.MaskedReg}}<span class="plate masked" title="Someone else's rego">{{.Guest.MaskedReg}}</span>{{else}}<span class="noplate">no rego</span>{{end}}{{if .Guest.CheckedAgo}} <span class="gnuntil">&middot; checked {{.Guest.CheckedAgo}}</span>{{end}}{{if and .Guest.UntilText (not .Guest.PendingReg)}} <span class="gnuntil">&middot; {{.Guest.UntilText}}</span>{{end}}</p>
   <p class="gsub">{{if .Guest.PendingReg}}{{if .Guest.PendingOutage}}<span class="gstall">{{template "ic-alert"}} The council&rsquo;s system is down &mdash; <span class="plate">{{.Guest.PendingReg}}</span> may not be on the permit yet. p.stonn keeps trying.</span>{{else if .Guest.Stalled}}<span class="gstall">{{template "ic-alert"}} Changing to {{.Guest.PendingReg}} is taking longer than usual &mdash; check back shortly, or ask the account holder.</span>{{else}}<span class="gspin"></span> <span>Changing to <span class="plate">{{.Guest.PendingReg}}</span>{{if .Guest.UntilText}} ({{.Guest.UntilText}}){{end}}&hellip;</span>{{end}}{{else if .Flash}}<span class="gok">{{template "ic-check"}} {{.Flash}}</span>{{end}}</p>
 </div>
 {{if .Guest.PendingReg}}{{/* Poll while ANYTHING is pending — a pending change can still land (or be superseded) whether it's mid-apply, "taking longer", or council-down, so the page must keep checking and flip to on-the-permit when it resolves. Stopping at the "stalled" edge froze the page exactly when a change was about to land, notably as an outage cleared. The spinner itself is still suppressed once stalled/outage (see the message line); this is a quiet poll. .hx-quiet + transition:false: the layout turns on globalViewTransitions, so this 2.5s poll cross-faded the visitor's whole page and flashed the loading bar every tick. */}}<div class="hx-quiet" hx-get="/g/live/{{.Guest.Token}}?fp={{.Guest.FP}}" hx-trigger="every 2500ms" hx-target="#gbody" hx-swap="innerHTML transition:false"></div>{{end}}
@@ -141,7 +140,7 @@
 </form>
 {{if .Guest.RevertPlate}}
 <form method="post" action="/g/{{.Guest.Token}}/revert" hx-post="/g/{{.Guest.Token}}/revert" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px">
-  <button type="submit" class="ghost" style="justify-content:center;width:100%">&#8617; Put <span class="plate" style="margin:0 4px">{{.Guest.RevertPlate}}</span> back on the permit</button>
+  <button type="submit" class="ghost" style="justify-content:center;width:100%">&#8617; Put <span class="plate masked" style="margin:0 4px">{{maskRego .Guest.RevertPlate}}</span> back on the permit</button>
 </form>
 <p class="empty-note" style="margin-top:8px">Made a mistake? This restores the rego that was on the permit before you used this link.</p>
 {{end}}

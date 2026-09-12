@@ -377,12 +377,14 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 			view.Req = &guestWaitView{Plate: req.Plate, ReqID: req.ID, Nonce: nonce, Status: status, Until: req.Until}
 		}
 	}
-	// A printed door QR is meant to be left out in public, so the page must not
-	// disclose the holder's email or the plate currently on the permit to anyone
-	// who scans it. For emailed links / on-screen QR (a known or present visitor)
-	// the current plate and "managed by" address are useful trust signals.
+	// Every guest page names the household by the name the holder chose, never
+	// by email: a guest link gets forwarded, an on-screen QR is scanned by a
+	// tradie, and a printed one by anyone passing. With no name set the heading
+	// names only the council's permit; the visitor got the link from the holder's
+	// own hand, phone, email or door, which is where the trust comes from.
+	view.Household, _ = s.store.HouseholdName(ctx, permit.Owner)
+	view.Council = s.tenantViewFor(ctx, permit.Owner).Name
 	if !gc.Grant.RequestOnly {
-		view.OwnerEmail = permit.Owner
 		view.CurrentReg = current
 		view.CheckedAgo = s.guestPlateCheckedAgo(ctx, permit)
 		want, _, decidedAt, until := s.guestDesired(ctx, permit)
@@ -393,6 +395,18 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		// winner keeps the offer honest and prevents the clobber.
 		if gp, ok := s.store.ActiveGuestOverridePlate(ctx, permit.ID, gc.TokenID, time.Now()); ok && model.SamePlate(gp, want) {
 			view.RevertPlate = revertPlate(gc.BaselinePlate, gc.BaselineUntil, current, gc.Vehicles, time.Now())
+		}
+		// The rego on the permit is shown in full only when this link put it there.
+		// Anyone else's is masked to its last two characters: enough for the
+		// household's own visitors to recognise a car, not enough to hand a stranger
+		// a plate. (A saved rego on a pass still shows its "on now" tag, since the
+		// holder chose to let this pass use it.)
+		if current != "" {
+			if gp, ok := s.store.ActiveGuestOverridePlate(ctx, permit.ID, gc.TokenID, time.Now()); ok && model.SamePlate(gp, current) {
+				view.MineReg = current
+			} else {
+				view.MaskedReg = maskRego(current)
+			}
 		}
 		now := time.Now()
 		view.PendingReg, view.Stalled = pendingState(current, want, stallSince(permit.ID, current, want, decidedAt, now), now)
@@ -1007,7 +1021,7 @@ func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderGuestResult(w http.ResponseWriter, ownerEmail string, ok bool, msg string) {
 	noStore(w)
 	d := dashboardData{State: "guest-result", Loc: s.locFor(context.Background(), ownerEmail),
-		Guest: guestActView{OwnerEmail: ownerEmail}}
+		Guest: guestActView{Household: s.householdOrEmpty(context.Background(), ownerEmail), Council: s.tenantViewFor(context.Background(), ownerEmail).Name}}
 	if ok {
 		d.Flash = msg
 	} else {

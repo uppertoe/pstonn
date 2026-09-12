@@ -572,6 +572,9 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// sent must live somewhere that isn't.
 		`ALTER TABLE account_flags ADD COLUMN onboard_nudge_sent TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE account_flags ADD COLUMN fortnight_nudge_sent TEXT NOT NULL DEFAULT ''`,
+		// What visitors see instead of the holder's email on guest links and QR
+		// pages ("the Nguyens"); '' = show only the permit (2026-09-12).
+		`ALTER TABLE account_flags ADD COLUMN household_name TEXT NOT NULL DEFAULT ''`,
 		// Whether the "renewed this permit? copy your schedule" pitch has been
 		// answered (dismissed, copied, or a roster day set). DEFAULT 0 re-offers it
 		// on existing permits, which is safe: any permit with a roster already

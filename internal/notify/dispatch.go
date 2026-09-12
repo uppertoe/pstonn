@@ -555,18 +555,23 @@ func (s *Service) SendOnboardNudge(ctx context.Context, to string) error {
 // SendGuestLink emails a recipient their personal guest-pass link (email only,
 // no-op without SMTP). The link lets them set one of the account's cars on the
 // visitor permit without an account of their own.
-func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, tenantID, permitLabel, url string) error {
+// fromName is what the recipient is told the link is from: the household's
+// chosen name, or the holder's address when none is set.
+func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, fromName, tenantID, permitLabel, url string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
-	subject := "Your link to put a rego on " + ownerEmail + "'s parking permit"
+	if fromName == "" {
+		fromName = ownerEmail
+	}
+	subject := "Your link to put a rego on " + possessive(fromName) + " parking permit"
 	lines := []string{
 		// The label is free text the owner typed, and this recipient is whoever the
 		// owner named — so it goes in stripped of anything the mail layer would turn
 		// into a clickable link. It stays in the body because it is how the recipient
 		// knows WHICH permit this is ("Nanny", the flat number), which matters in a
 		// household with more than one.
-		say(s.tenantOf(ctx, ownerEmail, tenantID), "mail.guest_lead", map[string]any{"Owner": ownerEmail, "Label": neutraliseLinks(permitLabel)}),
+		say(s.tenantOf(ctx, ownerEmail, tenantID), "mail.guest_lead", map[string]any{"Owner": neutraliseLinks(fromName), "Label": neutraliseLinks(permitLabel)}),
 		"",
 		"When you arrive, open the link and choose your rego. It stays on the permit until the end of the day.",
 		"",
@@ -886,4 +891,14 @@ func (s *Service) SendReferralInvite(ctx context.Context, to, sender string) err
 		"If you weren't expecting this, you can ignore it — nothing else will be sent.",
 	}, "\n")
 	return s.sendEmail(ctx, to, subject, body, reasonReferral)
+}
+
+// possessive turns a name into its possessive: "the Nguyens" becomes "the
+// Nguyens\u2019", "Nana" becomes "Nana\u2019s", and an email address reads as
+// "x@y.com\u2019s", as before.
+func possessive(name string) string {
+	if strings.HasSuffix(strings.ToLower(name), "s") {
+		return name + "\u2019"
+	}
+	return name + "\u2019s"
 }

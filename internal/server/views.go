@@ -332,6 +332,8 @@ type settingsData struct {
 	// OtherConnections are the account's sessions with tenants other than the current one.
 	OtherConnections []connectionView
 	RelinkBy         string // human date the session must be re-authorised by ("" if unknown)
+	// HouseholdName is what visitors see instead of the holder's email ("" = only the permit).
+	HouseholdName string
 }
 
 // messageView drives the styled message/error page (State "message"): the

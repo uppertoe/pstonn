@@ -178,6 +178,11 @@ func changeText(c store.Change) string {
 		return "declined a visitor's request for " + c.Target
 	case store.ActionMemberAdd:
 		return "gave " + c.Target + " shared access"
+	case store.ActionHouseholdName:
+		if c.Target == "" {
+			return "cleared the household name visitors see"
+		}
+		return "named the household " + c.Target + " for visitors"
 	case store.ActionMemberRemove:
 		return "removed " + c.Target + "'s shared access" + optional(c.Detail, " (") + closeParen(c.Detail)
 	case store.ActionMemberLeave:
