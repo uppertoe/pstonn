@@ -221,7 +221,7 @@ func (s *Server) resumeEmail(w http.ResponseWriter, r *http.Request) {
 // saveNotify auto-saves the user's channel choices on every toggle, requiring at
 // least one channel to stay on (else it reverts and warns).
 func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
-	user, _, _, ok := s.accountForWrite(w, r)
+	user, owner, _, ok := s.accountForWrite(w, r)
 	if !ok {
 		return
 	}
@@ -300,10 +300,8 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	if _, owner, _, ok := s.accountForWrite(w, r); ok {
-		if err := s.store.MarkMilestone(r.Context(), owner, store.MilestoneNotify(user)); err != nil {
-			alog.Infof("milestone notify %s: %v", redact.Email(user), err)
-		}
+	if err := s.store.MarkMilestone(r.Context(), owner, store.MilestoneNotify(user)); err != nil {
+		alog.Infof("milestone notify %s: %v", redact.Email(user), err)
 	}
 	if nudged {
 		// The saved value differs from what the form shows; re-render to sync.
