@@ -40,13 +40,13 @@
   <div class="banner warn council-down">{{template "ic-alert"}} <span><strong>{{.CouncilName}}&rsquo;s parking system is having problems right now.</strong> Changes might be delayed &mdash; p.stonn keeps trying and will catch up as soon as the council is back.</span></div>
   {{end}}
   {{/* ---------- SCHEDULE ---------- */}}
+  {{/* The same heading row as the other tabs, then the "still to try" strip,
+       then the plate legend, then the permit cards. */}}
+  <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-calendar"}}</span> Schedule</div>
+  {{template "checklist" .}}
   {{if .Vehicles}}
   {{template "legend" .}}
   {{end}}
-  {{/* No page-level "add your plates first" nudge any more: a first visit gets
-       the card's own "Start with the number plates" panel, and the roster
-       picker and the dialog explain the prerequisite at the moment of use. */}}
-  {{template "checklist" .}}
   {{range .App.Permits}}
   {{/* The one-off modal closes itself after a SUCCESSFUL SUBMIT and nothing else.
        The guard used to close it after any htmx request that bubbled through the
@@ -105,6 +105,18 @@
   {{end}}
   {{end}}
 
+  {{if or .App.Permits .App.ExpiredPermits}}
+  {{/* The feature-tour hint: most households use only the roster and one-off
+       bookings, so point once at the demos for the rest. Dismiss is remembered
+       per browser, like the other hint strips. Full navigation into /how — its
+       demo assets are head-only (see publicheader). */}}
+  <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-how-hint')==='1'}" x-show="!hide" x-cloak>
+    {{template "ic-qr"}}
+    <span>There&rsquo;s more than the roster: visitor QRs, a printed QR you confirm on your phone, guest passes. <a href="/features" hx-boost="false">See how they work</a>.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-how-hint','1')">{{template "ic-x"}}</button>
+  </p>
+  {{end}}
   {{if .App.ShowInstallHint}}
   {{/* Hidden when already running from the home screen (display-mode: standalone,
        or iOS's navigator.standalone), and dismissed per browser like the share

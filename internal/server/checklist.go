@@ -48,11 +48,11 @@ func (s *Server) checklistFor(ctx context.Context, owner, user, tab string) *che
 			}
 		}
 		items = []checkItem{
-			{Label: "Give a rego a day of the week on the roster", Href: "#roster", Done: roster},
+			{Label: "Add a number plate to the weekly schedule", Href: "#roster", Done: roster},
 			{Label: "Make a booking for a visitor who does not fit the roster", Href: "/schedule?book=1", Done: did(store.ActionOverrideAdd)},
 		}
 		if roster {
-			items = append(items, checkItem{Label: "Add a second week, if the help alternates week to week", Href: "#roster", Done: weeks})
+			items = append(items, checkItem{Label: "Add a second week, if the roster differs week to week", Href: "#roster", Done: weeks})
 		}
 	case "vehicles":
 		vs, _ := s.store.ListVehiclesFor(ctx, owner)
@@ -64,13 +64,13 @@ func (s *Server) checklistFor(ctx context.Context, owner, user, tab string) *che
 		}
 		items = []checkItem{
 			{Label: "Save the rego of someone who visits you", Href: "#add", Done: len(vs) > 0},
-			{Label: "Add their email, so they are told when their rego goes on the permit", Href: "#add", Done: email},
+			{Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add", Done: email},
 		}
 	case "guests":
 		items = []checkItem{
 			{Label: "Show a visitor QR to someone at the door", Href: "#now", Done: did(store.ActionDoorQRShow)},
 			{Label: "Send a guest pass to a household that visits often", Href: "#new", Done: did(store.ActionGuestCreate)},
-			{Label: "Put up a printed QR that you confirm on your phone", Href: "#now", Done: did(store.ActionDoorQRCreate)},
+			{Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: did(store.ActionDoorQRCreate)},
 		}
 	case "settings":
 		permits, _ := s.store.ListPermitsFor(ctx, owner)
@@ -84,7 +84,7 @@ func (s *Server) checklistFor(ctx context.Context, owner, user, tab string) *che
 		members, _ := s.store.CountMembers(ctx, owner)
 		prefs, _ := s.store.HasNotifyPref(ctx, user)
 		items = []checkItem{
-			{Label: "Name the permit, so the schedule reads as yours", Href: "/schedule", Done: named},
+			{Label: "Name the permit, as it appears on the schedule and in your emails", Href: "/schedule", Done: named},
 			{Label: "Name the household, so visitors see it instead of your email", Href: "#household", Done: household != ""},
 			{Label: "Give someone else in the house access", Href: "#shared", Done: members > 0},
 			{Label: "Set how you want to be told about changes", Href: "#notifications", Done: prefs},

@@ -879,23 +879,32 @@ table.adm .bad { color:var(--danger); }
 /* A hint wears the colour of the page it points to (--hue = that page's
    section hue, same var the nav tabs use); no --hue falls back to the brand
    primary. Icon + a quiet left accent only — the strip stays a tip, not a banner. */
-/* The per-tab "still to try" card. Same footprint whether a line is ticked or
-   not: the tick and the ring are the same size, and a ticked line is plain text
-   where an unticked one is a link, so nothing shifts as the household works
-   through it. The card itself only appears or leaves on a fresh page load. */
-.todo { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:10px 10px 8px 14px; margin:0 0 14px; }
-.todo-head { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
-.todo-title { font-weight:650; font-size:13.5px; }
-.todo-count { color:var(--muted); font-size:12.5px; margin-right:auto; font-variant-numeric:tabular-nums; }
-.todo-list { list-style:none; margin:0; padding:0; display:grid; gap:2px; }
-.todo-list li { display:flex; align-items:center; gap:10px; min-height:28px; font-size:13.5px; }
-.todo-list a { color:var(--ink); text-decoration:underline; text-decoration-color:var(--line); text-underline-offset:3px; }
-.todo-list a:hover { text-decoration-color:var(--primary); }
+/* The per-tab "still to try" strip: collapsed to one quiet line in the tab's own
+   hue, so it reads as a note rather than a control; opens in place. A tick and
+   an empty ring share one footprint, and a ticked line is plain text where an
+   unticked one is a link, so nothing shifts as lines tick. */
+.todo { margin:0 0 14px; border-radius:11px; background:color-mix(in srgb, var(--hue,var(--primary)) 7%, var(--surface-2)); border:1px solid color-mix(in srgb, var(--hue,var(--primary)) 22%, var(--line)); }
+.todo-head { width:100%; display:flex; align-items:center; gap:8px; padding:8px 10px 8px 12px; background:none; border:0; box-shadow:none; color:var(--muted); font:inherit; font-size:12.5px; font-weight:600; letter-spacing:.02em; cursor:pointer; text-align:left; border-radius:11px; }
+.todo-head:hover { filter:none; box-shadow:none; color:var(--ink); }
+.todo-title { color:color-mix(in srgb, var(--hue,var(--primary)) 70%, var(--ink)); margin-right:6px; }
+.todo-count { font-weight:500; font-variant-numeric:tabular-nums; margin-right:auto; }
+.todo-chev { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; transition:transform .15s; }
+.todo-chev.open { transform:rotate(180deg); }
+.todo-list { list-style:none; margin:0; padding:2px 12px 10px 12px; display:grid; gap:2px; }
+.todo-list li { display:flex; align-items:center; gap:10px; min-height:26px; font-size:13px; }
+.todo-list a { color:var(--ink); text-decoration:none; }
+.todo-list a:hover { text-decoration:underline; text-decoration-color:var(--hue,var(--primary)); text-underline-offset:3px; }
 .todo-list li.done { color:var(--muted); }
-.todo-ring, .todo-tick { flex:none; width:16px; height:16px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; }
-.todo-ring { border:2px solid var(--line); }
-.todo-tick { background:var(--primary); color:var(--on-primary); }
-.todo-tick svg { width:11px; height:11px; }
+.todo-ring, .todo-tick { flex:none; width:15px; height:15px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; }
+.todo-ring { border:2px solid color-mix(in srgb, var(--hue,var(--primary)) 40%, var(--line)); }
+.todo-tick { background:var(--hue,var(--primary)); color:#fff; }
+.todo-tick svg { width:10px; height:10px; }
+.todo-foot { margin:0; padding:0 12px 9px 12px; }
+.todo-foot button { display:inline-flex; align-items:center; gap:10px; background:none; border:0; box-shadow:none; padding:0; font:inherit; font-size:13px; color:var(--muted); cursor:pointer; }
+.todo-x { flex:none; width:15px; height:15px; display:inline-flex; align-items:center; justify-content:center; }
+.todo-x svg { width:12px; height:12px; }
+.todo-foot button:hover { filter:none; box-shadow:none; color:var(--ink); text-decoration-color:var(--muted); }
+@media (prefers-reduced-motion:reduce){ .todo-chev { transition:none; } }
 .share-hint { color:var(--muted); font-size:13.5px; display:flex; align-items:center; gap:10px; margin:0; padding:9px 8px 9px 12px; background:var(--surface-2); border:1px solid var(--line); border-left:3px solid color-mix(in srgb, var(--hue,var(--primary)) 55%, var(--surface-2)); border-radius:11px; }
 .share-hint > svg { flex:none; width:16px; height:16px; align-self:center; color:var(--hue,var(--primary)); }
 .share-hint > span { flex:1 1 auto; }
