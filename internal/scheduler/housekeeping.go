@@ -57,7 +57,8 @@ const (
 // pending printed-QR requests expire after an hour (a stale "approve this
 // plate?" must not be actionable days later, and abandoned scans drain out of
 // the holder's queue), decided rows — visitor plates are PII — are purged after
-// 30 days, the apply log is pruned to a 90-day window, and a daily consistent
+// 7 days (decidedGuestRequestRetention), the apply log is pruned to a 90-day
+// window, and a daily consistent
 // DB snapshot is written for file-level backup tools.
 func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if n, err := s.store.ExpireGuestRequests(ctx, s.now().Add(-time.Hour)); err != nil {

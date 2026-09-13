@@ -1,7 +1,8 @@
 // Package server wires the HTTP routes and renders the dashboard. User identity
 // is resolved by identity.Middleware (forward_auth headers, else the app's own
 // OIDC session cookie, else a dev fallback); mutating routes require a
-// signed-in user and re-run the scheduler so changes take effect immediately.
+// signed-in user, and the ones that withdraw guest authority also kick the
+// scheduler so the permit is corrected at once rather than on the next tick.
 package server
 
 import (

@@ -37,7 +37,7 @@ func newScriptNonce() string {
 // 'unsafe-inline' entirely. Every inline <script> in layout.html carries
 // {{.Nonce}} instead, and there are no on* handler attributes anywhere in the
 // templates (a nonce cannot cover those, so they were converted to
-// addEventListener) — templates_csp_test.go holds both facts.
+// addEventListener) — frontend_security_test.go holds both facts.
 //
 // 'unsafe-eval' MUST STAY. Alpine compiles every x-data / @click / x-show
 // expression with `new Function`, and this app leans on Alpine throughout, so
