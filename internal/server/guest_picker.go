@@ -94,7 +94,9 @@ func (s *Server) livePermitOpts(ctx context.Context, owner string) ([]permitOpt,
 // card fragment re-rendered, open, carrying notice; anything else is sent back
 // to the Guests tab with the flag that produces the same message there.
 func (s *Server) respondPickerCard(w http.ResponseWriter, r *http.Request, owner string, edit bool, notice, flag string) {
-	if r.Header.Get("HX-Request") == "" {
+	// A boosted request also carries HX-Request but wants a whole page, so the
+	// fragment goes only to a targeted request (isBoosted).
+	if !isHX(r) || isBoosted(r) {
 		if flag == "" {
 			http.Redirect(w, r, "/guests#picker", http.StatusSeeOther)
 			return
@@ -165,7 +167,7 @@ func (s *Server) showPicker(w http.ResponseWriter, r *http.Request) {
 // editPicker renders the card open on its form, pre-filled with the current
 // regos and overnight option: the fragment for htmx, the whole tab otherwise.
 func (s *Server) editPicker(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("HX-Request") != "" {
+	if isHX(r) && !isBoosted(r) {
 		_, owner, _ := s.resolveAccount(r.Context())
 		s.respondPickerCard(w, r, owner, true, "", "")
 		return
