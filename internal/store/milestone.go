@@ -17,6 +17,7 @@ const (
 	MilestoneVisitorQR     Milestone = "visitor-qr"     // a visitor QR shown
 	MilestoneGuestPass     Milestone = "guest-pass"     // a guest pass sent
 	MilestonePrintedQR     Milestone = "printed-qr"     // a printed QR created
+	MilestonePicker        Milestone = "picker"         // the household's quick picker made
 	MilestonePermitName    Milestone = "permit-name"    // a permit given a name
 	MilestoneHouseholdName Milestone = "household-name" // the household named for visitors
 	MilestoneShared        Milestone = "shared"         // someone given shared access

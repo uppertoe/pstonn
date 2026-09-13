@@ -351,7 +351,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 	view := guestActView{
 		Token: gc.rawToken, PermitLabel: permitLabel(permit),
 		Cars: cars, AllowOvernight: gc.Grant.AllowOvernight,
-		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly,
+		AllowPlate: gc.Grant.AllowPlate, RequestOnly: gc.Grant.RequestOnly, Picker: gc.Grant.Picker,
 	}
 	// A typed plate carries its own registration state; the options come from the
 	// permit owner's tenant (empty when the provider has no such concept, or — in
@@ -403,6 +403,9 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		// holder chose to let this pass use it.)
 		if current != "" {
 			if gp, ok := s.store.ActiveGuestOverridePlate(ctx, permit.ID, gc.TokenID, time.Now()); ok && model.SamePlate(gp, current) {
+				view.MineReg = current
+			} else if gc.Grant.Picker {
+				// The household's own page: whatever is on their permit is theirs to see.
 				view.MineReg = current
 			} else {
 				view.MaskedReg = maskRego(current)
@@ -659,7 +662,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		disp, told := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
-		s.notifyGuestApply(bg, permit, reg, name, createdBy, disp, told)
+		s.notifyGuestApply(bg, permit, guestSource(gc), reg, name, createdBy, disp, told)
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
@@ -798,7 +801,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		// A revert can't displace a third party: the guest's own overrides were
 		// just swept, and the baseline is only re-pinned when nothing else covers
 		// now — so there is no displaced booking to chase.
-		s.notifyGuestApply(bg, permit, target, "", createdBy+" (undo)", model.DisplacedBooking{}, false)
+		s.notifyGuestApply(bg, permit, guestSource(gc), target, "", createdBy+" (undo)", model.DisplacedBooking{}, false)
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
@@ -850,6 +853,12 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 	if err != nil || permit.Owner != gc.Grant.Owner {
 		return guestCtx{}, model.Permit{}, false
 	}
+	// The picker's link has no recipient: it is the household's own. Everything
+	// downstream that names who made a change (the booking's "by", the notice)
+	// reads Recipient, so name the tool here rather than leave those blank.
+	if gc.Grant.Picker && gc.Recipient == "" {
+		gc.Recipient = "the quick picker"
+	}
 	// Deliberately NO idle-clock touch here. This is the funnel every guest
 	// surface passes through, which is exactly why it must not count as liveness:
 	// a mail scanner prefetching the emailed link, a link-preview bot, and the
@@ -893,7 +902,16 @@ func guestApplyDetail(err error) string {
 	return "The council did not accept the change."
 }
 
-func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg, name, by string, d model.DisplacedBooking, told bool) {
+// guestSource names the notice's context: a third party's guest link, or the
+// household's own quick picker (which notify treats as their own change).
+func guestSource(gc guestCtx) string {
+	if gc.Grant.Picker {
+		return "picker"
+	}
+	return "guest"
+}
+
+func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, source, reg, name, by string, d model.DisplacedBooking, told bool) {
 	if s.notify == nil {
 		return
 	}
@@ -910,7 +928,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, reg,
 	// path has no reconcile-loop retry behind it, so a fire-and-forget send could
 	// silently drop the "a guest put their car on your permit" notice.
 	outcome := notify.ApplyOutcome{
-		Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: "guest", OK: true,
+		Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: source, OK: true,
 		DisplacedReg: d.Reg, DisplacedTold: told,
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {

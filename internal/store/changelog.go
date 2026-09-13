@@ -42,6 +42,11 @@ const (
 	ActionDoorQRRevoke = "doorqr.revoke"
 	ActionRequestOK    = "request.approve"
 	ActionRequestNo    = "request.deny"
+	// The household's own quick picker (a guest grant it keeps for itself)
+	ActionPickerCreate = "picker.create"
+	ActionPickerUpdate = "picker.update"
+	ActionPickerRotate = "picker.rotate" // a new link; the old one stopped working
+	ActionPickerDelete = "picker.delete"
 	// Shared access
 	ActionMemberAdd     = "member.add"
 	ActionHouseholdName = "household.name" // target = the new name, "" when cleared
@@ -86,7 +91,7 @@ func (s *Store) HasGuestActivity(ctx context.Context, owner string) (bool, error
 	var exists int
 	err := s.db.QueryRowContext(ctx, `
 SELECT EXISTS(SELECT 1 FROM account_log
-  WHERE owner = ? AND (action LIKE 'guest.%' OR action LIKE 'doorqr.%' OR action LIKE 'request.%'))`,
+  WHERE owner = ? AND (action LIKE 'guest.%' OR action LIKE 'doorqr.%' OR action LIKE 'request.%' OR action LIKE 'picker.%'))`,
 		owner).Scan(&exists)
 	return exists == 1, err
 }

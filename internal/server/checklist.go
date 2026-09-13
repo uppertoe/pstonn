@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/uppertoe/pstonn/internal/redact"
 	"github.com/uppertoe/pstonn/internal/store"
@@ -93,10 +94,15 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 	case "guests":
 		passes, printed, shown, err := s.store.GuestGrantKinds(ctx, owner)
 		note(err)
+		_, perr := s.store.PickerGrant(ctx, owner)
+		if perr != nil && !errors.Is(perr, store.ErrNotFound) {
+			note(perr)
+		}
 		items = []checkItem{
 			{Milestone: store.MilestoneVisitorQR, Label: "Show a visitor QR to someone at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
 			{Milestone: store.MilestoneGuestPass, Label: "Send a guest pass to a household that visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
 			{Milestone: store.MilestonePrintedQR, Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
+			{Milestone: store.MilestonePicker, Label: "Save a quick picker to your own phone", Href: "#picker", Done: perr == nil || did(store.ActionPickerCreate)},
 		}
 	case "settings":
 		permits, err := s.store.ListPermitsFor(ctx, owner)

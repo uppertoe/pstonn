@@ -344,7 +344,8 @@ CREATE TABLE IF NOT EXISTS guest_grant (
     request_only    INTEGER NOT NULL DEFAULT 0,  -- printed QR: scanning only REQUESTS; holder must approve
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL,
-    created_by      TEXT NOT NULL DEFAULT ''    -- member who minted it ('' = the account owner / pre-dates the column)
+    created_by      TEXT NOT NULL DEFAULT '',   -- member who minted it ('' = the account owner / pre-dates the column)
+    picker          INTEGER NOT NULL DEFAULT 0   -- the household's own quick picker (one per account; hidden from the pass list)
 );
 CREATE INDEX IF NOT EXISTS idx_guest_grant_owner ON guest_grant(owner);
 
@@ -556,6 +557,10 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// the permit, so losing account access must also lose the passes you made.
 		// Rows predating this column have '' and are treated as the account's own.
 		`ALTER TABLE guest_grant ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`,
+		// The household's own quick picker: a grant whose single link the household
+		// keeps for itself (sealed, like a printed QR, so the same link can be shown
+		// again). Hidden from the pass list; one per account.
+		`ALTER TABLE guest_grant ADD COLUMN picker INTEGER NOT NULL DEFAULT 0`,
 		// Why this address is receiving this message, for the mail's own footer.
 		// Recipients with no account (a guest, a displaced driver) otherwise have no
 		// idea who we are or how we got their address.

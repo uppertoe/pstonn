@@ -225,6 +225,9 @@ func TestGoldenEmails(t *testing.T) {
 	run("apply-success-guest-displaced", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "GUEST1", By: "dad@example.com", Source: "guest", OK: true, DisplacedReg: "ABC123", DisplacedTold: true})
 	})
+	run("apply-success-picker", func() {
+		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "XYZ789", Name: "Baba", By: "the quick picker", Source: "picker", OK: true})
+	})
 	run("apply-failure-transient", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: false, CurrentReg: "XYZ789",
 			Reason: "The council was temporarily unavailable.", Action: "Nothing to do yet — p.stonn keeps trying.", Transient: true})

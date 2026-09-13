@@ -660,6 +660,21 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}},
 			Edit: &editGrantView{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit", AllowOvernight: true,
 				Selected: map[int64]bool{1: true}, Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}, "Editing pass"},
+		// The quick picker card: closed with its summary and actions once made; its
+		// form pre-filled when editing; and the household's own activation page.
+		{"guests-picker", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
+			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
+				Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok",
+					Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}}, "Set up for Mum, with the overnight option on."},
+		{"guests-picker-edit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
+			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, PickerOpen: true,
+				Picker:     &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum"},
+				PickerEdit: &pickerEditView{AllowOvernight: false, Selected: map[int64]bool{1: true}}}}, "Save changes"},
+		{"guest-picker-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", Picker: true, Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Home permit", CurrentReg: "ABC123", MineReg: "ABC123", RevertPlate: "1QT4RM",
+			Cars: []vehicleView{{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#111"}, {ID: 2, Label: "Baba", Registration: "XYZ789", Color: "#222"}}, AllowOvernight: true}}, "Tap a rego to put it on the permit"},
 		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "The Helds’ visitor permit"},

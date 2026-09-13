@@ -22,6 +22,7 @@ type GuestGrant struct {
 	AllowOvernight bool
 	AllowPlate     bool // visitor may type an arbitrary plate (tradie / on-screen QR)
 	RequestOnly    bool // printed QR: a scan only requests; the holder approves live
+	Picker         bool // the household's own quick picker: their link, their regos shown in full
 	Enabled        bool
 	CreatedAt      time.Time
 }
@@ -330,16 +331,16 @@ WHERE recipient_email != '' AND revoked_at != '' AND revoked_at < ?`,
 func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
 	var gc GuestContext
 	var created, blUntil string
-	var overnight, plate, reqOnly, enabled int
+	var overnight, plate, reqOnly, picker, enabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.enabled, g.created_at, t.baseline_plate, t.baseline_until
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.picker, g.enabled, g.created_at, t.baseline_plate, t.baseline_until
 FROM guest_token t
 JOIN guest_grant g ON g.id = t.grant_id
 WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
   AND (t.expires_at = '' OR t.expires_at > ?)
   AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
 		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
-		&gc.Grant.Label, &overnight, &plate, &reqOnly, &enabled, &created, &gc.BaselinePlate, &blUntil)
+		&gc.Grant.Label, &overnight, &plate, &reqOnly, &picker, &enabled, &created, &gc.BaselinePlate, &blUntil)
 	if err == sql.ErrNoRows {
 		return GuestContext{}, ErrNotFound
 	}
@@ -349,6 +350,7 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 	gc.Grant.AllowOvernight = overnight == 1
 	gc.Grant.AllowPlate = plate == 1
 	gc.Grant.RequestOnly = reqOnly == 1
+	gc.Grant.Picker = picker == 1
 	gc.Grant.Enabled = enabled == 1
 	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 		return GuestContext{}, err
@@ -370,7 +372,7 @@ WHERE gv.grant_id = ? ORDER BY v.label, v.registration`, gc.Grant.ID)
 // change log is pruned, so "has this household ever used X" is read from here.
 func (s *Store) GuestGrantKinds(ctx context.Context, owner string) (passes, printed, onScreen int, err error) {
 	err = s.db.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(on_screen = 0 AND request_only = 0), 0),
+SELECT COALESCE(SUM(on_screen = 0 AND request_only = 0 AND picker = 0), 0),
        COALESCE(SUM(request_only = 1), 0),
        COALESCE(SUM(on_screen = 1), 0)
 FROM guest_grant WHERE owner = ?`, owner).Scan(&passes, &printed, &onScreen)
@@ -379,7 +381,7 @@ FROM guest_grant WHERE owner = ?`, owner).Scan(&passes, &printed, &onScreen)
 
 func (s *Store) ListGuestGrants(ctx context.Context, owner string) ([]GuestGrantDetail, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 AND request_only = 0 ORDER BY id DESC`, owner)
+		`SELECT id, permit_id, label, allow_overnight, enabled, created_at FROM guest_grant WHERE owner = ? AND on_screen = 0 AND request_only = 0 AND picker = 0 ORDER BY id DESC`, owner)
 	if err != nil {
 		return nil, err
 	}

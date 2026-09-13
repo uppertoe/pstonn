@@ -49,6 +49,8 @@ func milestoneForChange(action, target string) (store.Milestone, bool) {
 		return store.MilestoneGuestPass, true
 	case store.ActionDoorQRCreate:
 		return store.MilestonePrintedQR, true
+	case store.ActionPickerCreate:
+		return store.MilestonePicker, true
 	case store.ActionPermitRename:
 		return store.MilestonePermitName, target != ""
 	case store.ActionHouseholdName:
@@ -206,6 +208,14 @@ func changeText(c store.Change) string {
 		return "created a printed QR code for " + c.Target
 	case store.ActionDoorQRRevoke:
 		return "removed a printed QR code" + optional(c.Target, " for ") + " — any printed copy stopped working"
+	case store.ActionPickerCreate:
+		return "made a quick picker" + optional(c.Target, " for ")
+	case store.ActionPickerUpdate:
+		return "changed the quick picker"
+	case store.ActionPickerRotate:
+		return "gave the quick picker a new link — the previous link stopped working"
+	case store.ActionPickerDelete:
+		return "deleted the quick picker — its link stopped working"
 	case store.ActionRequestOK:
 		return "approved a visitor's request for " + c.Target
 	case store.ActionRequestNo:

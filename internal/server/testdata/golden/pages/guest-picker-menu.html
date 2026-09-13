@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="htmx-config" content='{"globalViewTransitions":true}'>
+<title></title>
+<meta name="robots" content="noindex,nofollow">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=1fea3d8679">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=1fea3d8679">
+<meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
+<meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
+<link rel="stylesheet" href="/static/app.css?v=1fea3d8679">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/tok">
+<script>
+  
+  (function () {
+    var KEY = 'pstonn-theme', saved = localStorage.getItem(KEY);
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    function toggle() {
+      var cur = document.documentElement.getAttribute('data-theme');
+      var sysDark = matchMedia('(prefers-color-scheme:dark)').matches;
+      var isDark = cur ? cur === 'dark' : sysDark;
+      var next = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem(KEY, next);
+    }
+    
+    
+    
+    
+    
+    document.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('[data-theme-toggle]')) toggle();
+    });
+    
+    
+    
+    
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('[data-share-pstonn]');
+      if (!btn) return;
+      
+      
+      var url = location.origin;
+      var msg = 'Schedule your Stonnington visitor parking permit';
+      if (navigator.share) {
+        navigator.share({ title: 'p.stonn', text: msg, url: url }).catch(function () {});
+      } else if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function () {
+          btn.textContent = 'Link copied';
+        }).catch(function () {});
+      }
+    });
+  })();
+</script>
+<script>
+  
+  
+  
+  
+  
+  
+  
+  (function () {
+    var native = document.startViewTransition;
+    if (!native) return;
+    var noop = function () {};
+    document.startViewTransition = function () {
+      var t = native.apply(document, arguments);
+      if (t) {
+        if (t.ready && t.ready.catch) t.ready.catch(noop);
+        if (t.finished && t.finished.catch) t.finished.catch(noop);
+      }
+      return t;
+    };
+  })();
+
+  
+  
+  
+  
+  
+  
+  
+  
+  window.pstonnWake = (function () {
+    var lock = null, want = false;
+    function acquire() {
+      if (!want || lock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+      navigator.wakeLock.request('screen').then(function (l) {
+        if (!want) { try { l.release(); } catch (e) {} return; }
+        lock = l;
+        l.addEventListener('release', function () { lock = null; });
+      }).catch(function () {}); 
+    }
+    function release() {
+      want = false;
+      if (lock) { try { lock.release(); } catch (e) {} lock = null; }
+    }
+    
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') acquire();
+    });
+    return {
+      on: function () { want = true; acquire(); },
+      off: release,
+      
+      
+      
+      
+      sync: function () {
+        var live = Array.prototype.some.call(
+          document.querySelectorAll('[data-keep-awake]'),
+          function (el) { return el.getClientRects().length > 0; });
+        if (live) { this.on(); } else { release(); }
+      }
+    };
+  })();
+  document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
+  document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
+</script>
+<script src="/static/htmx.min.js?v=1fea3d8679"></script>
+<script defer src="/static/alpine.min.js?v=1fea3d8679"></script>
+
+
+<script>
+  
+  
+  addEventListener('htmx:beforeRequest', function (e) { var el = e.detail && e.detail.elt; if (el && el.classList && el.classList.contains('hx-quiet')) return; var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
+  addEventListener('htmx:afterRequest', function () { var b = document.getElementById('htmx-bar'); if (b) b.classList.remove('on'); });
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  addEventListener('htmx:sendError', function (e) {
+    var cfg = e.detail && e.detail.requestConfig;
+    if (!cfg || !cfg.boosted) return;
+    if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
+    else { window.location.reload(); }
+  });
+  
+  
+  
+  
+  
+  
+  addEventListener('htmx:beforeSwap', function (e) {
+    var x = e.detail && e.detail.xhr;
+    if (!x || x.status < 400) return;
+    e.detail.shouldSwap = false;
+    if (x.status === 422) {
+      e.detail.isError = false;
+      showToast((x.responseText || 'Something needs your attention.').trim());
+      return;
+    }
+    var msg = 'Something went wrong. Please try again.';
+    var body = x.responseText || '';
+    if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
+      try {
+        var p = new DOMParser().parseFromString(body, 'text/html').querySelector('p');
+        if (p && p.textContent.trim()) msg = p.textContent.trim();
+      } catch (err) {}
+    }
+    
+    
+    
+    
+    showToast(msg, true);
+  });
+  var toastTimer;
+  
+  function showToast(msg, sticky) {
+    var t = document.getElementById('toast');
+    if (!t) return;
+    clearTimeout(toastTimer);
+    t.textContent = msg;
+    t.classList.toggle('sticky', !!sticky);
+    if (sticky) {
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'toast-x';
+      x.setAttribute('aria-label', 'Dismiss');
+      x.textContent = '×';
+      x.addEventListener('click', function () { t.classList.remove('on'); });
+      t.appendChild(x);
+    } else {
+      toastTimer = setTimeout(function () { t.classList.remove('on'); }, 5000);
+    }
+    t.classList.add('on');
+  }
+</script>
+<script>
+
+window.popClamp = window.popClamp || function (el) {
+  el.style.removeProperty('--pop-shift');
+  var pad = 12, vw = document.documentElement.clientWidth;
+  var r = el.getBoundingClientRect(), dx = 0;
+  if (r.left < pad) dx = pad - r.left;
+  else if (r.right > vw - pad) dx = vw - pad - r.right;
+  if (dx) el.style.setProperty('--pop-shift', dx + 'px');
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
+(function () {
+  if (window.appConfirm) return; 
+  var pending = null;
+  function dlg() { return document.getElementById('confirm-dlg'); }
+  function settle(ok) {
+    var d = dlg(), res = pending;
+    pending = null;
+    if (d && d.open) d.close();
+    if (res) res(ok);
+  }
+  window.appConfirm = function (message, okLabel) {
+    var d = dlg();
+    if (!d || typeof d.showModal !== 'function') return Promise.resolve(window.confirm(message));
+    if (pending) pending(false);
+    d.querySelector('.dlg-msg').textContent = message;
+    d.querySelector('.dlg-ok').textContent = okLabel || 'Confirm';
+    d.showModal();
+    return new Promise(function (res) { pending = res; });
+  };
+  document.addEventListener('click', function (e) {
+    var d = dlg();
+    if (!d || !d.open) return;
+    if (e.target.closest('.dlg-ok')) settle(true);
+    else if (e.target.closest('.dlg-cancel') || e.target === d) settle(false); 
+  });
+  document.addEventListener('cancel', function (e) { 
+    if (e.target === dlg() && pending) { var res = pending; pending = null; res(false); }
+  }, true);
+  
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest ? e.target.closest('[data-print],[data-dispatch]') : null;
+    if (!el) return;
+    if (el.hasAttribute('data-print')) window.print();
+    var name = el.getAttribute('data-dispatch');
+    
+    if (name) window.dispatchEvent(new CustomEvent(name, {detail:{permit: el.getAttribute('data-dispatch-permit') || ''}}));
+  });
+  
+  document.addEventListener('submit', function (e) {
+    var f = e.target, field = f.dataset && f.dataset.plateConfirm;
+    if (!field || f.__confirmed) return;
+    var inp = f.querySelector('[name="' + field + '"]');
+    var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
+    if (!inp || inp.offsetParent === null || !v) { delete f.dataset.confirm; return; }
+    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
+      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches — continue';
+  }, true);
+  
+  document.addEventListener('submit', function (e) {
+    var f = e.target, msg = f.dataset && f.dataset.confirm;
+    if (!msg) return;
+    if (f.__confirmed) { f.__confirmed = false; return; }
+    e.preventDefault();
+    e.stopPropagation();
+    appConfirm(msg, f.dataset.confirmOk).then(function (ok) {
+      if (!ok) return;
+      f.__confirmed = true;
+      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+    });
+  }, true);
+  document.addEventListener('htmx:confirm', function (e) {
+    if (!e.detail.question) return; 
+    e.preventDefault();
+    var elt = e.detail.elt;
+    appConfirm(e.detail.question, elt && elt.dataset ? elt.dataset.confirmOk : null)
+      .then(function (ok) { if (ok) e.detail.issueRequest(true); });
+  });
+})();
+</script>
+</head>
+<body hx-boost="true">
+<a href="#main" class="skip-link">Skip to content</a>
+<div id="htmx-bar" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+
+
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    <div class="gbrand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    <h1>Home permit</h1>
+    <div id="gbody">
+
+
+
+<div class="gstat">
+  
+  <p class="gnow">On the permit now: <span class="plate">ABC123</span></p>
+  <p class="gsub"></p>
+</div>
+
+
+
+
+
+<form method="post" action="/g/tok" class="stack" style="margin-top:14px" data-plate-confirm="plate" hx-post="/g/tok" hx-target="#gbody" hx-swap="innerHTML">
+  
+  <p class="sub">Tap a rego to put it on the permit</p>
+  <div class="gcars">
+    
+    <button class="gcar" style="--plate:#111" type="submit" name="vehicle_id" value="1">
+      <span class="dot" style="background:#111"></span>
+      <span class="glabel">Nana</span>
+      <span class="plate" style="--plate:#111">ABC123</span>
+      <span class="gtag">on now</span>
+    </button>
+    
+    <button class="gcar" style="--plate:#222" type="submit" name="vehicle_id" value="2">
+      <span class="dot" style="background:#222"></span>
+      <span class="glabel">Baba</span>
+      <span class="plate" style="--plate:#222">XYZ789</span>
+      
+    </button>
+    
+  </div>
+  
+  
+  
+  
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" name="overnight" style="margin-top:2px"> <span>Overnight<br><span class="muted" style="font-size:12px">Keeps it on until the end of tomorrow instead of today.</span></span></label>
+  
+  
+</form>
+
+<form method="post" action="/g/tok/revert" hx-post="/g/tok/revert" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px">
+  <button type="submit" class="ghost" style="justify-content:center;width:100%">&#8617; Put <span class="plate" style="margin:0 4px">1QT4RM</span> back on the permit</button>
+</form>
+<p class="empty-note" style="margin-top:8px">This restores the rego that was on the permit before you used this page.</p>
+
+
+
+<p class="empty-note" style="margin-top:16px">Tap a rego. It stays on the permit until the end of the day, then the roster takes over. Everything else, the roster, guests and settings, is in the app.</p>
+<a class="gtip" href="/schedule" hx-boost="false">Open p.stonn &rarr;</a>
+
+</div>
+  </section>
+  
+  <p class="gcredit">This permit is managed with <a href="/" hx-boost="false">p.stonn</a> — free for City of Stonnington residents.</p>
+</main>
+
+
+
+
+<dialog id="confirm-dlg" class="confirm">
+  <div class="dlg-box">
+    <p class="dlg-msg"></p>
+    <div class="dlg-actions">
+      <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
+      <button type="button" class="danger dlg-ok">Confirm</button>
+    </div>
+  </div>
+</dialog>
+</body>
+</html>

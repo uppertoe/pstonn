@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=bc1c65577b">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=bc1c65577b">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=1fea3d8679">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=1fea3d8679">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=bc1c65577b">
+<link rel="stylesheet" href="/static/app.css?v=1fea3d8679">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=bc1c65577b"></script>
-<script defer src="/static/alpine.min.js?v=bc1c65577b"></script>
+<script src="/static/htmx.min.js?v=1fea3d8679"></script>
+<script defer src="/static/alpine.min.js?v=1fea3d8679"></script>
 
 
 <script>
@@ -335,6 +335,15 @@ window.popClamp = window.popClamp || function (el) {
 
   
   
+  <nav class="tiles" aria-label="What is on this page">
+    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span>Guest pass</span><span class="tile-who">Someone who visits often. They get a link by email.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span>Show a QR</span><span class="tile-who">A visitor standing here now.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v6H7z"/></svg></span>Printed QR</span><span class="tile-who">Anyone who turns up while you are out.</span></a>
+    <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span>Quick picker</span><span class="tile-who">Your own phone, one tap per rego.</span></a>
+  </nav>
+  
+  
+  
   
 
   
@@ -377,6 +386,48 @@ window.popClamp = window.popClamp || function (el) {
   </section>
   
 
+  
+
+
+  
+  
+  <section class="card fold" id="picker" style="--hue:var(--sec-activity)"
+           x-data="{open: location.hash === '#picker'}"
+           @hashchange.window="if (location.hash === '#picker') open = true">
+    <div class="fold-head">
+      <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span> Your own quick picker</h2>
+      
+      <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" aria-controls="picker-body" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+    <p class="fold-sum">A home-screen page with one button per rego, no sign-in.</p>
+    <div id="picker-body" class="fold-body" x-show="open" x-cloak>
+      
+      <p class="subtitle" style="margin-top:0">Tap a rego on it and it is on the permit until the end of the day. It works like a guest pass, so it can only choose from the regos you tick here.</p>
+      <form method="post" action="/guests/picker" class="stack">
+        
+        <input type="hidden" name="permit_id" value="1">
+        
+        <div class="fld"><span>Regos it offers</span>
+          <div class="checks">
+            
+            <label class="check">
+              <input type="checkbox" name="vehicle_id" value="1" checked>
+              <span class="dot" style="background:#111"></span>
+              <span class="cname">Mum</span>
+              <span class="plate" style="--plate:#111">AAA111</span>
+            </label>
+            
+          </div>
+        </div>
+        <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight" checked style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Keeps a rego on until the end of tomorrow rather than today. When the time is up the roster takes over; if nothing is scheduled, the rego stays on the permit until the next change.</span></span></label>
+        <div class="row" style="gap:10px">
+          <button type="submit">Create the picker</button>
+          
+        </div>
+      </form>
+      
+    </div>
+  </section>
   
 
   

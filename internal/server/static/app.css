@@ -599,6 +599,30 @@ button:disabled { opacity:.55; cursor:progress; }
 .share-preview { display:flex; align-items:center; gap:12px; padding:10px; background:var(--surface); border:1px solid var(--line); border-radius:10px; font-weight:650; }
 .share-preview img { width:72px; height:72px; border-radius:6px; background:#fff; }
 @media (max-width:640px){ .qropts { grid-template-columns:1fr; } }
+/* Signpost tiles: a row of links naming each tool on the Guests tab and who it
+   is for. Tinted and flat, so they read as navigation rather than as more cards. */
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin:0 0 14px; }
+.tile { display:flex; flex-direction:column; gap:5px; padding:11px 13px; border-radius:10px; text-decoration:none; color:var(--ink); min-width:0;
+        background:color-mix(in srgb, var(--hue) 7%, var(--surface-2)); border:1px solid color-mix(in srgb, var(--hue) 22%, var(--line)); }
+.tile:hover { border-color:var(--hue); text-decoration:none; }
+.tile-h { display:flex; align-items:center; gap:8px; font-weight:600; font-size:14px; }
+.tile-h .ic { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; background:color-mix(in srgb, var(--hue) 14%, transparent); color:var(--hue); flex:none; }
+.tile-h .ic svg { width:15px; height:15px; }
+.tile-who { color:var(--muted); font-size:12.5px; line-height:1.35; }
+@media (max-width:640px){ .tiles { grid-template-columns:1fr 1fr; gap:8px; } .tile { padding:10px 11px; } }
+/* A folding card: heading row with its actions and a chevron, a one-line
+   summary, and a body that opens under it. Closed by default so the card takes
+   two lines until it is wanted. */
+.fold-head { display:flex; align-items:center; gap:10px; flex-wrap:nowrap; }
+.fold-head h2 { margin:0; flex:1; min-width:0; font-size:15px; display:flex; align-items:center; gap:9px; letter-spacing:-.01em; }
+.fold-head h2 .ic { color:var(--hue,var(--muted)); display:inline-flex; }
+.fold-toggle { flex:none; }
+.fold-sum { color:var(--muted); font-size:13.5px; margin:8px 0 0; }
+.fold-body { margin-top:14px; }
+.qrimg { width:168px; height:168px; image-rendering:pixelated; display:block; background:#fff; padding:8px; border-radius:10px; }
+.fold-newlink { margin-top:auto; padding-top:10px; border-top:1px solid var(--line); }
+a.gtip { display:block; text-decoration:none; }
+a.gtip:hover { text-decoration:underline; }
 .req { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--line); }
 .req-main { display:flex; align-items:center; gap:12px; min-width:0; }
 .req-meta { display:flex; flex-direction:column; gap:1px; min-width:0; }

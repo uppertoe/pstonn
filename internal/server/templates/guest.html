@@ -3,7 +3,7 @@
 <main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard">
     <div class="gbrand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    <h1>{{if .Guest.Household}}{{possessive .Guest.Household | sentence}} visitor permit{{else}}A {{.Guest.Council}} visitor permit{{end}}</h1>
+    <h1>{{if .Guest.Picker}}{{.Guest.PermitLabel}}{{else if .Guest.Household}}{{possessive .Guest.Household | sentence}} visitor permit{{else}}A {{.Guest.Council}} visitor permit{{end}}</h1>
     <div id="gbody">{{template "guest-body" .}}</div>
   </section>
   {{/* The one line of marketing in the whole product, and it lives here on
@@ -106,7 +106,7 @@
 {{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">{{if .Guest.Req}}Need a different rego on the permit? Enter it below to ask again.{{else}}Enter your rego to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.{{end}}</p>{{end}}
 <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px" data-plate-confirm="plate"{{if not .Guest.RequestOnly}} hx-post="/g/{{.Guest.Token}}" hx-target="#gbody" hx-swap="innerHTML"{{end}}>
   {{if .Guest.Cars}}
-  <p class="sub">Tap your rego to put it on the permit</p>
+  <p class="sub">{{if .Guest.Picker}}Tap a rego to put it on the permit{{else}}Tap your rego to put it on the permit{{end}}</p>
   <div class="gcars">
     {{range .Guest.Cars}}
     <button class="gcar{{if eq .Registration $.Guest.SelectedReg}} on{{end}}" style="--plate:{{.Color}}" type="submit" name="vehicle_id" value="{{.ID}}">
@@ -132,7 +132,7 @@
   {{end}}
   {{end}}
   {{if .Guest.AllowOvernight}}
-  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" {{if .Guest.KeepForm}}hx-preserve {{end}}name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps your rego on until the end of tomorrow instead of the end of today.</span></span></label>
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" {{if .Guest.KeepForm}}hx-preserve {{end}}name="overnight" style="margin-top:2px"> <span>{{if .Guest.Picker}}Overnight<br><span class="muted" style="font-size:12px">Keeps it on until the end of tomorrow instead of today.</span>{{else}}I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps your rego on until the end of tomorrow instead of the end of today.</span>{{end}}</span></label>
   {{end}}
   {{if .Guest.AllowPlate}}
   <button type="submit" style="justify-content:center;margin-top:4px">{{if .Guest.RequestOnly}}{{template "ic-bell"}} Ask to use the permit{{else}}{{template "ic-check"}} Put my rego on the permit{{end}}</button>
@@ -140,13 +140,20 @@
 </form>
 {{if .Guest.RevertPlate}}
 <form method="post" action="/g/{{.Guest.Token}}/revert" hx-post="/g/{{.Guest.Token}}/revert" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px">
-  <button type="submit" class="ghost" style="justify-content:center;width:100%">&#8617; Put <span class="plate masked" style="margin:0 4px">{{maskRego .Guest.RevertPlate}}</span> back on the permit</button>
+  <button type="submit" class="ghost" style="justify-content:center;width:100%">&#8617; Put {{if .Guest.Picker}}<span class="plate" style="margin:0 4px">{{.Guest.RevertPlate}}</span>{{else}}<span class="plate masked" style="margin:0 4px">{{maskRego .Guest.RevertPlate}}</span>{{end}} back on the permit</button>
 </form>
-<p class="empty-note" style="margin-top:8px">Made a mistake? This restores the rego that was on the permit before you used this link.</p>
+<p class="empty-note" style="margin-top:8px">{{if .Guest.Picker}}This restores the rego that was on the permit before you used this page.{{else}}Made a mistake? This restores the rego that was on the permit before you used this link.{{end}}</p>
 {{end}}
+{{if .Guest.Picker}}
+{{/* The household's own page: no "account holder is told", no referral (they
+     have an account), and the way back into the app instead of a bookmark tip. */}}
+<p class="empty-note" style="margin-top:16px">Tap a rego. It stays on the permit until the end of the day, then the roster takes over. Everything else, the roster, guests and settings, is in the app.</p>
+<a class="gtip" href="/schedule" hx-boost="false">Open p.stonn &rarr;</a>
+{{else}}
 {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your rego to put it on the permit until the end of the day.{{else}}Tap your rego. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>{{end}}
 {{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>{{end}}
 {{if .Flash}}{{template "guest-referral" .}}{{end}}
+{{end}}
 {{end}}
 
 {{/* Printed-QR request status (htmx-polled). Pending re-polls; a decision stops. */}}

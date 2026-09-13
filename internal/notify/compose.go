@@ -45,7 +45,7 @@ type ApplyOutcome struct {
 	Reg         string // the vehicle we tried to set
 	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
 	By          string // who made the change, when it was a guest activation ("" otherwise)
-	Source      string // "roster" / "override" / "guest" / "doorqr" (success context)
+	Source      string // "roster" / "override" / "guest" / "doorqr" / "picker" (success context)
 	OK          bool
 	CurrentReg  string // what is still on the permit on failure ("" if unknown)
 	Reason      string // one plain sentence: why it failed
@@ -102,7 +102,11 @@ func (o ApplyOutcome) actionNeeded() bool { return !o.OK && (!o.Transient || o.U
 // made by someone else (a guest link, an approved door-QR request): that is a
 // third party touching the permit, which the household should hear about even
 // with routine confirmations off.
-func (o ApplyOutcome) fromSchedule() bool { return o.Source == "roster" || o.Source == "override" }
+func (o ApplyOutcome) fromSchedule() bool {
+	// The quick picker is the household tapping its own phone: their choice, not a
+	// third party's, so it is muted under failures-only exactly as a booking is.
+	return o.Source == "roster" || o.Source == "override" || o.Source == "picker"
+}
 
 // mutedByFailuresOnly reports whether a member who asked to hear about problems
 // only should be spared this outcome: a successful, household-scheduled apply that
@@ -168,6 +172,9 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		case o.Source == "guest":
 			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.",
 				o.PermitLabel, car, o.By)
+		case o.Source == "picker":
+			body = fmt.Sprintf("Your %s is now set to %s, from the quick picker on your phone. It stays until that booking ends — then your roster takes over again.%s",
+				o.PermitLabel, car, confirm)
 		case o.Source == "override" && o.By != "":
 			// Name whoever made the booking. On a shared account this is the only
 			// signal distinguishing "the schedule ran" from "someone booked over it",

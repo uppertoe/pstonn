@@ -56,11 +56,24 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 		base.Warn = "That request couldn't be put on the permit: its printed QR code may have been removed, or guest passes paused."
 	case looksLikeEmail(q.Get("resent")):
 		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
+	// The quick picker's own outcomes, all bare flags. Each also opens the
+	// picker card (closed by default) so the result is in view.
+	case q.Get("picker") == "made":
+		base.Flash = "Your quick picker is ready. Open it on your phone and add it to the home screen."
+	case q.Get("picker") == "updated":
+		base.Flash = "Quick picker updated."
+	case q.Get("picker") == "newlink":
+		base.Flash = "The quick picker has a new link. The one on your phone has stopped working, so open this one and save it again."
+	case q.Get("picker") == "deleted":
+		base.Flash = "Quick picker deleted. Its link has stopped working."
 	}
 	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
 		s.serverError(w, err)
 		return
 	}
+	// The picker card is closed by default; after one of its own actions the
+	// result should be in view.
+	base.GuestMgmt.PickerOpen = r.URL.Query().Get("picker") != ""
 	s.render(w, base)
 }
 
@@ -226,6 +239,9 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 				CreatedAt: d.CreatedAt.In(s.locFor(ctx, base.Owner)).Format("2 Jan 2006"),
 			})
 		}
+	}
+	if err := s.loadPicker(ctx, base); err != nil {
+		return err
 	}
 	base.GuestMgmt.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)
 	return err

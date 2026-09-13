@@ -3,6 +3,17 @@
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
   <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
   {{template "checklist" .}}
+  {{if and .GuestMgmt.PermitOpts (not .QR) (not .Edit)}}
+  {{/* Four tools live on this tab and the heading names one of them. The tiles
+       say who each is for and jump to its card; they are navigation, so they
+       are tinted and flat rather than cards of their own. */}}
+  <nav class="tiles" aria-label="What is on this page">
+    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic">{{template "ic-link"}}</span>Guest pass</span><span class="tile-who">Someone who visits often. They get a link by email.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic">{{template "ic-qr"}}</span>Show a QR</span><span class="tile-who">A visitor standing here now.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic">{{template "ic-print"}}</span>Printed QR</span><span class="tile-who">Anyone who turns up while you are out.</span></a>
+    <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic">{{template "ic-phone"}}</span>Quick picker</span><span class="tile-who">Your own phone, one tap per rego.</span></a>
+  </nav>
+  {{end}}
   {{if .QR}}
   {{/* ---- ON-SCREEN VISITOR QR ---- */}}
   <section class="card" style="--hue:var(--sec-vehicles);text-align:center">
@@ -167,6 +178,75 @@
       </div>
     </div>
     {{end}}
+  </section>
+  {{end}}
+
+
+  {{if and .GuestMgmt.PermitOpts (or .Vehicles .GuestMgmt.Picker)}}
+  {{/* The household's own quick picker. A folding card, closed by default: it
+       is not what most people come to this tab for. It opens from the tile
+       (the #picker hash), after a change (PickerOpen), or on its chevron. */}}
+  <section class="card fold" id="picker" style="--hue:var(--sec-activity)"
+           x-data="{open: {{if .GuestMgmt.PickerOpen}}true{{else}}location.hash === '#picker'{{end}}}"
+           @hashchange.window="if (location.hash === '#picker') open = true">
+    <div class="fold-head">
+      <h2><span class="ic">{{template "ic-phone"}}</span> {{if .GuestMgmt.Picker}}Your quick picker{{else}}Your own quick picker{{end}}</h2>
+      {{if and .GuestMgmt.Picker (not .GuestMgmt.PickerEdit)}}
+      <div class="row" style="gap:6px;flex:none">
+        <a href="/guests/picker/edit"><button type="button" class="ghost sm">{{template "ic-edit"}} Edit</button></a>
+        <form method="post" action="/guests/picker/delete" data-confirm="Delete the quick picker? The link on your phone stops working, and a rego it put on the permit comes off now." data-confirm-ok="Delete">
+          <button class="ghost icon" type="submit" title="Delete the quick picker" aria-label="Delete the quick picker">{{template "ic-trash"}}</button>
+        </form>
+      </div>
+      {{end}}
+      <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" aria-controls="picker-body" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+    <p class="fold-sum">{{if .GuestMgmt.Picker}}Set up for {{.GuestMgmt.Picker.Names}}, with the overnight option {{if .GuestMgmt.Picker.AllowOvernight}}on{{else}}off{{end}}.{{else}}A home-screen page with one button per rego, no sign-in.{{end}}</p>
+    <div id="picker-body" class="fold-body" x-show="open" x-cloak>
+      {{if and .GuestMgmt.Picker (not .GuestMgmt.PickerEdit)}}
+      <div class="qropts">
+        <div class="qropt" style="align-items:center;text-align:center">
+          {{if .GuestMgmt.Picker.ImageURI}}<img src="{{.GuestMgmt.Picker.ImageURI}}" alt="QR code for the quick picker" width="168" height="168" class="qrimg">
+          <span class="empty-note">Scan with the phone it should live on.</span>
+          {{else}}<span class="empty-note">This link could not be read. Make a new one below.</span>{{end}}
+        </div>
+        <div class="qropt">
+          <div class="qropt-txt"><strong>Or open it here</strong><span class="empty-note">Then on an iPhone: <strong>Share</strong>, then <strong>Add to Home Screen</strong>. On Android: the browser menu, then <strong>Add to Home screen</strong>. The icon is called p.stonn.</span></div>
+          {{if .GuestMgmt.Picker.URL}}<a href="{{.GuestMgmt.Picker.URL}}" class="btnlike" style="justify-content:center" hx-boost="false" target="_blank" rel="noopener">Open the quick picker</a>{{end}}
+          <form method="post" action="/guests/picker/rotate" class="qropt-txt fold-newlink" data-confirm="Make a new link? The one on your phone stops working, and you will need to save the new one." data-confirm-ok="New link">
+            <span class="empty-note">Lost the phone? A new link makes the old one stop working.</span>
+            <button type="submit" class="ghost sm" style="align-self:flex-start">{{template "ic-link"}} New link</button>
+          </form>
+        </div>
+      </div>
+      {{else}}
+      <p class="subtitle" style="margin-top:0">Tap a rego on it and it is on the permit until the end of the day. It works like a guest pass, so it can only choose from the regos you tick here.</p>
+      <form method="post" action="{{if .GuestMgmt.PickerEdit}}/guests/picker/update{{else}}/guests/picker{{end}}" class="stack">
+        {{if not .GuestMgmt.PickerEdit}}
+        {{if gt (len .GuestMgmt.PermitOpts) 1}}
+        <label class="fld"><span>Permit</span><select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select></label>
+        {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
+        {{end}}
+        <div class="fld"><span>Regos it offers</span>
+          <div class="checks">
+            {{range .Vehicles}}
+            <label class="check">
+              <input type="checkbox" name="vehicle_id" value="{{.ID}}"{{if $.GuestMgmt.PickerEdit}}{{if index $.GuestMgmt.PickerEdit.Selected .ID}} checked{{end}}{{else}} checked{{end}}>
+              <span class="dot" style="background:{{.Color}}"></span>
+              <span class="cname">{{.Label}}</span>
+              <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>
+            </label>
+            {{end}}
+          </div>
+        </div>
+        <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="allow_overnight"{{if .GuestMgmt.PickerEdit}}{{if .GuestMgmt.PickerEdit.AllowOvernight}} checked{{end}}{{else}} checked{{end}} style="margin-top:2px"> <span>Offer an <strong>overnight</strong> option<br><span class="muted" style="font-size:12.5px">Keeps a rego on until the end of tomorrow rather than today. When the time is up the roster takes over; if nothing is scheduled, the rego stays on the permit until the next change.</span></span></label>
+        <div class="row" style="gap:10px">
+          <button type="submit">{{if .GuestMgmt.PickerEdit}}{{template "ic-check"}} Save changes{{else}}Create the picker{{end}}</button>
+          {{if .GuestMgmt.PickerEdit}}<a href="/guests"><button type="button" class="ghost">Cancel</button></a>{{end}}
+        </div>
+      </form>
+      {{end}}
+    </div>
   </section>
   {{end}}
 

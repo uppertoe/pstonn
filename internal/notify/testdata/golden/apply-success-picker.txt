@@ -1,0 +1,29 @@
+=== EMAIL to primary@example.com
+Subject: Permit updated: Visitor now shows XYZ789
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your Visitor is now set to Baba — XYZ789, from the quick picker on your phone. It stays until that booking ends — then your roster takes over again.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+
+=== NTFY pstonn-primary
+Title: Permit updated: Visitor now shows XYZ789
+Priority: default
+Tags: white_check_mark
+
+Your Visitor is now set to Baba — XYZ789, from the quick picker on your phone. It stays until that booking ends — then your roster takes over again.
+
+Nothing to do — this is just your confirmation it went through.
+
+=== EMAIL to sam@example.com
+Subject: Permit updated: Visitor now shows XYZ789
+Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your Visitor is now set to Baba — XYZ789, from the quick picker on your phone. It stays until that booking ends — then your roster takes over again.
+
+Nothing to do — this is just your confirmation it went through.
+
+https://p.stonn.org
+

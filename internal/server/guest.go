@@ -49,6 +49,7 @@ type guestActView struct {
 	AllowPlate     bool              // whether the visitor may type an arbitrary plate
 	Regions        []provider.Region // registration-state options for a typed plate (empty hides the chooser)
 	RequestOnly    bool              // printed QR: entering a plate only requests approval
+	Picker         bool              // the household's own quick picker: the permit's name headlines, regos show in full, nothing is a "guest"
 	RevertPlate    string            // pre-existing plate the guest may put back ("" = no revert offered)
 	PendingReg     string            // plate the schedule targets but the tenant doesn't show yet ("" = settled)
 	Stalled        bool              // the pending change has taken suspiciously long; stop polling
@@ -135,6 +136,25 @@ type doorQRView struct {
 	ImageURI    template.URL
 	URL         string
 	CreatedAt   string // "20 Jul 2026"
+}
+
+// pickerView drives the Guests tab's quick-picker card once the household has
+// made one: the QR and link to save to a phone, and what it offers.
+type pickerView struct {
+	GrantID        int64
+	PermitLabel    string
+	ImageURI       template.URL
+	URL            string
+	Cars           []vehicleView
+	Names          string // "Nana, Baba and X-Trail"
+	AllowOvernight bool
+}
+
+// pickerEditView pre-fills the quick-picker form to change its regos or the
+// overnight option (nil on the page = create mode, or nothing to edit).
+type pickerEditView struct {
+	AllowOvernight bool
+	Selected       map[int64]bool
 }
 
 // doorGrantView is one durable door QR in the holder's management list.
