@@ -71,8 +71,9 @@ func TestOwnerIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteOverride(ctx, bob, ovr); err != nil {
-		t.Fatal(err)
+	// A scoped delete that matches nothing says so, rather than a silent nil.
+	if err := s.DeleteOverride(ctx, bob, ovr); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob deleting alice's override = %v, want ErrNotFound", err)
 	}
 	if o, _ := s.ListOverrides(ctx, aPermit, time.Now()); len(o) != 1 {
 		t.Fatalf("alice override deleted by bob: %+v", o)
@@ -208,7 +209,11 @@ func TestMarkCopyOfferDone(t *testing.T) {
 	if p, _ := s.GetPermit(ctx, id); p.CopyOfferDone {
 		t.Fatal("fresh permit should not have the copy pitch answered")
 	}
-	if err := s.MarkCopyOfferDone(ctx, id); err != nil {
+	// Another account cannot answer it, and a miss says so.
+	if err := s.MarkCopyOfferDone(ctx, "bob@example.com", id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-owner mark = %v, want ErrNotFound", err)
+	}
+	if err := s.MarkCopyOfferDone(ctx, "alice@example.com", id); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ := s.GetPermit(ctx, id); !p.CopyOfferDone {

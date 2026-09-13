@@ -194,8 +194,13 @@ func (s *Server) tenantSelect(w http.ResponseWriter, r *http.Request) {
 	// MUTATING: writes the CURRENT tenant on owner. With the lenient resolver a
 	// DB blip made a secondary's owner their own address, so the switch landed on
 	// a phantom account and the household's real one never moved.
-	_, owner, _, ok := s.accountForWrite(w, r)
+	user, owner, isPrimary, ok := s.accountForWrite(w, r)
 	if !ok {
+		return
+	}
+	// Account-wide, like connecting or disconnecting the council: the owner's call.
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can change the area.")
 		return
 	}
 	if s.registry == nil {
@@ -211,6 +216,7 @@ func (s *Server) tenantSelect(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	s.logChange(r.Context(), owner, user, store.ActionCouncilSelect, c.ID, "")
 	if s.tenant.Linked(r.Context(), owner, c.ID) {
 		redirectHome(w, r)
 		return
@@ -551,7 +557,11 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	// wasActive distinguishes revoking a real member from withdrawing a still-pending
 	// invitation: only the former is a loss of access, so only the former revokes
 	// sessions. Withdrawing an offer touches nothing that belongs to that address.
+	// Removal revokes the member's guest links and sweeps their live bookings, so
+	// claim the account's permits first, as every other revocation does.
+	releaseClaims := s.claimPermitApplies(r.Context(), s.accountPermitIDs(r.Context(), owner))
 	revoked, wasActive, err := s.store.RemoveMember(r.Context(), owner, email)
+	releaseClaims()
 	if errors.Is(err, store.ErrNotFound) {
 		// Not associated with this account: a stale form, or someone probing another
 		// household's address. There is nothing to do — and the response must match the
@@ -577,6 +587,12 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	detail := ""
 	if revoked > 0 {
 		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
+		// Their visitors' links died with their access; the rest of the household
+		// hears about it as it does for any revoked pass, and the permit is
+		// corrected now rather than on the next tick.
+		s.notifyDestructive(r.Context(), owner, user, fmt.Sprintf(
+			"%s removed %s from your p.stonn account. %d guest pass(es) or printed QR(s) they created have stopped working, and p.stonn is taking any rego they put on the permit back off now.", user, email, revoked))
+		s.kickScheduler()
 	}
 	s.logChange(r.Context(), owner, user, store.ActionMemberRemove, email, detail)
 	q := url.Values{"removed": {email}}
@@ -602,7 +618,9 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 		s.message(w, http.StatusForbidden, "You own this account, so there is nothing to leave.")
 		return
 	}
+	releaseClaims := s.claimPermitApplies(r.Context(), s.accountPermitIDs(r.Context(), leftOwner))
 	revoked, err := s.store.RemoveMembership(r.Context(), user)
+	releaseClaims()
 	if err != nil {
 		s.serverError(w, err)
 		return
@@ -621,6 +639,7 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
 		s.notifyDestructive(r.Context(), leftOwner, user, fmt.Sprintf(
 			"%s left the account. %d guest pass(es) or printed QR(s) they created have stopped working.", user, revoked))
+		s.kickScheduler()
 	}
 	s.logChange(r.Context(), leftOwner, user, store.ActionMemberLeave, "", detail)
 	redirectHome(w, r)

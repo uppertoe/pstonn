@@ -205,10 +205,9 @@ func TestGuestApplyCarriesRegistrationState(t *testing.T) {
 	})
 }
 
-// TestGuestRequestStateSurvivesOlderSchema: a database created before
-// guest_request.state existed upgrades on first touch (the column is added from
-// guests.go, not the shared migration list), so a door-QR flow on an existing
-// deployment never fails with "no such column".
+// TestGuestRequestStateColumnIsAddedLazily: a database created before
+// guest_request.state existed gains the column, so a door-QR flow on an
+// existing deployment never fails with "no such column".
 func TestGuestRequestStateColumnIsAddedLazily(t *testing.T) {
 	s := newGuestTestServer(t)
 	ctx := context.Background()

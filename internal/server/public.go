@@ -6,9 +6,6 @@ import (
 	"github.com/uppertoe/pstonn/internal/identity"
 )
 
-// landing is the PUBLIC marketing page (not behind forward-auth): what the app
-// does and how, with a sign-in button. Signed-in visitors get an "Open the app"
-// button instead.
 // signin is the target of every public "Sign in" button. Behind forward-auth
 // the request only arrives once the person is signed in, so it forwards to the
 // app; under the app's own OIDC login it starts that flow; with neither (a
@@ -26,6 +23,9 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// landing is the PUBLIC marketing page (not behind forward-auth): what the app
+// does and how, with a sign-in button. Signed-in visitors get an "Open the app"
+// button instead.
 func (s *Server) landing(w http.ResponseWriter, r *http.Request) {
 	_, signedIn := identity.FromContext(r.Context())
 	// A signed-in visitor goes straight to the app rather than the marketing page.

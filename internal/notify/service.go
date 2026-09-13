@@ -111,6 +111,11 @@ type Service struct {
 	// lastWriteAlert paces the operator alert for that condition, which otherwise
 	// repeats on every 15-second tick for as long as the disk stays broken.
 	lastWriteAlert time.Time
+	// lastDeadAlert and deadSinceAlert pace the dead-letter alert the same way:
+	// an SMTP outage ages a whole batch of rows to dead together, and one mail
+	// per row through the channel that just failed is noise, not information.
+	lastDeadAlert  time.Time
+	deadSinceAlert int
 	// enqueueHook sees every message as composed, BEFORE the store hashes its
 	// dedup key. Tests only: the golden files lock the plaintext key composition,
 	// which the stored (digest) form cannot show. nil in production.

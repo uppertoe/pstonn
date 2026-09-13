@@ -568,10 +568,16 @@ func (s *Store) PruneOverrides(ctx context.Context, before time.Time) (int64, er
 // DeleteOverride removes an override, scoped to the owner of its permit (guards
 // against deleting another user's override by id).
 func (s *Store) DeleteOverride(ctx context.Context, owner string, id int64) error {
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 DELETE FROM override
 WHERE id = ? AND permit_id IN (SELECT id FROM permit WHERE owner = ?)`, id, owner)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteOverrideOnPermit deletes a booking that belongs to BOTH the owner and the

@@ -675,6 +675,12 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 					Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
 					Picker:   &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum"},
 					Edit:     &pickerEditView{AllowOvernight: false, Selected: map[int64]bool{1: true}}}}}, "Save changes"},
+		// The "still to try" strip, as the tabs render it on load.
+		{"vehicles-checklist", dashboardData{User: user, State: "app", Page: "vehicles", IsPrimary: true, Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#7c3aed"}},
+			Checklist: &checklistView{Key: "vehicles", Done: 1, Items: []checkItem{
+				{Milestone: store.MilestoneRego, Label: "Save the rego of someone who visits you", Done: true},
+				{Milestone: store.MilestoneRegoEmail, Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add"}}}}, "Still to try"},
 		{"guest-picker-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Picker: true, Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Home permit", CurrentReg: "ABC123", MineReg: "ABC123", RevertPlate: "1QT4RM",
 			Cars: []vehicleView{{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#111"}, {ID: 2, Label: "Baba", Registration: "XYZ789", Color: "#222"}}, AllowOvernight: true}}, "Tap a rego to put it on the permit"},

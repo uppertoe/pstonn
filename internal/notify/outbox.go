@@ -285,9 +285,19 @@ func (s *Service) flushUnrecorded(ctx context.Context) bool {
 // the account but the message itself is gone.
 func (s *Service) announceDead(ctx context.Context, id int64, u outboxUpdate) {
 	alog.Errorf("DROPPED outbox row %d (%s) to %s: %s", id, u.why, u.who, u.lastErr)
+	// Every row is logged; the operator is mailed at most hourly, with the count
+	// of rows dropped since the last alert, so an outage reads as one message.
+	s.deadSinceAlert++
+	now := time.Now()
+	if now.Sub(s.lastDeadAlert) < time.Hour {
+		return
+	}
+	s.lastDeadAlert = now
+	n := s.deadSinceAlert
+	s.deadSinceAlert = 0
 	if ae := s.NotifyAdmin(ctx, "Notification undeliverable (gave up)",
-		fmt.Sprintf("A notification could not be delivered (%s) and was dropped.\nOutbox row: %d\nTo: %s\nLast error: %s",
-			u.why, id, u.who, u.lastErr)); ae != nil {
+		fmt.Sprintf("A notification could not be delivered (%s) and was dropped.\nOutbox row: %d\nTo: %s\nLast error: %s\n\n%d row(s) dropped since the last alert; each is in the log.",
+			u.why, id, u.who, u.lastErr, n)); ae != nil {
 		alog.Errorf("dead-letter admin alert also failed: %v", ae)
 	}
 }

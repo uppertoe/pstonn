@@ -712,7 +712,7 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	// building a schedule by hand, so the pitch must not lead again. p is a local
 	// copy, so mirror the flag for the respondPermit render below.
 	if vehicleID != 0 && !p.CopyOfferDone {
-		if err := s.store.MarkCopyOfferDone(r.Context(), p.ID); err == nil {
+		if err := s.store.MarkCopyOfferDone(r.Context(), owner, p.ID); err == nil {
 			p.CopyOfferDone = true
 		}
 	}

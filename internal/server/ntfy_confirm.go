@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -76,19 +75,19 @@ func (s *Server) openNtfyConfirm(token string, now time.Time) (owner, topic stri
 func (s *Server) ntfyConfirm(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	limitBody(r)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// The ntfy app opens this in a browser, so every answer is the branded page.
 	if !s.confirmLimit.allow(rateLimitKey(r)) {
 		w.Header().Set("Retry-After", "60")
-		http.Error(w, "Too many attempts. Please wait a moment.", http.StatusTooManyRequests)
+		s.message(w, http.StatusTooManyRequests, "Too many attempts. Please wait a moment.")
 		return
 	}
 	owner, topic, err := s.openNtfyConfirm(r.PathValue("token"), time.Now())
 	switch {
 	case errors.Is(err, errNtfyConfirmExpired):
-		http.Error(w, "This confirmation has expired. Send a new test from p.stonn Settings and tap Confirm on that one.", http.StatusGone)
+		s.message(w, http.StatusGone, "This confirmation has expired. Send a new test from p.stonn Settings and tap Confirm on that one.")
 		return
 	case err != nil:
-		http.Error(w, "That confirmation link isn't valid.", http.StatusNotFound)
+		s.message(w, http.StatusNotFound, "That confirmation link isn't valid.")
 		return
 	}
 	stamped, err := s.store.ConfirmNtfy(r.Context(), owner, topic, time.Now())
@@ -100,12 +99,12 @@ func (s *Server) ntfyConfirm(w http.ResponseWriter, r *http.Request) {
 		// Either already confirmed (a second tap) or the topic has since been
 		// regenerated. Both are "nothing to do", and only the second needs a hint.
 		if pref, perr := s.store.GetNotifyPref(r.Context(), owner); perr == nil && pref.NtfyTopic != topic {
-			http.Error(w, "This test was for an older topic. Subscribe to your new topic, send a fresh test, and tap Confirm on that.", http.StatusGone)
+			s.message(w, http.StatusGone, "This test was for an older topic. Subscribe to your new topic, send a fresh test, and tap Confirm on that.")
 			return
 		}
-		fmt.Fprintln(w, "Already confirmed. Push notifications are on for this phone.")
+		s.message(w, http.StatusOK, "Already confirmed. Push notifications are on for this phone.")
 		return
 	}
 	alog.Infof("ntfy confirmed for %s", redact.Email(owner))
-	fmt.Fprintln(w, "Confirmed — push notifications are getting through to this phone. You can now turn off email in p.stonn Settings if you'd rather.")
+	s.message(w, http.StatusOK, "Confirmed — push notifications are getting through to this phone. You can now turn off email in p.stonn Settings if you'd rather.")
 }

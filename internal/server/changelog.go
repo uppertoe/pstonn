@@ -239,6 +239,8 @@ func changeText(c store.Change) string {
 		return "connected the council account"
 	case store.ActionCouncilUnlink:
 		return "disconnected the council account"
+	case store.ActionCouncilSelect:
+		return "switched the account to " + c.Target
 	case store.ActionCouncilForget:
 		return "turned off automatic reconnection"
 	default:

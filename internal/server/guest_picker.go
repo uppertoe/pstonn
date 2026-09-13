@@ -271,7 +271,10 @@ func (s *Server) updatePicker(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
+	// Unticking a rego withdraws authority the link may be using right now.
+	releaseClaims := s.claimPermitApplies(r.Context(), []int64{pg.PermitID})
 	swept, err := s.store.UpdateGuestGrant(r.Context(), owner, pg.GrantID, "Quick picker", allowOvernight, vehicleIDs)
+	releaseClaims()
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That rego isn't one you manage.")
@@ -294,21 +297,37 @@ func (s *Server) rotatePicker(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pg, err := s.store.PickerGrant(r.Context(), owner)
+	if errors.Is(err, store.ErrNotFound) {
+		s.respondPickerCard(w, r, owner, false, "", "")
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
 	raw, hash := newGuestToken()
 	sealed, err := s.box.SealCtx(secretbox.GuestToken(owner), raw)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	switch err := s.store.RotatePickerToken(r.Context(), owner, hash, sealed); {
-	case errors.Is(err, store.ErrNotFound):
+	// The old link dies here: hold the permit's apply claim as any revocation does.
+	releaseClaims := s.claimPermitApplies(r.Context(), []int64{pg.PermitID})
+	err = s.store.RotatePickerToken(r.Context(), owner, hash, sealed)
+	releaseClaims()
+	if errors.Is(err, store.ErrNotFound) {
 		s.respondPickerCard(w, r, owner, false, "", "")
 		return
-	case err != nil:
+	}
+	if err != nil {
 		s.serverError(w, err)
 		return
 	}
 	s.logChange(r.Context(), owner, user, store.ActionPickerRotate, "", "")
+	// Every phone in the household that saved the old link has lost it.
+	s.notifyDestructive(r.Context(), owner, user,
+		user+" gave the quick picker a new link. The one saved on any phone has stopped working; open the Guests tab to save the new one.")
 	s.respondPickerCard(w, r, owner, false, "The quick picker has a new link. The one on your phone has stopped working, so open this one and save it again.", "newlink")
 }
 
@@ -340,6 +359,8 @@ func (s *Server) deletePicker(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionPickerDelete, "", "")
+		s.notifyDestructive(r.Context(), owner, user,
+			user+" deleted the quick picker on your p.stonn account. Its link has stopped working, and p.stonn is taking any rego it put on the permit back off now.")
 		s.kickScheduler()
 	}
 	s.respondPickerCard(w, r, owner, false, "Quick picker deleted. Its link has stopped working.", "deleted")

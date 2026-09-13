@@ -337,6 +337,12 @@ func goldenFragmentCases(loc *time.Location, user identity.User, now time.Time) 
 			Regions: []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}}}}},
 		{"pending", "guest-req-status", guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}},
 		// The quick-picker card as an action's reply: open, with its notice.
+		{"deleted", "picker-card", pickerCardView{Open: true, Notice: "Quick picker deleted. Its link has stopped working.",
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}},
+		{"edit", "picker-card", pickerCardView{Open: true,
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
+			Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum"},
+			Edit:   &pickerEditView{AllowOvernight: true, Selected: map[int64]bool{1: true}}}},
 		{"made", "picker-card", pickerCardView{Open: true, Notice: "Your quick picker is ready. Open it on your phone and add it to the home screen.",
 			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
 			Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok",

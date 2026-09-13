@@ -64,6 +64,12 @@ func GuestToken(owner string) string { return "guest-token:" + owner }
 // from opening as a confirmation).
 func NtfyConfirm() string { return "ntfy-confirm" }
 
+// One blob is deliberately sealed with no context at all: the roster payload
+// the /status endpoint hands to the outage watchdog (server/admin.go). It is in
+// transit, not at rest, under a key the watchdog holds for exactly that purpose
+// (ROSTER_KEY), and the watchdog must open it without knowing any string here.
+// Nothing else may use bare Seal.
+//
 // withTenant lays out purpose:tenant:owner. The tenant goes BEFORE the owner
 // because an owner is an email address, which may legally contain a colon, while a
 // tenant id is a registry slug that never does — so the string parses one way only.

@@ -167,6 +167,9 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 	s.logChange(r.Context(), owner, user, store.ActionVehicleDelete, plate, usageSentence(usage))
 	s.notifyDestructive(r.Context(), owner, user,
 		user+" deleted "+named+" from your p.stonn account. "+usageSentence(usage))
+	// The cascade just removed roster days and bookings, so what the schedule
+	// resolves to may have changed now.
+	s.kickScheduler()
 	q := url.Values{
 		"deleted":  {plate},
 		"days":     {strconv.Itoa(len(usage.Rules))},

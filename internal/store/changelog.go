@@ -55,6 +55,7 @@ const (
 	// Tenant connection
 	ActionCouncilLink   = "council.link"
 	ActionCouncilUnlink = "council.unlink"
+	ActionCouncilSelect = "council.select" // target = the council id the account now works in
 	ActionCouncilForget = "council.forget-password"
 )
 

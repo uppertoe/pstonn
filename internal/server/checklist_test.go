@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,5 +83,31 @@ func TestChecklistTicksAndRetires(t *testing.T) {
 	}
 	if s.checklistFor(ctx, owner, owner, true, "activity") != nil {
 		t.Fatal("a tab without a card returned one")
+	}
+}
+
+// TestChecklistRendersOnTheTab goes through the real router: the strip is on
+// the page, with its count, for a linked household.
+func TestChecklistRendersOnTheTab(t *testing.T) {
+	s, _ := newApplyRig(t)
+	ctx := context.Background()
+	const owner = "owner@example.com"
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.tenant.Link(ctx, owner, "", owner, "ok", false, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.UpsertPermit(ctx, owner, "90001", "14", "Home"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.CreateVehicle(ctx, owner, "ABC123", "Nana", ""); err != nil {
+		t.Fatal(err)
+	}
+	page := s.doReq("GET", "/regos", owner, "", nil).Body.String()
+	for _, want := range []string{"Still to try", "1 of 2", "Add an email, so they are told when their rego goes on the permit"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("regos page lacks %q:\n%s", want, page)
+		}
 	}
 }

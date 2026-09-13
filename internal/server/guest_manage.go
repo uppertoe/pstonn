@@ -503,7 +503,14 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, tooManyRecipients)
 		return
 	}
+	// Unticking a rego withdraws authority its links may be using right now, so
+	// hold the permit's apply claim over the sweep, as a revocation does.
+	var releaseClaims = func() {}
+	if pid, perr := s.store.GuestGrantPermit(r.Context(), owner, id); perr == nil {
+		releaseClaims = s.claimPermitApplies(r.Context(), []int64{pid})
+	}
 	swept, err := s.store.UpdateGuestGrant(r.Context(), owner, id, label, allowOvernight, vehicleIDs)
+	releaseClaims()
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			s.message(w, http.StatusForbidden, "That pass or rego isn't one you manage.")
@@ -844,6 +851,20 @@ func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
+// accountPermitIDs lists every permit on the account, for a revocation that
+// spans all of them (pausing guests, removing a member). Best-effort: on a read
+// error it returns nothing, and claimPermitApplies then claims nothing rather
+// than the revocation failing to revoke.
+func (s *Server) accountPermitIDs(ctx context.Context, owner string) []int64 {
+	var ids []int64
+	if ps, err := s.store.ListPermitsFor(ctx, owner); err == nil {
+		for _, p := range ps {
+			ids = append(ids, p.ID)
+		}
+	}
+	return ids
+}
+
 // kickScheduler asks the reconcile loop to run now. Tolerates a Server built
 // without one (tests construct one directly): a revocation must still take the
 // guest's authority away even when nothing is running to re-apply the schedule.
@@ -863,13 +884,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 	// stable order) so no guest apply can be in flight as the switch flips.
 	var releaseClaims = func() {}
 	if !enabled {
-		var ids []int64
-		if ps, perr := s.store.ListPermitsFor(r.Context(), owner); perr == nil {
-			for _, p := range ps {
-				ids = append(ids, p.ID)
-			}
-		}
-		releaseClaims = s.claimPermitApplies(r.Context(), ids)
+		releaseClaims = s.claimPermitApplies(r.Context(), s.accountPermitIDs(r.Context(), owner))
 	}
 	err := s.store.SetGuestsEnabled(r.Context(), owner, enabled)
 	releaseClaims()

@@ -41,6 +41,7 @@ func (s *Server) unsubscribePage(w http.ResponseWriter, r *http.Request) {
 // unsubscribeApply stops email to the address. Idempotent: unsubscribing twice is
 // the same as once, which is what a one-click header replay will do.
 func (s *Server) unsubscribeApply(w http.ResponseWriter, r *http.Request) {
+	limitBody(r)
 	if s.unsubThrottled(w, r) {
 		return
 	}

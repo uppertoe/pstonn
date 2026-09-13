@@ -4,46 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
 )
 
 // ---- Permits ----
-
-// permitSchemaOnce guards the lazy ADD COLUMN in ensurePermitSchema, one
-// sync.Once per *Store (tests open many stores per process).
-var permitSchemaOnce sync.Map // *Store -> *sync.Once
-
-// ensurePermitSchema adds permit.active_confirmed_at to a database that
-// predates it, once per open store. The proper home for this is the tolerant
-// ALTER list in migrate.go (and rebuildPermitTable's column list); it lives here
-// so the permit code is self-contained until that line lands — every permit
-// method runs it before touching the table, so a pre-column database never
-// sees "no such column: active_confirmed_at". Idempotent-by-tolerance the same
-// way migrate.go's loop is: SQLite reports a duplicate column as a generic
-// SQLITE_ERROR, so the message text is the only key.
-//
-// It must run BEFORE a method opens a rows cursor or a transaction: the pool
-// holds one connection, so an Exec issued mid-iteration blocks forever.
-func (s *Store) ensurePermitSchema() error {
-	v, _ := permitSchemaOnce.LoadOrStore(s, &sync.Once{})
-	var err error
-	v.(*sync.Once).Do(func() {
-		_, err = s.db.Exec(`ALTER TABLE permit ADD COLUMN active_confirmed_at TEXT NOT NULL DEFAULT ''`)
-		if err != nil && strings.Contains(err.Error(), "duplicate column") {
-			err = nil
-		}
-		if err != nil {
-			err = fmt.Errorf("ensure permit.active_confirmed_at: %w", err)
-			permitSchemaOnce.Delete(s) // let the next call retry rather than stay broken
-		}
-	})
-	return err
-}
 
 // ListPermits returns every permit across all owners (used by the scheduler,
 // which reconciles each permit using its owner's tenant session).
@@ -84,9 +50,6 @@ func scanPermit(sc interface{ Scan(...any) error }) (model.Permit, error) {
 }
 
 func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]model.Permit, error) {
-	if err := s.ensurePermitSchema(); err != nil {
-		return nil, err
-	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -104,9 +67,6 @@ func (s *Store) queryPermits(ctx context.Context, query string, args ...any) ([]
 }
 
 func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
-	if err := s.ensurePermitSchema(); err != nil {
-		return model.Permit{}, err
-	}
 	p, err := scanPermit(s.db.QueryRowContext(ctx,
 		`SELECT `+permitCols+` FROM permit WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -118,9 +78,6 @@ func (s *Store) GetPermit(ctx context.Context, id int64) (model.Permit, error) {
 // PermitInTenant looks a permit up by the tenant's own id WITHIN one tenant —
 // the lookup a handler must use, since two registry' id spaces overlap.
 func (s *Store) PermitInTenant(ctx context.Context, tenantID, tenantPermitID string) (model.Permit, error) {
-	if err := s.ensurePermitSchema(); err != nil {
-		return model.Permit{}, err
-	}
 	p, err := scanPermit(s.db.QueryRowContext(ctx,
 		`SELECT `+permitCols+` FROM permit WHERE council_id = ? AND council_permit_id = ?`, tenantID, tenantPermitID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -136,9 +93,6 @@ func (s *Store) PermitInTenant(ctx context.Context, tenantID, tenantPermitID str
 func (s *Store) ManagedPermitIDsInTenant(ctx context.Context, tenantID string) (map[string]bool, error) {
 	if tenantID == "" {
 		return map[string]bool{}, nil
-	}
-	if err := s.ensurePermitSchema(); err != nil {
-		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT council_permit_id FROM permit WHERE council_id = ?`, tenantID)
@@ -219,18 +173,24 @@ WHERE council_permit_id = ? AND owner = ? AND council_id = ?`,
 	return err
 }
 
+// MarkCopyOfferDone retires the "renewed this permit?" copy pitch for one
+// permit, owner-scoped. One-way by design: the pitch shows once per added
+// permit and never returns after a dismissal, a copy, or a first roster day.
+func (s *Store) MarkCopyOfferDone(ctx context.Context, owner string, id int64) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE permit SET copy_offer_done = 1 WHERE id = ? AND owner = ?`, id, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // MarkPermitExpiryReminded records that an approaching-expiry reminder has gone
 // out for the permit's current end date, so it isn't sent again until the date
 // changes (see UpdatePermitMeta, which clears the flag on renewal).
-// MarkCopyOfferDone retires the "renewed this permit?" copy pitch for one
-// permit. One-way by design: the pitch shows once per added permit and never
-// returns after a dismissal, a copy, or a first roster day.
-func (s *Store) MarkCopyOfferDone(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE permit SET copy_offer_done = 1 WHERE id = ?`, id)
-	return err
-}
-
 func (s *Store) MarkPermitExpiryReminded(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE permit SET expiry_reminded = '1' WHERE id = ?`, id)
@@ -273,9 +233,6 @@ func (s *Store) ClearFailStreak(ctx context.Context, id int64) error {
 // own list when the permit is added — so the stamp is unconditional here rather
 // than a flag each caller could forget.
 func (s *Store) SetPermitActive(ctx context.Context, id int64, registration string) error {
-	if err := s.ensurePermitSchema(); err != nil {
-		return err
-	}
 	now := nowUTC()
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE permit SET active_registration = ?, active_confirmed_at = ?, updated_at = ? WHERE id = ?`,
@@ -292,9 +249,6 @@ func (s *Store) SetPermitActive(ctx context.Context, id int64, registration stri
 // costs at most one write). RFC3339 UTC strings order lexically, and ” sorts
 // before any of them, so the comparison is a plain string one.
 func (s *Store) TouchPermitConfirmed(ctx context.Context, id int64, registration string, at time.Time) error {
-	if err := s.ensurePermitSchema(); err != nil {
-		return err
-	}
 	ts := at.UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE permit SET active_confirmed_at = ? WHERE id = ? AND active_registration = ? AND active_confirmed_at < ?`,
@@ -353,9 +307,6 @@ func (s *Store) CountPermits(ctx context.Context) (int, error) {
 //
 // The adopted plate is a council reading, so active_confirmed_at is stamped with it.
 func (s *Store) SetPermitActiveIfUnchanged(ctx context.Context, id int64, from, to string) (bool, error) {
-	if err := s.ensurePermitSchema(); err != nil {
-		return false, err
-	}
 	now := nowUTC()
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE permit SET active_registration = ?, active_confirmed_at = ?, updated_at = ? WHERE id = ? AND active_registration = ?`,

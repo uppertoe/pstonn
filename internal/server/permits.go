@@ -678,7 +678,7 @@ func (s *Server) dismissCopyOffer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.store.MarkCopyOfferDone(r.Context(), p.ID); err != nil {
+	if err := s.store.MarkCopyOfferDone(r.Context(), owner, p.ID); err != nil {
 		s.serverError(w, err)
 		return
 	}
@@ -792,7 +792,7 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	// and nothing else would retire it. dst is a local copy; mirror the flag for
 	// the render below.
 	if !dst.CopyOfferDone {
-		if err := s.store.MarkCopyOfferDone(r.Context(), dst.ID); err == nil {
+		if err := s.store.MarkCopyOfferDone(r.Context(), owner, dst.ID); err == nil {
 			dst.CopyOfferDone = true
 		}
 	}

@@ -87,20 +87,19 @@ func TestPermitActiveConfirmedAt(t *testing.T) {
 	}
 }
 
-// TestPermitConfirmedAtColumnBackfill: a database opened without the column
-// (the pre-upgrade shape) gains it on first permit access rather than failing.
+// TestPermitConfirmedAtColumnBackfill: a database in the pre-upgrade shape
+// (no active_confirmed_at column) gains it when the migrations run, which
+// they do on every start.
 func TestPermitConfirmedAtColumnBackfill(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
-	// Reach the old shape: drop the column the lazy ensure added, then forget that
-	// this store already ran the ensure.
-	if _, err := s.ListPermits(ctx); err != nil {
-		t.Fatal(err)
-	}
+	// Reach the old shape, then run the migrations again, as a restart would.
 	if _, err := s.db.Exec(`ALTER TABLE permit DROP COLUMN active_confirmed_at`); err != nil {
 		t.Fatal(err)
 	}
-	permitSchemaOnce.Delete(s)
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
 	id, err := s.UpsertPermit(ctx, "bob@example.com", "9", "1", "Back")
 	if err != nil {
 		t.Fatal(err)

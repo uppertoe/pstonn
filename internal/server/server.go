@@ -1,8 +1,12 @@
 // Package server wires the HTTP routes and renders the dashboard. User identity
 // is resolved by identity.Middleware (forward_auth headers, else the app's own
-// OIDC session cookie, else a dev fallback); mutating routes require a
-// signed-in user, and the ones that withdraw guest authority also kick the
-// scheduler so the permit is corrected at once rather than on the next tick.
+// OIDC session cookie, else a dev fallback). Every route registers through
+// handle with an explicit guard: guardConsent (signed in, same-origin, terms
+// accepted) is the default for anything that changes account data; a public
+// mutation is authenticated by a signed token instead. Handlers that change
+// what the schedule resolves to right now also kick the reconcile loop, so the
+// permit is corrected at once rather than on the next tick. See
+// docs/CONVENTIONS.md.
 package server
 
 import (
@@ -315,8 +319,8 @@ func (s *Server) Handler() http.Handler {
 	s.routes = s.routes[:0]
 	mux := http.NewServeMux()
 	s.handle(mux, "GET /healthz", guardPublic, s.health)
-	mux.Handle("GET /static/app.css", cacheStatic(http.HandlerFunc(serveAppCSS)))
-	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(staticSub))))
+	s.handle(mux, "GET /static/app.css", guardPublic, cacheStatic(http.HandlerFunc(serveAppCSS)).ServeHTTP)
+	s.handle(mux, "GET /static/", guardPublic, cacheStatic(http.StripPrefix("/static/", http.FileServerFS(staticSub))).ServeHTTP)
 
 	if s.auth != nil {
 		// Both of these are anonymous and both WRITE to the store (Login inserts a
