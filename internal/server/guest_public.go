@@ -367,6 +367,12 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 	if gc.Grant.RequestOnly {
 		view.PermitLabel = "Visitor parking permit"
 	}
+	// The household's own picker headlines the permit by the name they gave it.
+	// A permit they never named would headline as its bare council number, which
+	// on a home-screen page reads as nothing at all.
+	if gc.Grant.Picker && (permit.Label == "" || permit.Label == permit.PermitNumber) {
+		view.PermitLabel = "Your visitor permit"
+	}
 	// A door-QR re-scan should answer "what happened to my request?", not present
 	// a blank form as if nothing ever happened. The visitor's own request (and
 	// only theirs — the cookie carries the request's poll nonce) is shown with

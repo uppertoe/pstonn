@@ -10,8 +10,9 @@
        purpose: every visitor who uses a guest link is a permit-zone visitor —
        exactly the demographic — experiencing the product at its best (parked,
        covered, no account). Quiet, outside the card, and the only nav on an
-       otherwise dead-end page. */}}
-  <p class="gcredit">{{T "guest.credit" . (slots "home" (link "/" (noboost)))}}</p>
+       otherwise dead-end page. Not on the household's own picker: they have
+       the account, and the page carries its own way back into the app. */}}
+  {{if not .Guest.Picker}}<p class="gcredit">{{T "guest.credit" . (slots "home" (link "/" (noboost)))}}</p>{{end}}
 </main>
 
 {{end}}
@@ -147,7 +148,7 @@
 {{if .Guest.Picker}}
 {{/* The household's own page: no "account holder is told", no referral (they
      have an account), and the way back into the app instead of a bookmark tip. */}}
-<p class="empty-note" style="margin-top:16px">Tap a rego. It stays on the permit until the end of the day, then the roster takes over. Everything else, the roster, guests and settings, is in the app.</p>
+<p class="empty-note" style="margin-top:16px">Tap a rego. It stays on the permit until the end of the day; after that the roster takes over, or if nothing is scheduled it stays until the next change. Everything else, the roster, guests and settings, is in the app.</p>
 <a class="gtip" href="/schedule" hx-boost="false">Open p.stonn &rarr;</a>
 {{else}}
 {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your rego to put it on the permit until the end of the day.{{else}}Tap your rego. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>{{end}}

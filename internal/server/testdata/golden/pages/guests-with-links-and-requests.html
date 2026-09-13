@@ -330,8 +330,8 @@ window.popClamp = window.popClamp || function (el) {
 
   
   
-  <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Guest passes</div>
-  <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
+  <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Guests</div>
+  <p class="subtitle">Ways to put a rego on the permit without signing in: three for your visitors, and a quick picker for your own phone. Each use lasts until the end of the day.</p>
   
 
   
@@ -445,7 +445,7 @@ window.popClamp = window.popClamp || function (el) {
     <p class="fold-sum">A home-screen page with one button per rego, no sign-in.</p>
     <div id="picker-body" class="fold-body" x-show="open" x-cloak>
       
-      <p class="subtitle" style="margin-top:0">Tap a rego on it and it is on the permit until the end of the day. It works like a guest pass, so it can only choose from the regos you tick here.</p>
+      <p class="subtitle" style="margin-top:0">This one is for you, not for visitors. The link stays on your phone; tap a rego on it and it is on the permit until the end of the day, the same as a booking made here. It offers only the regos you tick.</p>
       <form method="post" action="/guests/picker" class="stack">
         
         <input type="hidden" name="permit_id" value="1">
@@ -478,6 +478,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg></span> Create a new guest pass</h2>
+    <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you tick here.</p>
     <div class="banner warn" style="margin-bottom:16px;align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these regos on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     
     

@@ -632,7 +632,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 				PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
 				Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
 					Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-					Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}}, "Guest passes"},
+					Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}}, "three for your visitors, and a quick picker for your own phone"},
 		// A pass on a dead permit says so on its card and names the way out.
 		{"guests-page flags a pass on a dead permit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
 			GuestMgmt: &guestMgmt{GuestsEnabled: true,

@@ -1,7 +1,7 @@
 {{define "page-guests"}}
   {{/* ---------- GUEST PASSES ---------- */}}
-  <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guest passes</div>
-  <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you have saved and allowed, and each activation lasts until the end of the day.</p>
+  <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guests</div>
+  <p class="subtitle">Ways to put a rego on the permit without signing in: three for your visitors, and a quick picker for your own phone. Each use lasts until the end of the day.</p>
   {{template "checklist" .}}
   {{if and .GuestMgmt.PermitOpts (not .QR) (not .Edit)}}
   {{/* Four tools live on this tab and the heading names one of them. The tiles
@@ -207,11 +207,11 @@
       <div class="qropts">
         <div class="qropt" style="align-items:center;text-align:center">
           {{if .GuestMgmt.Picker.ImageURI}}<img src="{{.GuestMgmt.Picker.ImageURI}}" alt="QR code for the quick picker" width="168" height="168" class="qrimg">
-          <span class="empty-note">Scan with the phone it should live on.</span>
+          <span class="empty-note">Scan it with any phone in the household.</span>
           {{else}}<span class="empty-note">This link could not be read. Make a new one below.</span>{{end}}
         </div>
         <div class="qropt">
-          <div class="qropt-txt"><strong>Or open it here</strong><span class="empty-note">Then on an iPhone: <strong>Share</strong>, then <strong>Add to Home Screen</strong>. On Android: the browser menu, then <strong>Add to Home screen</strong>. The icon is called p.stonn.</span></div>
+          <div class="qropt-txt"><strong>Or open it on this phone</strong><span class="empty-note">Open it, then on an iPhone tap <strong>Share</strong> and <strong>Add to Home Screen</strong>; on Android, the browser menu and <strong>Add to Home screen</strong>. The icon is called p.stonn.</span></div>
           {{if .GuestMgmt.Picker.URL}}<a href="{{.GuestMgmt.Picker.URL}}" class="btnlike" style="justify-content:center" hx-boost="false" target="_blank" rel="noopener">Open the quick picker</a>{{end}}
           <form method="post" action="/guests/picker/rotate" class="qropt-txt fold-newlink" data-confirm="Make a new link? The one on your phone stops working, and you will need to save the new one." data-confirm-ok="New link">
             <span class="empty-note">Lost the phone? A new link makes the old one stop working.</span>
@@ -220,7 +220,7 @@
         </div>
       </div>
       {{else}}
-      <p class="subtitle" style="margin-top:0">Tap a rego on it and it is on the permit until the end of the day. It works like a guest pass, so it can only choose from the regos you tick here.</p>
+      <p class="subtitle" style="margin-top:0">This one is for you, not for visitors. The link stays on your phone; tap a rego on it and it is on the permit until the end of the day, the same as a booking made here. It offers only the regos you tick.</p>
       <form method="post" action="{{if .GuestMgmt.PickerEdit}}/guests/picker/update{{else}}/guests/picker{{end}}" class="stack">
         {{if not .GuestMgmt.PickerEdit}}
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
@@ -303,6 +303,7 @@
   {{if and .GuestMgmt.PermitOpts .Vehicles}}
   <section class="card" style="--hue:var(--sec-vehicles)" id="new">
     <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
+    <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you tick here.</p>
     <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these regos on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     {{/* Boosted POST (the body is hx-boost), so the double-submit guard is Alpine:
          the first submit marks the form sent and later ones are dropped, and the
