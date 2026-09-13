@@ -85,7 +85,10 @@ svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7;
 @keyframes htmxslide { 0%{left:-35%} 100%{left:100%} }
 
 /* ---- app bar ---- */
-.appbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 18px; background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:20; }
+/* The app bar and the tab strip scroll away with the page. They were declared
+   sticky for a long time but never stuck (body's overflow rule defeated it), so
+   scrolling away is the look the site has always had; keep it deliberate. */
+.appbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 18px; background:var(--surface); border-bottom:1px solid var(--line); position:relative; z-index:20; }
 .brand { display:flex; align-items:center; gap:10px; font-weight:650; font-size:15.5px; letter-spacing:-.01em; }
 .brand .mark { width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:var(--on-primary); display:grid; place-items:center; box-shadow:var(--shadow); }
 .brand .mark svg { width:19px; height:19px; stroke-width:1.9; }
@@ -186,7 +189,7 @@ button.sm, .btnlike.sm { padding:7px 12px; font-size:13px; }
 .nav-item:hover { color:var(--ink); background:color-mix(in srgb, var(--surface) 60%, transparent); }
 .nav-item.active { color:var(--hue,var(--primary)); }
 .nav-item.active::after { content:""; position:absolute; left:12px; right:12px; bottom:0; height:3px; border-radius:3px 3px 0 0; background:var(--hue,var(--primary)); }
-.navwrap { border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--surface) 55%, transparent); position:sticky; top:53px; z-index:15; }
+.navwrap { border-bottom:1px solid var(--line); background:color-mix(in srgb, var(--surface) 55%, transparent); position:relative; z-index:15; }
 
 main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap:16px; }
 /* Material bottom navigation on small screens. This block must come after the
@@ -623,11 +626,9 @@ button:disabled { opacity:.55; cursor:progress; }
 .secgroup { display:flex; align-items:center; gap:10px; margin:26px 0 10px; font-size:12.5px; font-weight:650; letter-spacing:.06em; text-transform:uppercase; color:color-mix(in srgb, var(--hue,var(--muted)) 70%, var(--ink)); }
 .secgroup::after { content:""; flex:1; height:1px; background:color-mix(in srgb, var(--hue,var(--line)) 25%, var(--line)); }
 .tiles + .secgroup, .todo + .secgroup { margin-top:18px; }
-/* Same-page anchors land under the sticky app bar and tab strip (53px each on
-   a desktop; the tab strip is a bottom bar on a phone), so a target reserves
-   that height and a little air above it, or the jump looks arbitrary. */
-.secgroup, .card[id], .todo[id] { scroll-margin-top:120px; }
-@media (max-width:640px){ .secgroup, .card[id], .todo[id] { scroll-margin-top:68px; } }
+/* Same-page anchors land with a little air above the target; nothing is pinned
+   at the top of the viewport, so that is all the room they need. */
+.secgroup, .card[id], .todo[id] { scroll-margin-top:14px; }
 /* A folding card: heading row with its actions and a chevron, a one-line
    summary, and a body that opens under it. Closed by default so the card takes
    two lines until it is wanted. */
