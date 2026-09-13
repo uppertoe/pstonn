@@ -33,7 +33,7 @@
         <div class="share-ic" style="--hue:var(--sec-activity)">{{template "ic-qr"}}</div>
         <div class="qropt-txt"><strong>Print a card</strong><span class="empty-note">A card with a QR code straight to p.stonn.org &mdash; for handing over the fence or leaving with a neighbour.</span></div>
         {{if .Share.ShareQR}}<div class="share-preview"><img src="{{.Share.ShareQR}}" alt="" width="72" height="72"><span>p.stonn.org</span></div>{{end}}
-        <a href="/share/card" hx-boost="false"><button type="button" class="ghost" style="width:100%;justify-content:center">{{template "ic-qr"}} Open the printable card</button></a>
+        <a href="/share/card" hx-boost="false" class="btnlike ghost" style="width:100%;justify-content:center">{{template "ic-qr"}} Open the printable card</a>
       </div>
     </div>
   </section>
@@ -45,7 +45,7 @@
 {{template "appbar" .}}
 <main id="main" tabindex="-1" class="posterwrap">
   <div class="posteractions noprint">
-    <a href="/share" hx-boost="false"><button type="button" class="ghost sm">&larr; Share</button></a>
+    <a href="/share" hx-boost="false" class="btnlike ghost sm">&larr; Share</a>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" data-print>{{template "ic-qr"}} Print</button>
     </div>

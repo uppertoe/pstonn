@@ -584,7 +584,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"schedule-only-expired", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{ExpiredPermits: []expiredPermitView{{ID: 4, Label: "Old Visitor", StatusText: "Cancelled"}}},
-		}, "Got a new permit instead?"},
+		}, "If you have a new permit"},
 		{"schedule-passiton-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{ShowPassItOnHint: true, Permits: []permitView{samplePermitViewAt(loc, now)}},

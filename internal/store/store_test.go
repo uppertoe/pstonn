@@ -488,10 +488,10 @@ func TestCopySchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRule(ctx, src, 0, time.Monday, veh); err != nil {
+	if err := s.SetRule(ctx, owner, src, 0, time.Monday, veh); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRule(ctx, src, 0, time.Friday, veh); err != nil {
+	if err := s.SetRule(ctx, owner, src, 0, time.Friday, veh); err != nil {
 		t.Fatal(err)
 	}
 	future := time.Now().Add(48 * time.Hour)
@@ -533,7 +533,7 @@ func TestCopySchedule(t *testing.T) {
 	}
 	// Replace clears a rule the destination had that the source lacks.
 	otherVeh, _ := s.CreateVehicle(ctx, owner, "BBB222", "Other", "")
-	if err := s.SetRule(ctx, dst, 0, time.Wednesday, otherVeh); err != nil {
+	if err := s.SetRule(ctx, owner, dst, 0, time.Wednesday, otherVeh); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CopySchedule(ctx, owner, src, dst, time.Now()); err != nil {
@@ -929,7 +929,7 @@ func TestDeleteAllForOwner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SetRule(ctx, pid, 0, time.Monday, veh); err != nil {
+		if err := s.SetRule(ctx, owner, pid, 0, time.Monday, veh); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.CreateOverride(ctx, pid, veh, time.Now(), nil, owner); err != nil {
@@ -990,7 +990,7 @@ func TestDeletePermit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRule(ctx, pid, 0, time.Monday, veh); err != nil {
+	if err := s.SetRule(ctx, alice, pid, 0, time.Monday, veh); err != nil {
 		t.Fatal(err)
 	}
 	end := time.Now().Add(time.Hour)

@@ -84,7 +84,7 @@ func TestCycleWeekEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.st.SetRule(ctx, id, 0, time.Monday, vid); err != nil {
+	if err := r.st.SetRule(ctx, user, id, 0, time.Monday, vid); err != nil {
 		t.Fatal(err)
 	}
 	add := "/permits/" + itoa64(id) + "/weeks/add"
@@ -185,10 +185,10 @@ func TestCalendarCrossesTheCycleBoundary(t *testing.T) {
 	}
 	// Wednesdays differ by week; week 1's Wednesday also gets an override so
 	// its popover must say "usually BBB222" (its own week), never AAA111.
-	if err := r.st.SetRule(ctx, id, 0, time.Wednesday, vidA); err != nil {
+	if err := r.st.SetRule(ctx, owner, id, 0, time.Wednesday, vidA); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.st.SetRule(ctx, id, 1, time.Wednesday, vidB); err != nil {
+	if err := r.st.SetRule(ctx, owner, id, 1, time.Wednesday, vidB); err != nil {
 		t.Fatal(err)
 	}
 	p := model.Permit{ID: id, Owner: owner, TenantID: r.s.registry.Default.ID, CouncilPermitID: "CYC-3", PermitTypeID: "1", CycleWeeks: 2, CycleAnchor: "2026-09-06"}

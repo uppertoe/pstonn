@@ -30,7 +30,7 @@ func TestChecklistTicksAndRetires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.SetRule(ctx, pid, 0, time.Monday, vid); err != nil {
+	if err := s.store.SetRule(ctx, owner, pid, 0, time.Monday, vid); err != nil {
 		t.Fatal(err)
 	}
 	v = s.checklistFor(ctx, owner, owner, true, "schedule")

@@ -696,12 +696,12 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	var err error
 	var plate string
 	if vehicleID == 0 {
-		err = s.store.ClearRule(r.Context(), p.ID, week, weekday)
+		err = s.store.ClearRule(r.Context(), owner, p.ID, week, weekday)
 	} else {
 		if !s.ownsVehicle(w, r, owner, vehicleID) {
 			return
 		}
-		err = s.store.SetRule(r.Context(), p.ID, week, weekday, vehicleID)
+		err = s.store.SetRule(r.Context(), owner, p.ID, week, weekday, vehicleID)
 		plate = s.plateOf(r.Context(), owner, vehicleID)
 	}
 	if err != nil {

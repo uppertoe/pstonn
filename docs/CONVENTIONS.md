@@ -264,8 +264,9 @@ nearest:
 - Families to reuse before inventing: `.card` (and `.card > h2` with its
   `.ic` chip), `.sectitle`, `.subtitle`, `.sub`, `.empty-note`, `.banner`,
   `.plate` (and `.plate.masked`, `.noplate` in the same box), `button` /
-  `.ghost` / `.sm` / `.icon` / `.danger`, `.btnlike` for a link styled as a
-  button, `.row`, `.fld`, `.toggle`, `.checks`/`.check`, `.qropts`/`.qropt`,
+  `.ghost` / `.sm` / `.icon` / `.danger`, `.btnlike` for a link that must look
+  like a button (it takes the same modifiers: `class="btnlike ghost sm"`; never
+  put a `<button>` inside an `<a>`), `.row`, `.fld`, `.toggle`, `.checks`/`.check`, `.qropts`/`.qropt`,
   `.tiles`/`.tile`, `.fold-*`, `.todo-*`.
 - Dark theme is three-way: a `[data-theme]` choice on the root, and
   `prefers-color-scheme` for the unstamped default. Define a colour once as a

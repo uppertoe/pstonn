@@ -48,7 +48,7 @@ func TestCycleWeekAddRemoveRestoreRoundTrip(t *testing.T) {
 	}
 
 	// Edit week 1, then remove it: the removed rules come back out.
-	if err := st.ClearRule(ctx, src, 1, time.Friday); err != nil {
+	if err := st.ClearRule(ctx, owner, src, 1, time.Friday); err != nil {
 		t.Fatal(err)
 	}
 	removed, n, err := st.RemoveLastCycleWeek(ctx, owner, src, "")
@@ -121,16 +121,16 @@ func TestSetRuleRefusesUnreachableWeek(t *testing.T) {
 	const owner = "owner@example.com"
 	src, _, vehID := copyFixture(t, st, owner)
 
-	if err := st.SetRule(ctx, src, 1, time.Tuesday, vehID); !errors.Is(err, ErrCycleWeek) {
+	if err := st.SetRule(ctx, owner, src, 1, time.Tuesday, vehID); !errors.Is(err, ErrCycleWeek) {
 		t.Fatalf("week 1 on a 1-week roster: err = %v, want ErrCycleWeek", err)
 	}
 	if _, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetRule(ctx, src, 1, time.Tuesday, vehID); err != nil {
+	if err := st.SetRule(ctx, owner, src, 1, time.Tuesday, vehID); err != nil {
 		t.Fatalf("week 1 after adding it: %v", err)
 	}
-	if err := st.SetRule(ctx, src, 2, time.Tuesday, vehID); !errors.Is(err, ErrCycleWeek) {
+	if err := st.SetRule(ctx, owner, src, 2, time.Tuesday, vehID); !errors.Is(err, ErrCycleWeek) {
 		t.Fatalf("week 2 on a 2-week roster: err = %v, want ErrCycleWeek", err)
 	}
 }
@@ -147,7 +147,7 @@ func TestCopyScheduleCarriesTheCycle(t *testing.T) {
 	if _, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetRule(ctx, src, 1, time.Wednesday, vehID); err != nil {
+	if err := st.SetRule(ctx, owner, src, 1, time.Wednesday, vehID); err != nil {
 		t.Fatal(err)
 	}
 	n, err := st.CopySchedule(ctx, owner, src, dst, time.Now())

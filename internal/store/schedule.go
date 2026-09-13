@@ -41,12 +41,24 @@ var ErrCycleWeek = errors.New("store: no such cycle week on this permit")
 // week. The insert is guarded in SQL against the permit's own cycle_weeks so a
 // stale form can never write an orphan week (single round trip; the guard and
 // the write cannot race apart on the one-connection pool).
-func (s *Store) SetRule(ctx context.Context, permitID int64, week int, weekday time.Weekday, vehicleID int64) error {
+func (s *Store) SetRule(ctx context.Context, owner string, permitID int64, week int, weekday time.Weekday, vehicleID int64) error {
+	// Ownership is checked here, at the write, not only in the handler: the
+	// permit must be the owner's, and so must the rego it names.
+	if err := s.ownsPermit(ctx, owner, permitID); err != nil {
+		return err
+	}
+	var vehOK int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM vehicle WHERE id = ? AND owner = ?)`, vehicleID, owner).Scan(&vehOK); err != nil {
+		return err
+	}
+	if vehOK == 0 {
+		return ErrNotFound
+	}
 	res, err := s.db.ExecContext(ctx, `
 INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
-SELECT ?, ?, ?, ? WHERE ? < (SELECT cycle_weeks FROM permit WHERE id = ?)
+SELECT ?, ?, ?, ? WHERE ? < (SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?)
 ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
-		permitID, week, int(weekday), vehicleID, week, permitID)
+		permitID, week, int(weekday), vehicleID, week, permitID, owner)
 	if err != nil {
 		return err
 	}
@@ -56,12 +68,31 @@ ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.
 	return nil
 }
 
-// ClearRule removes any rule for a permit on a weekday of a cycle week.
-func (s *Store) ClearRule(ctx context.Context, permitID int64, week int, weekday time.Weekday) error {
+func (s *Store) ClearRule(ctx context.Context, owner string, permitID int64, week int, weekday time.Weekday) error {
+	if err := s.ownsPermit(ctx, owner, permitID); err != nil {
+		return err
+	}
+	// Clearing a day that is already empty is a valid no-op (the roster cell
+	// offers "none" on every day), so no row affected is not an error here.
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM weekly_rule WHERE permit_id = ? AND cycle_week = ? AND weekday = ?`,
-		permitID, week, int(weekday))
+		`DELETE FROM weekly_rule WHERE permit_id = ? AND cycle_week = ? AND weekday = ?
+		   AND permit_id IN (SELECT id FROM permit WHERE owner = ?)`,
+		permitID, week, int(weekday), owner)
 	return err
+}
+
+// ownsPermit is the IDOR guard for writes that address a permit by id: the row
+// must be the owner's, or the caller gets the same ErrNotFound a missing row
+// gives, so "not yours" and "not there" are one neutral answer.
+func (s *Store) ownsPermit(ctx context.Context, owner string, permitID int64) error {
+	var ok int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM permit WHERE id = ? AND owner = ?)`, permitID, owner).Scan(&ok); err != nil {
+		return err
+	}
+	if ok == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // OwnerHasSchedule reports whether ANY of the owner's permits carries a weekly

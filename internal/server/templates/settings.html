@@ -112,7 +112,7 @@
     <h2><span class="ic">{{template "ic-user"}}</span> Account</h2>
     <div class="row" style="justify-content:space-between">
       <span class="muted">Signed in as <strong style="color:var(--ink)">{{.User.Email}}</strong></span>
-      {{if .LogoutURL}}<a href="{{.LogoutURL}}"><button type="button" class="ghost">{{template "ic-logout"}} Sign out</button></a>{{end}}
+      {{if .LogoutURL}}<a href="{{.LogoutURL}}" class="btnlike ghost">{{template "ic-logout"}} Sign out</a>{{end}}
     </div>
     <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
     {{if .IsPrimary}}
@@ -129,7 +129,7 @@
          public header and from the footer of outgoing mail, neither of which is in
          front of someone already inside the app. Shown only when contact is
          configured, matching every other link to it. */}}
-    {{if .Contact}}<p class="empty-note" style="margin-top:8px">Something wrong, or a question? <a href="/contact">Get in touch</a>.</p>{{end}}
+    {{if .Contact}}<p class="empty-note" style="margin-top:8px">If something is wrong, or you have a question, <a href="/contact">get in touch</a>.</p>{{end}}
   </section>
 {{if .BookFAB}}
 <a class="fab" href="/schedule?book=1" hx-push-url="/schedule">{{template "ic-plus"}}<span class="fab-label">Make a booking</span></a>
@@ -209,7 +209,7 @@
            server" with a "Service URL" field; a self-hosted server is not the
            default, and people who skip that toggle subscribe on ntfy.sh instead
            and never hear from us. */}}
-      <p class="steps-lead">Free, and takes a minute:</p>
+      <p class="steps-lead">Setting it up is free and takes about a minute.</p>
       <ol>
         <li>Install the <strong>ntfy</strong> app (App Store or Google Play).</li>
         <li>Open it and tap <strong>+</strong> (<em>Subscribe to topic</em> on Android, <em>Add subscription</em> on iPhone).</li>

@@ -5,7 +5,7 @@
   <section class="lhero">
     <h1>{{T "public.hero" .}}</h1>
     <p class="lead">p.stonn sets your visitor permit to the rego you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
-    <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button" class="cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</button></a>
+    <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false" class="btnlike cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</a>
     <p class="lnote">{{T "public.hero_note" .}}</p>
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
          without an ePermits visitor permit is the most common way a newcomer ends
@@ -359,7 +359,7 @@
         {{if eq .Guide.Demo "roster"}}{{template "demo-roster" .}}{{else if eq .Guide.Demo "oneoff"}}{{template "demo-oneoff" .}}{{else if eq .Guide.Demo "guest"}}{{template "demo-guestpass" .}}{{end}}
       </div>
     </div>
-    <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false"><button type="button">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</button></a></p>
+    <p style="margin-top:22px"><a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false" class="btnlike">{{template "ic-link"}} {{if .SignedIn}}Open the app{{else}}Get started{{end}}</a></p>
     <p class="faq-more">{{T "public.faq_more" . (slots "apply" (link .Tenant.Links.ApplyVisitor (newtab)) "faq" (link .Tenant.Links.FAQ (newtab)) "how" (link "/features" (noboost)) "faq_page" (link "/faq" (noboost)))}}</p>
     {{with neighbouringGuides .Tenant .Guide.Slug}}
     <nav class="guide-pager" aria-label="Previous and next guide">

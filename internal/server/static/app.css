@@ -166,7 +166,7 @@ dialog.confirm[open] { animation:rise .18s ease both; }
 .dtpair input[type="time"] { flex:2 1 100px; }
 .oo-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:20px 0 10px; }
 .oo-head .sub { margin:0; }
-button.sm { padding:7px 12px; font-size:13px; }
+button.sm, .btnlike.sm { padding:7px 12px; font-size:13px; }
 
 /* ---- nav ---- */
 .nav { display:flex; gap:2px; padding:6px 12px 0; max-width:960px; margin:0 auto; overflow-x:auto; }
@@ -238,18 +238,18 @@ label.optin strong { color:var(--ink); font-weight:600; }
 .contactform input, .contactform textarea { font-size:15px; padding:12px 14px; }
 .contactform textarea { min-height:150px; line-height:1.5; }
 .contactform button[type=submit] { padding:13px 18px; font-size:15px; margin-top:2px; }
-button { font:inherit; font-weight:560; padding:9px 15px; border:0; border-radius:var(--radius-sm); background:var(--primary); color:var(--on-primary); cursor:pointer; display:inline-flex; align-items:center; gap:7px; transition:transform .08s, box-shadow .15s, filter .15s; box-shadow:var(--shadow); }
-button:hover { filter:brightness(1.05); box-shadow:var(--shadow-lg); }
-button:active { transform:translateY(1px) scale(.99); }
-button svg { width:16px; height:16px; }
+button, .btnlike { font:inherit; font-weight:560; padding:9px 15px; border:0; border-radius:var(--radius-sm); background:var(--primary); color:var(--on-primary); cursor:pointer; display:inline-flex; align-items:center; gap:7px; transition:transform .08s, box-shadow .15s, filter .15s; box-shadow:var(--shadow); }
+button:hover, .btnlike:hover { filter:brightness(1.05); box-shadow:var(--shadow-lg); }
+button:active, .btnlike:active { transform:translateY(1px) scale(.99); }
+button svg, .btnlike svg { width:16px; height:16px; }
 /* A leading icon sits inside a 16px box its strokes never reach, so with equal
    padding both sides the label reads as shoved right ("+ Book" next to a centred
    "Cancel"). Pull the icon in by the dead space. Icon-only buttons keep their
    centring: they are excluded by class, so a new icon-only button needs one
    (.wkadd-first is excluded because it has no padding to trim). */
-button:not(.icon):not(.icon-btn):not(.wkadd):not(.wkadd-first):not(.fab) > svg:first-child { margin-left:-3px; }
-button.ghost { background:var(--surface-2); color:var(--ink); box-shadow:none; border:1px solid var(--line); }
-button.ghost:hover { background:var(--line); filter:none; box-shadow:none; }
+button:not(.icon):not(.icon-btn):not(.wkadd):not(.wkadd-first):not(.fab) > svg:first-child, .btnlike:not(.icon) > svg:first-child { margin-left:-3px; }
+button.ghost, .btnlike.ghost { background:var(--surface-2); color:var(--ink); box-shadow:none; border:1px solid var(--line); }
+button.ghost:hover, .btnlike.ghost:hover { background:var(--line); filter:none; box-shadow:none; }
 button.danger { background:var(--danger-soft); color:var(--danger); box-shadow:none; }
 button.danger:hover { filter:brightness(.97); box-shadow:none; }
 button.icon { padding:9px; }
@@ -822,8 +822,11 @@ table.adm .bad { color:var(--danger); }
 .gref .empty-note { margin:0 auto 10px; max-width:320px; }
 .grefrow { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
 /* the mailto is an <a> that must sit visually beside a real button */
-.btnlike { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; font-size:13px; border-radius:10px; background:var(--surface-2); color:var(--ink); border:1px solid var(--line); text-decoration:none; font-weight:600; }
-.btnlike:hover { background:var(--line); }
+/* .btnlike: a link that looks and behaves as a button. It takes the button rules
+   above by selector (base, .ghost, .sm, .cta), so the two never drift; a button
+   inside a link is invalid markup and reads differently to a keyboard. */
+.btnlike { text-decoration:none; }
+.btnlike:hover { text-decoration:none; }
 .gcars { display:grid; gap:12px; margin-top:6px; }
 .gcar { position:relative; justify-content:flex-start; gap:12px; background:var(--surface-2); color:var(--ink); border:1px solid var(--line); border-left:5px solid var(--plate,var(--line)); box-shadow:none; padding:14px 16px; font-size:15px; font-weight:600; }
 .gcar:hover { border-color:var(--primary); filter:none; box-shadow:var(--shadow); }

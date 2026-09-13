@@ -32,10 +32,10 @@ func TestReconcileFollowsTheCycleWeek(t *testing.T) {
 	if _, err := st.AddCycleWeek(ctx, owner, pid, "2026-09-06"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetRule(ctx, pid, 0, time.Wednesday, vehA); err != nil {
+	if err := st.SetRule(ctx, owner, pid, 0, time.Wednesday, vehA); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetRule(ctx, pid, 1, time.Wednesday, vehB); err != nil {
+	if err := st.SetRule(ctx, owner, pid, 1, time.Wednesday, vehB); err != nil {
 		t.Fatal(err)
 	}
 
