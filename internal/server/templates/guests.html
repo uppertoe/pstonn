@@ -224,7 +224,8 @@
        on it) and otherwise opened from the "Guest pass" tile or its chevron. */}}
   <section class="card fold" style="--hue:var(--sec-vehicles)" id="new"
            x-data="{open: {{if .GuestMgmt.Guests}}location.hash === '#new'{{else}}true{{end}}}"
-           @hashchange.window="if (location.hash === '#new') open = true">
+           x-init="if (location.hash === '#new') setTimeout(() => $el.scrollIntoView({block: 'start'}), 60)"
+           @hashchange.window="if (location.hash === '#new') { open = true; setTimeout(() => $el.scrollIntoView({block: 'start'}), 60) }">
     <div class="fold-head">
       <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
       <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" @click="open=!open" title="Show or hide" aria-label="Show or hide the new pass form"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
@@ -386,7 +387,12 @@
      writes server attributes back onto id-matched elements. */}}
 <section class="card fold" id="picker" style="--hue:var(--sec-activity)"
          x-data="{open: {{if .Open}}true{{else}}location.hash === '#picker'{{end}}}"
-         @hashchange.window="if (location.hash === '#picker') open = true">
+         {{/* A jump to a closed card lands short: the browser scrolls to the closed
+              card, the card then opens and grows. Scroll again once it is open,
+              a beat later, because Chrome performs its own fragment scroll after
+              the hashchange handlers have run and would otherwise win. */}}
+         x-init="if (location.hash === '#picker') setTimeout(() => $el.scrollIntoView({block: 'start'}), 60)"
+         @hashchange.window="if (location.hash === '#picker') { open = true; setTimeout(() => $el.scrollIntoView({block: 'start'}), 60) }">
   <div class="fold-head">
     <h2><span class="ic">{{template "ic-phone"}}</span> {{if .Picker}}Your quick picker{{else}}Your own quick picker{{end}}</h2>
     {{if and .Picker (not .Edit)}}

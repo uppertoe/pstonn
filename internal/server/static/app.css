@@ -61,7 +61,11 @@ main:focus { outline:none; }
    anchor asks for (a tile on the Guests tab landed nowhere), and the one place
    that wants smooth motion asks for it itself (popClamp in layout.html). */
 html { overflow-x:hidden; }
-body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; overflow-x:hidden; }
+body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; }
+/* Horizontal overflow is clipped by the html rule above, never here: an overflow
+   value on body makes body the scrollport that sticky descendants pin to, and
+   body is not what scrolls, so the app bar and tab strip scrolled away with the
+   page and same-page anchors landed 112px too low. */
 a { color:var(--primary); text-decoration:none; }
 svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; display:block; }
 @keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
@@ -370,7 +374,7 @@ tr:last-child td { border-bottom:0; }
    the rise animation ends at transform:none (fill both), which would wipe a
    transform-based centring and shove the popover half a width off-screen.
    --pop-shift is set by popClamp() on open to pull the popover back inside
-   the viewport (body is overflow-x:hidden, so an overhang is clipped, not
+   the viewport (html is overflow-x:hidden, so an overhang is clipped, not
    scrollable). */
 .pop { position:absolute; z-index:30; top:100%; left:50%; translate:calc(-50% + var(--pop-shift,0px)) 0; margin-top:7px; background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-lg); padding:13px; min-width:216px; max-width:calc(100vw - 24px); animation:rise .16s ease both; }
 .pop .tt { font-size:12px; color:var(--muted); margin:0 0 9px; font-weight:600; }
@@ -749,7 +753,7 @@ a.gtip:hover { text-decoration:underline; }
 /* The page is a grid (see main{}) whose single 1fr track is minmax(auto,1fr): a
    grid item's minimum is its min-content width, and a nowrap table inside a
    scroll wrapper contributes the table's full width to that. The track then grew
-   to the widest row, main overflowed the viewport, and body's overflow-x:hidden
+   to the widest row, main overflowed the viewport, and the root's overflow-x:hidden
    clipped it with no way to scroll sideways. minmax(0,1fr) lets the track stay
    viewport-wide so the wrapper is what scrolls. */
 .adminwrap { max-width:1100px; margin:0 auto; padding:18px 16px 60px; grid-template-columns:minmax(0,1fr); }

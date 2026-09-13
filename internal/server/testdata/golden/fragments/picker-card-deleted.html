@@ -2,7 +2,9 @@
 
 <section class="card fold" id="picker" style="--hue:var(--sec-activity)"
          x-data="{open: true}"
-         @hashchange.window="if (location.hash === '#picker') open = true">
+         
+         x-init="if (location.hash === '#picker') setTimeout(() => $el.scrollIntoView({block: 'start'}), 60)"
+         @hashchange.window="if (location.hash === '#picker') { open = true; setTimeout(() => $el.scrollIntoView({block: 'start'}), 60) }">
   <div class="fold-head">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span> Your own quick picker</h2>
     
