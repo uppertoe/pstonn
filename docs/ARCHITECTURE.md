@@ -177,3 +177,4 @@ that should change by review, not by a deploy-time override.
 | Multi-council registry/mux | `internal/tenant/`, `docs/council-connections.md` |
 | Schema + migrations | `internal/store/migrate.go` |
 | Tunables + startup validation | `internal/config/config.go` |
+| How a feature is built: htmx fragments, handlers, store, tests | `docs/CONVENTIONS.md` |
