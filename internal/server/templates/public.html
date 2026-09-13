@@ -236,6 +236,17 @@
       </div>
     </section>
 
+    <section class="feature">
+      <div class="feature-text">
+        <h2>One tap from your own home screen</h2>
+        <p>Save the quick picker to your phone and every rego in the household becomes a button. Tap one and it is on the permit until the end of the day, with no sign-in, exactly as a booking made in the app would be.</p>
+        <p>It offers every rego you have, so one you add later appears on it by itself. If the phone is lost, a new link stops the old one working.</p>
+      </div>
+      <div class="feature-demo">
+        {{template "demo-picker" .}}
+      </div>
+    </section>
+
     {{if not .SignedIn}}
     <section class="feature">
       <div class="feature-text">
@@ -474,6 +485,29 @@
           </div>
           <div class="dm-permit">
             <div><div class="plab">Visitor permit VPP-000000</div><div class="pnow">On the permit now: <span class="dm-dot" data-gdot style="background:var(--line)"></span> <span class="dm-rego" data-grego>&middot;</span></div><div class="dm-guntil" data-guntil></div></div>
+            <div class="dm-sync">{{template "ic-check"}}</div>
+          </div>
+        </div>
+        <div class="dm-caption"><span></span></div>
+        </figure>
+{{end}}
+
+{{define "demo-picker"}}
+        {{/* The household's own phone: the picker saved to the home screen, a tap
+             on a rego, and a rego added later appearing by itself. Mirrors the
+             /g/ page in picker mode (guest.html with .Guest.Picker). */}}
+        <figure class="dm" data-demo="picker">
+        <div class="dm-phone">
+          <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-phone"}}</span> Your own phone</div><span class="dm-sample">Sample data</span></div>
+          <div class="dm-push" data-pkhome><span class="badge" style="background:var(--primary)">{{template "ic-monogram"}}</span><div class="bd"><div class="ttl">p.stonn <span class="ago">home screen</span></div><div class="msg">Home permit &mdash; <b>one tap</b> opens the picker, no sign-in.</div></div></div>
+          <div class="dm-gsub">Tap a rego to put it on the permit.</div>
+          <div class="dm-gcars">
+            <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan&rsquo;s car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+            <div class="dm-gcar" data-g="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span><span class="dm-tick">{{template "ic-check"}}</span></div>
+          </div>
+          <div class="dm-permit">
+            <div><div class="plab">Home permit</div><div class="pnow">On the permit now: <span class="dm-dot" data-pkdot style="background:var(--line)"></span> <span class="dm-rego" data-pkrego>&middot;</span> <span class="dm-until" data-pkuntil></span></div></div>
             <div class="dm-sync">{{template "ic-check"}}</div>
           </div>
         </div>

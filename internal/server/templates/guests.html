@@ -8,9 +8,9 @@
        say who each is for and jump to its card; they are navigation, so they
        are tinted and flat rather than cards of their own. */}}
   <nav class="tiles" aria-label="What is on this page">
-    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic">{{template "ic-link"}}</span>Guest pass</span><span class="tile-who">Someone who visits often keeps a link you send them.</span></a>
-    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic">{{template "ic-qr"}}</span>Show a QR</span><span class="tile-who">A visitor who is here now scans your screen.</span></a>
-    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic">{{template "ic-print"}}</span>Printed QR</span><span class="tile-who">Anyone who arrives while you are out scans the printed code.</span></a>
+    <a class="tile" href="#passes" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic">{{template "ic-link"}}</span>Guest pass</span><span class="tile-who">Someone who visits often keeps a link you send them.</span></a>
+    <a class="tile" href="#visitors" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic">{{template "ic-qr"}}</span>Show a QR</span><span class="tile-who">A visitor who is here now scans your screen.</span></a>
+    <a class="tile" href="#visitors" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic">{{template "ic-print"}}</span>Printed QR</span><span class="tile-who">Anyone who arrives while you are out scans the printed code.</span></a>
     <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic">{{template "ic-phone"}}</span>Quick picker</span><span class="tile-who">Your own phone carries one button for each rego.</span></a>
   </nav>
   {{end}}
@@ -123,7 +123,7 @@
   {{/* Three sections in the tiles' order, each a small labelled group so the
        page reads as a table of contents and its chapters. The tiles carry the
        "who it is for" line, so the cards below say only what happens. */}}
-  <h3 class="secgroup" style="--hue:var(--sec-schedule)">A visitor here now</h3>
+  <h3 class="secgroup" id="visitors" style="--hue:var(--sec-schedule)">A visitor here now</h3>
   <section class="card" id="now" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Let a visitor in now</h2>
     <p class="subtitle">They put <em>their own rego</em> on the permit; no saved rego is needed, and neither code gives lasting access.</p>
@@ -167,7 +167,7 @@
 
 
 
-  <h3 class="secgroup" style="--hue:var(--sec-guests)">Guest passes</h3>
+  <h3 class="secgroup" id="passes" style="--hue:var(--sec-guests)">Guest passes</h3>
   {{if .GuestMgmt.Guests}}
   {{/* The list of passes had no heading: a card titled "Cleaner" with cars and
        people under it did not say what it was. */}}
@@ -303,7 +303,7 @@
 
 
   {{if .GuestMgmt.PickerCard}}
-  <h3 class="secgroup" style="--hue:var(--sec-activity)">Your own phone</h3>
+  <h3 class="secgroup" id="phone" style="--hue:var(--sec-activity)">Your own phone</h3>
   {{/* The household's own quick picker: a folding card, closed by default, that
        swaps in place on every action (see "picker-card" below). */}}
   {{template "picker-card" .GuestMgmt.PickerCard}}

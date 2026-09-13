@@ -57,7 +57,10 @@
 .skip-link { position:fixed; top:-60px; left:8px; z-index:200; padding:9px 14px; border-radius:10px; background:var(--primary); color:var(--on-primary); font-weight:600; font-size:14px; box-shadow:var(--shadow-lg); transition:top .15s; }
 .skip-link:focus { top:8px; outline:2px solid var(--on-primary); outline-offset:-4px; }
 main:focus { outline:none; }
-html { scroll-behavior:smooth; overflow-x:hidden; }
+/* No smooth scrolling on the root: with it, Chrome abandons the jump a same-page
+   anchor asks for (a tile on the Guests tab landed nowhere), and the one place
+   that wants smooth motion asks for it itself (popClamp in layout.html). */
+html { overflow-x:hidden; }
 body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); background-image:var(--pattern); color:var(--ink); -webkit-font-smoothing:antialiased; overflow-x:hidden; }
 a { color:var(--primary); text-decoration:none; }
 svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; display:block; }
@@ -616,6 +619,11 @@ button:disabled { opacity:.55; cursor:progress; }
 .secgroup { display:flex; align-items:center; gap:10px; margin:26px 0 10px; font-size:12.5px; font-weight:650; letter-spacing:.06em; text-transform:uppercase; color:color-mix(in srgb, var(--hue,var(--muted)) 70%, var(--ink)); }
 .secgroup::after { content:""; flex:1; height:1px; background:color-mix(in srgb, var(--hue,var(--line)) 25%, var(--line)); }
 .tiles + .secgroup, .todo + .secgroup { margin-top:18px; }
+/* Same-page anchors land under the sticky app bar and tab strip (53px each on
+   a desktop; the tab strip is a bottom bar on a phone), so a target reserves
+   that height and a little air above it, or the jump looks arbitrary. */
+.secgroup, .card[id], .todo[id] { scroll-margin-top:120px; }
+@media (max-width:640px){ .secgroup, .card[id], .todo[id] { scroll-margin-top:68px; } }
 /* A folding card: heading row with its actions and a chevron, a one-line
    summary, and a body that opens under it. Closed by default so the card takes
    two lines until it is wanted. */

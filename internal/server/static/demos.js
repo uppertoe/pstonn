@@ -231,6 +231,44 @@
     loop(steps, 9200);
   }
 
+  /* ---------- Demo: the household's own quick picker ---------- */
+  function initPicker(root) {
+    var cars = [].slice.call(root.querySelectorAll(".dm-gcar"));
+    var dot = root.querySelector("[data-pkdot]"), rego = root.querySelector("[data-pkrego]"), until = root.querySelector("[data-pkuntil]");
+    var home = root.querySelector("[data-pkhome]"), sync = root.querySelector(".dm-sync"), say = sayer(root);
+    var CHOICE = 1; // the household taps Nan's car
+    function car(n) { return cars.filter(function (c) { return c.getAttribute("data-g") === String(n); })[0]; }
+    function settle() { var c = CARS[CHOICE]; dot.style.background = c.v; rego.textContent = c.rego; until.textContent = "until the end of today"; }
+    if (reduced) {
+      show(home, true);
+      cars.forEach(function (c) { c.classList.add("in"); });
+      car(CHOICE).classList.add("on"); settle();
+      var cap = root.querySelector(".dm-caption span");
+      if (cap) { cap.innerHTML = "One tap from your home screen &mdash; <b>on until the end of today</b>."; cap.classList.add("show"); }
+      return;
+    }
+    function reset() {
+      cars.forEach(function (c) { c.classList.remove("in", "on"); });
+      dot.style.background = "var(--line)"; rego.textContent = "·"; until.textContent = "";
+      show(home, false);
+    }
+    var steps = [
+      [150, reset],
+      [300, function () { say("Save the picker to your home screen once."); }],
+      [700, function () { show(home, true); }],
+      [2700, function () { show(home, false); say("Then tap a rego whenever you need it on the permit."); }],
+      [3100, function () { car(1).classList.add("in"); }],
+      [3300, function () { car(2).classList.add("in"); }],
+      [4300, function () { car(CHOICE).classList.add("on"); }],
+      [4600, function () { until.textContent = "applying…"; }],
+      [5400, function () { settle(); pulse(sync); }],
+      [5700, function () { say("<b>On until the end of today</b> &mdash; then the roster takes over."); }],
+      [7900, function () { say("Add a rego in the app and it appears here by itself."); }],
+      [8300, function () { car(3).classList.add("in"); }]
+    ];
+    loop(steps, 11200);
+  }
+
   /* ---------- Demo F: add a visitor with a QR (on-screen code) ---------- */
   function initVisitorqr(root) {
     var dot = root.querySelector("[data-vqdot]"), rego = root.querySelector("[data-vqrego]"), until = root.querySelector("[data-vquntil]");
@@ -290,7 +328,7 @@
     ], 10600);
   }
 
-  var inits = { showcase: initShowcase, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guestpass: initGuestpass, visitorqr: initVisitorqr, doorqr: initDoorqr };
+  var inits = { showcase: initShowcase, roster: initRoster, oneoff: initOneoff, notify: initNotify, connect: initConnect, guestpass: initGuestpass, picker: initPicker, visitorqr: initVisitorqr, doorqr: initDoorqr };
   function initDemos() {
     document.querySelectorAll("[data-demo]").forEach(function (root) {
       if (root.dataset.demoInit) return; // already running
