@@ -82,7 +82,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	}
 	raw := rawLink(t)
 	page = s.doReq("GET", "/guests?picker=made", owner, "", nil).Body.String()
-	for _, want := range []string{"Your quick picker", "Set up for Baba and Nana, with the overnight option on.", "/g/" + raw, "data:image/png;base64,", "Your quick picker is ready", "New link", "/guests/picker/edit"} {
+	for _, want := range []string{"Your quick picker", "It offers Baba and Nana, with the overnight option on.", "/g/" + raw, "data:image/png;base64,", "Your quick picker is ready", "New link", "/guests/picker/edit"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("guests page after creating lacks %q:\n%s", want, page)
 		}
@@ -125,7 +125,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	if pg, _ := s.store.PickerGrant(ctx, owner); pg.AllowOvernight || len(pg.Vehicles) != 1 || pg.Vehicles[0].ID != baba {
 		t.Fatalf("after update = %+v", pg)
 	}
-	if page = s.doReq("GET", "/guests", owner, "", nil).Body.String(); !strings.Contains(page, "Set up for Baba, with the overnight option off.") {
+	if page = s.doReq("GET", "/guests", owner, "", nil).Body.String(); !strings.Contains(page, "It offers Baba, with the overnight option off.") {
 		t.Fatalf("summary after update:\n%s", page)
 	}
 

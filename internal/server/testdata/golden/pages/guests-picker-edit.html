@@ -330,16 +330,16 @@ window.popClamp = window.popClamp || function (el) {
   
   
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Guests</div>
-  <p class="subtitle">Ways to put a rego on the permit without signing in: three for your visitors, and a quick picker for your own phone. Each use lasts until the end of the day.</p>
+  <p class="subtitle">Each of these puts a rego on the permit without a sign-in, and each lasts until the end of the day. Three of them are for your visitors, and the quick picker is for your own phone.</p>
   
 
   
   
   <nav class="tiles" aria-label="What is on this page">
-    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span>Guest pass</span><span class="tile-who">Someone who visits often. They get a link by email.</span></a>
-    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span>Show a QR</span><span class="tile-who">A visitor standing here now.</span></a>
-    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v6H7z"/></svg></span>Printed QR</span><span class="tile-who">Anyone who turns up while you are out.</span></a>
-    <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span>Quick picker</span><span class="tile-who">Your own phone, one tap per rego.</span></a>
+    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span>Guest pass</span><span class="tile-who">Someone who visits often keeps a link you send them.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg></span>Show a QR</span><span class="tile-who">A visitor who is here now scans your screen.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v6H7z"/></svg></span>Printed QR</span><span class="tile-who">Anyone who arrives while you are out scans the printed code.</span></a>
+    <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span>Quick picker</span><span class="tile-who">Your own phone carries one button for each rego.</span></a>
   </nav>
   
   
@@ -386,10 +386,10 @@ window.popClamp = window.popClamp || function (el) {
       
       <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" aria-controls="picker-body" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
     </div>
-    <p class="fold-sum">Set up for Mum, with the overnight option off.</p>
+    <p class="fold-sum">It offers Mum, with the overnight option off.</p>
     <div id="picker-body" class="fold-body" x-show="open" x-cloak>
       
-      <p class="subtitle" style="margin-top:0">This one is for you, not for visitors. The link stays on your phone; tap a rego on it and it is on the permit until the end of the day, the same as a booking made here. It offers only the regos you tick.</p>
+      <p class="subtitle" style="margin-top:0">The picker is for the household rather than for visitors. It lives on your own phone, and a tap puts that rego on the permit until the end of the day, exactly as a booking made here would. It offers only the regos you tick.</p>
       <form method="post" action="/guests/picker/update" class="stack">
         
         <div class="fld"><span>Regos it offers</span>

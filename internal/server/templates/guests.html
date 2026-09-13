@@ -1,17 +1,17 @@
 {{define "page-guests"}}
   {{/* ---------- GUEST PASSES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guests</div>
-  <p class="subtitle">Ways to put a rego on the permit without signing in: three for your visitors, and a quick picker for your own phone. Each use lasts until the end of the day.</p>
+  <p class="subtitle">Each of these puts a rego on the permit without a sign-in, and each lasts until the end of the day. Three of them are for your visitors, and the quick picker is for your own phone.</p>
   {{template "checklist" .}}
   {{if and .GuestMgmt.PermitOpts (not .QR) (not .Edit)}}
   {{/* Four tools live on this tab and the heading names one of them. The tiles
        say who each is for and jump to its card; they are navigation, so they
        are tinted and flat rather than cards of their own. */}}
   <nav class="tiles" aria-label="What is on this page">
-    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic">{{template "ic-link"}}</span>Guest pass</span><span class="tile-who">Someone who visits often. They get a link by email.</span></a>
-    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic">{{template "ic-qr"}}</span>Show a QR</span><span class="tile-who">A visitor standing here now.</span></a>
-    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic">{{template "ic-print"}}</span>Printed QR</span><span class="tile-who">Anyone who turns up while you are out.</span></a>
-    <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic">{{template "ic-phone"}}</span>Quick picker</span><span class="tile-who">Your own phone, one tap per rego.</span></a>
+    <a class="tile" href="#new" style="--hue:var(--sec-guests)"><span class="tile-h"><span class="ic">{{template "ic-link"}}</span>Guest pass</span><span class="tile-who">Someone who visits often keeps a link you send them.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-schedule)"><span class="tile-h"><span class="ic">{{template "ic-qr"}}</span>Show a QR</span><span class="tile-who">A visitor who is here now scans your screen.</span></a>
+    <a class="tile" href="#now" style="--hue:var(--sec-vehicles)"><span class="tile-h"><span class="ic">{{template "ic-print"}}</span>Printed QR</span><span class="tile-who">Anyone who arrives while you are out scans the printed code.</span></a>
+    <a class="tile" href="#picker" style="--hue:var(--sec-activity)"><span class="tile-h"><span class="ic">{{template "ic-phone"}}</span>Quick picker</span><span class="tile-who">Your own phone carries one button for each rego.</span></a>
   </nav>
   {{end}}
   {{if .QR}}
@@ -201,7 +201,7 @@
       {{end}}
       <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" aria-controls="picker-body" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
     </div>
-    <p class="fold-sum">{{if .GuestMgmt.Picker}}Set up for {{.GuestMgmt.Picker.Names}}, with the overnight option {{if .GuestMgmt.Picker.AllowOvernight}}on{{else}}off{{end}}.{{else}}A home-screen page with one button per rego, no sign-in.{{end}}</p>
+    <p class="fold-sum">{{if .GuestMgmt.Picker}}It offers {{.GuestMgmt.Picker.Names}}, with the overnight option {{if .GuestMgmt.Picker.AllowOvernight}}on{{else}}off{{end}}.{{else}}A page on your home screen puts a rego on the permit with one tap.{{end}}</p>
     <div id="picker-body" class="fold-body" x-show="open" x-cloak>
       {{if and .GuestMgmt.Picker (not .GuestMgmt.PickerEdit)}}
       <div class="qropts">
@@ -211,16 +211,16 @@
           {{else}}<span class="empty-note">This link could not be read. Make a new one below.</span>{{end}}
         </div>
         <div class="qropt">
-          <div class="qropt-txt"><strong>Or open it on this phone</strong><span class="empty-note">Open it, then on an iPhone tap <strong>Share</strong> and <strong>Add to Home Screen</strong>; on Android, the browser menu and <strong>Add to Home screen</strong>. The icon is called p.stonn.</span></div>
+          <div class="qropt-txt"><strong>Or open it on this phone</strong><span class="empty-note">Open it, then add it to the home screen. On an iPhone, tap <strong>Share</strong> and then <strong>Add to Home Screen</strong>; on Android, open the browser menu and choose <strong>Add to Home screen</strong>. The icon is called p.stonn.</span></div>
           {{if .GuestMgmt.Picker.URL}}<a href="{{.GuestMgmt.Picker.URL}}" class="btnlike" style="justify-content:center" hx-boost="false" target="_blank" rel="noopener">Open the quick picker</a>{{end}}
           <form method="post" action="/guests/picker/rotate" class="qropt-txt fold-newlink" data-confirm="Make a new link? The one on your phone stops working, and you will need to save the new one." data-confirm-ok="New link">
-            <span class="empty-note">Lost the phone? A new link makes the old one stop working.</span>
+            <span class="empty-note">If the phone is lost, a new link stops the old one working.</span>
             <button type="submit" class="ghost sm" style="align-self:flex-start">{{template "ic-link"}} New link</button>
           </form>
         </div>
       </div>
       {{else}}
-      <p class="subtitle" style="margin-top:0">This one is for you, not for visitors. The link stays on your phone; tap a rego on it and it is on the permit until the end of the day, the same as a booking made here. It offers only the regos you tick.</p>
+      <p class="subtitle" style="margin-top:0">The picker is for the household rather than for visitors. It lives on your own phone, and a tap puts that rego on the permit until the end of the day, exactly as a booking made here would. It offers only the regos you tick.</p>
       <form method="post" action="{{if .GuestMgmt.PickerEdit}}/guests/picker/update{{else}}/guests/picker{{end}}" class="stack">
         {{if not .GuestMgmt.PickerEdit}}
         {{if gt (len .GuestMgmt.PermitOpts) 1}}

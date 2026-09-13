@@ -632,7 +632,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 				PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
 				Guests: []guestGrantView{{ID: 1, Label: "Friday", PermitLabel: "Visitor Permit",
 					Cars:       []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-					Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}}, "three for your visitors, and a quick picker for your own phone"},
+					Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}}, "the quick picker is for your own phone"},
 		// A pass on a dead permit says so on its card and names the way out.
 		{"guests-page flags a pass on a dead permit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
 			GuestMgmt: &guestMgmt{GuestsEnabled: true,
@@ -666,7 +666,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
 			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
 				Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok",
-					Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}}, "Set up for Mum, with the overnight option on."},
+					Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}}, "It offers Mum, with the overnight option on."},
 		{"guests-picker-edit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
 			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, PickerOpen: true,
