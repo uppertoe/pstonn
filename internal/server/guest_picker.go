@@ -129,6 +129,9 @@ func (s *Server) respondPickerCard(w http.ResponseWriter, r *http.Request, owner
 	}
 	card.Open = true
 	card.Notice = notice
+	if on, err := s.store.GuestsEnabled(ctx, owner); err == nil {
+		card.Paused = !on
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := templates.ExecuteTemplate(w, "picker-card", card); err != nil {
 		alog.Infof("render picker-card: %v", err)

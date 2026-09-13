@@ -287,14 +287,17 @@
        or requests sees an admin toggle as its first card, for a feature it has
        never used. Shown once anything exists — and always when paused, so the
        Resume switch can never disappear. */}}
-  {{if or .GuestMgmt.Guests .GuestMgmt.DoorGrants .GuestMgmt.PendingRequests .GuestMgmt.RecentRequests (not .GuestMgmt.GuestsEnabled)}}
+  {{/* The switch pauses EVERY link on this tab, the household's own quick
+       picker included: it is one "nothing gets on the permit through a link"
+       control, and the wording says so. */}}
+  {{if or .GuestMgmt.Guests .GuestMgmt.DoorGrants .GuestMgmt.PendingRequests .GuestMgmt.RecentRequests (and .GuestMgmt.PickerCard .GuestMgmt.PickerCard.Picker) (not .GuestMgmt.GuestsEnabled)}}
   <section class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
       <div>
-        <strong>Guest passes are {{if .GuestMgmt.GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
-        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor's rego still on a permit comes off now.</div>
+        <strong>Every link is {{if .GuestMgmt.GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
+        <div class="empty-note" style="margin-top:2px">One switch pauses every link on this page: guest passes, both QR codes and the quick picker. They are kept, so you can resume them, but any rego they put on a permit comes off now.</div>
       </div>
-      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor's rego still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
+      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause every link? Guest passes, both QR codes and the quick picker stop working, and any rego they put on a permit comes off now. They are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
         <input type="hidden" name="enabled" value="{{if .GuestMgmt.GuestsEnabled}}{{else}}1{{end}}">
         <button type="submit" class="{{if .GuestMgmt.GuestsEnabled}}danger{{end}}">{{if .GuestMgmt.GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
       </form>
@@ -409,6 +412,7 @@
   <p class="fold-sum">{{if .Picker}}It offers {{if .Picker.AllVehicles}}every rego, including any you add later{{else}}{{.Picker.Names}}{{end}}, with the overnight option {{if .Picker.AllowOvernight}}on{{else}}off{{end}}.{{else}}A page on your home screen puts a rego on the permit with one tap.{{end}}</p>
   <div class="fold-body" x-show="open" x-cloak>
     {{if .Notice}}<div class="banner ok" style="margin-bottom:12px">{{template "ic-check"}} <span>{{.Notice}}</span></div>{{end}}
+    {{if and .Picker .Paused}}<div class="banner warn" style="margin-bottom:12px">{{template "ic-alert"}} <span>Every link is paused, this one included. Resume them under Guest passes.</span></div>{{end}}
     {{if and .Picker (not .Edit)}}
     <div class="qropts">
       <div class="qropt" style="align-items:center;text-align:center">

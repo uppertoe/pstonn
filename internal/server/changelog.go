@@ -201,9 +201,9 @@ func changeText(c store.Change) string {
 		return "showed the on-screen visitor QR" + optional(c.Target, " for ")
 	case store.ActionGuestToggle:
 		if c.Detail == "off" {
-			return "paused all guest passes"
+			return "paused every link: guest passes, QR codes and the quick picker"
 		}
-		return "resumed guest passes"
+		return "resumed the links"
 	case store.ActionDoorQRCreate:
 		return "created a printed QR code for " + c.Target
 	case store.ActionDoorQRRevoke:

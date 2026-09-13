@@ -17,7 +17,17 @@ import (
 // in full, the heading names the permit, and there is no one to notify.
 //
 // The raw token is sealed at rest (as a printed QR's is) so the SAME link can be
-// shown again on every visit to the Guests tab. One per account.
+// shown again on every visit to the Guests tab.
+//
+// One per ACCOUNT, controlling one permit: a product constraint, not a
+// structural one. A household with two permits gets one picker and chooses
+// which permit it drives. If that pinches, the change is a per-permit picker
+// (UNIQUE(owner, permit_id) in place of the per-owner count in
+// CreatePickerGrant), a card per permit, and a permit named on each.
+//
+// It shares the account's link switch (guests_enabled) with every other
+// link on purpose: the switch means "nothing gets on the permit through a
+// link", the picker included, and the Guests tab says so.
 type PickerGrant struct {
 	GrantID        int64
 	PermitID       int64

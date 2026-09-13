@@ -18,10 +18,10 @@
     
     <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
   </div>
-  <p class="fold-sum">It offers every rego, including any you add later, with the overnight option on.</p>
+  <p class="fold-sum">It offers every rego, including any you add later, with the overnight option off.</p>
   <div class="fold-body" x-show="open" x-cloak>
-    <div class="banner ok" style="margin-bottom:12px"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> <span>Your quick picker is ready. Open it on your phone and add it to the home screen.</span></div>
     
+    <div class="banner warn" style="margin-bottom:12px"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>Every link is paused, this one included. Resume them under Guest passes.</span></div>
     
     <div class="qropts">
       <div class="qropt" style="align-items:center;text-align:center">

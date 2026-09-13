@@ -167,6 +167,7 @@ type pickerCardView struct {
 	Picker     *pickerView     // nil until the household has made one
 	Edit       *pickerEditView // non-nil renders the form pre-filled, to change it
 	Open       bool            // render open (after an action, or while editing); closed by default
+	Paused     bool            // the account's link switch is off, which pauses this link too
 	Notice     string          // the outcome of the action that produced this render
 	Vehicles   []vehicleView
 	PermitOpts []permitOpt

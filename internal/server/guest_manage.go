@@ -54,7 +54,7 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	case q.Get("alreadydecided") != "":
 		base.Flash = "That request has already been answered, or it expired before anyone answered it."
 	case q.Get("revoked") != "":
-		base.Warn = "That request couldn't be put on the permit: its printed QR code may have been removed, or guest passes paused."
+		base.Warn = "That request couldn't be put on the permit: its printed QR code may have been removed, or every link paused."
 	case looksLikeEmail(q.Get("resent")):
 		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
 	// The quick picker's own outcomes, all bare flags. Each also opens the
@@ -250,8 +250,13 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 	if base.GuestMgmt.PickerCard, err = s.pickerCard(ctx, owner, base.GuestMgmt.PermitOpts, base.Vehicles, false); err != nil {
 		return err
 	}
-	base.GuestMgmt.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)
-	return err
+	if base.GuestMgmt.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner); err != nil {
+		return err
+	}
+	if base.GuestMgmt.PickerCard != nil {
+		base.GuestMgmt.PickerCard.Paused = !base.GuestMgmt.GuestsEnabled
+	}
+	return nil
 }
 
 // agoText is a coarse "how long ago" for the approvals queue.
@@ -901,7 +906,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 		// Pausing kills every guest link at once — a visitor at the kerb just sees
 		// "no longer active", so the household should know it was deliberate.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" paused all guest passes on your p.stonn account. Existing guest links and printed QR codes will not work until they are resumed, and p.stonn is taking any rego a guest had put on a permit back off now — check the permit directly if this is urgent.")
+			user+" paused every link on your p.stonn account: guest passes, QR codes and the quick picker will not work until they are resumed, and p.stonn is taking any rego they had put on a permit back off now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)

@@ -428,6 +428,20 @@ window.popClamp = window.popClamp || function (el) {
   
   
   
+  
+  <section class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
+      <div>
+        <strong>Every link is active</strong>
+        <div class="empty-note" style="margin-top:2px">One switch pauses every link on this page: guest passes, both QR codes and the quick picker. They are kept, so you can resume them, but any rego they put on a permit comes off now.</div>
+      </div>
+      <form method="post" action="/guests/toggle" data-confirm="Pause every link? Guest passes, both QR codes and the quick picker stop working, and any rego they put on a permit comes off now. They are kept, so you can resume them." data-confirm-ok="Pause all">
+        <input type="hidden" name="enabled" value="">
+        <button type="submit" class="danger">Pause all</button>
+      </form>
+    </div>
+  </section>
+  
 
 
   
@@ -455,6 +469,7 @@ window.popClamp = window.popClamp || function (el) {
   </div>
   <p class="fold-sum">It offers Mum, with the overnight option on.</p>
   <div class="fold-body" x-show="open" x-cloak>
+    
     
     
     <div class="qropts">
