@@ -660,8 +660,10 @@ WHERE o.id = ? AND o.guest_token_id = ?
   AND t.revoked_at = '' AND g.enabled = 1 AND g.permit_id = o.permit_id
   AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1
   AND ((o.vehicle_id IS NOT NULL
-        AND EXISTS (SELECT 1 FROM guest_grant_vehicle gv
-                    WHERE gv.grant_id = g.id AND gv.vehicle_id = o.vehicle_id))
+        AND (EXISTS (SELECT 1 FROM guest_grant_vehicle gv
+                     WHERE gv.grant_id = g.id AND gv.vehicle_id = o.vehicle_id)
+             OR (g.all_vehicles = 1
+                 AND EXISTS (SELECT 1 FROM vehicle v WHERE v.id = o.vehicle_id AND v.owner = g.owner))))
     OR (o.vehicle_id IS NULL AND g.allow_plate = 1))`,
 		overrideID, guestTokenID).Scan(&n)
 	return n > 0, err

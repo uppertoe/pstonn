@@ -12,12 +12,15 @@
   <div class="fold-body" x-show="open" x-cloak>
     <div class="banner ok" style="margin-bottom:12px"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> <span>Quick picker deleted. Its link has stopped working.</span></div>
     
-    <p class="subtitle" style="margin-top:0">The picker is for the household rather than for visitors. It lives on your own phone, and a tap puts that rego on the permit until the end of the day, exactly as a booking made here would. It offers only the regos you tick.</p>
-    <form method="post" action="/guests/picker" hx-post="/guests/picker" hx-target="#picker" hx-swap="outerHTML" class="stack">
+    <p class="subtitle" style="margin-top:0">The picker is for the household rather than for visitors. It lives on your own phone, and a tap puts that rego on the permit until the end of the day, exactly as a booking made here would.</p>
+    
+    <form method="post" action="/guests/picker" hx-post="/guests/picker" hx-target="#picker" hx-swap="outerHTML" class="stack"
+          x-data="{all: true}">
       
       <input type="hidden" name="permit_id" value="1">
       
-      <div class="fld"><span>Regos it offers</span>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="all_vehicles" value="1" x-model="all" style="margin-top:2px"> <span>Offer <strong>every rego</strong>, including any added later<br><span class="muted" style="font-size:12.5px">Untick this to choose which regos it offers.</span></span></label>
+      <div class="fld" x-show="!all" x-cloak><span>Regos it offers</span>
         <div class="checks">
           
           <label class="check">

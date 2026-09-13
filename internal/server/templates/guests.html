@@ -382,7 +382,7 @@
     {{end}}
     <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
   </div>
-  <p class="fold-sum">{{if .Picker}}It offers {{.Picker.Names}}, with the overnight option {{if .Picker.AllowOvernight}}on{{else}}off{{end}}.{{else}}A page on your home screen puts a rego on the permit with one tap.{{end}}</p>
+  <p class="fold-sum">{{if .Picker}}It offers {{if .Picker.AllVehicles}}every rego, including any you add later{{else}}{{.Picker.Names}}{{end}}, with the overnight option {{if .Picker.AllowOvernight}}on{{else}}off{{end}}.{{else}}A page on your home screen puts a rego on the permit with one tap.{{end}}</p>
   <div class="fold-body" x-show="open" x-cloak>
     {{if .Notice}}<div class="banner ok" style="margin-bottom:12px">{{template "ic-check"}} <span>{{.Notice}}</span></div>{{end}}
     {{if and .Picker (not .Edit)}}
@@ -403,14 +403,20 @@
       </div>
     </div>
     {{else}}
-    <p class="subtitle" style="margin-top:0">The picker is for the household rather than for visitors. It lives on your own phone, and a tap puts that rego on the permit until the end of the day, exactly as a booking made here would. It offers only the regos you tick.</p>
-    <form method="post" action="{{if .Edit}}/guests/picker/update{{else}}/guests/picker{{end}}" hx-post="{{if .Edit}}/guests/picker/update{{else}}/guests/picker{{end}}" hx-target="#picker" hx-swap="outerHTML" class="stack">
+    <p class="subtitle" style="margin-top:0">The picker is for the household rather than for visitors. It lives on your own phone, and a tap puts that rego on the permit until the end of the day, exactly as a booking made here would.</p>
+    {{/* "Every rego" is the default: the picker's point is one button for each
+         rego the household has, and a rego added on the Regos tab should be on
+         the phone without anyone editing anything. The tick list is the
+         narrowing option, kept as chosen; new regos stay off a narrowed list. */}}
+    <form method="post" action="{{if .Edit}}/guests/picker/update{{else}}/guests/picker{{end}}" hx-post="{{if .Edit}}/guests/picker/update{{else}}/guests/picker{{end}}" hx-target="#picker" hx-swap="outerHTML" class="stack"
+          x-data="{all: {{if .Edit}}{{if .Edit.AllVehicles}}true{{else}}false{{end}}{{else}}true{{end}}}">
       {{if not .Edit}}
       {{if gt (len .PermitOpts) 1}}
       <label class="fld"><span>Permit</span><select name="permit_id">{{range .PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select></label>
       {{else}}{{range .PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
       {{end}}
-      <div class="fld"><span>Regos it offers</span>
+      <label class="toggle" style="align-items:flex-start;gap:11px"><input type="checkbox" name="all_vehicles" value="1" x-model="all" style="margin-top:2px"> <span>Offer <strong>every rego</strong>, including any added later<br><span class="muted" style="font-size:12.5px">Untick this to choose which regos it offers.</span></span></label>
+      <div class="fld" x-show="!all" x-cloak><span>Regos it offers</span>
         <div class="checks">
           {{range .Vehicles}}
           <label class="check">

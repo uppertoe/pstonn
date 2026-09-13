@@ -346,7 +346,7 @@ func goldenFragmentCases(loc *time.Location, user identity.User, now time.Time) 
 		{"made", "picker-card", pickerCardView{Open: true, Notice: "Your quick picker is ready. Open it on your phone and add it to the home screen.",
 			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
 			Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok",
-				Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}},
+				Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllVehicles: true, AllowOvernight: true}}},
 	}
 }
 

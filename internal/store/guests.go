@@ -23,6 +23,7 @@ type GuestGrant struct {
 	AllowPlate     bool // visitor may type an arbitrary plate (tradie / on-screen QR)
 	RequestOnly    bool // printed QR: a scan only requests; the holder approves live
 	Picker         bool // the household's own quick picker: their link, their regos shown in full
+	AllVehicles    bool // picker only: offers every rego the household has, read at the time, not a saved list
 	Enabled        bool
 	CreatedAt      time.Time
 }
@@ -331,16 +332,16 @@ WHERE recipient_email != '' AND revoked_at != '' AND revoked_at < ?`,
 func (s *Store) GuestContextByTokenHash(ctx context.Context, tokenHash string) (GuestContext, error) {
 	var gc GuestContext
 	var created, blUntil string
-	var overnight, plate, reqOnly, picker, enabled int
+	var overnight, plate, reqOnly, picker, allVeh, enabled int
 	err := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.picker, g.enabled, g.created_at, t.baseline_plate, t.baseline_until
+SELECT t.id, t.recipient_email, g.id, g.owner, g.permit_id, g.label, g.allow_overnight, g.allow_plate, g.request_only, g.picker, g.all_vehicles, g.enabled, g.created_at, t.baseline_plate, t.baseline_until
 FROM guest_token t
 JOIN guest_grant g ON g.id = t.grant_id
 WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
   AND (t.expires_at = '' OR t.expires_at > ?)
   AND COALESCE((SELECT guests_enabled FROM account_flags WHERE owner = g.owner), 1) = 1`,
 		tokenHash, nowUTC()).Scan(&gc.TokenID, &gc.Recipient, &gc.Grant.ID, &gc.Grant.Owner, &gc.Grant.PermitID,
-		&gc.Grant.Label, &overnight, &plate, &reqOnly, &picker, &enabled, &created, &gc.BaselinePlate, &blUntil)
+		&gc.Grant.Label, &overnight, &plate, &reqOnly, &picker, &allVeh, &enabled, &created, &gc.BaselinePlate, &blUntil)
 	if err == sql.ErrNoRows {
 		return GuestContext{}, ErrNotFound
 	}
@@ -351,6 +352,7 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 	gc.Grant.AllowPlate = plate == 1
 	gc.Grant.RequestOnly = reqOnly == 1
 	gc.Grant.Picker = picker == 1
+	gc.Grant.AllVehicles = allVeh == 1
 	gc.Grant.Enabled = enabled == 1
 	if gc.Grant.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 		return GuestContext{}, err
@@ -358,6 +360,13 @@ WHERE t.token_hash = ? AND t.revoked_at = '' AND g.enabled = 1
 	if blUntil != "" {
 		// A malformed timestamp reads as "no baseline" rather than failing the link.
 		gc.BaselineUntil, _ = time.Parse(time.RFC3339, blUntil)
+	}
+	// A picker in "every rego" mode has no saved list: it offers whatever the
+	// household has right now, so a rego added this morning is on the phone by
+	// lunch without anyone editing anything.
+	if gc.Grant.AllVehicles {
+		gc.Vehicles, err = s.ListVehiclesFor(ctx, gc.Grant.Owner)
+		return gc, err
 	}
 	gc.Vehicles, err = s.queryVehicles(ctx, `
 SELECT v.id, v.registration, v.label, v.email, v.color, v.state, v.notify_driver FROM vehicle v

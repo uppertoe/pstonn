@@ -35,24 +35,24 @@ func TestPickerGrantLifecycle(t *testing.T) {
 		t.Fatalf("fresh account: %v, want ErrNotFound", err)
 	}
 	// Someone else's rego, no regos at all, someone else's permit: refused.
-	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, true, []int64{nana, other}, "h-bad", "s-bad"); !errors.Is(err, ErrNotFound) {
+	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, true, false, []int64{nana, other}, "h-bad", "s-bad"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign rego: %v", err)
 	}
-	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, true, nil, "h-none", "s-none"); !errors.Is(err, ErrNotFound) {
+	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, true, false, nil, "h-none", "s-none"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("no regos: %v", err)
 	}
-	if _, err := st.CreatePickerGrant(ctx, "z@b.com", "z@b.com", pid, true, []int64{other}, "h-perm", "s-perm"); !errors.Is(err, ErrNotFound) {
+	if _, err := st.CreatePickerGrant(ctx, "z@b.com", "z@b.com", pid, true, false, []int64{other}, "h-perm", "s-perm"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign permit: %v", err)
 	}
 	if _, err := st.PickerGrant(ctx, owner); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a refused create left a picker behind: %v", err)
 	}
 
-	gid, err := st.CreatePickerGrant(ctx, owner, owner, pid, true, []int64{nana, baba}, "hash-1", "sealed-1")
+	gid, err := st.CreatePickerGrant(ctx, owner, owner, pid, true, false, []int64{nana, baba}, "hash-1", "sealed-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, false, []int64{nana}, "hash-2", "sealed-2"); !errors.Is(err, ErrDuplicate) {
+	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, false, false, []int64{nana}, "hash-2", "sealed-2"); !errors.Is(err, ErrDuplicate) {
 		t.Fatalf("second picker: %v, want ErrDuplicate", err)
 	}
 	pg, err := st.PickerGrant(ctx, owner)
@@ -93,13 +93,33 @@ func TestPickerGrantLifecycle(t *testing.T) {
 		t.Fatalf("rotate without a picker: %v", err)
 	}
 
-	// Changing the regos goes through the ordinary grant update.
-	if _, err := st.UpdateGuestGrant(ctx, owner, gid, "Quick picker", false, []int64{baba}); err != nil {
+	// Narrowing the list, then widening to every rego.
+	if _, err := st.UpdatePickerGrant(ctx, owner, false, false, []int64{baba}); err != nil {
 		t.Fatal(err)
 	}
-	if pg, _ = st.PickerGrant(ctx, owner); pg.AllowOvernight || len(pg.Vehicles) != 1 || pg.Vehicles[0].ID != baba {
-		t.Fatalf("after update = %+v", pg)
+	if pg, _ = st.PickerGrant(ctx, owner); pg.AllowOvernight || pg.AllVehicles || len(pg.Vehicles) != 1 || pg.Vehicles[0].ID != baba {
+		t.Fatalf("after narrowing = %+v", pg)
 	}
+	if _, err := st.UpdatePickerGrant(ctx, owner, false, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if pg, _ = st.PickerGrant(ctx, owner); !pg.AllVehicles || len(pg.Vehicles) != 2 {
+		t.Fatalf("after widening = %+v", pg)
+	}
+	// In "every rego" mode a rego added later is on the picker at once, on the
+	// public path too, and the still-authorised check accepts a booking for it.
+	later, err := st.CreateVehicle(ctx, owner, "NEW111", "Later", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gc3, err := st.GuestContextByTokenHash(ctx, "hash-3")
+	if err != nil || !gc3.Grant.AllVehicles || len(gc3.Vehicles) != 3 {
+		t.Fatalf("context in every-rego mode = %+v %v", gc3, err)
+	}
+	if _, err := st.UpdatePickerGrant(ctx, "z@b.com", false, true, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update without a picker: %v", err)
+	}
+	_ = later
 
 	// And the ordinary delete removes it, so a new one can be made.
 	if err := st.DeleteGuestGrant(ctx, owner, gid); err != nil {
@@ -108,7 +128,7 @@ func TestPickerGrantLifecycle(t *testing.T) {
 	if _, err := st.PickerGrant(ctx, owner); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("after delete: %v", err)
 	}
-	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, false, []int64{nana}, "hash-5", "sealed-5"); err != nil {
+	if _, err := st.CreatePickerGrant(ctx, owner, owner, pid, false, false, []int64{nana}, "hash-5", "sealed-5"); err != nil {
 		t.Fatalf("recreate after delete: %v", err)
 	}
 }

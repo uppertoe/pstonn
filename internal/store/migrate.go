@@ -345,7 +345,8 @@ CREATE TABLE IF NOT EXISTS guest_grant (
     enabled         INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL,
     created_by      TEXT NOT NULL DEFAULT '',   -- member who minted it ('' = the account owner / pre-dates the column)
-    picker          INTEGER NOT NULL DEFAULT 0   -- the household's own quick picker (one per account; hidden from the pass list)
+    picker          INTEGER NOT NULL DEFAULT 0,  -- the household's own quick picker (one per account; hidden from the pass list)
+    all_vehicles    INTEGER NOT NULL DEFAULT 0   -- picker only: offers every rego the household has, including ones added later
 );
 CREATE INDEX IF NOT EXISTS idx_guest_grant_owner ON guest_grant(owner);
 
@@ -561,6 +562,9 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// keeps for itself (sealed, like a printed QR, so the same link can be shown
 		// again). Hidden from the pass list; one per account.
 		`ALTER TABLE guest_grant ADD COLUMN picker INTEGER NOT NULL DEFAULT 0`,
+		// The picker's "every rego" mode: no saved list, the household's current
+		// regos are read at the time. Default 0 keeps every existing picker on its list.
+		`ALTER TABLE guest_grant ADD COLUMN all_vehicles INTEGER NOT NULL DEFAULT 0`,
 		// Why this address is receiving this message, for the mail's own footer.
 		// Recipients with no account (a guest, a displaced driver) otherwise have no
 		// idea who we are or how we got their address.

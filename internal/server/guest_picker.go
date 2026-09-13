@@ -50,7 +50,7 @@ func (s *Server) pickerCard(ctx context.Context, owner string, permits []permitO
 	}
 	v := &pickerView{
 		GrantID: pg.GrantID, PermitLabel: s.permitLabelByID(ctx, owner, pg.PermitID),
-		Cars: cars, Names: andList(names), AllowOvernight: pg.AllowOvernight,
+		Cars: cars, Names: andList(names), AllowOvernight: pg.AllowOvernight, AllVehicles: pg.AllVehicles,
 	}
 	if raw, _, err := s.box.OpenCtx(secretbox.GuestToken(owner), pg.TokenSealed); err == nil {
 		v.URL = s.guestLink(raw)
@@ -66,7 +66,7 @@ func (s *Server) pickerCard(ctx context.Context, owner string, permits []permitO
 		for _, c := range cars {
 			sel[c.ID] = true
 		}
-		card.Edit = &pickerEditView{AllowOvernight: pg.AllowOvernight, Selected: sel}
+		card.Edit = &pickerEditView{AllowOvernight: pg.AllowOvernight, AllVehicles: pg.AllVehicles, Selected: sel}
 		card.Open = true
 	}
 	return card, nil
@@ -147,14 +147,15 @@ func andList(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// pickerForm reads the regos and overnight option common to create and update.
-func pickerForm(r *http.Request) (vehicleIDs []int64, allowOvernight bool) {
+// pickerForm reads what the picker should offer, common to create and update:
+// every rego (all_vehicles) or the ticked ones, and the overnight option.
+func pickerForm(r *http.Request) (vehicleIDs []int64, allowOvernight, allVehicles bool) {
 	for _, v := range r.Form["vehicle_id"] {
 		if id := atoi64(v); id > 0 {
 			vehicleIDs = append(vehicleIDs, id)
 		}
 	}
-	return vehicleIDs, r.FormValue("allow_overnight") != ""
+	return vehicleIDs, r.FormValue("allow_overnight") != "", r.FormValue("all_vehicles") != ""
 }
 
 // showPicker returns the card as it stands: the reply to Cancel on the edit
@@ -189,7 +190,7 @@ func (s *Server) editPicker(w http.ResponseWriter, r *http.Request) {
 	for _, c := range card.Picker.Cars {
 		sel[c.ID] = true
 	}
-	card.Edit = &pickerEditView{AllowOvernight: card.Picker.AllowOvernight, Selected: sel}
+	card.Edit = &pickerEditView{AllowOvernight: card.Picker.AllowOvernight, AllVehicles: card.Picker.AllVehicles, Selected: sel}
 	card.Open = true
 	s.render(w, base)
 }
@@ -207,9 +208,9 @@ func (s *Server) createPicker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
-	vehicleIDs, allowOvernight := pickerForm(r)
-	if len(vehicleIDs) == 0 {
-		s.formError(w, r, "Tick at least one rego for the picker to offer.")
+	vehicleIDs, allowOvernight, allVehicles := pickerForm(r)
+	if !allVehicles && len(vehicleIDs) == 0 {
+		s.formError(w, r, "Tick at least one rego for the picker to offer, or offer every rego.")
 		return
 	}
 	// Refuse a dead permit before minting anything, failing closed on a store
@@ -230,7 +231,7 @@ func (s *Server) createPicker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const made = "Your quick picker is ready. Open it on your phone and add it to the home screen."
-	switch _, err := s.store.CreatePickerGrant(r.Context(), owner, user, permitID, allowOvernight, vehicleIDs, hash, sealed); {
+	switch _, err := s.store.CreatePickerGrant(r.Context(), owner, user, permitID, allowOvernight, allVehicles, vehicleIDs, hash, sealed); {
 	case errors.Is(err, store.ErrDuplicate):
 		s.respondPickerCard(w, r, owner, false, made, "made")
 		return
@@ -257,9 +258,9 @@ func (s *Server) updatePicker(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "Could not read the form. Please try again.")
 		return
 	}
-	vehicleIDs, allowOvernight := pickerForm(r)
-	if len(vehicleIDs) == 0 {
-		s.formError(w, r, "Tick at least one rego for the picker to offer.")
+	vehicleIDs, allowOvernight, allVehicles := pickerForm(r)
+	if !allVehicles && len(vehicleIDs) == 0 {
+		s.formError(w, r, "Tick at least one rego for the picker to offer, or offer every rego.")
 		return
 	}
 	pg, err := s.store.PickerGrant(r.Context(), owner)
@@ -273,7 +274,7 @@ func (s *Server) updatePicker(w http.ResponseWriter, r *http.Request) {
 	}
 	// Unticking a rego withdraws authority the link may be using right now.
 	releaseClaims := s.claimPermitApplies(r.Context(), []int64{pg.PermitID})
-	swept, err := s.store.UpdateGuestGrant(r.Context(), owner, pg.GrantID, "Quick picker", allowOvernight, vehicleIDs)
+	swept, err := s.store.UpdatePickerGrant(r.Context(), owner, allowOvernight, allVehicles, vehicleIDs)
 	releaseClaims()
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {

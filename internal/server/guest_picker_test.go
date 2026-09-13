@@ -74,7 +74,7 @@ func TestQuickPickerManagement(t *testing.T) {
 		t.Fatalf("a refused create minted a picker: %v", err)
 	}
 	w := s.doReq("POST", "/guests/picker", owner, origin, url.Values{
-		"permit_id": {itoa64(pid)}, "vehicle_id": {itoa64(nana), itoa64(baba)}, "allow_overnight": {"1"}})
+		"permit_id": {itoa64(pid)}, "all_vehicles": {"1"}, "allow_overnight": {"1"}})
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/guests?picker=made#picker" {
 		t.Fatalf("create = %d %q", w.Code, w.Header().Get("Location"))
 	}
@@ -84,7 +84,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	}
 	raw := rawLink(t)
 	page = s.doReq("GET", "/guests?picker=made", owner, "", nil).Body.String()
-	for _, want := range []string{"Your quick picker", "It offers Baba and Nana, with the overnight option on.", "/g/" + raw, "data:image/png;base64,", "Your quick picker is ready", "New link", "/guests/picker/edit"} {
+	for _, want := range []string{"Your quick picker", "It offers every rego, including any you add later, with the overnight option on.", "/g/" + raw, "data:image/png;base64,", "Your quick picker is ready", "New link", "/guests/picker/edit"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("guests page after creating lacks %q:\n%s", want, page)
 		}
@@ -103,8 +103,13 @@ func TestQuickPickerManagement(t *testing.T) {
 	if menu.Code != 200 {
 		t.Fatalf("picker page = %d", menu.Code)
 	}
+	// A rego added after the picker was made is on it without an edit.
+	if _, err := s.store.CreateVehicle(ctx, owner, "NEW111", "Later", ""); err != nil {
+		t.Fatal(err)
+	}
+	menu = s.getGuest("/g/" + raw)
 	body := menu.Body.String()
-	for _, want := range []string{"<h1>Home permit</h1>", "Tap a rego to put it on the permit", "ABC123", "XYZ789", "Open p.stonn", "Overnight<br>"} {
+	for _, want := range []string{"<h1>Home permit</h1>", "Tap a rego to put it on the permit", "ABC123", "XYZ789", "NEW111", "Open p.stonn", "Overnight<br>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("picker page lacks %q:\n%s", want, body)
 		}
@@ -115,16 +120,17 @@ func TestQuickPickerManagement(t *testing.T) {
 		}
 	}
 
-	// Edit: the form is pre-filled; saving with one rego narrows the picker.
+	// Edit: the form is pre-filled with every-rego on; saving with one rego
+	// ticked and every-rego off narrows the picker.
 	page = s.doReq("GET", "/guests/picker/edit", owner, "", nil).Body.String()
-	if !strings.Contains(page, "Save changes") || !strings.Contains(page, `value="`+itoa64(baba)+`" checked`) {
+	if !strings.Contains(page, "Save changes") || !strings.Contains(page, `x-data="{all: true}"`) {
 		t.Fatalf("edit page:\n%s", page)
 	}
 	w = s.doReq("POST", "/guests/picker/update", owner, origin, url.Values{"vehicle_id": {itoa64(baba)}})
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/guests?picker=updated#picker" {
 		t.Fatalf("update = %d %q", w.Code, w.Header().Get("Location"))
 	}
-	if pg, _ := s.store.PickerGrant(ctx, owner); pg.AllowOvernight || len(pg.Vehicles) != 1 || pg.Vehicles[0].ID != baba {
+	if pg, _ := s.store.PickerGrant(ctx, owner); pg.AllowOvernight || pg.AllVehicles || len(pg.Vehicles) != 1 || pg.Vehicles[0].ID != baba {
 		t.Fatalf("after update = %+v", pg)
 	}
 	if page = s.doReq("GET", "/guests", owner, "", nil).Body.String(); !strings.Contains(page, "It offers Baba, with the overnight option off.") {
@@ -194,6 +200,7 @@ func TestQuickPickerManagement(t *testing.T) {
 		return rec
 	}
 	w = hx("POST", "/guests/picker", url.Values{"permit_id": {itoa64(pid)}, "vehicle_id": {itoa64(nana)}})
+	_ = nana
 	frag := w.Body.String()
 	if w.Code != 200 || !strings.HasPrefix(strings.TrimSpace(frag), `<section class="card fold" id="picker"`) || strings.Contains(frag, "<html") {
 		t.Fatalf("htmx create = %d, not the card fragment:\n%s", w.Code, frag)
@@ -248,7 +255,7 @@ func TestQuickPickerActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	const raw = "picker-token-for-activation-test-01"
-	if _, err := s.store.CreatePickerGrant(ctx, owner, owner, pid, true, []int64{baba}, hashGuestToken(raw), "sealed"); err != nil {
+	if _, err := s.store.CreatePickerGrant(ctx, owner, owner, pid, true, false, []int64{baba}, hashGuestToken(raw), "sealed"); err != nil {
 		t.Fatal(err)
 	}
 	// The pre-existing plate is someone else's: the household's page still shows

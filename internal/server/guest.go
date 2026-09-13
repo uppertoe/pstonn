@@ -147,6 +147,7 @@ type pickerView struct {
 	URL            string
 	Cars           []vehicleView
 	Names          string // "Nana, Baba and X-Trail"
+	AllVehicles    bool   // every rego, including ones added later; Names is then not shown
 	AllowOvernight bool
 }
 
@@ -154,6 +155,7 @@ type pickerView struct {
 // overnight option (nil on the page = create mode, or nothing to edit).
 type pickerEditView struct {
 	AllowOvernight bool
+	AllVehicles    bool
 	Selected       map[int64]bool
 }
 
