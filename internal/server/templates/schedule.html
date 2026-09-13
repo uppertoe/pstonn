@@ -130,6 +130,17 @@
             @click="hide=true; localStorage.setItem('pstonn-install-hint','1')">{{template "ic-x"}}</button>
   </p>
   {{end}}
+  {{if .App.ShowPickerHint}}
+  {{/* The one pointer at the quick picker outside the Guests tab, gated on three
+       one-off bookings from the app (schedule.go): the person it is for has just
+       done by hand, three times, what the picker does in one tap. */}}
+  <p class="share-hint" style="--hue:var(--sec-activity)" x-data="{hide: localStorage.getItem('pstonn-picker-hint')==='1'}" x-show="!hide" x-cloak>
+    {{template "ic-phone"}}
+    <span>You have made a few bookings from here. A <a href="/guests#picker">quick picker</a> on your phone does the same in one tap, with no sign-in.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-picker-hint','1')">{{template "ic-x"}}</button>
+  </p>
+  {{end}}
   {{if .App.ShowPassItOnHint}}
   {{/* Referral pointer, deliberately last in the strip order and gated on five
        successful applies (see schedule.go): the ask to vouch for p.stonn to a

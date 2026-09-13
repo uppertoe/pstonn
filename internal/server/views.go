@@ -236,6 +236,10 @@ type appData struct {
 	// to /share (which holds the share sheet, email invite and printable card);
 	// server-gated here, dismissed per-browser in the template like its siblings.
 	ShowPassItOnHint bool
+	// ShowPickerHint points a household that keeps making one-off bookings from
+	// the app at the quick picker, once, after pickerHintAfterBookings of them
+	// and only while no picker exists. Dismissed per browser in the template.
+	ShowPickerHint bool
 	// GuestActive gates the page-level "add your plates first" banner: a
 	// household already using guest QRs (which need no saved cars) shouldn't be
 	// told to add plates — the roster and one-off surfaces explain their own

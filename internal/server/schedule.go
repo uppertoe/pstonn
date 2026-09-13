@@ -37,6 +37,10 @@ func councilTroubled(state string) bool {
 // feature of their own account.
 const passItOnHintAfterApplies = 5
 
+// pickerHintAfterBookings is how many one-off bookings a household makes from
+// the app before the Schedule tab points once at the quick picker.
+const pickerHintAfterBookings = 3
+
 // schedule is the primary day-to-day page: permit status, weekly roster, 14-day
 // calendar, and the chronological one-offs.
 func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +159,14 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 			// away from accounts the tool hasn't yet done anything for.
 			if n >= passItOnHintAfterApplies {
 				base.App.ShowPassItOnHint = true
+			}
+		}
+		// A household making repeated one-off bookings from here is exactly who
+		// the quick picker is for. The count is the change log's, so it measures
+		// recent habit; the picker's existence is durable and ends the hint.
+		if n, cerr := s.store.CountChanges(ctx, owner, store.ActionOverrideAdd); cerr == nil && n >= pickerHintAfterBookings {
+			if _, perr := s.store.PickerGrant(ctx, owner); errors.Is(perr, store.ErrNotFound) {
+				base.App.ShowPickerHint = true
 			}
 		}
 	}
