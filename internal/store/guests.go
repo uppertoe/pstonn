@@ -671,29 +671,29 @@ ON CONFLICT(owner) DO UPDATE SET guests_enabled = excluded.guests_enabled`, owne
 //     has its own, the source's is left behind (where the inactive-permit gate
 //     keeps it safely refused) and strandedPoster reports it, so the caller can
 //     tell the household the old poster is dead instead of claiming it works.
-func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID int64) (moved int, strandedPoster bool, err error) {
+func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID int64) (moved int, strandedPoster, retiredPicker bool, err error) {
 	if srcID == dstID {
-		return 0, false, errors.New("store: cannot move guest passes onto the same permit")
+		return 0, false, false, errors.New("store: cannot move guest passes onto the same permit")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	defer tx.Rollback()
 
 	var owned int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM permit WHERE id IN (?, ?) AND owner = ?`, srcID, dstID, owner).Scan(&owned); err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if owned != 2 {
-		return 0, false, ErrNotFound
+		return 0, false, false, ErrNotFound
 	}
 	var dstPrinted int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`,
 		owner, dstID).Scan(&dstPrinted); err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	filter := ``
 	if dstPrinted > 0 {
@@ -702,9 +702,37 @@ func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID 
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND permit_id = ? AND request_only = 1`,
 			owner, srcID).Scan(&srcPrinted); err != nil {
-			return 0, false, err
+			return 0, false, false, err
 		}
 		strandedPoster = srcPrinted > 0
+	}
+	// The quick picker is one per account. If the household already made one
+	// on another permit (typically the new permit, before copying from the
+	// old), the old permit's picker is retired here rather than moved: the one
+	// they made deliberately on the live permit is the one they want, and two
+	// would leave one working unseen. Its live bookings are swept as any
+	// revocation's are; the permit it sat on is over anyway.
+	var otherPicker, srcPicker int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND picker = 1 AND permit_id != ?`, owner, srcID).Scan(&otherPicker); err != nil {
+		return 0, false, false, err
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND picker = 1 AND permit_id = ?`, owner, srcID).Scan(&srcPicker); err != nil {
+		return 0, false, false, err
+	}
+	if otherPicker > 0 && srcPicker > 0 {
+		if _, err := tx.ExecContext(ctx,
+			sweepLiveGuestOverrides+`IN (SELECT t.id FROM guest_token t JOIN guest_grant g ON g.id = t.grant_id
+			     WHERE g.owner = ? AND g.permit_id = ? AND g.picker = 1)`,
+			nowUTC(), owner, srcID); err != nil {
+			return 0, false, false, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM guest_grant WHERE owner = ? AND permit_id = ? AND picker = 1`, owner, srcID); err != nil {
+			return 0, false, false, err
+		}
+		retiredPicker = true
 	}
 	// Baselines and pending requests are updated BEFORE the grants move, while
 	// "the grants being moved" is still expressible as a subquery on the source.
@@ -712,22 +740,22 @@ func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE guest_token SET baseline_plate = '', baseline_until = '' WHERE grant_id IN `+movingGrants,
 		owner, srcID); err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE guest_request SET permit_id = ? WHERE status = 'pending' AND permit_id = ? AND grant_id IN `+movingGrants,
 		dstID, srcID, owner, srcID); err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE guest_grant SET permit_id = ? WHERE owner = ? AND permit_id = ?`+filter,
 		dstID, owner, srcID)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	n, _ := res.RowsAffected()
-	return int(n), strandedPoster, nil
+	return int(n), strandedPoster, retiredPicker, nil
 }

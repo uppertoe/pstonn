@@ -35,7 +35,7 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
-		s.renderGuestInactive(w, r)
+		s.renderGuestInactive(w, r, gc.Grant.Picker)
 		return
 	}
 	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
@@ -510,7 +510,7 @@ func (s *Server) guestLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
-		s.renderGuestInactive(w, r)
+		s.renderGuestInactive(w, r, gc.Grant.Picker)
 		return
 	}
 	if gc.Grant.RequestOnly {
@@ -569,7 +569,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// already refuses to reconcile inactive permits, so the override would also
 	// never be corrected.)
 	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
-		s.renderGuestInactive(w, r)
+		s.renderGuestInactive(w, r, gc.Grant.Picker)
 		return
 	}
 
@@ -727,7 +727,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
-		s.renderGuestInactive(w, r)
+		s.renderGuestInactive(w, r, gc.Grant.Picker)
 		return
 	}
 	if gc.Grant.RequestOnly {
@@ -1029,8 +1029,12 @@ func (s *Server) renderStatus(w http.ResponseWriter, code int, data dashboardDat
 // renderGuestGone: "ask for a new link" would send this guest chasing a link
 // that would be exactly as dead. What they need to hear is that the permit
 // itself is finished — parking on its say-so no longer protects anyone.
-func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request) {
-	const msg = "This permit is no longer active, so this code cannot put a rego on it right now. Please check with your host before parking."
+func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request, picker bool) {
+	msg := "This permit is no longer active, so this code cannot put a rego on it right now. Please check with your host before parking."
+	if picker {
+		// The household's own page: say what to do, not who to ask.
+		msg = "This permit is no longer active. In p.stonn, add the new permit and copy the schedule across; the quick picker moves with it."
+	}
 	if isHX(r) && !isBoosted(r) {
 		// The permit died mid-session: swap the menu for the notice in place.
 		noStore(w)

@@ -722,10 +722,10 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	// dead-to-dead would strand every pass on a target that still 410s while
 	// this handler announces the links work.
 	now := time.Now()
-	moved, stranded := 0, false
+	moved, stranded, retired := 0, false, false
 	var moveErr error
 	if sp.Inactive(now, s.locForPermit(r.Context(), dst)) && !dst.Inactive(now, s.locForPermit(r.Context(), dst)) {
-		if moved, stranded, moveErr = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); moveErr != nil {
+		if moved, stranded, retired, moveErr = s.store.MoveGuestGrants(r.Context(), owner, src, dst.ID); moveErr != nil {
 			// The unmoved passes stay safely refused by the inactive-permit gate
 			// rather than half-working — but the failure must reach the user (below),
 			// not just the log: the whole promise of this path is "links keep
@@ -772,6 +772,9 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	} else if moved > 0 {
 		msg += " Printed posters keep working too."
 	}
+	if retired {
+		msg += " The old permit's quick picker was not moved (this permit already has its own); the old link no longer works."
+	}
 	s.notifyDestructive(r.Context(), owner, user, msg)
 	// The same facts for the person who did it, in their own frame: the change
 	// notice above goes to everyone else on the account.
@@ -785,6 +788,9 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 		notice += " The old permit's printed door QR wasn't moved (this permit already has its own) — that old poster no longer works, so take it down."
 	} else if moved > 0 {
 		notice += " Printed posters keep working too."
+	}
+	if retired {
+		notice += " The old permit's quick picker was not moved (this permit already has its own); the old link no longer works."
 	}
 	s.sched.KickPermit(dst.ID)
 	// Running a copy answers the "renewed this permit?" pitch for good — matters

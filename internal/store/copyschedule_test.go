@@ -257,7 +257,7 @@ func TestMoveGuestGrants(t *testing.T) {
 	}
 
 	// Both grants move; the pass's token rows are untouched (same hash resolves).
-	n, stranded, err := st.MoveGuestGrants(ctx, owner, src, dst)
+	n, stranded, _, err := st.MoveGuestGrants(ctx, owner, src, dst)
 	if err != nil || n != 2 || stranded {
 		t.Fatalf("MoveGuestGrants = %d, stranded=%v, %v; want 2 grants moved, none stranded", n, stranded, err)
 	}
@@ -291,7 +291,7 @@ func TestMoveGuestGrants(t *testing.T) {
 		[]int64{vehID}, []GuestRecipient{{Email: "pa@example.com", TokenHash: "hash-pass2"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, stranded, err = st.MoveGuestGrants(ctx, owner, src2, dst)
+	n, stranded, _, err = st.MoveGuestGrants(ctx, owner, src2, dst)
 	if err != nil || n != 1 || !stranded {
 		t.Fatalf("second move = %d, stranded=%v, %v; want only the pass moved and the poster reported stranded", n, stranded, err)
 	}
@@ -300,10 +300,10 @@ func TestMoveGuestGrants(t *testing.T) {
 	}
 
 	// Foreign or unknown permits refuse wholesale.
-	if _, _, err := st.MoveGuestGrants(ctx, "other@example.com", src, dst); !errors.Is(err, ErrNotFound) {
+	if _, _, _, err := st.MoveGuestGrants(ctx, "other@example.com", src, dst); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign owner = %v, want ErrNotFound", err)
 	}
-	if _, _, err := st.MoveGuestGrants(ctx, owner, src, src); err == nil {
+	if _, _, _, err := st.MoveGuestGrants(ctx, owner, src, src); err == nil {
 		t.Fatal("same-permit move must refuse")
 	}
 }
@@ -334,5 +334,64 @@ func TestCopyScheduleEmptySourceIsNoOp(t *testing.T) {
 	rules, err := st.ListRules(ctx, dst)
 	if err != nil || len(rules) != 1 {
 		t.Fatalf("dst roster after empty-source copy = %v (%v); want untouched", rules, err)
+	}
+}
+
+// TestMoveGuestGrantsPicker: the quick picker follows a copy onto a new permit
+// like any grant, unless the household already made one on the new permit, in
+// which case the old permit's picker is retired rather than moved, so the
+// account never holds two.
+func TestMoveGuestGrantsPicker(t *testing.T) {
+	st := copyStore(t)
+	ctx := context.Background()
+	const owner = "own@example.com"
+	src, dst, vehID := copyFixture(t, st, owner)
+
+	// No picker on the new permit: the old one moves and keeps its link.
+	if _, err := st.CreatePickerGrant(ctx, owner, owner, src, true, true, nil, "hash-pk", "sealed-pk"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, retired, err := st.MoveGuestGrants(ctx, owner, src, dst); err != nil || retired {
+		t.Fatalf("move with no picker on the destination = retired %v, %v", retired, err)
+	}
+	if pg, err := st.PickerGrant(ctx, owner); err != nil || pg.PermitID != dst || pg.TokenSealed != "sealed-pk" {
+		t.Fatalf("picker after move = %+v %v, want the same picker on permit %d", pg, err, dst)
+	}
+
+	// Now the household has a picker on the live permit and copies from another
+	// old permit that also had one: the old one is retired, the live one stays.
+	src2, err := st.UpsertPermit(ctx, owner, "src2-permit", "14", "Second old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateGuestGrant(ctx, owner, owner, src2, "Pa", false,
+		[]int64{vehID}, []GuestRecipient{{Email: "pa@example.com", TokenHash: "hash-pass2"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A second picker cannot be created through the front door (one per account),
+	// so plant one on the old permit as an older database might carry it.
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO guest_grant (owner, permit_id, label, picker, all_vehicles, enabled, created_at) VALUES (?, ?, 'Quick picker', 1, 1, 1, ?)`, owner, src2, nowUTC()); err != nil {
+		t.Fatal(err)
+	}
+	var oldGrant int64
+	if err := st.db.QueryRowContext(ctx, `SELECT id FROM guest_grant WHERE owner = ? AND permit_id = ? AND picker = 1`, owner, src2).Scan(&oldGrant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO guest_token (grant_id, recipient_email, token_hash, token_sealed, created_at) VALUES (?, '', 'hash-old-pk', 'sealed-old', ?)`, oldGrant, nowUTC()); err != nil {
+		t.Fatal(err)
+	}
+	n, stranded, retired, err := st.MoveGuestGrants(ctx, owner, src2, dst)
+	if err != nil || n != 1 || stranded || !retired {
+		t.Fatalf("second move = %d moved, stranded %v, retired %v, %v; want the pass moved and the old picker retired", n, stranded, retired, err)
+	}
+	var pickers int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM guest_grant WHERE owner = ? AND picker = 1`, owner).Scan(&pickers); err != nil || pickers != 1 {
+		t.Fatalf("pickers on the account after the move = %d %v, want 1", pickers, err)
+	}
+	if pg, err := st.PickerGrant(ctx, owner); err != nil || pg.PermitID != dst || pg.TokenSealed != "sealed-pk" {
+		t.Fatalf("surviving picker = %+v %v, want the live permit's", pg, err)
+	}
+	if _, err := st.GuestContextByTokenHash(ctx, "hash-old-pk"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the retired picker's link still resolves: %v", err)
 	}
 }
