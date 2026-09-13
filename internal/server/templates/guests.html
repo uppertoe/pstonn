@@ -1,7 +1,7 @@
 {{define "page-guests"}}
   {{/* ---------- GUEST PASSES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-guests)"><span class="ic">{{template "ic-users"}}</span> Guests</div>
-  <p class="subtitle">Each of these puts a rego on the permit without a sign-in, and each lasts until the end of the day. Three of them are for your visitors, and the quick picker is for your own phone.</p>
+  <p class="subtitle">Each of these puts a rego on the permit without a sign-in, and each lasts until the end of the day.</p>
   {{template "checklist" .}}
   {{if and .GuestMgmt.PermitOpts (not .QR) (not .Edit)}}
   {{/* Four tools live on this tab and the heading names one of them. The tiles
@@ -119,40 +119,24 @@
   </section>
   {{end}}
 
-  {{/* Nothing to pause on a first visit: an account with no passes, printed QRs
-       or requests sees an admin toggle as its first card, for a feature it has
-       never used. Shown once anything exists — and always when paused, so the
-       Resume switch can never disappear. */}}
-  {{if or .GuestMgmt.Guests .GuestMgmt.DoorGrants .GuestMgmt.PendingRequests .GuestMgmt.RecentRequests (not .GuestMgmt.GuestsEnabled)}}
-  <section class="card">
-    <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
-      <div>
-        <strong>Guest passes are {{if .GuestMgmt.GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
-        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor's rego still on a permit comes off now.</div>
-      </div>
-      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor's rego still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
-        <input type="hidden" name="enabled" value="{{if .GuestMgmt.GuestsEnabled}}{{else}}1{{end}}">
-        <button type="submit" class="{{if .GuestMgmt.GuestsEnabled}}danger{{end}}">{{if .GuestMgmt.GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
-      </form>
-    </div>
-  </section>
-  {{end}}
-
   {{if .GuestMgmt.PermitOpts}}
+  {{/* Three sections in the tiles' order, each a small labelled group so the
+       page reads as a table of contents and its chapters. The tiles carry the
+       "who it is for" line, so the cards below say only what happens. */}}
+  <h3 class="secgroup" style="--hue:var(--sec-schedule)">A visitor here now</h3>
   <section class="card" id="now" style="--hue:var(--sec-schedule)">
     <h2><span class="ic">{{template "ic-qr"}}</span> Let a visitor in now</h2>
-    <p class="subtitle">Let a visitor, a tradie or a friend, put <em>their own rego</em> on the permit. No saved rego is needed.</p>
-    <p class="subtitle" style="margin-top:-6px"><strong>Unlike a guest pass, these don't give lasting access</strong> &mdash; the on-screen code stops working after 15&nbsp;min (whoever scans it within that window can put a rego on straight away), and a printed code makes your phone ask you to confirm each scan, so nothing goes on the permit until you say yes.</p>
+    <p class="subtitle">They put <em>their own rego</em> on the permit; no saved rego is needed, and neither code gives lasting access.</p>
     <div class="qropts">
       <form method="post" action="/guests/qr" class="qropt">
-        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">You're here: they scan, enter their rego, and it goes on straight away. The code stops working 15&nbsp;min after you show it.</span></div>
+        <div class="qropt-txt"><strong>Show a QR now</strong><span class="empty-note">They scan it and type their rego, and it is on the permit until the end of the day. The code stops working after 15&nbsp;minutes.</span></div>
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
         <button type="submit">{{template "ic-qr"}} Show a visitor QR</button>
       </form>
       <form method="post" action="/guests/printed" class="qropt">
-        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Stick it on the fridge, or wherever your visitors will see it. Each scan asks you to confirm on your phone. It keeps working until you remove it.</span></div>
+        <div class="qropt-txt"><strong>Print one out for later</strong><span class="empty-note">Stick it where your visitors will see it. Each scan asks you to confirm on your phone, and it keeps working until you remove it.</span></div>
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
@@ -182,14 +166,12 @@
   {{end}}
 
 
-  {{/* The household's own quick picker: a folding card, closed by default, that
-       swaps in place on every action (see "picker-card" below). */}}
-  {{if .GuestMgmt.PickerCard}}{{template "picker-card" .GuestMgmt.PickerCard}}{{end}}
 
+  <h3 class="secgroup" style="--hue:var(--sec-guests)">Guest passes</h3>
   {{if .GuestMgmt.Guests}}
   {{/* The list of passes had no heading: a card titled "Cleaner" with cars and
        people under it did not say what it was. */}}
-  <div class="sectitle" style="--hue:var(--sec-guests);margin-top:6px"><span class="ic">{{template "ic-link"}}</span> Passes you&rsquo;ve sent</div>
+  <p class="sub" style="margin:0 0 8px">Passes you&rsquo;ve sent</p>
   <div class="grants">
     {{range .GuestMgmt.Guests}}
     <section class="card">
@@ -237,9 +219,18 @@
   {{end}}
 
   {{if and .GuestMgmt.PermitOpts .Vehicles}}
-  <section class="card" style="--hue:var(--sec-vehicles)" id="new">
-    <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
-    <p class="subtitle">Give someone a link that lets them put their rego on the permit when they arrive, without an account. They can only choose from the regos you tick here.</p>
+  {{/* The tallest thing on the tab, and most visits are not to create a pass:
+       a folding card, open while the household has none (a first-timer lands
+       on it) and otherwise opened from the "Guest pass" tile or its chevron. */}}
+  <section class="card fold" style="--hue:var(--sec-vehicles)" id="new"
+           x-data="{open: {{if .GuestMgmt.Guests}}location.hash === '#new'{{else}}true{{end}}}"
+           @hashchange.window="if (location.hash === '#new') open = true">
+    <div class="fold-head">
+      <h2><span class="ic">{{template "ic-plus"}}</span> Create a new guest pass</h2>
+      <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" @click="open=!open" title="Show or hide" aria-label="Show or hide the new pass form"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+    <p class="fold-sum">Someone who visits often keeps a link that puts one of your regos on the permit when they arrive.</p>
+    <div class="fold-body" x-show="open" x-cloak>
     <div class="banner warn" style="margin-bottom:16px;align-items:flex-start">{{template "ic-alert"}} <span>A guest pass is <strong>standing access</strong>: anyone who has the link can put one of these regos on your permit <strong>at any time of their choosing</strong>, without asking you, until you delete the pass. Only send it to people you trust.</span></div>
     {{/* Boosted POST (the body is hx-boost), so the double-submit guard is Alpine:
          the first submit marks the form sent and later ones are dropped, and the
@@ -286,9 +277,36 @@
       </label>
       <button type="submit" :disabled="sent || !hasRecip()">{{template "ic-link"}} Create pass and send links</button>
     </form>
+    </div>
   </section>
   {{else}}
   <section class="card"><p class="empty-note">Add at least one <a href="/regos">rego</a> and manage a permit on the <a href="/schedule">Schedule</a> first, then you can create a guest pass.</p></section>
+  {{end}}
+  {{/* Nothing to pause on a first visit: an account with no passes, printed QRs
+       or requests sees an admin toggle as its first card, for a feature it has
+       never used. Shown once anything exists — and always when paused, so the
+       Resume switch can never disappear. */}}
+  {{if or .GuestMgmt.Guests .GuestMgmt.DoorGrants .GuestMgmt.PendingRequests .GuestMgmt.RecentRequests (not .GuestMgmt.GuestsEnabled)}}
+  <section class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:14px">
+      <div>
+        <strong>Guest passes are {{if .GuestMgmt.GuestsEnabled}}active{{else}}<span style="color:var(--danger)">paused</span>{{end}}</strong>
+        <div class="empty-note" style="margin-top:2px">One switch to disable every link at once. Your passes are kept, so you can resume them &mdash; but any visitor's rego still on a permit comes off now.</div>
+      </div>
+      <form method="post" action="/guests/toggle"{{if .GuestMgmt.GuestsEnabled}} data-confirm="Pause all guest passes? Every link stops working, and any visitor's rego still on a permit comes off now. Your passes are kept, so you can resume them." data-confirm-ok="Pause all"{{end}}>
+        <input type="hidden" name="enabled" value="{{if .GuestMgmt.GuestsEnabled}}{{else}}1{{end}}">
+        <button type="submit" class="{{if .GuestMgmt.GuestsEnabled}}danger{{end}}">{{if .GuestMgmt.GuestsEnabled}}Pause all{{else}}Resume{{end}}</button>
+      </form>
+    </div>
+  </section>
+  {{end}}
+
+
+  {{if .GuestMgmt.PickerCard}}
+  <h3 class="secgroup" style="--hue:var(--sec-activity)">Your own phone</h3>
+  {{/* The household's own quick picker: a folding card, closed by default, that
+       swaps in place on every action (see "picker-card" below). */}}
+  {{template "picker-card" .GuestMgmt.PickerCard}}
   {{end}}
   {{end}}{{/* mode */}}
 {{if .BookFAB}}

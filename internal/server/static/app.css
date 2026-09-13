@@ -610,6 +610,12 @@ button:disabled { opacity:.55; cursor:progress; }
 .tile-h .ic svg { width:15px; height:15px; }
 .tile-who { color:var(--muted); font-size:12.5px; line-height:1.35; }
 @media (max-width:640px){ .tiles { grid-template-columns:1fr 1fr; gap:8px; } .tile { padding:10px 11px; } }
+/* Section labels on the Guests tab: an uppercase eyebrow in the section's hue
+   with a hairline running out from it, so the page reads as chapters without
+   another row of card-sized headings. */
+.secgroup { display:flex; align-items:center; gap:10px; margin:26px 0 10px; font-size:12.5px; font-weight:650; letter-spacing:.06em; text-transform:uppercase; color:color-mix(in srgb, var(--hue,var(--muted)) 70%, var(--ink)); }
+.secgroup::after { content:""; flex:1; height:1px; background:color-mix(in srgb, var(--hue,var(--line)) 25%, var(--line)); }
+.tiles + .secgroup, .todo + .secgroup { margin-top:18px; }
 /* A folding card: heading row with its actions and a chevron, a one-line
    summary, and a body that opens under it. Closed by default so the card takes
    two lines until it is wanted. */

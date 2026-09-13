@@ -336,16 +336,6 @@ window.popClamp = window.popClamp || function (el) {
 
   
   
-
-<div id="legend"
-     
-     hx-get="/schedule/legend" hx-trigger="schedule-changed from:body"
-     hx-swap="outerHTML" hx-sync="this:replace">
-  
-</div>
-
-  
-  
   
   
   <section class="card" id="permit-7" style="--hue:var(--sec-schedule)"
@@ -353,10 +343,7 @@ window.popClamp = window.popClamp || function (el) {
            @htmx:after-request="if($event.detail.successful && $event.detail.requestConfig && $event.detail.requestConfig.verb !== 'get' && !$event.detail.elt.closest('.qrtrigger')) addOpen=false">
     
     <div id="pbody-7">
-<div class="banner ok" style="margin-bottom:12px"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> <span>Schedule copied. Guest passes and QR codes moved across with it — links that people have saved keep working.</span>
-  
-  
-</div>
+
 <div class="permit-head">
   <div class="pname" x-data="{rename:false}">
     
@@ -978,6 +965,14 @@ window.popClamp = window.popClamp || function (el) {
   </p>
   
   
+  
+  
+  <p class="share-hint" style="--hue:var(--sec-activity)" x-data="{hide: localStorage.getItem('pstonn-picker-hint')==='1'}" x-show="!hide" x-cloak>
+    <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg>
+    <span>You have made a few bookings from here. A <a href="/guests#picker">quick picker</a> on your phone does the same in one tap, with no sign-in.</span>
+    <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
+            @click="hide=true; localStorage.setItem('pstonn-picker-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </p>
   
   
   
