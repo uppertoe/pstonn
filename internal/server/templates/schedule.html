@@ -76,7 +76,7 @@
   {{if .App.ExpiredPermits}}
   <section class="card expired-permits">
     <h2 class="exp-h2">{{template "ic-clock"}} Permits no longer active</h2>
-    <p class="empty-note" style="margin:2px 0 12px">Not being updated anymore, and their guest passes and QR codes are paused. Got a new permit instead? <a href="/permits/new">Add it</a>, then pick the old one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links that people have saved keep working.</p>
+    <p class="empty-note" style="margin:2px 0 12px">Not being updated any more, and their guest passes and QR codes are paused. Got a new permit instead? <a href="/permits/new">Add it</a>, then pick the old one under &ldquo;Copy schedule from another permit&rdquo; &mdash; the schedule and guest passes move across, and links that people have saved keep working.</p>
     <ul class="explist">
       {{range .App.ExpiredPermits}}
       <li class="exprow">
@@ -210,7 +210,7 @@
            permit is far easier to tell apart in a multi-permit household. */}}
       {{if .Unnamed}}<button x-show="!rename" type="button" class="rename-hint"
               @click="rename=true; $nextTick(() => $refs.pname.focus())">Name this permit</button>{{end}}
-      <form x-show="rename" x-cloak method="post" action="/permits/{{.Permit.ID}}/name" class="pname-edit" @submit="rename=false">
+      <form x-show="rename" x-cloak method="post" action="/permits/{{.Permit.ID}}/name" hx-post="/permits/{{.Permit.ID}}/name" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML" class="pname-edit" @submit="rename=false">
         <input name="label" x-ref="pname" maxlength="40" required autocomplete="off" @keydown.escape="rename=false"
                placeholder="e.g. Front-unit permit"
                value="{{if .Unnamed}}{{else}}{{.Permit.Label}}{{end}}">
@@ -326,9 +326,13 @@
        that is no longer active the guest passes and QR codes move across too
        (the option carries data-dead), so the person is told before, not after. */}}
   <form x-show="open" x-cloak class="cs-form" hx-post="/permits/{{.Permit.ID}}/copy-schedule" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
-        @submit="var o = $event.target.source.selectedOptions[0]; var m = 'Copy from ' + o.text + '? This replaces this permit\'s weekly roster and upcoming bookings.'; if (o.dataset.dead) m += ' Guest passes and QR codes move across; links that people have saved keep working.'; if(!confirm(m)) $event.preventDefault()">
+        hx-confirm="Copy that permit's schedule? This replaces this permit's weekly roster and upcoming bookings." data-confirm-ok="Copy schedule">
     <label class="fld">Copy from
-      <select name="source" required>
+      {{/* The question names the chosen permit, so it is rewritten as the choice
+           changes; htmx reads hx-confirm at submit time and the shared dialog
+           (layout.html, htmx:confirm) shows it, as for every other confirm. */}}
+      <select name="source" required
+              @change="var o = $event.target.selectedOptions[0]; var m = 'Copy from ' + o.text + '? This replaces this permit\'s weekly roster and upcoming bookings.'; if (o.dataset.dead) m += ' Guest passes and QR codes move across; links that people have saved keep working.'; $event.target.closest('form').setAttribute('hx-confirm', m)">
         <option value="" disabled selected>Choose a permit…</option>
         {{range .CopyFrom}}<option value="{{.ID}}"{{if .Dead}} data-dead="1"{{end}}>{{.Label}}</option>{{end}}
       </select>

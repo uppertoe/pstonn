@@ -152,8 +152,8 @@ as a banner above the section title.
 
 Use this when the action **changes which page you are on or which list you
 are looking at**: creating a guest pass (the page then shows the new links),
-deleting a pass, adding or removing a rego, permit rename and delete, every
-account and council form in Settings, the contact form. Do not use it for an
+deleting a pass, adding or removing a rego, permit delete, every account and
+council form in Settings, the contact form. Do not use it for an
 action whose result belongs inside a card; that is 2a.
 
 Rules that go with it:
@@ -176,12 +176,12 @@ nearest:
 | Where | Request | Target, swap | Reply |
 |---|---|---|---|
 | Schedule legend | `GET /schedule/legend` on `schedule-changed` | `#legend`, outerHTML | `legend` |
-| Roster cell, week add/remove/restore, one-off add/delete, clear, copy schedule, dismiss copy offer | `POST /permits/{id}/…` | `#pbody-{id}`, innerHTML | `permit-body` with Notice |
+| Roster cell, week add/remove/restore, one-off add/delete, clear, copy schedule, dismiss copy offer, rename | `POST /permits/{id}/…` | `#pbody-{id}`, innerHTML | `permit-body` with Notice |
 | Plate poll | `GET /permits/{id}/card?n=` on `load delay:Ns` | `closest .nowbadge`, outerHTML, `hx-select=".nowbadge"` | `permit-body`, narrowed |
 | Visitor QR from the card | `POST /guests/qr` | `#qrbody-{id}`, innerHTML transition:false | `qr-card` |
 | Guest activation, revert, live poll | `POST /g/{token}`, `/revert`, `GET /g/live/{token}` | `#gbody`, innerHTML | `guest-body`, or 204 |
 | Printed-QR request status | `GET /g/req/{id}` every 3s | `#reqstatus`, outerHTML | `guest-req-status`, or 204 |
-| Notification settings | `POST /notifications` on change, test push, regen topic, resume email, ntfy status poll | `#notify-body`, innerHTML or none | `notify-body`, 204, or `HX-Retarget` |
+| Notification settings | `POST /notifications` on change, send a test, test push, regen topic, resume email, ntfy status poll | `#notify-body`, innerHTML or none | `notify-body`, 204, or `HX-Retarget` |
 | Rego email and notify toggle | `POST /regos/{id}/email`, `/notify` | none | 204 |
 | Quick picker create, update, new link, delete, edit, cancel | `POST /guests/picker…`, `GET /guests/picker[/edit]` | `#picker`, outerHTML | `picker-card` with Notice |
 
@@ -327,7 +327,9 @@ is. Copy that names the council or its portal goes through the i18n catalog
 - Replies: `formError` (422 plain text to htmx, 400 page otherwise),
   `message(w, code, msg)` (the branded message page), `serverError` (500,
   logged), `redirectHome` (303 to `/schedule`). No `HX-Redirect`,
-  `HX-Location` or `HX-Push-Url` anywhere; navigation is a 303.
+  `HX-Location` or `HX-Push-Url` response headers anywhere; navigation is a
+  303. (The `hx-push-url` attribute on the booking button is a client-side
+  address-bar tidy, not a reply.)
 - `render` executes into a buffer so a mid-render failure never ships a
   truncated 200; on error it emits the dependency-free bare page.
 - Query flags read on a GET are validated (`validRego`, `looksLikeEmail`)

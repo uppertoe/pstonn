@@ -49,7 +49,7 @@
     {{if .RelinkBy}}<p class="empty-note" style="margin-top:-8px">If nobody visits, this connection would stop around <strong>{{.RelinkBy}}</strong>.</p>{{end}}
     <div class="row" style="margin-top:14px">
       <strong>Auto-reconnect</strong> {{if .AutoReconnect}}<span class="pill ok">On</span>
-      <form method="post" action="/tenant/forget-password"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">Turn off</button></form>
+      <form method="post" action="/tenant/forget-password" data-confirm="Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires." data-confirm-ok="Stop saving"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">Turn off</button></form>
       {{else}}<span class="pill">Off</span>{{end}}
     </div>
     <div class="row" style="margin-top:14px">
@@ -103,7 +103,7 @@
     <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
     {{if or .Settings.Notify.EmailAvailable .Settings.Notify.NtfyAvailable}}
     <div id="notify-body">{{template "notify-body" .Settings.Notify}}</div>
-    <form method="post" action="/notifications/test" class="notify-test"><button type="submit" class="ghost">{{template "ic-bell"}} Send a test notification</button></form>
+    <form method="post" action="/notifications/test" hx-post="/notifications/test" hx-target="#notify-body" hx-swap="innerHTML" class="notify-test"><button type="submit" class="ghost">{{template "ic-bell"}} Send a test notification</button></form>
     {{else}}
     <p class="empty-note">No notification channels are set up by the operator. Configure <code>SMTP_*</code> (email) or <code>NTFY_BASE_URL</code> (push) to enable this.</p>
     {{end}}
@@ -227,7 +227,7 @@
       {{else if .PushSent}}
       {{/* Sent, tap awaited: the box says so and polls ntfyStatus (204 until the
            tap, then the confirmed fragment) so it turns green by itself. */}}
-      <div class="banner info" style="margin:16px 0 16px;align-items:flex-start" hx-get="/notifications/ntfy-status" hx-trigger="every 4s" hx-target="#notify-body" hx-swap="innerHTML">{{template "ic-bell"}} <span><strong>Sent to your phone.</strong> Now tap <strong>Confirm</strong> on the notification when it arrives &mdash; this page will update by itself once you have. Nothing arrived? Check the topic and Service URL in the ntfy app, then send again.</span></div>
+      <div class="banner info hx-quiet" style="margin:16px 0 16px;align-items:flex-start" hx-get="/notifications/ntfy-status" hx-trigger="every 4s" hx-target="#notify-body" hx-swap="innerHTML transition:false">{{template "ic-bell"}} <span><strong>Sent to your phone.</strong> Now tap <strong>Confirm</strong> on the notification when it arrives &mdash; this page will update by itself once you have. Nothing arrived? Check the topic and Service URL in the ntfy app, then send again.</span></div>
       {{else}}
       <div class="banner warn" style="margin:16px 0 16px;align-items:flex-start">{{template "ic-alert"}} <span><strong>One more step: confirm your phone.</strong> Tap <strong>Send a test to my phone</strong>, then <strong>Confirm</strong> on the notification when it arrives. That tells p.stonn the notifications are getting through &mdash; you can turn off email once you have.</span></div>
       {{end}}

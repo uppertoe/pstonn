@@ -94,7 +94,7 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.notify == nil || !s.notify.EmailAvailable() {
-		s.formError(w, r, "Email isn't set up on this p.stonn, so invitations can't be sent from here.")
+		s.message(w, http.StatusConflict, "Email isn't set up on this p.stonn, so invitations can't be sent from here.")
 		return
 	}
 	// Resolved BEFORE the send and the write, and fail-closed: the lenient
@@ -112,7 +112,7 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n >= referralDailyCap {
-		s.formError(w, r, "That's the limit for today — you can send more tomorrow.")
+		s.message(w, http.StatusTooManyRequests, "That's the limit for today — you can send more tomorrow.")
 		return
 	}
 	if err := s.store.RecordReferralInvite(ctx, u.Email, to); err != nil {

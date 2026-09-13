@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,6 +101,10 @@ func (s *Server) editGuestGrant(w http.ResponseWriter, r *http.Request) {
 	if base.Edit == nil { // no such grant for this owner
 		http.Redirect(w, r, "/guests", http.StatusSeeOther)
 		return
+	}
+	// Validated on the read path like every other flag (see guestsPage).
+	if who := r.URL.Query().Get("revoked"); looksLikeEmail(who) {
+		base.Flash = "The link for " + who + " has been revoked. It no longer works, and any rego it put on the permit is coming off now."
 	}
 	s.render(w, base)
 }
@@ -421,7 +426,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 	// Nor when we can't deliver the replacement — that would break the
 	// recipient's current link with nothing to replace it.
 	if !s.notify.EmailAvailable() {
-		s.formError(w, r, "Email isn't set up, so links can't be re-sent.")
+		s.message(w, http.StatusConflict, "Email isn't set up, so links can't be re-sent.")
 		return
 	}
 	raw, hash := newGuestToken()
@@ -830,6 +835,12 @@ func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 			user+" revoked a guest link"+optional(recipient, " (")+closeParen(recipient)+" on your p.stonn account. That link no longer works, and p.stonn is taking any car it had put on your permit back off now — check the permit directly if this is urgent.")
 		s.kickScheduler()
 	}
+	// From the pass's edit card, land back on it with the outcome; the form
+	// says which card it came from.
+	if back := atoi64(r.FormValue("back")); back > 0 {
+		http.Redirect(w, r, "/guests/"+strconv.FormatInt(back, 10)+"/edit?revoked="+url.QueryEscape(recipient), http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
 }
 
@@ -911,7 +922,7 @@ func (s *Server) setVehicleEmail(w http.ResponseWriter, r *http.Request) {
 		s.logChange(r.Context(), owner, user, store.ActionVehicleEmail,
 			s.plateOf(r.Context(), owner, pathInt(r, "id")), detail)
 	}
-	if r.Header.Get("HX-Request") != "" {
+	if isHX(r) && !isBoosted(r) {
 		w.WriteHeader(http.StatusNoContent) // live save from the Vehicles page; no reload
 		return
 	}

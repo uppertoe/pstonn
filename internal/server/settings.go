@@ -26,6 +26,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	base.Settings = &settingsData{}
 	base.Checklist = s.checklistFor(ctx, owner, user, base.IsPrimary, "settings")
 	base.Settings.HouseholdName = s.householdOrEmpty(ctx, owner)
+	if r.URL.Query().Get("autoreconnect") == "off" {
+		base.Flash = "Your saved council password has been removed. p.stonn will no longer reconnect on its own."
+	}
 	if r.URL.Query().Get("named") == "1" {
 		if base.Settings.HouseholdName == "" {
 			base.Flash = "Household name cleared. Visitors now see only the permit."
@@ -176,7 +179,7 @@ func (s *Server) renderNotify(w http.ResponseWriter, r *http.Request, user strin
 
 // renderNotifyView is renderNotify for a caller that has already shaped the view.
 func (s *Server) renderNotifyView(w http.ResponseWriter, r *http.Request, nv notifyView) {
-	if r.Header.Get("HX-Request") != "" {
+	if isHX(r) && !isBoosted(r) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := templates.ExecuteTemplate(w, "notify-body", nv); err != nil {
 			alog.Infof("render notify-body: %v", err)
@@ -356,7 +359,7 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	// leaving it unbounded lets one account burn shared SMTP quota by holding it
 	// down. Their own address, so a low limit costs nothing legitimate.
 	if !s.testNotifyLimit.allow("u:" + user) {
-		s.formError(w, r, "You've sent a few test notifications already. Please wait a little while before sending another.")
+		s.message(w, http.StatusTooManyRequests, "You've sent a few test notifications already. Please wait a little while before sending another.")
 		return
 	}
 	confirmURL, awaiting := s.ntfyConfirmURL(r.Context(), user)
@@ -365,6 +368,19 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 		// browser.
 		alog.Infof("test notify %s: %v", redact.Email(user), err)
 		s.message(w, http.StatusBadGateway, "Couldn't send the test notification. Check your channels in Settings, and ask the operator to check the logs if it keeps failing.")
+		return
+	}
+	if isHX(r) && !isBoosted(r) {
+		pref, err := s.store.GetNotifyPref(r.Context(), user)
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		status := "Test notification sent."
+		if awaiting {
+			status = "Test notification sent. Tap Confirm on the one that reaches your phone, and push is proven."
+		}
+		s.renderNotify(w, r, user, pref, status, "")
 		return
 	}
 	if awaiting {

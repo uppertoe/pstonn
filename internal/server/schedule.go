@@ -1047,7 +1047,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// every dashboard render and reconcile pass. A ceiling a real household never hits.
 	overLimit := func(err error) bool {
 		if errors.Is(err, store.ErrOverrideLimit) {
-			s.formError(w, r, "This permit already has the maximum number of active bookings. Remove one before adding another.")
+			s.message(w, http.StatusConflict, "This permit already has the maximum number of active bookings. Remove one before adding another.")
 			return true
 		}
 		return false
@@ -1281,7 +1281,7 @@ func (s *Server) respondPermitUndo(w http.ResponseWriter, r *http.Request, owner
 // when every tick re-fetched the legend too, a badge check cost two requests
 // and re-rendered a key that could not have moved.
 func (s *Server) renderPermitFragment(w http.ResponseWriter, r *http.Request, owner string, p model.Permit, notice, undo string, changed bool) {
-	if r.Header.Get("HX-Request") == "" {
+	if !isHX(r) || isBoosted(r) {
 		redirectHome(w, r)
 		return
 	}

@@ -821,7 +821,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	// offers the action then, and this is the authoritative refusal (a stale tab,
 	// a hand-built request). Checked before any claim or tenant call.
 	if !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
-		s.formError(w, r, "This council's permit can't be left with no rego on it. Put a different rego on instead.")
+		s.message(w, http.StatusConflict, "This council's permit can't be left with no rego on it. Put a different rego on instead.")
 		return
 	}
 	now := time.Now().In(s.locForPermit(r.Context(), p))
@@ -834,7 +834,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	release, claimed := s.sched.AcquireApply(applyCtx, p.ID)
 	if !claimed {
-		s.formError(w, r, "The permit is busy with another change right now. Please try again in a moment.")
+		s.message(w, http.StatusConflict, "The permit is busy with another change right now. Please try again in a moment.")
 		return
 	}
 	// Re-check under the claim, immediately before the write: if a schedule now
@@ -848,7 +848,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	if res := model.Resolve(now, p.Cycle(), rules, ovs); res.Source != model.SourceNone {
 		release()
-		s.formError(w, r, "This permit has a rego scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
+		s.message(w, http.StatusConflict, "This permit has a rego scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
 		return
 	}
 	err := s.tenant.ClearVehicle(applyCtx, owner, p)
@@ -869,10 +869,10 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		alog.Infof("clearPermit %d for %s: %v", p.ID, redact.Email(owner), err)
 		if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-			s.formError(w, r, "Couldn't reach the council just now — nothing was changed. Please try again shortly.")
+			s.message(w, http.StatusBadGateway, "Couldn't reach the council just now — nothing was changed. Please try again shortly.")
 			return
 		}
-		s.formError(w, r, "The council didn't accept removing the rego. The account holder may need to reconnect their council login.")
+		s.message(w, http.StatusConflict, "The council didn't accept removing the rego. The account holder may need to reconnect their council login.")
 		return
 	}
 	_ = s.store.RecordApply(bg, p.ID, "", "manual", "success", "rego removed by "+user)
@@ -918,5 +918,6 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logChange(r.Context(), owner, user, store.ActionPermitRename, label, "")
-	redirectHome(w, r)
+	p.Label = label
+	s.respondPermitNotice(w, r, owner, p, "Permit renamed.")
 }

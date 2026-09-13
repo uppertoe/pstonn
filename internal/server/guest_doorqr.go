@@ -270,7 +270,7 @@ func (s *Server) guestRequestStatus(w http.ResponseWriter, r *http.Request) {
 		v = guestWaitView{ReqID: id, Nonce: nonce, Status: "pending"}
 	}
 	v.FP = guestWaitFP(v)
-	if !isHX(r) {
+	if !isHX(r) || isBoosted(r) {
 		// A direct navigation (bookmark, or a browser that landed here after a
 		// network hiccup) gets the full wait page — with styling and the poller —
 		// not the bare fragment.

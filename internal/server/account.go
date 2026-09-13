@@ -332,11 +332,7 @@ func (s *Server) tenantForgetPassword(w http.ResponseWriter, r *http.Request) {
 	// password — this only cancels not-yet-started work.
 	s.sched.CancelReconnectIn(user, tenant)
 	s.logChange(r.Context(), user, user, store.ActionCouncilForget, "", "")
-	if r.Header.Get("HX-Request") != "" {
-		s.settingsPage(w, r)
-		return
-	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?autoreconnect=off", http.StatusSeeOther)
 }
 
 // accountDelete erases all of the owner's data (session, permits, vehicles,
@@ -603,7 +599,7 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isPrimary {
-		s.formError(w, r, "You own this account, so there is nothing to leave.")
+		s.message(w, http.StatusForbidden, "You own this account, so there is nothing to leave.")
 		return
 	}
 	revoked, err := s.store.RemoveMembership(r.Context(), user)
