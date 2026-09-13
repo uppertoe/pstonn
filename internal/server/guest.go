@@ -157,6 +157,19 @@ type pickerEditView struct {
 	Selected       map[int64]bool
 }
 
+// pickerCardView drives the quick-picker card on the Guests tab. The card is a
+// swappable fragment ("picker-card"): every action on it answers an htmx
+// request with this view re-rendered, so the card changes in place with its
+// outcome in Notice, and a plain request falls back to a full page.
+type pickerCardView struct {
+	Picker     *pickerView     // nil until the household has made one
+	Edit       *pickerEditView // non-nil renders the form pre-filled, to change it
+	Open       bool            // render open (after an action, or while editing); closed by default
+	Notice     string          // the outcome of the action that produced this render
+	Vehicles   []vehicleView
+	PermitOpts []permitOpt
+}
+
 // doorGrantView is one durable door QR in the holder's management list.
 type doorGrantView struct {
 	GrantID     int64

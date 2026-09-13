@@ -466,6 +466,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /guests/tokens/{tid}/revoke", guardConsent, s.revokeGuestToken)
 	// The household's own quick picker: one per account, so no id in the path.
 	// Literal segments win over the {id} patterns above.
+	s.handle(mux, "GET /guests/picker", guardUser, s.showPicker)
 	s.handle(mux, "GET /guests/picker/edit", guardUser, s.editPicker)
 	s.handle(mux, "POST /guests/picker", guardConsent, s.createPicker)
 	s.handle(mux, "POST /guests/picker/update", guardConsent, s.updatePicker)

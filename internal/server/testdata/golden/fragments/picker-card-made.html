@@ -1,0 +1,41 @@
+
+
+<section class="card fold" id="picker" style="--hue:var(--sec-activity)"
+         x-data="{open: true}"
+         @hashchange.window="if (location.hash === '#picker') open = true">
+  <div class="fold-head">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span> Your quick picker</h2>
+    
+    <div class="row" style="gap:6px;flex:none">
+      <a href="/guests/picker/edit" hx-get="/guests/picker/edit" hx-target="#picker" hx-swap="outerHTML"><button type="button" class="ghost sm"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> Edit</button></a>
+      <form method="post" action="/guests/picker/delete" hx-post="/guests/picker/delete" hx-target="#picker" hx-swap="outerHTML"
+            hx-confirm="Delete the quick picker? The link on your phone stops working, and a rego it put on the permit comes off now." data-confirm-ok="Delete">
+        <button class="ghost icon" type="submit" title="Delete the quick picker" aria-label="Delete the quick picker"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg></button>
+      </form>
+    </div>
+    
+    <button type="button" class="ghost icon fold-toggle" :aria-expanded="open" @click="open=!open" title="Show or hide" aria-label="Show or hide the quick picker"><svg class="todo-chev" :class="{open: open}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+  <p class="fold-sum">It offers Mum, with the overnight option on.</p>
+  <div class="fold-body" x-show="open" x-cloak>
+    <div class="banner ok" style="margin-bottom:12px"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> <span>Your quick picker is ready. Open it on your phone and add it to the home screen.</span></div>
+    
+    <div class="qropts">
+      <div class="qropt" style="align-items:center;text-align:center">
+        <img src="data:image/png;base64,AAAA" alt="QR code for the quick picker" width="168" height="168" class="qrimg">
+        <span class="empty-note">Scan it with any phone in the household.</span>
+        
+      </div>
+      <div class="qropt">
+        <div class="qropt-txt"><strong>Or open it on this phone</strong><span class="empty-note">Open it, then add it to the home screen. On an iPhone, tap <strong>Share</strong> and then <strong>Add to Home Screen</strong>; on Android, open the browser menu and choose <strong>Add to Home screen</strong>. The icon is called p.stonn.</span></div>
+        <a href="https://p.stonn.org/g/tok" class="btnlike" style="justify-content:center" hx-boost="false" target="_blank" rel="noopener">Open the quick picker</a>
+        <form method="post" action="/guests/picker/rotate" hx-post="/guests/picker/rotate" hx-target="#picker" hx-swap="outerHTML" class="qropt-txt fold-newlink"
+              hx-confirm="Make a new link? The one on your phone stops working, and you will need to save the new one." data-confirm-ok="New link">
+          <span class="empty-note">If the phone is lost, a new link stops the old one working.</span>
+          <button type="submit" class="ghost sm" style="align-self:flex-start"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> New link</button>
+        </form>
+      </div>
+    </div>
+    
+  </div>
+</section>

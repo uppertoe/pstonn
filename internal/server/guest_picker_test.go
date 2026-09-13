@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -147,7 +149,7 @@ func TestQuickPickerManagement(t *testing.T) {
 
 	// Delete: gone from the store and the page, and the link is dead.
 	w = s.doReq("POST", "/guests/picker/delete", owner, origin, url.Values{})
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/guests?picker=deleted" {
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/guests?picker=deleted#picker" {
 		t.Fatalf("delete = %d %q", w.Code, w.Header().Get("Location"))
 	}
 	if _, err := s.store.PickerGrant(ctx, owner); !errors.Is(err, store.ErrNotFound) {
@@ -170,6 +172,50 @@ func TestQuickPickerManagement(t *testing.T) {
 			t.Fatalf("change log lacks %s: %+v", a, changes)
 		}
 	}
+	// With htmx, every action answers with just the card, open, carrying its
+	// outcome, so the tab swaps the card in place rather than reloading.
+	hx := func(method, target string, form url.Values) *httptest.ResponseRecorder {
+		var body io.Reader = strings.NewReader("")
+		if form != nil {
+			body = strings.NewReader(form.Encode())
+		}
+		req := httptest.NewRequest(method, target, body)
+		req.Host = "app.example.com"
+		req.RemoteAddr = "10.0.0.2:41000"
+		req.Header.Set("Remote-Email", owner)
+		req.Header.Set("Remote-Groups", "user")
+		req.Header.Set("HX-Request", "true")
+		req.Header.Set("Origin", origin)
+		if form != nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	w = hx("POST", "/guests/picker", url.Values{"permit_id": {itoa64(pid)}, "vehicle_id": {itoa64(nana)}})
+	frag := w.Body.String()
+	if w.Code != 200 || !strings.HasPrefix(strings.TrimSpace(frag), `<section class="card fold" id="picker"`) || strings.Contains(frag, "<html") {
+		t.Fatalf("htmx create = %d, not the card fragment:\n%s", w.Code, frag)
+	}
+	for _, want := range []string{"x-data=\"{open: true}\"", "Your quick picker is ready", "It offers Nana, with the overnight option off.", "New link"} {
+		if !strings.Contains(frag, want) {
+			t.Fatalf("htmx create reply lacks %q:\n%s", want, frag)
+		}
+	}
+	if frag = hx("GET", "/guests/picker/edit", nil).Body.String(); !strings.Contains(frag, "Save changes") || strings.Contains(frag, "<html") {
+		t.Fatalf("htmx edit = not the card's form:\n%s", frag)
+	}
+	if frag = hx("GET", "/guests/picker", nil).Body.String(); strings.Contains(frag, "Save changes") || !strings.Contains(frag, "New link") {
+		t.Fatalf("htmx cancel = not the card at rest:\n%s", frag)
+	}
+	if frag = hx("POST", "/guests/picker/delete", url.Values{}).Body.String(); !strings.Contains(frag, "Quick picker deleted") || !strings.Contains(frag, "Create the picker") {
+		t.Fatalf("htmx delete = not the create card with its notice:\n%s", frag)
+	}
+	if w := hx("POST", "/guests/picker", url.Values{"permit_id": {itoa64(pid)}}); w.Code != http.StatusUnprocessableEntity || strings.Contains(w.Body.String(), "<") {
+		t.Fatalf("htmx validation = %d %q, want a bare 422 for the toast", w.Code, w.Body.String())
+	}
+
 	// The picker's gates: anonymous and cross-site posts never reach it.
 	if w := s.doReq("POST", "/guests/picker", "", origin, url.Values{}); w.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous create = %d", w.Code)

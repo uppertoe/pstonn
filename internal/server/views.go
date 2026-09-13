@@ -253,9 +253,7 @@ type guestMgmt struct {
 	DoorGrants      []doorGrantView    // durable door QRs in the management list
 	PendingRequests []guestReqView     // printed-QR requests awaiting the holder's decision
 	RecentRequests  []guestDecidedView // recently decided printed-QR requests, so every member sees how they were resolved
-	Picker          *pickerView        // the household's quick picker, once made
-	PickerEdit      *pickerEditView    // non-nil renders the picker card's form pre-filled, to change it
-	PickerOpen      bool               // open the picker card on load (just changed, or being edited); it is closed by default
+	PickerCard      *pickerCardView    // the household's quick-picker card; nil when the tab cannot offer one
 }
 
 // onboardData backs the onboarding / link-your-council page (State "onboarding"):

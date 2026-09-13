@@ -71,9 +71,11 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	// The picker card is closed by default; after one of its own actions the
-	// result should be in view.
-	base.GuestMgmt.PickerOpen = r.URL.Query().Get("picker") != ""
+	// Without scripting the picker's actions land here with a flag; open the
+	// card so the result is in view (with scripting the card swaps in place).
+	if base.GuestMgmt.PickerCard != nil && r.URL.Query().Get("picker") != "" {
+		base.GuestMgmt.PickerCard.Open = true
+	}
 	s.render(w, base)
 }
 
@@ -240,7 +242,7 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 			})
 		}
 	}
-	if err := s.loadPicker(ctx, base); err != nil {
+	if base.GuestMgmt.PickerCard, err = s.pickerCard(ctx, owner, base.GuestMgmt.PermitOpts, base.Vehicles, false); err != nil {
 		return err
 	}
 	base.GuestMgmt.GuestsEnabled, err = s.store.GuestsEnabled(ctx, owner)

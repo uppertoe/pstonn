@@ -336,6 +336,11 @@ func goldenFragmentCases(loc *time.Location, user identity.User, now time.Time) 
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true, AllowPlate: true,
 			Regions: []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}}}}},
 		{"pending", "guest-req-status", guestWaitView{Household: "the Helds", Council: "City of Stonnington", Plate: "GUEST1", ReqID: 4, Nonce: "nn", Status: "pending"}},
+		// The quick-picker card as an action's reply: open, with its notice.
+		{"made", "picker-card", pickerCardView{Open: true, Notice: "Your quick picker is ready. Open it on your phone and add it to the home screen.",
+			PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
+			Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok",
+				Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}},
 	}
 }
 
