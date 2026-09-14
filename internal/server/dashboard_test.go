@@ -600,6 +600,10 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"activity-source-label", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			App: &appData{Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now}}},
 		}, "weekly roster"},
+		// A change made on the council's website is named as such, not as the raw "external" tag.
+		{"activity-external", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
+			App: &appData{Log: []store.ApplyRecord{{PermitID: 7, Registration: "ABC123", Source: "external", Status: "changed", Detail: "changed on the council's website, not through p.stonn; kept until the end of 14 Sep", At: now}}},
+		}, "at the council"},
 		// A removal has no plate: it reads "rego removed", not "manual" with an empty pill.
 		{"activity-removal", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			App: &appData{Log: []store.ApplyRecord{{PermitID: 7, Registration: "", Source: "manual", Status: "success", Detail: "vehicle removed by a@b.com", At: now}}},

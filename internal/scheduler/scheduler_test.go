@@ -293,7 +293,8 @@ type fakeNotifier struct {
 	applied       []appliedNote
 	outcomes      []notify.ApplyOutcome // full outcomes, for asserting message content
 	driverFailed  []string              // to|plate, from NotifyDriverFailed
-	drifts        []string              // owner|plate, from NotifyDriftChanged
+	drifts        []string              // owner|plates, one per NotifyDriftChanged message
+	driftChanges  []notify.DriftChange  // every change those messages carried
 	adminNotes    []string
 	adminErr      error // when set, NotifyAdmin records the attempt but returns this
 	relinks       []string
@@ -389,10 +390,18 @@ func (f *fakeNotifier) NotifyDriverFailed(_ context.Context, owner, tenantID, to
 	return nil
 }
 
-func (f *fakeNotifier) NotifyDriftChanged(_ context.Context, owner, tenantID, permitLabel, plate string) error {
+// NotifyDriftChanged records one entry per MESSAGE (a drift round), as
+// "owner|plate[,plate…]" so a test can see both that one message carried several
+// permits and which plates it named. HoldsUntil/PutsBack are kept in driftChanges.
+func (f *fakeNotifier) NotifyDriftChanged(_ context.Context, owner, tenantID string, changes []notify.DriftChange) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.drifts = append(f.drifts, owner+"|"+plate)
+	plates := make([]string, 0, len(changes))
+	for _, c := range changes {
+		plates = append(plates, c.Plate)
+	}
+	f.drifts = append(f.drifts, owner+"|"+strings.Join(plates, ","))
+	f.driftChanges = append(f.driftChanges, changes...)
 	return nil
 }
 

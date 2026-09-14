@@ -144,6 +144,8 @@ var templateFuncs = template.FuncMap{
 			return "printed QR"
 		case "manual":
 			return "rego removed"
+		case "external":
+			return "at the council"
 		default:
 			return src
 		}

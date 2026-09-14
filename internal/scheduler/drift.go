@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/model"
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -232,6 +233,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 	// the schedule over it at the other portal.
 	permits = slices.DeleteFunc(permits, func(p model.Permit) bool { return p.TenantID != tenantID })
 	drifted := false
+	var changes []notify.DriftChange // what the household is told, one message per round
 	now := s.now()
 	for i := range permits {
 		p := permits[i]
@@ -296,32 +298,40 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 			}
 			continue
 		}
-		s.logApply(ctx, p.ID, actual, "external", "changed", "changed directly at the council portal")
 		// Whoever's car was on before the portal edit may be parked and now uncovered:
 		// same warning as any other displacement, worded for what actually happened.
 		s.warnExternallyDisplaced(ctx, p, wasActive[p.ID])
-		// And tell the household itself: nothing that changes their permit should be
-		// invisible, least of all a change p.stonn did not make. Durable and soft
-		// (quiet hours apply); a failure to queue it is logged, not fatal.
-		if s.notifier != nil && s.notifier.Enabled() {
-			if e := s.notifier.NotifyDriftChanged(ctx, p.Owner, p.TenantID, permitLabel(p), actual); e != nil {
-				alog.Infof("enqueue drift notice for %s: %v", redact.Email(p.Owner), e)
-			}
-		}
 		// Clear the delivered-notification fingerprint. The tenant now holds a plate we
-		// did not set, and the reconcile this kicks will re-assert the schedule over it.
-		// If the external edit RESTORED the previous plate, that re-assertion is the same
-		// prev→want transition as the original apply, so the transition key alone would
-		// dedup the "your permit was updated" notice away and the resident would never
-		// learn their deliberate manual change was reverted — the exact fine-risk case the
-		// notice exists for. Clearing forces the next apply to be treated as new.
+		// did not set, and whenever the schedule next writes over it, that write must be
+		// announced. If the external edit RESTORED the previous plate, the re-assertion
+		// is the same prev→want transition as the original apply, so the transition key
+		// alone would dedup the "your permit was updated" notice away and the resident
+		// would never learn their deliberate manual change was reverted — the exact
+		// fine-risk case the notice exists for. Clearing forces the next apply to be
+		// treated as new.
 		if e := s.store.SetPermitNotifiedKey(ctx, p.ID, ""); e != nil {
 			alog.Infof("clear notified key for permit %s after drift: %v", p.CouncilPermitID, e)
 		}
 		drifted = true
+		change, detail, hold := s.holdExternalChange(ctx, p, actual, now)
+		s.logApply(ctx, p.ID, actual, "external", "changed", detail)
+		if hold {
+			changes = append(changes, change)
+		}
 	}
 	if drifted {
-		s.Kick() // reconcile now: re-apply the schedule over the drift
+		s.Kick() // reconcile now: put the schedule back where a plate was cleared; a held plate resolves as already correct
+	}
+	// Tell the household itself, once for the round: nothing that changes their
+	// permit should be invisible, least of all a change p.stonn did not make — but
+	// only where the app is going to act on it. A permit with nothing scheduled
+	// simply takes the plate as its own, and a weekly note saying "you changed it,
+	// we noticed" to a household that manages its permit at the council is a nag.
+	// Durable and soft (quiet hours apply); a failure to queue it is logged, not fatal.
+	if len(changes) > 0 && s.notifier != nil && s.notifier.Enabled() {
+		if e := s.notifier.NotifyDriftChanged(ctx, owner, tenantID, changes); e != nil {
+			alog.Infof("enqueue drift notice for %s: %v", redact.Email(owner), e)
+		}
 	}
 	s.warnExpiring(ctx, owner)
 	if !complete {
@@ -387,6 +397,94 @@ func (s *Scheduler) warnExpiring(ctx context.Context, owner string) {
 			}
 		}
 	}
+}
+
+// externalHoldHorizon bounds how far ahead the schedule is searched for its next
+// change when a plate set at the council is held; a schedule that changes
+// nothing within it holds the plate to the end of the day instead.
+const externalHoldHorizon = 14 * 24 * time.Hour
+
+// externalActor is the CreatedBy on a booking that holds a council-side change,
+// so the Schedule tab's booking list can say where it came from.
+const externalActor = "the council's website"
+
+// holdExternalChange decides what the schedule does about a plate the council now
+// shows that p.stonn did not put there, and records that decision as a one-off
+// booking where one is needed. It returns the change to tell the household
+// about, the activity-row detail, and whether the household is told at all.
+//
+// Three cases, by what the schedule wants RIGHT NOW:
+//
+//   - Nothing: the plate is adopted as the permit's own and the household is not
+//     told. Reconcile leaves an unscheduled permit alone, so there is nothing the
+//     app will do differently, and a household that runs its permit at the
+//     council would otherwise get a note every time it did.
+//   - Something, and the council shows a plate: the plate is the household's most
+//     recent instruction, so it is kept as a one-off booking until the schedule's
+//     next change (its next different plate, or the end of the day, whichever is
+//     sooner) rather than reverted hours later without warning. The note says
+//     until when, and what comes back.
+//   - Something, and the council shows no plate: the schedule's plate goes back on
+//     now (the kicked reconcile does it) and the note says so. Cover being
+//     restored is the safe direction, and a booking cannot hold "no plate".
+func (s *Scheduler) holdExternalChange(ctx context.Context, p model.Permit, actual string, now time.Time) (notify.DriftChange, string, bool) {
+	const detailBase = "changed on the council's website, not through p.stonn"
+	loc := s.locOf(p.Owner, p.TenantID)
+	lnow := now.In(loc)
+	rules, err := s.store.ListRules(ctx, p.ID)
+	if err != nil {
+		alog.Infof("rules for permit %s after drift: %v", p.CouncilPermitID, err)
+		return notify.DriftChange{}, detailBase, false
+	}
+	overrides, err := s.store.ListOverrides(ctx, p.ID, lnow)
+	if err != nil {
+		alog.Infof("overrides for permit %s after drift: %v", p.CouncilPermitID, err)
+		return notify.DriftChange{}, detailBase, false
+	}
+	res := model.Resolve(lnow, p.Cycle(), rules, overrides)
+	if res.Source == model.SourceNone {
+		return notify.DriftChange{}, detailBase, false // nothing scheduled: the plate is simply the permit's now
+	}
+	vehicles, err := s.store.ListVehiclesFor(ctx, p.Owner)
+	if err != nil {
+		alog.Infof("vehicles for permit %s after drift: %v", p.CouncilPermitID, err)
+		return notify.DriftChange{}, detailBase, false
+	}
+	plateOf := func(r model.Resolution) string {
+		if r.Source == model.SourceNone {
+			return ""
+		}
+		if r.Registration != "" {
+			return r.Registration
+		}
+		for _, v := range vehicles {
+			if v.ID == r.VehicleID {
+				return v.Registration
+			}
+		}
+		return ""
+	}
+	change := notify.DriftChange{PermitLabel: permitLabel(p), Plate: actual}
+	if actual == "" {
+		change.PutsBack = plateOf(res)
+		return change, detailBase + "; the schedule's rego goes back on", true
+	}
+	end := model.EndOfDay(lnow, loc)
+	if next := model.NextChange(lnow, externalHoldHorizon, p.Cycle(), rules, overrides); next != nil && next.Before(end) {
+		end = next.In(loc)
+	}
+	change.HoldsUntil = end
+	change.PutsBack = plateOf(model.Resolve(end, p.Cycle(), rules, overrides))
+	if _, err := s.store.CreatePlateOverride(ctx, p.ID, actual, "", lnow, &end, externalActor); err != nil {
+		// The booking could not be recorded (most likely the live-booking cap), so
+		// the schedule will write over the plate on the next pass as it always did.
+		// Say that rather than promise a hold that will not happen.
+		alog.Infof("hold council-side plate on permit %s: %v", p.CouncilPermitID, err)
+		change.HoldsUntil = time.Time{}
+		change.PutsBack = plateOf(res)
+		return change, detailBase + "; the schedule's rego goes back on", true
+	}
+	return change, detailBase + "; kept until " + model.EndText(end, loc), true
 }
 
 // warnExternallyDisplaced warns the driver whose car a tenant-portal edit just

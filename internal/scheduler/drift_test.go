@@ -3,9 +3,11 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/parking"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -31,16 +33,23 @@ func driftSetup(t *testing.T, owner, tenantID, rosterReg, believedReg, tenantReg
 	return st, fc, nf, s, pid
 }
 
-// The core case: the tenant shows a plate the app did not put there. The app must
-// record what the tenant actually shows (so the activity log tells the truth, and so
-// the re-assertion is not deduped away as a no-op against the pre-drift row) and then
-// re-assert the schedule over it.
-func TestCheckDriftRecordsAndReasserts(t *testing.T) {
+// The core case: the tenant shows a plate the app did not put there while the
+// roster wants something else. The app must record what the tenant actually shows
+// (so the activity log tells the truth), and then — because that plate is the
+// household's most recent instruction — HOLD it as a one-off booking until the
+// schedule's next change rather than write the roster back over it hours after the
+// fact. The roster returns when the hold ends.
+func TestCheckDriftHoldsAPlateTheScheduleWouldOverwrite(t *testing.T) {
 	ctx := context.Background()
 	const owner, tenantID = "drift@example.com", "drift-1"
-	st, _, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	st, _, nf, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	rosterEveryDay(t, st, owner, pid)
+	base := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	s.clock = func() time.Time { return base }
 
-	s.checkDrift(ctx, owner, "")
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
+		t.Fatal(err)
+	}
 
 	// The DB now believes what the tenant reports, not what it wished were true.
 	p, err := st.GetPermit(ctx, pid)
@@ -48,10 +57,11 @@ func TestCheckDriftRecordsAndReasserts(t *testing.T) {
 		t.Fatalf("get permit: %v", err)
 	}
 	if p.ActiveRegistration != "MEDDLED1" {
-		t.Fatalf("recorded plate = %q, want the council's MEDDLED1 — otherwise the next reconcile sees no work to do", p.ActiveRegistration)
+		t.Fatalf("recorded plate = %q, want the council's MEDDLED1", p.ActiveRegistration)
 	}
 
-	// The external change is in the activity log, attributed as external.
+	// The external change is in the activity log, attributed as external, and the
+	// row says what the app did about it.
 	logs, err := st.ListApplyLogFor(ctx, owner, 10)
 	if err != nil {
 		t.Fatalf("list apply log: %v", err)
@@ -66,15 +76,159 @@ func TestCheckDriftRecordsAndReasserts(t *testing.T) {
 	if found == nil {
 		t.Fatalf("no external row in the activity log: %+v", logs)
 	}
-	if found.Registration != "MEDDLED1" || found.Status != "changed" {
-		t.Errorf("external row = reg %q status %q, want MEDDLED1/changed", found.Registration, found.Status)
+	if found.Registration != "MEDDLED1" || found.Status != "changed" || !strings.Contains(found.Detail, "kept until the end of 14 Sep") {
+		t.Errorf("external row = reg %q status %q detail %q, want MEDDLED1/changed, kept until the end of 14 Sep", found.Registration, found.Status, found.Detail)
 	}
 
-	// And a reconcile now puts the roster back on the permit.
+	// The hold is a one-off booking for the council's plate, ending at the day's end
+	// (the roster is the same car every day, so that is its next change), attributed
+	// to the council's website so the Schedule tab can say where it came from.
+	wantEnd := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	ovs, err := st.ListOverrides(ctx, pid, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ovs) != 1 || ovs[0].Registration != "MEDDLED1" || ovs[0].CreatedBy != externalActor || ovs[0].EndsAt == nil || !ovs[0].EndsAt.Equal(wantEnd) {
+		t.Fatalf("holding booking = %+v, want one for MEDDLED1 by %q ending %s", ovs, externalActor, wantEnd)
+	}
+
+	// A reconcile now leaves the council's plate alone…
+	s.reconcileAll(ctx)
+	p, _ = st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "MEDDLED1" {
+		t.Errorf("reconcile wrote %q over the held plate; it should stay MEDDLED1 until the hold ends", p.ActiveRegistration)
+	}
+	// …and once the hold ends, the roster comes back.
+	s.clock = func() time.Time { return wantEnd.Add(time.Minute) }
 	s.reconcileAll(ctx)
 	p, _ = st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "ROSTER1" {
-		t.Errorf("after re-assertion the permit holds %q, want the rostered ROSTER1", p.ActiveRegistration)
+		t.Errorf("after the hold the permit holds %q, want the rostered ROSTER1", p.ActiveRegistration)
+	}
+
+	// The household was told once, and told what happens next.
+	nf.mu.Lock()
+	drifts, changes := append([]string(nil), nf.drifts...), append([]notify.DriftChange(nil), nf.driftChanges...)
+	nf.mu.Unlock()
+	if len(drifts) != 1 || drifts[0] != owner+"|MEDDLED1" {
+		t.Fatalf("drift notices = %v, want one naming MEDDLED1", drifts)
+	}
+	if c := changes[0]; !c.HoldsUntil.Equal(wantEnd) || c.PutsBack != "ROSTER1" {
+		t.Errorf("notice said held until %s, then %q; want %s then ROSTER1", c.HoldsUntil, c.PutsBack, wantEnd)
+	}
+}
+
+// When the schedule has an upcoming change of its own — a booking starting later
+// today — the council's plate is held only until then: the booking was made on
+// purpose and must still happen.
+func TestCheckDriftHoldsOnlyUntilTheNextScheduledChange(t *testing.T) {
+	ctx := context.Background()
+	const owner, tenantID = "drift-next@example.com", "drift-next"
+	st, _, nf, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	base := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	s.clock = func() time.Time { return base }
+	later := base.Add(2 * time.Hour)
+	if _, err := st.CreatePlateOverride(ctx, pid, "LATER1", "", later, nil, owner); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	nf.mu.Lock()
+	changes := append([]notify.DriftChange(nil), nf.driftChanges...)
+	nf.mu.Unlock()
+	if len(changes) != 1 || !changes[0].HoldsUntil.Equal(later) || changes[0].PutsBack != "LATER1" {
+		t.Fatalf("changes = %+v, want one held until %s then LATER1", changes, later)
+	}
+}
+
+// A permit with nothing scheduled simply takes the council's plate as its own: no
+// booking, no notice. Reconcile leaves an unscheduled permit alone anyway, so the
+// app will do nothing differently, and a household that runs its permit at the
+// council would otherwise be told about its own edit every time.
+func TestCheckDriftAdoptsSilentlyWhenNothingIsScheduled(t *testing.T) {
+	ctx := context.Background()
+	const owner, tenantID = "drift-quiet@example.com", "drift-quiet"
+	st := newStore(t)
+	seedSession(t, st, owner)
+	pid, err := st.UpsertPermit(ctx, owner, tenantID, "14", "Permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPermitActive(ctx, pid, "OLD111"); err != nil {
+		t.Fatal(err)
+	}
+	fc := &fakeTenant{}
+	fc.setCurrent(tenantID, "NEW222")
+	nf := &fakeNotifier{on: true, admin: true}
+	s := New(st, fc, time.UTC, Options{Notifier: nf})
+
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := st.GetPermit(ctx, pid)
+	if p.ActiveRegistration != "NEW222" {
+		t.Fatalf("recorded plate = %q, want the council's NEW222", p.ActiveRegistration)
+	}
+	logs, _ := st.ListApplyLogFor(ctx, owner, 10)
+	if len(logs) != 1 || logs[0].Source != "external" || strings.Contains(logs[0].Detail, "kept") {
+		t.Fatalf("activity rows = %+v, want one plain external row", logs)
+	}
+	if ovs, _ := st.ListOverrides(ctx, pid, s.now()); len(ovs) != 0 {
+		t.Errorf("a holding booking was made on a permit with nothing scheduled: %+v", ovs)
+	}
+	nf.mu.Lock()
+	n := len(nf.drifts)
+	nf.mu.Unlock()
+	if n != 0 {
+		t.Errorf("household was told about a change the app will do nothing about: %v", nf.drifts)
+	}
+}
+
+// Two permits changed in the same round make ONE message, not one per permit.
+func TestCheckDriftTellsTheHouseholdOncePerRound(t *testing.T) {
+	ctx := context.Background()
+	const owner, tenantID = "drift-two@example.com", "drift-two"
+	st, fc, nf, s, _ := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	// A second rostered permit on the same account, also changed at the council.
+	pid2, err := st.UpsertPermit(ctx, owner, "drift-two-b", "14", "Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehs, _ := st.ListVehiclesFor(ctx, owner)
+	if err := st.SetRule(ctx, owner, pid2, 0, time.Now().In(time.UTC).Weekday(), vehs[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPermitActive(ctx, pid2, "ROSTER1"); err != nil {
+		t.Fatal(err)
+	}
+	fc.setCurrent("drift-two-b", "MEDDLED2")
+
+	if err := s.checkDrift(ctx, owner, ""); err != nil {
+		t.Fatal(err)
+	}
+	nf.mu.Lock()
+	got := append([]string(nil), nf.drifts...)
+	nf.mu.Unlock()
+	if len(got) != 1 || got[0] != owner+"|MEDDLED1,MEDDLED2" {
+		t.Fatalf("drift notices = %v, want exactly one carrying both plates", got)
+	}
+}
+
+// rosterEveryDay puts the permit's rostered car on all seven days, so a hold's
+// "next change" is the day boundary rather than a gap in the roster.
+func rosterEveryDay(t *testing.T, st *store.Store, owner string, pid int64) {
+	t.Helper()
+	ctx := context.Background()
+	vehs, err := st.ListVehiclesFor(ctx, owner)
+	if err != nil || len(vehs) == 0 {
+		t.Fatalf("vehicles: %v %v", vehs, err)
+	}
+	for wd := time.Sunday; wd <= time.Saturday; wd++ {
+		if err := st.SetRule(ctx, owner, pid, 0, wd, vehs[0].ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -203,7 +357,7 @@ func TestCheckDriftBelievesACorroboratedClearing(t *testing.T) {
 func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
 	ctx := context.Background()
 	const owner, tenantID = "cleared@example.com", "cleared-1"
-	st, _, _, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "")
+	st, _, nf, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "")
 
 	s.checkDrift(ctx, owner, "")
 
@@ -211,11 +365,19 @@ func TestCheckDriftNoticesAClearedPermit(t *testing.T) {
 	if p.ActiveRegistration != "" {
 		t.Errorf("recorded plate = %q, want empty to match the cleared permit", p.ActiveRegistration)
 	}
-	// And the schedule is re-asserted over the clearing.
+	// And the schedule is re-asserted over the clearing: a booking cannot hold "no
+	// plate", and restoring cover is the safe direction.
 	s.reconcileAll(ctx)
 	p, _ = st.GetPermit(ctx, pid)
 	if p.ActiveRegistration != "ROSTER1" {
 		t.Errorf("after re-assertion the permit holds %q, want ROSTER1", p.ActiveRegistration)
+	}
+	// The household is told the rego was taken off and that the roster goes back.
+	nf.mu.Lock()
+	changes := append([]notify.DriftChange(nil), nf.driftChanges...)
+	nf.mu.Unlock()
+	if len(changes) != 1 || !changes[0].Removed() || changes[0].PutsBack != "ROSTER1" || !changes[0].HoldsUntil.IsZero() {
+		t.Errorf("notice = %+v, want a removal that puts ROSTER1 back now", changes)
 	}
 }
 

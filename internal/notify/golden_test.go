@@ -241,9 +241,24 @@ func TestGoldenEmails(t *testing.T) {
 	})
 	run("relink-required", func() { svc.NotifyRelinkRequired(ctx, owner, "") })
 	// The council-side change notice (drift.go): the one email a household gets
-	// for a change p.stonn did not make. Was missing from this set until 2026-09-10.
-	run("drift-changed", func() { _ = svc.NotifyDriftChanged(ctx, owner, "", "Visitor", "AMY602") })
-	run("drift-removed", func() { _ = svc.NotifyDriftChanged(ctx, owner, "", "Visitor", "") })
+	// for a change p.stonn did not make, sent only when the schedule will act on
+	// it. Held until the schedule's next change; put back now when cleared; one
+	// message when several permits changed in the same round.
+	run("drift-changed", func() {
+		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor", Plate: "AMY602", HoldsUntil: time.Date(2026, 7, 15, 0, 0, 0, 0, at.Location()), PutsBack: "ABC123"}})
+	})
+	run("drift-changed-gap", func() {
+		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor", Plate: "AMY602", HoldsUntil: time.Date(2026, 7, 14, 18, 0, 0, 0, at.Location())}})
+	})
+	run("drift-removed", func() {
+		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor", Plate: "", PutsBack: "ABC123"}})
+	})
+	run("drift-two-permits", func() {
+		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{
+			{PermitLabel: "VPP16071", Plate: "AMY602", HoldsUntil: time.Date(2026, 7, 15, 0, 0, 0, 0, at.Location()), PutsBack: "ABC123"},
+			{PermitLabel: "VPP16072", Plate: "", PutsBack: "XYZ789"},
+		})
+	})
 	run("reconnect-stalled", func() { svc.NotifyReconnectStalled(ctx, owner, "") })
 	run("permit-expiry", func() { svc.NotifyPermitExpiry(ctx, owner, "", "Visitor", at.Add(14*24*time.Hour)) })
 	run("renewal-reminder", func() {

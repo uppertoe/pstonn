@@ -415,6 +415,12 @@ is. Copy that names the council or its portal goes through the i18n catalog
   `isolateGuestBounds(t)`.
 - `NotifyAdmin` is for systemic conditions only, paced with `sync.Once`
   where it could repeat, and paired with a log line that carries the detail.
+- A change made on the council's website (the scheduler's drift read) is told
+  once per round, and only when the schedule will act on it: a permit with
+  nothing scheduled adopts the plate silently; a scheduled permit holds the
+  plate as a one-off booking until its next change; a cleared plate is put
+  back. `holdExternalChange` in `scheduler/drift.go` is the one place that
+  decides, and `notify.DriftChange` carries the decision into the wording.
 - Every notice has a golden in `internal/notify/testdata/golden`; add a
   `run(...)` case in `golden_test.go` and regenerate with
   `go test ./internal/notify -run Golden -update`.

@@ -51,7 +51,9 @@ shows something else, applies the change through the tenant mux. Page renders ne
 call the council synchronously; only the loop, keep-warm, drift and reconnect do.
 
 Supporting workers in the same package: **keep-warm** (silent-renews sessions before
-they idle out), **drift** (notices a plate changed directly in the council portal),
+they idle out), **drift** (notices a plate changed directly in the council portal:
+adopted silently when nothing is scheduled, held as a one-off booking until the
+schedule's next change when something is, put back at once when it was cleared),
 **reconnect** (owner-deduplicated recovery of a dead session), and **housekeeping**
 (retention purges + a daily consistent DB snapshot).
 

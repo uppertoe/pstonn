@@ -416,6 +416,29 @@ func NextChange(now time.Time, horizon time.Duration, c Cycle, rules []WeeklyRul
 	return nil
 }
 
+// EndText says when a booking window closes, the way the app words it
+// everywhere: a window that closes exactly at midnight is "the end of" the day
+// before, since that is the day the person chose; any other instant is spelt
+// out. Shared by the booking form's activity line and the scheduler's notices
+// so the two can never disagree.
+func EndText(end time.Time, loc *time.Location) string {
+	if loc == nil {
+		loc = time.Local
+	}
+	l := end.In(loc)
+	if l.Hour() == 0 && l.Minute() == 0 && l.Second() == 0 {
+		return "the end of " + l.AddDate(0, 0, -1).Format("2 Jan")
+	}
+	return l.Format("2 Jan 3:04pm")
+}
+
+// EndOfDay is the first instant of the following local day: the moment a
+// "whole day" booking closes.
+func EndOfDay(t time.Time, loc *time.Location) time.Time {
+	l := t.In(loc)
+	return time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, loc)
+}
+
 func startOfDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }

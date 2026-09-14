@@ -210,10 +210,7 @@ func (s *Server) legendFragment(w http.ResponseWriter, r *http.Request) {
 // booking. The weekly roster reasserted itself for that minute — a real tenant
 // write and a "your permit was updated" notification at 23:59, then the next day's
 // booking or roster writing again at 00:00, where one change was intended.
-func endOfDay(t time.Time, loc *time.Location) time.Time {
-	l := t.In(loc)
-	return time.Date(l.Year(), l.Month(), l.Day()+1, 0, 0, 0, 0, loc)
-}
+func endOfDay(t time.Time, loc *time.Location) time.Time { return model.EndOfDay(t, loc) }
 
 // legendColors is the set of car colours the Schedule page will render, across
 // every permit on it: whatever each roster day and each live one-off points at,
@@ -1356,16 +1353,7 @@ func (s *Server) permitCard(w http.ResponseWriter, r *http.Request) {
 // user made for the 4th, which reads as a whole day longer than they asked for.
 //
 // So a midnight end is described by the day it completes, not the day it touches.
-func windowEndText(end time.Time, loc *time.Location) string {
-	if loc == nil {
-		loc = time.Local
-	}
-	l := end.In(loc)
-	if l.Hour() == 0 && l.Minute() == 0 && l.Second() == 0 {
-		return "the end of " + l.AddDate(0, 0, -1).Format("2 Jan")
-	}
-	return l.Format("2 Jan 3:04pm")
-}
+func windowEndText(end time.Time, loc *time.Location) string { return model.EndText(end, loc) }
 
 // hasLivePermit reports whether the account manages a permit a booking could
 // land on — the gate for the floating "Add booking now" link on pages other than

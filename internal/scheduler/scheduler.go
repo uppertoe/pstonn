@@ -101,10 +101,12 @@ type Notifier interface {
 	// not be put on the permit and may not be covered. Fired once per failure
 	// episode per plate, at the moment the household itself is first told.
 	NotifyDriverFailed(ctx context.Context, owner, tenantID, to, plate, color string, councilDown bool) error
-	// NotifyDriftChanged tells the household that the plate on their permit was
-	// changed at the council directly, not by p.stonn. Soft: quiet hours apply,
-	// and members who only hear about problems are skipped.
-	NotifyDriftChanged(ctx context.Context, owner, tenantID, permitLabel, plate string) error
+	// NotifyDriftChanged tells the household which of their permits were changed
+	// at the council directly, not by p.stonn, and what the app is doing about
+	// each (holding the plate until the schedule's next change, or putting the
+	// schedule's plate back). One message per drift round. Soft: quiet hours
+	// apply, and members who only hear about problems are skipped.
+	NotifyDriftChanged(ctx context.Context, owner, tenantID string, changes []notify.DriftChange) error
 	// SendOnboardNudge emails a stalled signup (terms accepted, tenant never
 	// connected) the once-ever recovery note. Email-only, like the renewal
 	// reminder: this person configured no other channel.

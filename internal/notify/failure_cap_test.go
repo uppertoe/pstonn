@@ -186,7 +186,7 @@ func TestDriftNoticeIsSoft(t *testing.T) {
 	}
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
 	svc := New(st, m, "", "", "", "", "", time.UTC, []byte("test-unsub-key"), nil)
-	if err := svc.NotifyDriftChanged(ctx, owner, "", "Visitor Permit", "ABC123"); err != nil {
+	if err := svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor Permit", Plate: "ABC123", PutsBack: "XYZ789"}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := st.DueOutbox(ctx, time.Now().Add(48*time.Hour), 50)
@@ -196,7 +196,7 @@ func TestDriftNoticeIsSoft(t *testing.T) {
 	var to []string
 	for _, r := range rows {
 		to = append(to, r.Recipients...)
-		if !strings.Contains(r.Body, "changed to ABC123 at the council directly") || !strings.Contains(r.Body, "p.stonn didn't make this change") {
+		if !strings.Contains(r.Body, "ABC123 was put on your Visitor Permit on the council's website, not through p.stonn") || !strings.Contains(r.Body, "putting that back on now") {
 			t.Fatalf("unexpected body: %q", r.Body)
 		}
 	}
@@ -213,13 +213,13 @@ func TestDriftNoticeIsSoft(t *testing.T) {
 		t.Fatalf("rows due now = %d, want just the owner's (the quiet-hours member's is held)", len(dueNow))
 	}
 	// A removal is worded as a removal.
-	if err := svc.NotifyDriftChanged(ctx, owner, "", "Visitor Permit", ""); err != nil {
+	if err := svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor Permit", Plate: "", PutsBack: "XYZ789"}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ = st.DueOutbox(ctx, time.Now().Add(48*time.Hour), 50)
 	found := false
 	for _, r := range rows {
-		if strings.Contains(r.Body, "was removed at the council directly") {
+		if strings.Contains(r.Body, "was taken off your Visitor Permit on the council's website") {
 			found = true
 		}
 	}

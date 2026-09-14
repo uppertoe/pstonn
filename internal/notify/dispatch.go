@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/uppertoe/pstonn/internal/mailer"
+	"github.com/uppertoe/pstonn/internal/model"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -686,25 +687,90 @@ func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, p
 		HeroPlate: plate, HeroColor: color})
 }
 
-// NotifyDriftChanged tells every member of the household that the plate on
-// their permit was changed at the council directly — a change p.stonn did not
-// make, which may be theirs or may be a surprise. Soft, like a scheduled
-// success: quiet hours hold it, and members who only hear about problems are
-// skipped (it is information, not a fault). Durable via the outbox, deduped per
-// member, permit and plate.
-func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permitLabel, plate string) error {
-	c := s.tenantOf(ctx, owner, tenantID)
-	var subject, body string
-	if plate == "" {
-		subject = fmt.Sprintf("The rego was removed from your %s at the council", permitLabel)
-		body = fmt.Sprintf("The rego on your %s was removed at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel)
-	} else {
-		subject = fmt.Sprintf("Your %s was changed to %s at the council", permitLabel, plate)
-		body = fmt.Sprintf("The rego on your %s was changed to %s at the council directly — p.stonn didn't make this change. If that wasn't you or someone in your household, you may want to check it.", permitLabel, plate)
+// DriftChange is one permit's council-side change as the scheduler's drift read
+// found it, with what p.stonn decided to do about it. A plate that arrived while
+// the schedule wanted something else is HELD (kept as a one-off booking until
+// HoldsUntil, when the schedule puts PutsBack on); a plate cleared at the council
+// while the schedule wants one is put back straight away (Removed). A permit
+// with nothing scheduled never reaches here: the app adopts the plate and says
+// nothing, because there is nothing it will do differently.
+type DriftChange struct {
+	PermitLabel string
+	Plate       string    // the plate the council now shows; "" when it was cleared
+	HoldsUntil  time.Time // when the held plate gives way; zero when not held
+	PutsBack    string    // the plate the schedule puts on at HoldsUntil (or now, when Removed); "" when the schedule has a gap then
+}
+
+// Removed reports a clearing rather than a new plate.
+func (d DriftChange) Removed() bool { return d.Plate == "" }
+
+// NotifyDriftChanged tells every member of the household about the plates on
+// their permits that changed at the council directly, in one message per
+// drift round rather than one per permit, and says what p.stonn will do about
+// each: keep it until the schedule's next change, or put the schedule's plate
+// back now. Soft, like a scheduled success: quiet hours hold it, and members
+// who only hear about problems are skipped (it is information, not a fault).
+// Durable via the outbox, deduped per member and per set of changes.
+func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string, changes []DriftChange) error {
+	if len(changes) == 0 {
+		return nil
 	}
+	c := s.tenantOf(ctx, owner, tenantID)
+	loc := c.Loc
+	if loc == nil {
+		loc = s.loc
+	}
+	var subject string
+	var lines []string
+	var keyParts []string
+	for _, d := range changes {
+		keyParts = append(keyParts, fmt.Sprintf("%s=%s@%d>%s", d.PermitLabel, d.Plate, d.HoldsUntil.Unix(), d.PutsBack))
+		switch {
+		case d.Removed():
+			line := fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn.", d.PermitLabel)
+			if d.PutsBack != "" {
+				line += fmt.Sprintf(" Your schedule still says %s, so p.stonn is putting it back on now.", d.PutsBack)
+			} else {
+				line += " Your schedule takes over again when it next puts a rego on."
+			}
+			lines = append(lines, line)
+		case d.HoldsUntil.IsZero():
+			// Something is scheduled but the plate could not be held (the permit is
+			// at its live-booking cap): the schedule writes over it as before.
+			line := fmt.Sprintf("%s was put on your %s on the council's website, not through p.stonn.", d.Plate, d.PermitLabel)
+			if d.PutsBack != "" {
+				line += fmt.Sprintf(" Your schedule says %s, so p.stonn is putting that back on now.", d.PutsBack)
+			}
+			line += fmt.Sprintf(" If %s should be on the permit, book it or add it to the roster in p.stonn.", d.Plate)
+			lines = append(lines, line)
+		default:
+			line := fmt.Sprintf("%s was put on your %s on the council's website, not through p.stonn. p.stonn has left it there until %s", d.Plate, d.PermitLabel, model.EndText(d.HoldsUntil, loc))
+			if d.PutsBack != "" {
+				line += fmt.Sprintf(", when your schedule puts %s back on.", d.PutsBack)
+			} else {
+				line += "; after that your schedule takes over again when it next puts a rego on."
+			}
+			line += " If it should stay longer, book it or add it to the roster in p.stonn."
+			lines = append(lines, line)
+		}
+	}
+	switch {
+	case len(changes) > 1:
+		subject = "Your permits were changed on the council's website"
+	case changes[0].Removed():
+		subject = fmt.Sprintf("The rego was taken off your %s on the council's website", changes[0].PermitLabel)
+	default:
+		subject = fmt.Sprintf("Your %s was changed to %s on the council's website", changes[0].PermitLabel, changes[0].Plate)
+	}
+	body := strings.Join(lines, "\n\n")
 	if s.appURL != "" {
 		body += "\n\n" + s.appURL
 	}
+	hero := ""
+	if len(changes) == 1 {
+		hero = changes[0].Plate
+	}
+	key := strings.Join(keyParts, ";")
 	now := time.Now()
 	_, err := s.fanoutEnqueue(ctx, owner, func(d memberPref) (outMessage, bool) {
 		if d.pref.FailuresOnly {
@@ -712,10 +778,10 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID, permi
 		}
 		m := outMessage{
 			Account: owner, Subject: subject, Body: body,
-			DedupKey:  fmt.Sprintf("drift|%s|%s|%s|%s", d.email, owner, permitLabel, plate),
+			DedupKey:  fmt.Sprintf("drift|%s|%s|%s", d.email, owner, key),
 			NotBefore: s.quietDefer(d.pref, now, c.Loc),
 			Reason:    reasonAccount,
-			HeroPlate: plate,
+			HeroPlate: hero,
 		}
 		if d.pref.EmailEnabled {
 			m.Recipients = []string{d.email}
