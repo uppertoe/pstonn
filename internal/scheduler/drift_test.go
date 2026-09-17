@@ -125,6 +125,7 @@ func TestCheckDriftHoldsOnlyUntilTheNextScheduledChange(t *testing.T) {
 	ctx := context.Background()
 	const owner, tenantID = "drift-next@example.com", "drift-next"
 	st, _, nf, s, pid := driftSetup(t, owner, tenantID, "ROSTER1", "ROSTER1", "MEDDLED1")
+	rosterEveryDay(t, st, owner, pid) // the clock below is pinned, so the roster must cover that day too
 	base := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	s.clock = func() time.Time { return base }
 	later := base.Add(2 * time.Hour)
