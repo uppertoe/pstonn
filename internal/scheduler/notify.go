@@ -162,7 +162,7 @@ func (s *Scheduler) notifyFailure(ctx context.Context, p model.Permit, o notify.
 	// driver, who may be parked on it right now; the escalation that follows is
 	// for the household, who can act at the council — the driver cannot.
 	if told == "" || !model.SamePlate(told, o.Reg) {
-		s.notifyFailedDriver(ctx, p, o)
+		o.DriverTold = s.notifyFailedDriver(ctx, p, o)
 	}
 	o.Urgent = tier == tierUrgent
 	key := "fail|" + o.Reg + "|" + tier.String()
@@ -199,14 +199,15 @@ func (s *Scheduler) escalateFailure(ctx context.Context, p model.Permit, thresho
 // permit, if it is one of the owner's saved cars with a contact and the per-car
 // notify toggle on — the failure twin of notifyAddedDriver. Best effort, and
 // durable (the notifier queues it): a suppressed or throttled address is skipped.
-func (s *Scheduler) notifyFailedDriver(ctx context.Context, p model.Permit, o notify.ApplyOutcome) {
+// It returns the address told, or "".
+func (s *Scheduler) notifyFailedDriver(ctx context.Context, p model.Permit, o notify.ApplyOutcome) string {
 	if o.Reg == "" || s.notifier == nil || !s.notifier.Enabled() {
-		return
+		return ""
 	}
 	vehicles, err := s.store.ListVehiclesFor(ctx, p.Owner)
 	if err != nil {
 		alog.Errorf("driver-failed lookup for %s: %v", redact.Email(p.Owner), err)
-		return
+		return ""
 	}
 	var v model.Vehicle
 	found := false
@@ -217,17 +218,19 @@ func (s *Scheduler) notifyFailedDriver(ctx context.Context, p model.Permit, o no
 		}
 	}
 	if !found || v.Email == "" || !v.NotifyDriver {
-		return // an ad-hoc plate, or a car whose driver asked not to hear
+		return "" // an ad-hoc plate, or a car whose driver asked not to hear
 	}
 	if sup, err := s.store.SuppressedAmong(ctx, []string{v.Email}); err != nil || len(sup) > 0 {
 		if err != nil {
 			alog.Infof("suppression check for %s: %v", notify.RedactEmail(v.Email), err)
 		}
-		return
+		return ""
 	}
 	if err := s.notifier.NotifyDriverFailed(ctx, p.Owner, p.TenantID, v.Email, o.Reg, v.Color, o.CouncilDown); err != nil {
 		alog.Errorf("enqueue driver-failed for %s: %v", notify.RedactEmail(v.Email), err)
+		return ""
 	}
+	return v.Email
 }
 
 // closeFailureEpisode ends the permit's open episode, reporting whether the
@@ -372,10 +375,11 @@ func (s *Scheduler) warnDisplacedHow(ctx context.Context, p model.Permit, d mode
 // notifyAddedDriver emails the driver of the car just put ON the permit, if that
 // car has a contact email and its household left the per-car notify toggle on.
 // The symmetric partner of warnDisplaced (which covers a car coming OFF). Best
-// effort: a suppressed or throttled address is simply skipped.
-func (s *Scheduler) notifyAddedDriver(ctx context.Context, p model.Permit, want string, vehByOwnerID map[ownerVehicle]model.VehicleInfo) {
+// effort: a suppressed or throttled address is simply skipped. It returns the
+// address told, so the household's own notice can name the driver, or "".
+func (s *Scheduler) notifyAddedDriver(ctx context.Context, p model.Permit, want string, vehByOwnerID map[ownerVehicle]model.VehicleInfo) string {
 	if want == "" || s.notifier == nil || !s.notifier.Enabled() {
-		return
+		return ""
 	}
 	// Find the OWNER's saved car matching the new plate; an ad-hoc one-off plate
 	// (no saved vehicle) has no driver contact and is skipped.
@@ -388,17 +392,19 @@ func (s *Scheduler) notifyAddedDriver(ctx context.Context, p model.Permit, want 
 		}
 	}
 	if !found || vi.Email == "" || !vi.NotifyDriver {
-		return
+		return ""
 	}
 	if sup, err := s.store.SuppressedAmong(ctx, []string{vi.Email}); err != nil || len(sup) > 0 {
 		if err != nil {
 			alog.Infof("suppression check for %s: %v", notify.RedactEmail(vi.Email), err)
 		}
-		return
+		return ""
 	}
 	if err := s.notifier.NotifyDriverAdded(ctx, p.Owner, p.TenantID, vi.Email, want, vi.Color); err != nil {
 		alog.Infof("enqueue driver-added for %s: %v", notify.RedactEmail(vi.Email), err)
+		return ""
 	}
+	return vi.Email
 }
 
 // permitLabel is the human name for a permit in notifications.

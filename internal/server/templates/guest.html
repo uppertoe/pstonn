@@ -105,12 +105,12 @@
 <div aria-live="polite" style="text-align:center">{{template "guest-req-status" .Guest.Req}}</div>
 {{end}}
 {{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">{{if .Guest.Req}}To ask for a different rego, enter it below.{{else}}Enter your rego to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.{{end}}</p>{{end}}
-<form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px" data-plate-confirm="plate"{{if .Guest.Picker}} data-picker-confirm{{if .Guest.Audience}} data-audience="{{.Guest.Audience}}"{{end}}{{end}}{{if not .Guest.RequestOnly}} hx-post="/g/{{.Guest.Token}}" hx-target="#gbody" hx-swap="innerHTML"{{end}}>
+<form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px" data-plate-confirm="plate"{{if .Guest.Picker}} data-picker-confirm{{end}}{{if not .Guest.RequestOnly}} hx-post="/g/{{.Guest.Token}}" hx-target="#gbody" hx-swap="innerHTML"{{end}}>
   {{if .Guest.Cars}}
   <p class="sub">{{if .Guest.Picker}}Tap a rego to put it on the permit{{else}}Tap your rego to put it on the permit{{end}}</p>
   <div class="gcars">
     {{range .Guest.Cars}}
-    <button class="gcar{{if eq .Registration $.Guest.SelectedReg}} on{{end}}" style="--plate:{{.Color}}" type="submit" name="vehicle_id" value="{{.ID}}"{{if $.Guest.Picker}} data-plate="{{.Registration}}" data-label="{{.Label}}" data-color="{{.Color}}"{{end}}>
+    <button class="gcar{{if eq .Registration $.Guest.SelectedReg}} on{{end}}" style="--plate:{{.Color}}" type="submit" name="vehicle_id" value="{{.ID}}"{{if $.Guest.Picker}} data-plate="{{.Registration}}" data-label="{{.Label}}" data-color="{{.Color}}"{{if .Audience}} data-audience="{{.Audience}}"{{end}}{{end}}>
       <span class="dot" style="background:{{.Color}}"></span>
       <span class="glabel">{{.Label}}</span>
       <span class="plate" style="--plate:{{.Color}}">{{.Registration}}</span>

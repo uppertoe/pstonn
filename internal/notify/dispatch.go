@@ -256,7 +256,13 @@ func (s *Service) ApplyAudience(ctx context.Context, o ApplyOutcome, now time.Ti
 	if err != nil {
 		return nil, err
 	}
-	c := s.tenantOf(ctx, o.Owner, o.TenantID)
+	return s.audienceOf(dels, s.tenantOf(ctx, o.Owner, o.TenantID), o, now), nil
+}
+
+// audienceOf is ApplyAudience over members already loaded: the notices call it
+// on the same list they are about to walk, so the "we have also told" line in
+// each member's copy is decided by exactly the rules that decide the sending.
+func (s *Service) audienceOf(dels []memberPref, c mailTenant, o ApplyOutcome, now time.Time) []Recipient {
 	var out []Recipient
 	for _, d := range dels {
 		if o.mutedByFailuresOnly(d.pref) {
@@ -273,7 +279,55 @@ func (s *Service) ApplyAudience(ctx context.Context, o ApplyOutcome, now time.Ti
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out
+}
+
+// Channel words how a recipient is reached, for the picker's confirm and the
+// "we have also told" line: "by email", "by push notification", or both.
+func (r Recipient) Channel() string {
+	switch {
+	case r.ByEmail && r.ByPush:
+		return "by email and push notification"
+	case r.ByEmail:
+		return "by email"
+	default:
+		return "by push notification"
+	}
+}
+
+// alsoToldLine is the sentence in one member's copy naming everyone else this
+// outcome reaches: the other members of the account, each by their channel (and
+// held until their quiet hours end where they are), and the car's own driver
+// when they were emailed. A driver who is also a member is named once. "" when
+// nobody else is told, so a single-person household's confirmation stays as it
+// was rather than announcing that no one else exists.
+func alsoToldLine(rs []Recipient, self string, o ApplyOutcome) string {
+	var parts []string
+	driverListed := false
+	for _, r := range rs {
+		if strings.EqualFold(r.Email, self) {
+			continue
+		}
+		if strings.EqualFold(r.Email, o.DriverTold) {
+			driverListed = true
+		}
+		how := r.Channel()
+		if !r.NotBefore.IsZero() {
+			how += ", once their quiet hours end"
+		}
+		parts = append(parts, r.Email+" ("+how+")")
+	}
+	if o.DriverTold != "" && !driverListed && !strings.EqualFold(o.DriverTold, self) {
+		parts = append(parts, o.DriverTold+" (by email, as the driver of "+o.Reg+")")
+	}
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return "\n\nWe have also told " + parts[0] + "."
+	default:
+		return "\n\nWe have also told " + strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1] + "."
+	}
 }
 
 func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
@@ -284,13 +338,18 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	}
 	body += s.firstApplyLine(ctx, o)
 	now := time.Now()
-	_, err := s.fanoutEnqueue(ctx, o.Owner, func(d memberPref) (outMessage, bool) {
+	dels, err := s.accountDeliveries(ctx, o.Owner)
+	if err != nil {
+		return err
+	}
+	audience := s.audienceOf(dels, c, o, now)
+	_, err = s.fanoutEnqueue(ctx, o.Owner, func(d memberPref) (outMessage, bool) {
 		if o.mutedByFailuresOnly(d.pref) {
 			return outMessage{}, false
 		}
 		m := outMessage{
 			Account: o.Owner,
-			Subject: subject, Body: body, NtfyPriority: priority, NtfyTag: tags,
+			Subject: subject, Body: body + alsoToldLine(audience, d.email, o), NtfyPriority: priority, NtfyTag: tags,
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 			NotBefore: s.deferUntil(d.pref, now, c.Loc, o),
 			Reason:    reasonAccount,
@@ -328,6 +387,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	due := 0
 	var seenKeys []string // every reached-memory key consulted by this delivery
 	now := time.Now()
+	audience := s.audienceOf(dels, c, o, now)
 	for _, d := range dels {
 		if o.mutedByFailuresOnly(d.pref) {
 			continue
@@ -338,6 +398,10 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			continue // no reachable channel for this member
 		}
 		due++
+		// This member's copy names the others; the shared body above is what
+		// every copy has in common.
+		also := alsoToldLine(audience, d.email, o)
+		body, emailBody := body+also, emailBody+also
 
 		// A retry of a partial delivery: this member was reached last time, so
 		// they still count as delivered, and only the members who were missed are

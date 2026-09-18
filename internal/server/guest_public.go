@@ -442,52 +442,94 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		}
 	}
 	if gc.Grant.Picker {
-		view.Audience = s.pickerAudience(ctx, permit)
+		s.fillPickerAudience(ctx, permit, &view)
 	}
 	view.FP = guestFP(view)
 	return view
 }
 
-// pickerAudience says who on the account hears about a rego put on the permit
-// from the quick picker, for the confirm dialog: a heading line, then one line
-// per person naming the channel, joined by newlines (the dialog splits them
-// into a list). It is the same per-member decision the notice itself makes
+// fillPickerAudience says who hears about a rego put on the permit from the
+// quick picker, for the confirm dialog: a heading line, then one line per
+// person naming the channel, joined by newlines (the dialog splits them into a
+// list). The account's members are decided as the notice itself decides them
 // (failures-only mutes it, email off drops the email, quiet hours hold it until
-// the morning). "" when nothing can be sent, so the dialog says nothing rather
-// than something wrong.
-func (s *Server) pickerAudience(ctx context.Context, permit model.Permit) string {
+// the morning); each rego tile then adds that rego's driver when the rego has
+// an address, its notify toggle is on and the address is not suppressed, which
+// is exactly when the scheduler emails them. The revert form gets the list for
+// the plate it puts back. Nothing is set when nothing can be sent, so the
+// dialog says nothing rather than something wrong.
+func (s *Server) fillPickerAudience(ctx context.Context, permit model.Permit, view *guestActView) {
 	if s.notify == nil || !s.notify.Enabled() {
-		return ""
+		return
 	}
 	now := time.Now()
 	rs, err := s.notify.ApplyAudience(ctx, notify.ApplyOutcome{Owner: permit.Owner, TenantID: permit.TenantID, Source: "picker", OK: true}, now)
 	if err != nil {
 		alog.Infof("picker audience for %s: %v", redact.Email(permit.Owner), err)
-		return ""
+		return
 	}
-	return strings.Join(audienceLines(rs, s.locForPermit(ctx, permit)), "\n")
+	loc := s.locForPermit(ctx, permit)
+	// One suppression lookup for every driver address on the page.
+	var addrs []string
+	for _, c := range view.Cars {
+		if c.Email != "" && c.NotifyDriver {
+			addrs = append(addrs, c.Email)
+		}
+	}
+	suppressed, err := s.store.SuppressedAmong(ctx, addrs)
+	if err != nil {
+		alog.Infof("picker audience suppression for %s: %v", redact.Email(permit.Owner), err)
+		suppressed = nil
+	}
+	driverOf := func(reg string) audienceDriver {
+		for _, c := range view.Cars {
+			if c.Email == "" || !c.NotifyDriver || !model.SamePlate(c.Registration, reg) {
+				continue
+			}
+			if _, bad := suppressed[c.Email]; bad {
+				return audienceDriver{}
+			}
+			return audienceDriver{Email: c.Email, Reg: c.Registration}
+		}
+		return audienceDriver{}
+	}
+	for i := range view.Cars {
+		view.Cars[i].Audience = strings.Join(audienceLines(rs, loc, driverOf(view.Cars[i].Registration)), "\n")
+	}
+	view.Audience = strings.Join(audienceLines(rs, loc, driverOf(view.RevertPlate)), "\n")
+}
+
+// audienceDriver is the driver a rego's own notice goes to, for audienceLines;
+// the zero value means the rego has no driver who is told.
+type audienceDriver struct {
+	Email, Reg string
 }
 
 // audienceLines words a notice's recipients for the confirm dialog: a heading,
-// then each person with how they are told: by email now, by email once their
-// quiet hours end, or by push only. A member reachable both ways is listed
-// under email, the channel the household asked about. Nobody is one plain line.
-func audienceLines(rs []notify.Recipient, loc *time.Location) []string {
-	if len(rs) == 0 {
+// then each person with how they are told: by email, by push notification, or
+// both, and when their quiet hours would hold it, from what time. The rego's
+// driver, when there is one, comes last, unless they are already listed as a
+// member. Nobody is one plain line.
+func audienceLines(rs []notify.Recipient, loc *time.Location, driver audienceDriver) []string {
+	var lines []string
+	driverListed := false
+	for _, r := range rs {
+		if strings.EqualFold(r.Email, driver.Email) {
+			driverListed = true
+		}
+		how := r.Channel()
+		if !r.NotBefore.IsZero() {
+			how += " at " + r.NotBefore.In(loc).Format("3:04pm") + ", after their quiet hours"
+		}
+		lines = append(lines, r.Email+" — "+how)
+	}
+	if driver.Email != "" && !driverListed {
+		lines = append(lines, driver.Email+" — by email, as the driver of "+driver.Reg)
+	}
+	if len(lines) == 0 {
 		return []string{"No one is notified of this change, the way notifications are set on the account."}
 	}
-	out := []string{"The following people will be notified of the change:"}
-	for _, r := range rs {
-		switch {
-		case r.ByEmail && r.NotBefore.IsZero():
-			out = append(out, r.Email+" — by email")
-		case r.ByEmail:
-			out = append(out, r.Email+" — by email at "+r.NotBefore.In(loc).Format("3:04pm")+", after their quiet hours")
-		default:
-			out = append(out, r.Email+" — by push notification, not email")
-		}
-	}
-	return out
+	return append([]string{"The following people will be notified of the change:"}, lines...)
 }
 
 // guestFP fingerprints the state a poll could change. Everything else on the

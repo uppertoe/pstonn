@@ -669,14 +669,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		told := s.warnDisplaced(ctx, p, d, prev, want)
 		// Symmetric reassurance: tell the driver of the car just put ON the permit
 		// (opt-out per car; roster changes included).
-		s.notifyAddedDriver(ctx, p, want, vehByOwnerID)
+		driverTold := s.notifyAddedDriver(ctx, p, want, vehByOwnerID)
 		// This success ends any failure episode. If the household was told about
 		// the failure, this is the news that it is over, and it reaches even the
 		// members who only hear about problems.
 		resolves := s.closeFailureEpisode(ctx, p.ID)
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Color: wantColor, Source: string(res.Source), By: res.By, OK: true,
-			DisplacedReg: d.Reg, DisplacedTold: told, ResolvesFailure: resolves,
+			DisplacedReg: d.Reg, DisplacedTold: told, DriverTold: driverTold, ResolvesFailure: resolves,
 		}, "success|"+prev+">"+want)
 		alog.Infof("permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
 		return true

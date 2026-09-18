@@ -331,8 +331,9 @@ window.popClamp = window.popClamp || function (el) {
   {{/* The quick picker's "are you sure": one tap on a rego tile used to change
        the permit outright, and on a phone's home screen a tile is easy to brush.
        Composed at submit time from the tile that was tapped (e.submitter: each
-       tile is its own submit button), the overnight box, and the audience line
-       the server rendered onto the form, which names who on the account is told.
+       tile is its own submit button), the overnight box, and the audience list
+       the server rendered onto that tile, which names who is told: the account's
+       members and, when the rego has one, its driver.
        After the plate read-back above (which clears dataset.confirm when the
        form has no plate field) and before the interceptor below, which reads it. */}}
   document.addEventListener('submit', function (e) {
@@ -344,6 +345,7 @@ window.popClamp = window.popClamp || function (el) {
     f.dataset.confirm = 'Put this rego on the permit until ' + until + '?';
     f.dataset.confirmOk = 'Put it on';
     f.__confirmOpts = {tone: 'primary', plate: btn.dataset.plate, plateColor: btn.dataset.color, plateLabel: btn.dataset.label};
+    if (btn.dataset.audience) f.__confirmOpts.lines = btn.dataset.audience.split('\n');
   }, true);
   {{/* Capture phase so this runs (and stops htmx's own element handler) before
        any boosted submit; the __confirmed pass-through lets the re-submit
@@ -357,9 +359,10 @@ window.popClamp = window.popClamp || function (el) {
     {{/* A composer (above) hands over its options; a plain data-confirm form can
          still ask for the ordinary button with data-confirm-tone="primary". */}}
     var opts = f.__confirmOpts || {tone: f.dataset.confirmTone}; f.__confirmOpts = null;
-    {{/* data-audience (server-rendered, newline-separated: a heading then one
-         line per person) lists who is told about the change under the message. */}}
-    if (f.dataset.audience) opts.lines = f.dataset.audience.split('\n');
+    {{/* data-audience on the form (server-rendered, newline-separated: a heading
+         then one line per person) lists who is told about the change under the
+         message, unless a composer already took the list from the button. */}}
+    if (!opts.lines && f.dataset.audience) opts.lines = f.dataset.audience.split('\n');
     appConfirm(msg, f.dataset.confirmOk, opts).then(function (ok) {
       if (!ok) return;
       f.__confirmed = true;

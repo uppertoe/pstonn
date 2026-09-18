@@ -610,6 +610,10 @@ type vehicleView struct {
 	Color        string
 	Email        string // optional driver email (shown on the Vehicles page)
 	State        string // registration state code ("" = tenant home state; shown as a chip)
+	// Audience is the quick picker's confirm list for THIS rego: the account's
+	// members plus, when the rego has a driver who is told, that driver. It is
+	// per tile because the driver line depends on which rego was tapped.
+	Audience string
 }
 
 type memberView struct {

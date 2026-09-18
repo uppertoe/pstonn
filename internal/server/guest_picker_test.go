@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -120,7 +121,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	menu = s.getGuest("/g/" + raw)
 	body := menu.Body.String()
 	for _, want := range []string{"<h1>Home permit</h1>", "Tap a rego to put it on the permit", "ABC123", "XYZ789", "NEW111", "Open p.stonn", "Overnight<br>",
-		"data-picker-confirm data-audience=\"The following people will be notified of the change:\n" + owner + " — by email\"", `data-plate="XYZ789" data-label="Baba"`} {
+		`data-plate="XYZ789" data-label="Baba" data-color="`, `data-audience="The following people will be notified of the change:` + "\n" + owner + ` — by email"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("picker page lacks %q:\n%s", want, body)
 		}
@@ -129,6 +130,25 @@ func TestQuickPickerManagement(t *testing.T) {
 		if strings.Contains(body, leak) {
 			t.Fatalf("picker page carries visitor copy %q", leak)
 		}
+	}
+	// A rego with a driver who is told carries that driver on ITS tile only,
+	// the way the scheduler emails them; a suppressed address is left off.
+	if err := s.store.SetVehicleEmail(ctx, owner, nana, "nanny@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetVehicleEmail(ctx, owner, baba, "gone@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SuppressAddress(ctx, "gone@example.com", store.SuppressBounce, "test"); err != nil {
+		t.Fatal(err)
+	}
+	body = s.getGuest("/g/" + raw).Body.String()
+	members := `data-audience="The following people will be notified of the change:` + "\n" + owner + ` — by email`
+	if want := regexp.MustCompile(`data-label="Nana" data-color="#[0-9a-f]{6}" ` + regexp.QuoteMeta(members+"\n"+`nanny@example.com — by email, as the driver of ABC123"`)); !want.MatchString(body) {
+		t.Fatalf("Nana's tile lacks its driver %q:\n%s", want, body)
+	}
+	if want := regexp.MustCompile(`data-label="Baba" data-color="#[0-9a-f]{6}" ` + regexp.QuoteMeta(members+`"`)); !want.MatchString(body) {
+		t.Fatalf("Baba's tile should list the members only %q:\n%s", want, body)
 	}
 
 	// Edit: the form is pre-filled with every-rego on; saving with one rego
@@ -313,27 +333,35 @@ func TestQuickPickerActivation(t *testing.T) {
 }
 
 // The confirm dialog on the quick picker lists who is told, from the same
-// per-member decision the notice makes: emailed now, emailed once quiet hours
-// end, or pushed only; nobody at all is said plainly.
+// per-member decision the notice makes: by email, by push, or both, held until
+// quiet hours end where they are; the rego's own driver comes last when the
+// scheduler would email them; nobody at all is said plainly.
 func TestAudienceLines(t *testing.T) {
 	loc, _ := time.LoadLocation("Australia/Melbourne")
 	six := time.Date(2026, 9, 18, 6, 0, 0, 0, loc)
 	const head = "The following people will be notified of the change:"
+	driver := audienceDriver{Email: "nanny@example.com", Reg: "NAN123"}
 	cases := []struct {
-		name string
-		in   []notify.Recipient
-		want []string
+		name   string
+		in     []notify.Recipient
+		driver audienceDriver
+		want   []string
 	}{
-		{"nobody", nil, []string{"No one is notified of this change, the way notifications are set on the account."}},
-		{"one email", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}}, []string{head, "jo@example.com — by email"}},
-		{"email and push counts as email", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, ByPush: true}}, []string{head, "sam@example.com — by email"}},
-		{"quiet hours", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, NotBefore: six}},
+		{"nobody", nil, audienceDriver{}, []string{"No one is notified of this change, the way notifications are set on the account."}},
+		{"one email", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}}, audienceDriver{}, []string{head, "jo@example.com — by email"}},
+		{"email and push", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, ByPush: true}}, audienceDriver{}, []string{head, "sam@example.com — by email and push notification"}},
+		{"quiet hours", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, NotBefore: six}}, audienceDriver{},
 			[]string{head, "sam@example.com — by email at 6:00am, after their quiet hours"}},
-		{"push only", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}, {Email: "alex@example.com", ByPush: true}},
-			[]string{head, "jo@example.com — by email", "alex@example.com — by push notification, not email"}},
+		{"push only", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}, {Email: "alex@example.com", ByPush: true}}, audienceDriver{},
+			[]string{head, "jo@example.com — by email", "alex@example.com — by push notification"}},
+		{"driver", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}}, driver,
+			[]string{head, "jo@example.com — by email", "nanny@example.com — by email, as the driver of NAN123"}},
+		{"driver alone", nil, driver, []string{head, "nanny@example.com — by email, as the driver of NAN123"}},
+		{"driver who is a member is listed once", []notify.Recipient{{Email: "Nanny@example.com", ByPush: true}}, driver,
+			[]string{head, "Nanny@example.com — by push notification"}},
 	}
 	for _, c := range cases {
-		got := audienceLines(c.in, loc)
+		got := audienceLines(c.in, loc, c.driver)
 		if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
 		}

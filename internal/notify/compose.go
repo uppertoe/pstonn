@@ -86,6 +86,11 @@ type ApplyOutcome struct {
 	// the warning — otherwise the displaced car sits uncovered with nobody told.
 	DisplacedReg  string
 	DisplacedTold bool
+
+	// DriverTold is the address of the car's own driver when they were sent their
+	// notice about this outcome (the per-rego "tell the driver" toggle), so each
+	// member's copy can name them among the others told. "" when nobody was.
+	DriverTold string
 }
 
 // hero is the plate chip at the top of the HTML mail: the rego now on the
