@@ -243,6 +243,7 @@ type Override struct {
 	EndsAt       *time.Time
 	CreatedBy    string
 	CreatedAt    time.Time // when it was booked; the tie-break for overlapping overrides
+	GuestTokenID int64     // the guest link that made it (0 = the household's own booking)
 }
 
 // Source identifies why a particular vehicle is the resolved allocation.

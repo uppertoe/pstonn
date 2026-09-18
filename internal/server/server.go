@@ -406,6 +406,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /g/manifest/{token}", guardPublic, s.publicGuest(s.guestManifest))
 	s.handle(mux, "POST /g/{token}", guardPublic, s.publicGuest(s.guestActivate))
 	s.handle(mux, "POST /g/{token}/revert", guardPublic, s.publicGuest(s.guestRevert))
+	s.handle(mux, "POST /g/{token}/clear", guardPublic, s.publicGuest(s.guestClear)) // quick picker only
 	s.handle(mux, "GET /g/live/{token}", guardPublic, s.publicGuest(s.guestLive))
 	// Public, nonce-gated: a printed-QR visitor polls their request's status here.
 	s.handle(mux, "GET /g/req/{id}", guardPublic, s.publicGuest(s.guestRequestStatus))

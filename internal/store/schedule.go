@@ -513,7 +513,7 @@ func endsAtSQL(endsAt *time.Time) sql.NullString {
 func (s *Store) ListOverrides(ctx context.Context, permitID int64, now time.Time) ([]model.Override, error) {
 	nowStr := now.UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at
+SELECT id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id
 FROM override
 WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)
 ORDER BY starts_at ASC`, permitID, nowStr)
@@ -527,7 +527,7 @@ ORDER BY starts_at ASC`, permitID, nowStr)
 		var starts, created string
 		var ends sql.NullString
 		var vid sql.NullInt64
-		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &o.State, &starts, &ends, &o.CreatedBy, &created); err != nil {
+		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &o.State, &starts, &ends, &o.CreatedBy, &created, &o.GuestTokenID); err != nil {
 			return nil, err
 		}
 		o.VehicleID = vid.Int64 // 0 when NULL (an ad-hoc plate)

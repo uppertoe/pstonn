@@ -179,7 +179,7 @@ nearest:
 | Roster cell, week add/remove/restore, one-off add/delete, clear, copy schedule, dismiss copy offer, rename | `POST /permits/{id}/…` | `#pbody-{id}`, innerHTML | `permit-body` with Notice |
 | Plate poll | `GET /permits/{id}/card?n=` on `load delay:Ns` | `closest .nowbadge`, outerHTML, `hx-select=".nowbadge"` | `permit-body`, narrowed |
 | Visitor QR from the card | `POST /guests/qr` | `#qrbody-{id}`, innerHTML transition:false | `qr-card` |
-| Guest activation, revert, live poll | `POST /g/{token}`, `/revert`, `GET /g/live/{token}` | `#gbody`, innerHTML | `guest-body`, or 204 |
+| Guest activation, revert, the picker's take-off, live poll | `POST /g/{token}`, `/revert`, `/clear`, `GET /g/live/{token}` | `#gbody`, innerHTML | `guest-body`, or 204 |
 | Printed-QR request status | `GET /g/req/{id}` every 3s | `#reqstatus`, outerHTML | `guest-req-status`, or 204 |
 | Notification settings | `POST /notifications` on change, send a test, test push, regen topic, resume email, ntfy status poll | `#notify-body`, innerHTML or none | `notify-body`, 204, or `HX-Retarget` |
 | Rego email and notify toggle | `POST /regos/{id}/email`, `/notify` | none | 204 |

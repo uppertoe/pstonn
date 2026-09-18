@@ -68,6 +68,7 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 		"POST /hooks/ses":             "SES/SNS bounce webhook; message signature",
 		"POST /g/{token}":             "guest-pass activation; possession of the link is the grant",
 		"POST /g/{token}/revert":      "guest-pass revert; same token",
+		"POST /g/{token}/clear":       "quick picker takes the rego off; same token, picker grants only",
 	}
 
 	for _, rt := range s.routes {

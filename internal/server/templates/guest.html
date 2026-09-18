@@ -145,6 +145,16 @@
 </form>
 <p class="empty-note" style="margin-top:8px">{{if .Guest.Picker}}This restores the rego that was on the permit before you used this page.{{else}}This restores the rego that was on the permit before you used this link.{{end}}</p>
 {{end}}
+{{if .Guest.CanClear}}
+{{/* The picker's twin of the schedule's "Remove" button, offered on the same
+     terms (see pickerCanClear): the permit is deliberately left with no rego,
+     which the confirm spells out because a car in a permit zone loses cover
+     the moment it happens. */}}
+<form method="post" action="/g/{{.Guest.Token}}/clear" hx-post="/g/{{.Guest.Token}}/clear" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px" data-confirm="Take {{.Guest.CurrentReg}} off the permit? The permit will then have no rego, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until a rego is put on or the roster puts one on." data-confirm-ok="Take it off"{{if .Guest.ClearAudience}} data-audience="{{.Guest.ClearAudience}}"{{end}}>
+  <button type="submit" class="ghost grevert">&#10005; Take <span class="plate" style="margin:0 4px">{{.Guest.CurrentReg}}</span> off the permit</button>
+</form>
+<p class="empty-note" style="margin-top:8px">This leaves the permit with no rego on it until a rego is put on or the roster puts one on.</p>
+{{end}}
 {{if .Guest.Picker}}
 {{/* The household's own page: no "account holder is told", no referral (they
      have an account), and the way back into the app instead of a bookmark tip. */}}

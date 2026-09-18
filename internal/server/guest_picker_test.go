@@ -330,6 +330,59 @@ func TestQuickPickerActivation(t *testing.T) {
 	if got := rp.last(t); got.Registration != "SBX1AB" {
 		t.Fatalf("put back handed the provider %+v", got)
 	}
+
+	// Taking the rego off: offered on the schedule's own terms. With the roster
+	// covering today the offer is withheld and a hand-built request is refused
+	// before anything changes; with nothing scheduled, the picker's own booking
+	// is ended and the council's record cleared.
+	w = s.postGuest("/g/"+raw, "203.0.113.9", "", url.Values{"vehicle_id": {itoa64(baba)}})
+	if !strings.Contains(w.Body.String(), "off the permit</button>") {
+		t.Fatalf("no take-off offer after the tap:\n%s", w.Body.String())
+	}
+	// Today in the permit's own zone: the rig's council is in Melbourne while
+	// its display default is UTC.
+	permit, _ := s.store.GetPermit(ctx, pid)
+	today := time.Now().In(s.locForPermit(ctx, permit)).Weekday()
+	if err := s.store.SetRule(ctx, owner, pid, 0, today, baba); err != nil {
+		t.Fatal(err)
+	}
+	if body := s.getGuest("/g/" + raw).Body.String(); strings.Contains(body, "off the permit</button>") {
+		t.Fatalf("take-off offered while the roster covers today:\n%s", body)
+	}
+	w = s.postGuest("/g/"+raw+"/clear", "203.0.113.9", "", url.Values{})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "The roster has a rego scheduled for now") {
+		t.Fatalf("clear under a roster day = %d:\n%s", w.Code, w.Body.String())
+	}
+	if p, _ := s.store.GetPermit(ctx, pid); p.ActiveRegistration != "XYZ789" {
+		t.Fatalf("refused clear changed the permit to %q", p.ActiveRegistration)
+	}
+	if err := s.store.ClearRule(ctx, owner, pid, 0, today); err != nil {
+		t.Fatal(err)
+	}
+	w = s.postGuest("/g/"+raw+"/clear", "203.0.113.9", "", url.Values{})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "XYZ789 is off the permit.") {
+		t.Fatalf("clear = %d:\n%s", w.Code, w.Body.String())
+	}
+	if p, _ := s.store.GetPermit(ctx, pid); p.ActiveRegistration != "" {
+		t.Fatalf("permit still shows %q after the clear", p.ActiveRegistration)
+	}
+	if cur, ok := rp.Current("90001"); !ok || cur != "" {
+		t.Fatalf("council still holds %q", cur)
+	}
+	if ovs, _ := s.store.ListOverrides(ctx, pid, time.Now()); len(ovs) != 0 {
+		t.Fatalf("the picker's booking survived the clear: %+v", ovs)
+	}
+	if body := w.Body.String(); strings.Contains(body, "off the permit</button>") || strings.Contains(body, "back on the permit") {
+		t.Fatalf("an empty permit still offers take-off or put-back:\n%s", body)
+	}
+	// A visitor's pass may never leave the permit empty.
+	const visitor = "visitor-token-for-clear-test-000001"
+	if _, err := s.store.CreateGuestGrant(ctx, owner, owner, pid, "Nanny", false, []int64{baba}, []store.GuestRecipient{{Email: "v@example.com", TokenHash: hashGuestToken(visitor)}}); err != nil {
+		t.Fatal(err)
+	}
+	if w := s.postGuest("/g/"+visitor+"/clear", "203.0.113.9", "", url.Values{}); strings.Contains(w.Body.String(), "off the permit") {
+		t.Fatalf("a visitor pass could clear the permit:\n%s", w.Body.String())
+	}
 }
 
 // The confirm dialog on the quick picker lists who is told, from the same

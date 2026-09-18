@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -442,10 +443,52 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 		}
 	}
 	if gc.Grant.Picker {
+		view.CanClear = s.pickerCanClear(ctx, gc, permit, current)
 		s.fillPickerAudience(ctx, permit, &view)
 	}
 	view.FP = guestFP(view)
 	return view
+}
+
+// pickerActor names the quick picker as the maker of a change in the change
+// log and the account-change notice. Nobody is signed in on the picker, so the
+// notice goes to every member: no one is "the person who did it".
+const pickerActor = "the quick picker"
+
+// pickerCanClear says whether the picker may offer to take the rego off the
+// permit, on the same terms as the schedule's own "Remove" button: the council
+// allows an empty permit, a rego is on it, and nothing is scheduled for now,
+// judged with this link's own bookings set aside, because taking the rego off
+// ends them first. When the roster or another booking covers the moment the
+// loop would put its rego straight back, so the offer is withheld.
+func (s *Server) pickerCanClear(ctx context.Context, gc guestCtx, permit model.Permit, current string) bool {
+	if current == "" || s.tenant == nil || !s.tenant.Capabilities(ctx, permit.Owner, permit.TenantID).CanClearVehicle {
+		return false
+	}
+	res, err := s.resolveWithout(ctx, permit, gc.TokenID)
+	return err == nil && res.Source == model.SourceNone
+}
+
+// resolveWithout resolves the permit's schedule for now with the overrides a
+// guest link made left out: what the schedule says once that link's bookings
+// are swept.
+func (s *Server) resolveWithout(ctx context.Context, permit model.Permit, tokenID int64) (model.Resolution, error) {
+	now := time.Now().In(s.locForPermit(ctx, permit))
+	rules, err := s.store.ListRules(ctx, permit.ID)
+	if err != nil {
+		return model.Resolution{}, err
+	}
+	all, err := s.store.ListOverrides(ctx, permit.ID, now)
+	if err != nil {
+		return model.Resolution{}, err
+	}
+	others := all[:0:0]
+	for _, o := range all {
+		if o.GuestTokenID != tokenID {
+			others = append(others, o)
+		}
+	}
+	return model.Resolve(now, permit.Cycle(), rules, others), nil
 }
 
 // fillPickerAudience says who hears about a rego put on the permit from the
@@ -497,6 +540,16 @@ func (s *Server) fillPickerAudience(ctx context.Context, permit model.Permit, vi
 		view.Cars[i].Audience = strings.Join(audienceLines(rs, loc, driverOf(view.Cars[i].Registration)), "\n")
 	}
 	view.Audience = strings.Join(audienceLines(rs, loc, driverOf(view.RevertPlate)), "\n")
+	// Taking the rego off is told as an account change, whose rules differ (no
+	// failures-only mute, and nobody is the actor), so its list is its own.
+	if view.CanClear {
+		crs, err := s.notify.AccountChangeAudience(ctx, permit.Owner, pickerActor, now)
+		if err != nil {
+			alog.Infof("picker clear audience for %s: %v", redact.Email(permit.Owner), err)
+			return
+		}
+		view.ClearAudience = strings.Join(audienceLines(crs, loc, audienceDriver{}), "\n")
+	}
 }
 
 // audienceDriver is the driver a rego's own notice goes to, for audienceLines;
@@ -547,7 +600,11 @@ func guestFP(v guestActView) string {
 	if v.PendingOutage {
 		outage = "1"
 	}
-	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + outage + "|" + v.RevertPlate + "|" + v.UntilText + "|" + v.CheckedAgo))
+	clear := "0"
+	if v.CanClear {
+		clear = "1"
+	}
+	sum := sha256.Sum256([]byte(v.CurrentReg + "|" + v.PendingReg + "|" + stalled + "|" + outage + "|" + v.RevertPlate + "|" + v.UntilText + "|" + v.CheckedAgo + "|" + clear))
 	return hex.EncodeToString(sum[:6])
 }
 
@@ -905,6 +962,119 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", guestRefusalMessage(err, target, true))
+}
+
+// guestClear takes the rego off the permit from the household's quick picker:
+// the picker's twin of the schedule's "Remove" button (clearPermit), on the
+// same terms. It ends this link's own booking first, and only when nothing
+// else is scheduled for now does it clear the council's record; with the
+// roster or another booking covering the moment the loop would put that rego
+// straight back, so the request is refused before anything changes. Household
+// members are told as for any destructive change.
+func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	if !sameOrigin(r) {
+		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
+		return
+	}
+	if !s.guest.allow(rateLimitKey(r)) {
+		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
+		return
+	}
+	limitBody(r)
+	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
+	if !ok || !gc.Grant.Picker {
+		s.renderGuestGone(w, r) // only the household's own page may leave the permit empty
+		return
+	}
+	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
+		s.renderGuestInactive(w, r, true)
+		return
+	}
+	current := s.guestCurrentPlate(r.Context(), gc, permit)
+	if current == "" {
+		s.renderGuestMenu(w, r, gc, permit, current, "", "There is no rego on the permit to take off.")
+		return
+	}
+	if s.tenant == nil || !s.tenant.Capabilities(r.Context(), permit.Owner, permit.TenantID).CanClearVehicle {
+		s.renderGuestMenu(w, r, gc, permit, current, "", "This council's permit can't be left with no rego on it. Put a different rego on instead.")
+		return
+	}
+	// Checked BEFORE the sweep: refusing after it would have ended the booking
+	// and let the roster's rego come back, which is not what was asked.
+	if res, err := s.resolveWithout(r.Context(), permit, gc.TokenID); err != nil {
+		s.serverError(w, err)
+		return
+	} else if res.Source != model.SourceNone {
+		s.renderGuestMenu(w, r, gc, permit, current, "", "The roster has a rego scheduled for now, so the permit can't be left empty. Change today's roster in the app instead.")
+		return
+	}
+	// End this link's own booking, and forget the baseline: there is nothing to
+	// put back once the permit is deliberately empty.
+	if err := s.store.DeleteGuestOverrides(r.Context(), permit.ID, gc.TokenID); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	_ = s.store.ClearGuestBaseline(r.Context(), gc.TokenID)
+	gc.BaselinePlate, gc.BaselineUntil = "", time.Time{}
+	s.touchGuestActivity(r.Context(), permit.Owner)
+
+	// Detached and capped like every other tenant write on a request path (see
+	// applyGuestPlate); the claim serialises with the reconcile loop, and the
+	// schedule is re-read under it so a booking made in the gap is honoured.
+	bg := context.WithoutCancel(r.Context())
+	applyCtx, cancel := context.WithTimeout(bg, 15*time.Second)
+	defer cancel()
+	release, claimed := s.sched.AcquireApply(applyCtx, permit.ID)
+	if !claimed {
+		s.kickScheduler()
+		s.renderGuestMenu(w, r, gc, permit, current, "", "The permit is busy with another change right now. Please try again in a moment.")
+		return
+	}
+	if d := s.authoriseGuestApply(applyCtx, gc.TokenID, 0); d != guestApplyAllowed {
+		release()
+		s.kickScheduler()
+		s.renderGuestMenu(w, r, gc, permit, current, "", d.message())
+		return
+	}
+	rules, rerr := s.store.ListRules(applyCtx, permit.ID)
+	ovs, oerr := s.store.ListOverrides(applyCtx, permit.ID, time.Now())
+	if rerr != nil || oerr != nil {
+		release()
+		s.serverError(w, cmp.Or(rerr, oerr))
+		return
+	}
+	if res := model.Resolve(time.Now().In(s.locForPermit(applyCtx, permit)), permit.Cycle(), rules, ovs); res.Source != model.SourceNone {
+		release()
+		s.kickScheduler()
+		s.renderGuestMenu(w, r, gc, permit, current, "", "A rego was just scheduled for now, so the permit can't be left empty.")
+		return
+	}
+	err := s.tenant.ClearVehicle(applyCtx, permit.Owner, permit)
+	if err == nil {
+		if e := s.store.SetPermitActive(bg, permit.ID, ""); e != nil {
+			alog.Errorf("guest clear: council cleared permit %d but local commit failed: %v", permit.ID, e)
+		}
+		permit.ActiveRegistration = ""
+	}
+	release()
+	s.sched.Kick()
+	if err != nil {
+		alog.Infof("guest clear on permit %d: %v", permit.ID, err)
+		_ = s.store.RecordApply(bg, permit.ID, "", "guest", "error", guestApplyDetail(err))
+		if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
+			s.renderGuestMenu(w, r, gc, permit, current, "", "Couldn't reach the council just now, so "+current+" is still on the permit. Please try again shortly.")
+			return
+		}
+		s.renderGuestMenu(w, r, gc, permit, current, "", "The council didn't accept taking "+current+" off, so it is still on the permit. Check the permit in the app.")
+		return
+	}
+	label := permitLabel(permit)
+	_ = s.store.RecordApply(bg, permit.ID, "", "guest", "success", "rego removed from "+pickerActor)
+	s.logChange(bg, permit.Owner, pickerActor, store.ActionVehicleClear, label, "")
+	s.notifyDestructive(bg, permit.Owner, pickerActor,
+		"The rego was taken off the permit \""+label+"\" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.")
+	s.renderGuestMenu(w, r, gc, permit, "", current+" is off the permit.", "")
 }
 
 // guestFail reports a pre-resolution failure (bad origin, rate limit). For a

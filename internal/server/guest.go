@@ -59,6 +59,8 @@ type guestActView struct {
 	KeepForm       bool              // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
 	FP             string            // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
 	Req            *guestWaitView    // printed door QR only: this browser's own remembered request (from the greq cookie), so a re-scan shows its fate instead of a blank form
+	CanClear       bool              // quick picker only: the permit may be left with no rego (the council allows it, a rego is on, and nothing is scheduled for now once this link's own booking ends)
+	ClearAudience  string            // quick picker only: who is told when the rego is taken off, for that confirm dialog (same shape as Audience)
 	Audience       string            // quick picker only: who on the account is told about a change made here, for the confirm dialog: a heading line then one line per person, newline-joined ("" = don't say). The revert form's list; each rego tile carries its own (vehicleView.Audience), which adds the rego's driver.
 }
 

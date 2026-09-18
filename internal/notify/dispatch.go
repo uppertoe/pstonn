@@ -970,6 +970,34 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 // from a parking ranger. Quiet hours ARE honoured (this is information, not an
 // emergency) and failures-only is ignored, since an unexpected deletion is
 // exactly the kind of thing a failures-only subscriber still wants.
+// AccountChangeAudience lists who NotifyAccountChange would reach for a change
+// by actor, by the same per-member rules: everyone but the actor, by the
+// channels they enabled, held until their quiet hours end where they are.
+func (s *Service) AccountChangeAudience(ctx context.Context, owner, actor string, now time.Time) ([]Recipient, error) {
+	dels, err := s.accountDeliveries(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	loc := s.tenantOf(ctx, owner, "").Loc
+	var out []Recipient
+	for _, d := range dels {
+		if strings.EqualFold(d.email, actor) {
+			continue
+		}
+		r := Recipient{
+			Email:     d.email,
+			ByEmail:   d.pref.EmailEnabled && s.mail.Enabled(),
+			ByPush:    d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "",
+			NotBefore: s.quietDefer(d.pref, now, loc),
+		}
+		if !r.ByEmail && !r.ByPush {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary string) error {
 	subject := "A change was made to your p.stonn setup"
 	lines := []string{
