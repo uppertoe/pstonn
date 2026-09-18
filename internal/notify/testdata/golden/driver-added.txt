@@ -1,6 +1,7 @@
 === OUTBOX account= recipients=guest@example.com ntfy=// reason=this address is the contact for a rego put on a visitor parking permit
 Dedup: driver-on|guest@example.com|AAA111|DATE
 Subject: AAA111 is on a Stonnington visitor parking permit
+Hero: AAA111 #3b82f6
 
 Your rego is now on a City of Stonnington visitor parking permit, so you are covered to park where the permit applies.
 

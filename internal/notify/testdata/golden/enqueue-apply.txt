@@ -1,6 +1,7 @@
 === OUTBOX account= recipients=primary@example.com ntfy=/default/white_check_mark reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: apply|primary@example.com|primary@example.com|Visitor|ABC123|true|email|primary@example.com
 Subject: Permit updated: Visitor now shows ABC123
+Hero: ABC123 #3b82f6
 
 Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
@@ -11,6 +12,7 @@ https://p.stonn.org
 === OUTBOX account= recipients= ntfy=pstonn-primary/default/white_check_mark reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: apply|primary@example.com|primary@example.com|Visitor|ABC123|true|ntfy
 Subject: Permit updated: Visitor now shows ABC123
+Hero: ABC123 #3b82f6
 
 Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
@@ -21,6 +23,7 @@ https://p.stonn.org
 === OUTBOX account= recipients=sam@example.com ntfy=/default/white_check_mark reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: apply|sam@example.com|primary@example.com|Visitor|ABC123|true|email|sam@example.com
 Subject: Permit updated: Visitor now shows ABC123
+Hero: ABC123 #3b82f6
 
 Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 

@@ -1,6 +1,7 @@
 === OUTBOX account= recipients=primary@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|primary@example.com|primary@example.com|Visitor=AMY602@1784037600>ABC123|email|primary@example.com
 Subject: Your Visitor was changed to AMY602 on the council's website
+Hero: AMY602
 
 AMY602 was put on your Visitor on the council's website, not through p.stonn. p.stonn has left it there until the end of 14 Jul, when your schedule puts ABC123 back on. If it should stay longer, book it or add it to the roster in p.stonn.
 
@@ -9,6 +10,7 @@ https://p.stonn.org
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|primary@example.com|primary@example.com|Visitor=AMY602@1784037600>ABC123|ntfy
 Subject: Your Visitor was changed to AMY602 on the council's website
+Hero: AMY602
 
 AMY602 was put on your Visitor on the council's website, not through p.stonn. p.stonn has left it there until the end of 14 Jul, when your schedule puts ABC123 back on. If it should stay longer, book it or add it to the roster in p.stonn.
 
@@ -17,6 +19,7 @@ https://p.stonn.org
 === OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|sam@example.com|primary@example.com|Visitor=AMY602@1784037600>ABC123|email|sam@example.com
 Subject: Your Visitor was changed to AMY602 on the council's website
+Hero: AMY602
 
 AMY602 was put on your Visitor on the council's website, not through p.stonn. p.stonn has left it there until the end of 14 Jul, when your schedule puts ABC123 back on. If it should stay longer, book it or add it to the roster in p.stonn.
 

@@ -1,6 +1,7 @@
 === EMAIL to primary@example.com
 Subject: Permit updated: Visitor now shows GUEST1
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Hero: GUEST1
 
 Your Visitor is now set to GUEST1.
 
@@ -24,6 +25,7 @@ This replaced ABC123, which an active booking had put on. We have emailed the pe
 === EMAIL to sam@example.com
 Subject: Permit updated: Visitor now shows GUEST1
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+Hero: GUEST1
 
 Your Visitor is now set to GUEST1.
 
