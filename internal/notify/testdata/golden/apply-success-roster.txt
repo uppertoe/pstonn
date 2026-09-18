@@ -9,6 +9,8 @@ Nothing to do — this is just your confirmation it went through.
 
 https://p.stonn.org
 
+We have also told sam@example.com (by email).
+
 === NTFY pstonn-primary
 Title: Permit updated: Visitor now shows ABC123
 Priority: default
@@ -17,6 +19,8 @@ Tags: white_check_mark
 Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
 
 Nothing to do — this is just your confirmation it went through.
+
+We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
 Subject: Permit updated: Visitor now shows ABC123
@@ -28,4 +32,6 @@ Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster
 Nothing to do — this is just your confirmation it went through.
 
 https://p.stonn.org
+
+We have also told primary@example.com (by email and push notification).
 

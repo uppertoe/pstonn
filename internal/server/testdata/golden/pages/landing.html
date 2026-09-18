@@ -287,6 +287,7 @@ window.popClamp = window.popClamp || function (el) {
     f.dataset.confirm = 'Put this rego on the permit until ' + until + '?';
     f.dataset.confirmOk = 'Put it on';
     f.__confirmOpts = {tone: 'primary', plate: btn.dataset.plate, plateColor: btn.dataset.color, plateLabel: btn.dataset.label};
+    if (btn.dataset.audience) f.__confirmOpts.lines = btn.dataset.audience.split('\n');
   }, true);
   
   document.addEventListener('submit', function (e) {
@@ -298,7 +299,7 @@ window.popClamp = window.popClamp || function (el) {
     
     var opts = f.__confirmOpts || {tone: f.dataset.confirmTone}; f.__confirmOpts = null;
     
-    if (f.dataset.audience) opts.lines = f.dataset.audience.split('\n');
+    if (!opts.lines && f.dataset.audience) opts.lines = f.dataset.audience.split('\n');
     appConfirm(msg, f.dataset.confirmOk, opts).then(function (ok) {
       if (!ok) return;
       f.__confirmed = true;

@@ -13,6 +13,8 @@ https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 https://p.stonn.org
 
+We have also told sam@example.com (by email).
+
 === NTFY pstonn-primary
 Title: Action needed: your Visitor still shows XYZ789
 Priority: high
@@ -26,6 +28,8 @@ Check the permit on the council's site.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
+
+We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
 Subject: Action needed: your Visitor still shows XYZ789
@@ -41,4 +45,6 @@ You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 https://p.stonn.org
+
+We have also told primary@example.com (by email and push notification).
 
