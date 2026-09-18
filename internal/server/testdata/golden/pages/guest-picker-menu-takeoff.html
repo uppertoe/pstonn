@@ -327,60 +327,61 @@ window.popClamp = window.popClamp || function (el) {
 <main id="main" tabindex="-1" class="guestwrap">
   <section class="guestcard">
     <div class="gbrand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    <h1>A  visitor permit</h1>
+    <h1>Home permit</h1>
     <div id="gbody">
 
 
 
-
-
-<p class="gnow" style="margin-top:14px;text-align:center">Your request to use <span class="plate">GUEST1</span>:</p>
-<div aria-live="polite" style="text-align:center">
-
-
-<div id="reqstatus">
-  <div class="gring ok" style="margin:18px auto 12px"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
-  <p class="gresult"><span class="plate">GUEST1</span> is on the permit until the end of today.</p>
+<div class="gstat">
   
+  <p class="gnow">On the permit now: <span class="plate">ABC123</span></p>
+  <p class="gsub"></p>
+</div>
 
-<div class="gref">
-  <p class="empty-note">Does your own household juggle a visitor permit? p.stonn is free for City of Stonnington residents.</p>
-  <div class="grefrow">
-    <button type="button" class="ghost sm" data-share-pstonn><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</button>
-    <a class="btnlike ghost sm" href="mailto:?subject=p.stonn%20%E2%80%94%20visitor%20permit%20scheduler&body=Free%20scheduler%20for%20City%20of%20Stonnington%20visitor%20parking%20permits%3A%20https%3A%2F%2Fp.stonn.org" hx-boost="false">Email yourself the link</a>
+
+
+
+
+<form method="post" action="/g/tok" class="stack" style="margin-top:14px" data-plate-confirm="plate" data-picker-confirm hx-post="/g/tok" hx-target="#gbody" hx-swap="innerHTML">
+  
+  <p class="sub">Tap a rego to put it on the permit</p>
+  <div class="gcars">
+    
+    <button class="gcar" style="--plate:#111" type="submit" name="vehicle_id" value="1" data-plate="ABC123" data-label="Nana" data-color="#111">
+      <span class="dot" style="background:#111"></span>
+      <span class="glabel">Nana</span>
+      <span class="plate" style="--plate:#111">ABC123</span>
+      <span class="gtag">on now</span>
+    </button>
+    
   </div>
-</div>
-
-</div>
-
-</div>
-
-<p class="empty-note" style="margin-top:12px">To ask for a different rego, enter it below.</p>
-<form method="post" action="/g/tok" class="stack" style="margin-top:14px" data-plate-confirm="plate">
-  
-  
-  
-  <label class="fld"><span>Your number plate</span>
-    <input type="text" id="g-plate" name="plate" placeholder="e.g. ABC123" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" required style="text-transform:uppercase;font-size:17px;letter-spacing:1px;text-align:center">
-  </label>
   
   
   
   
-  <button type="submit" style="justify-content:center;margin-top:4px"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Ask to use the permit</button>
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" name="overnight" style="margin-top:2px"> <span>Overnight<br><span class="muted" style="font-size:12px">Keeps it on until the end of tomorrow instead of today.</span></span></label>
+  
   
 </form>
 
 
 
+<form method="post" action="/g/tok/clear" hx-post="/g/tok/clear" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px" data-confirm="Take ABC123 off the permit? The permit will then have no rego, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until a rego is put on or the roster puts one on." data-confirm-ok="Take it off" data-audience="The following people will be notified of the change:
+jo@example.com — by email
+sam@example.com — by email">
+  <button type="submit" class="ghost grevert">&#10005; Take <span class="plate" style="margin:0 4px">ABC123</span> off the permit</button>
+</form>
+<p class="empty-note" style="margin-top:8px">This leaves the permit with no rego on it until a rego is put on or the roster puts one on.</p>
 
 
 
+<p class="empty-note" style="margin-top:16px">Tap a rego. It stays on the permit until the end of the day; after that the roster takes over, or if nothing is scheduled it stays until the next change. Everything else, the roster, guests and settings, is in the app.</p>
+<a class="gtip" href="/schedule" hx-boost="false">Open p.stonn &rarr;</a>
 
 </div>
   </section>
   
-  <p class="gcredit">This permit is managed with <a href="/" hx-boost="false">p.stonn</a> — free for City of Stonnington residents.</p>
+  
 </main>
 
 
