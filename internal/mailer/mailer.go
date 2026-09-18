@@ -75,10 +75,13 @@ type Options struct {
 }
 
 // Hero is an optional centred plate chip for the HTML mail. Color is a hex
-// string ("#RRGGBB" or "RRGGBB"); empty falls back to a neutral chip.
+// string ("#RRGGBB" or "RRGGBB"); empty falls back to a neutral chip. Caption
+// is a short muted line set above the chip when the plate's standing is not
+// what a prominent plate implies ("No longer on the permit"); empty omits it.
 type Hero struct {
-	Plate string
-	Color string
+	Plate   string
+	Color   string
+	Caption string
 }
 
 // Send delivers a plain-text email. A nil *Mailer is a no-op.

@@ -124,9 +124,12 @@ type OutboxItem struct {
 	// merely HELD for quiet hours keeps the tier it would have had inline.
 	Critical bool
 	// HeroPlate/HeroColor render a centred plate chip (matching the on-site plate)
-	// in the HTML mail. Set only on the driver-on notice; empty leaves no chip.
-	HeroPlate string
-	HeroColor string
+	// in the HTML mail; empty leaves no chip. HeroCaption is the small line above
+	// it that says what the plate's standing is ("No longer on the permit") where
+	// the chip alone would read as reassurance.
+	HeroPlate   string
+	HeroColor   string
+	HeroCaption string
 }
 
 // dedupKeyPrefix tags a hashed dedup key, so the migration that hashes keys
@@ -175,14 +178,14 @@ func (s *Store) EnqueueOutbox(ctx context.Context, it OutboxItem) error {
 	// outcome) each pass the check and double-insert — defeating the dedup this
 	// exists for.
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at, reason, critical, hero_plate, hero_color)
-SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10, ?12, ?13, ?14, ?15
+INSERT INTO outbox (account, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, status, attempts, next_attempt, created_at, reason, critical, hero_plate, hero_color, hero_caption)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 0, ?9, ?10, ?12, ?13, ?14, ?15, ?16
 WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
   WHERE dedup_key = ?2
     AND (status = 'pending' OR (status = 'sent' AND sent_at > ?11)))`,
 		it.Account, HashDedupKey(it.DedupKey), strings.Join(it.Recipients, "\n"), it.NtfyTopic, it.NtfyPriority, it.NtfyTag,
 		it.Subject, it.Body, nextAttempt, now,
-		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339), it.Reason, boolInt(it.Critical), it.HeroPlate, it.HeroColor)
+		time.Now().Add(-outboxDedupWindow).UTC().Format(time.RFC3339), it.Reason, boolInt(it.Critical), it.HeroPlate, it.HeroColor, it.HeroCaption)
 	return err
 }
 
@@ -190,7 +193,7 @@ WHERE ?2 = '' OR NOT EXISTS (SELECT 1 FROM outbox
 // DedupKey comes back in its stored (hashed) form.
 func (s *Store) DueOutbox(ctx context.Context, now time.Time, limit int) ([]OutboxItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts, reason, critical, hero_plate, hero_color
+SELECT id, dedup_key, recipients, ntfy_topic, ntfy_priority, ntfy_tag, subject, body, attempts, reason, critical, hero_plate, hero_color, hero_caption
 FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 		now.UTC().Format(time.RFC3339), limit)
 	if err != nil {
@@ -203,7 +206,7 @@ FROM outbox WHERE status = 'pending' AND next_attempt <= ? ORDER BY id LIMIT ?`,
 		var recips string
 		var critical int
 		if err := rows.Scan(&it.ID, &it.DedupKey, &recips, &it.NtfyTopic, &it.NtfyPriority, &it.NtfyTag,
-			&it.Subject, &it.Body, &it.Attempts, &it.Reason, &critical, &it.HeroPlate, &it.HeroColor); err != nil {
+			&it.Subject, &it.Body, &it.Attempts, &it.Reason, &critical, &it.HeroPlate, &it.HeroColor, &it.HeroCaption); err != nil {
 			return nil, err
 		}
 		if recips != "" {

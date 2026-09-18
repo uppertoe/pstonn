@@ -165,7 +165,11 @@ func plateChip(h Hero) string {
 		fill = tintColor(hex)
 	}
 	plate := strings.ToUpper(strings.TrimSpace(h.Plate))
-	return `<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:2px auto 22px;"><tr>` +
+	caption := ""
+	if c := strings.TrimSpace(h.Caption); c != "" {
+		caption = `<div style="text-align:center;font-family:` + emailFont + `;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:` + colMuted + `;margin:0 0 8px;">` + html.EscapeString(c) + `</div>`
+	}
+	return caption + `<table role="presentation" align="center" cellpadding="0" cellspacing="0" style="margin:2px auto 22px;"><tr>` +
 		`<td style="border:2px solid ` + border + `;background:` + fill + `;border-radius:10px;` +
 		`padding:13px 24px;font-family:` + plateFont + `;font-size:26px;font-weight:700;` +
 		`letter-spacing:4px;text-transform:uppercase;color:` + colInk + `;white-space:nowrap;">` +

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/mailer"
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/secretbox"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -107,9 +109,18 @@ func TestQuickPickerManagement(t *testing.T) {
 	if _, err := s.store.CreateVehicle(ctx, owner, "NEW111", "Later", ""); err != nil {
 		t.Fatal(err)
 	}
+	// With mail configured, the page carries the confirm dialog's audience line
+	// (who on the account is emailed) and each tile the rego it stands for.
+	s.notify = notify.New(s.store, &mailer.Mailer{SendHook: func(string, string, string, mailer.Options) error { return nil }},
+		"", "", "https://app.example.com", "", "", time.UTC, nil, nil)
+	// Quiet hours off, so the line reads the same whatever the clock says.
+	if err := s.store.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	menu = s.getGuest("/g/" + raw)
 	body := menu.Body.String()
-	for _, want := range []string{"<h1>Home permit</h1>", "Tap a rego to put it on the permit", "ABC123", "XYZ789", "NEW111", "Open p.stonn", "Overnight<br>"} {
+	for _, want := range []string{"<h1>Home permit</h1>", "Tap a rego to put it on the permit", "ABC123", "XYZ789", "NEW111", "Open p.stonn", "Overnight<br>",
+		"data-picker-confirm data-audience=\"The following people will be notified of the change:\n" + owner + " — by email\"", `data-plate="XYZ789" data-label="Baba"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("picker page lacks %q:\n%s", want, body)
 		}
@@ -298,5 +309,33 @@ func TestQuickPickerActivation(t *testing.T) {
 	}
 	if got := rp.last(t); got.Registration != "SBX1AB" {
 		t.Fatalf("put back handed the provider %+v", got)
+	}
+}
+
+// The confirm dialog on the quick picker lists who is told, from the same
+// per-member decision the notice makes: emailed now, emailed once quiet hours
+// end, or pushed only; nobody at all is said plainly.
+func TestAudienceLines(t *testing.T) {
+	loc, _ := time.LoadLocation("Australia/Melbourne")
+	six := time.Date(2026, 9, 18, 6, 0, 0, 0, loc)
+	const head = "The following people will be notified of the change:"
+	cases := []struct {
+		name string
+		in   []notify.Recipient
+		want []string
+	}{
+		{"nobody", nil, []string{"No one is notified of this change, the way notifications are set on the account."}},
+		{"one email", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}}, []string{head, "jo@example.com — by email"}},
+		{"email and push counts as email", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, ByPush: true}}, []string{head, "sam@example.com — by email"}},
+		{"quiet hours", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, NotBefore: six}},
+			[]string{head, "sam@example.com — by email at 6:00am, after their quiet hours"}},
+		{"push only", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}, {Email: "alex@example.com", ByPush: true}},
+			[]string{head, "jo@example.com — by email", "alex@example.com — by push notification, not email"}},
+	}
+	for _, c := range cases {
+		got := audienceLines(c.in, loc)
+		if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
 	}
 }

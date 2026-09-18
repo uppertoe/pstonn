@@ -201,7 +201,15 @@ nearest:
   on the pass form records why: a person on a phone saw only the toast and left.
 - **Confirms** through the shared dialog (`data-confirm` on plain forms,
   `hx-confirm` on htmx ones), with `data-confirm-ok` naming the action on the
-  button. `data-plate-confirm` composes the message from the typed plate.
+  button. The button is the red danger one unless the form says
+  `data-confirm-tone="primary"` (a routine change, not a destructive one).
+  `data-plate-confirm` composes the message from the typed plate;
+  `data-picker-confirm` composes it from the rego tile that was tapped and
+  shows that rego above the message as a plate chip (`appConfirm`'s `opts`).
+  A form carrying `data-audience` (server-rendered: a heading line, then one
+  line per person, newline-joined) gets that list under the message, saying
+  who on the account is told (`pickerAudience`, from `notify.ApplyAudience`,
+  the notice's own rules).
 - **Pending states look pending.** A saved-but-not-applied change shows a
   spinner and "Changing to …" in a slot of fixed size; the plate on the
   permit is always the council's actual record, never the intended one. Polls
@@ -421,6 +429,11 @@ is. Copy that names the council or its portal goes through the i18n catalog
   plate as a one-off booking until its next change; a cleared plate is put
   back. `holdExternalChange` in `scheduler/drift.go` is the one place that
   decides, and `notify.DriftChange` carries the decision into the wording.
+- A notice about a plate leads its HTML alternative with that plate as a chip
+  (`mailer.Hero`, carried on the outbox row): a successful apply shows the rego
+  now on the permit in its colour (`ApplyOutcome.Color`), the driver notices
+  theirs, and a chip whose plate is NOT on the permit carries a `Caption`
+  saying so. A failure notice has no chip.
 - Every notice has a golden in `internal/notify/testdata/golden`; add a
   `run(...)` case in `golden_test.go` and regenerate with
   `go test ./internal/notify -run Golden -update`.

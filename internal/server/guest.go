@@ -59,6 +59,7 @@ type guestActView struct {
 	KeepForm       bool              // poll responses only: render hx-preserve so a half-filled form survives the swap; activation responses omit it so the form resets
 	FP             string            // fingerprint of the visible state; polls echo it so an unchanged page is a 204, not a re-render
 	Req            *guestWaitView    // printed door QR only: this browser's own remembered request (from the greq cookie), so a re-scan shows its fate instead of a blank form
+	Audience       string            // quick picker only: who on the account is told about a change made here, for the confirm dialog: a heading line then one line per person, newline-joined ("" = don't say)
 }
 
 // guestWaitView drives the visitor's "waiting for approval" page (State

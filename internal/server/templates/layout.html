@@ -249,12 +249,36 @@ window.popClamp = window.popClamp || function (el) {
     if (d && d.open) d.close();
     if (res) res(ok);
   }
-  window.appConfirm = function (message, okLabel) {
+  {{/* opts: {tone:'primary'} makes the confirm button the ordinary one rather
+       than the red danger button (a routine action, not a destructive one);
+       {plate, plateColor, plateLabel} put the rego above the message as the app
+       shows it, so the person confirms the plate they see, not one in prose. */}}
+  window.appConfirm = function (message, okLabel, opts) {
     var d = dlg();
+    opts = opts || {};
     if (!d || typeof d.showModal !== 'function') return Promise.resolve(window.confirm(message));
     if (pending) pending(false);
     d.querySelector('.dlg-msg').textContent = message;
-    d.querySelector('.dlg-ok').textContent = okLabel || 'Confirm';
+    var ok = d.querySelector('.dlg-ok');
+    ok.textContent = okLabel || 'Confirm';
+    ok.classList.toggle('danger', opts.tone !== 'primary');
+    var slot = d.querySelector('.dlg-plate');
+    slot.hidden = !opts.plate;
+    if (opts.plate) {
+      var chip = slot.querySelector('.plate');
+      chip.textContent = opts.plate;
+      chip.style.setProperty('--plate', opts.plateColor || '');
+      slot.querySelector('.dlg-plate-label').textContent = opts.plateLabel || '';
+    }
+    {{/* opts.lines: a heading then one line per person, shown as a paragraph
+         and a list under the message (who is told about the change). */}}
+    var who = d.querySelector('.dlg-who'), lines = opts.lines || [];
+    who.hidden = !lines.length;
+    who.querySelector('.dlg-who-note').textContent = lines[0] || '';
+    var ul = who.querySelector('ul');
+    ul.textContent = '';
+    for (var i = 1; i < lines.length; i++) { var li = document.createElement('li'); li.textContent = lines[i]; ul.appendChild(li); }
+    ul.hidden = lines.length < 2;
     d.showModal();
     return new Promise(function (res) { pending = res; });
   };
@@ -304,19 +328,45 @@ window.popClamp = window.popClamp || function (el) {
       'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
     f.dataset.confirmOk = 'It matches — continue';
   }, true);
+  {{/* The quick picker's "are you sure": one tap on a rego tile used to change
+       the permit outright, and on a phone's home screen a tile is easy to brush.
+       Composed at submit time from the tile that was tapped (e.submitter: each
+       tile is its own submit button), the overnight box, and the audience line
+       the server rendered onto the form, which names who on the account is told.
+       After the plate read-back above (which clears dataset.confirm when the
+       form has no plate field) and before the interceptor below, which reads it. */}}
+  document.addEventListener('submit', function (e) {
+    var f = e.target, btn = e.submitter;
+    if (!f.dataset || !('pickerConfirm' in f.dataset) || f.__confirmed) return;
+    if (!btn || !btn.dataset || !btn.dataset.plate) { delete f.dataset.confirm; return; }
+    var night = f.querySelector('[name="overnight"]');
+    var until = night && night.checked ? 'the end of tomorrow' : 'the end of today';
+    f.dataset.confirm = 'Put this rego on the permit until ' + until + '?';
+    f.dataset.confirmOk = 'Put it on';
+    f.__confirmOpts = {tone: 'primary', plate: btn.dataset.plate, plateColor: btn.dataset.color, plateLabel: btn.dataset.label};
+  }, true);
   {{/* Capture phase so this runs (and stops htmx's own element handler) before
        any boosted submit; the __confirmed pass-through lets the re-submit
        continue down the normal path. */}}
   document.addEventListener('submit', function (e) {
-    var f = e.target, msg = f.dataset && f.dataset.confirm;
+    var f = e.target, msg = f.dataset && f.dataset.confirm, btn = e.submitter;
     if (!msg) return;
     if (f.__confirmed) { f.__confirmed = false; return; }
     e.preventDefault();
     e.stopPropagation();
-    appConfirm(msg, f.dataset.confirmOk).then(function (ok) {
+    {{/* A composer (above) hands over its options; a plain data-confirm form can
+         still ask for the ordinary button with data-confirm-tone="primary". */}}
+    var opts = f.__confirmOpts || {tone: f.dataset.confirmTone}; f.__confirmOpts = null;
+    {{/* data-audience (server-rendered, newline-separated: a heading then one
+         line per person) lists who is told about the change under the message. */}}
+    if (f.dataset.audience) opts.lines = f.dataset.audience.split('\n');
+    appConfirm(msg, f.dataset.confirmOk, opts).then(function (ok) {
       if (!ok) return;
       f.__confirmed = true;
-      if (f.requestSubmit) f.requestSubmit(); else f.submit();
+      {{/* Re-submit with the button that was pressed, so a form whose choice IS
+           the button (the picker's rego tiles) still sends its name and value. */}}
+      if (f.requestSubmit) { try { f.requestSubmit(btn && btn.form === f ? btn : undefined); } catch (err) { f.requestSubmit(); } }
+      else f.submit();
     });
   }, true);
   document.addEventListener('htmx:confirm', function (e) {
@@ -363,7 +413,9 @@ window.popClamp = window.popClamp || function (el) {
      is unsupported. data-confirm-ok customises the confirm button label. */}}
 <dialog id="confirm-dlg" class="confirm">
   <div class="dlg-box">
+    <p class="dlg-plate" hidden><span class="plate"></span> <span class="dlg-plate-label"></span></p>
     <p class="dlg-msg"></p>
+    <div class="dlg-who" hidden><p class="dlg-who-note"></p><ul></ul></div>
     <div class="dlg-actions">
       <button type="button" class="ghost dlg-cancel" autofocus>Cancel</button>
       <button type="button" class="danger dlg-ok">Confirm</button>

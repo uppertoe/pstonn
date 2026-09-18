@@ -71,6 +71,9 @@ func (c *capture) email(to, subject, body string, o mailer.Options) error {
 	if o.Provenance != "" {
 		fmt.Fprintf(&c.buf, "Provenance: %s\n", o.Provenance)
 	}
+	if h := heroLine(o.Hero); h != "" {
+		c.buf.WriteString(h)
+	}
 	c.buf.WriteString("\n" + strings.ReplaceAll(body, "\r\n", "\n") + "\n\n")
 	return nil
 }
@@ -97,9 +100,26 @@ func (c *capture) outbox(it store.OutboxItem) {
 	if it.Critical {
 		tier = " critical=true"
 	}
-	fmt.Fprintf(&c.buf, "=== OUTBOX account=%s recipients=%s ntfy=%s/%s/%s reason=%s%s\nDedup: %s\nSubject: %s\n\n%s\n\n",
+	fmt.Fprintf(&c.buf, "=== OUTBOX account=%s recipients=%s ntfy=%s/%s/%s reason=%s%s\nDedup: %s\nSubject: %s\n%s\n%s\n\n",
 		it.Account, strings.Join(it.Recipients, ","), it.NtfyTopic, it.NtfyPriority, it.NtfyTag, it.Reason, tier, key, it.Subject,
+		heroLine(mailer.Hero{Plate: it.HeroPlate, Color: it.HeroColor, Caption: it.HeroCaption}),
 		strings.ReplaceAll(it.Body, "\r\n", "\n"))
+}
+
+// heroLine records the plate chip the HTML mail leads with, so the golden shows
+// which notices carry one and what it says. "" when there is no chip.
+func heroLine(h mailer.Hero) string {
+	if h.Plate == "" {
+		return ""
+	}
+	line := "Hero: " + h.Plate
+	if h.Color != "" {
+		line += " " + h.Color
+	}
+	if h.Caption != "" {
+		line += " (" + h.Caption + ")"
+	}
+	return line + "\n"
 }
 
 // Signed links: /u/<addr>/<token> and /r/<id>/<addr>/<token> embed an expiry.
@@ -220,7 +240,7 @@ func TestGoldenEmails(t *testing.T) {
 	}
 
 	run("apply-success-roster", func() {
-		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: true})
+		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Color: "#3b82f6", Source: "roster", OK: true})
 	})
 	run("apply-success-guest-displaced", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "GUEST1", By: "dad@example.com", Source: "guest", OK: true, DisplacedReg: "ABC123", DisplacedTold: true})
@@ -237,7 +257,7 @@ func TestGoldenEmails(t *testing.T) {
 			Reason: "The council rejected the change.", Action: "Check the permit on the council's site.", Urgent: true})
 	})
 	run("enqueue-apply", func() {
-		_ = svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: true})
+		_ = svc.EnqueueApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Color: "#3b82f6", Source: "roster", OK: true})
 	})
 	run("relink-required", func() { svc.NotifyRelinkRequired(ctx, owner, "") })
 	// The council-side change notice (drift.go): the one email a household gets

@@ -160,6 +160,17 @@ dialog.confirm::backdrop { background:rgba(8,12,22,.55); }
 dialog.confirm[open] { animation:rise .18s ease both; }
 .dlg-box { padding:20px; display:flex; flex-direction:column; gap:16px; }
 .dlg-msg { margin:0; font-size:14.5px; line-height:1.55; overflow-wrap:anywhere; }
+/* The rego a confirm is about, above the message, as the app shows it. */
+.dlg-plate { margin:0; display:flex; align-items:center; gap:10px; }
+.dlg-plate[hidden] { display:none; }
+.dlg-plate .plate { font-size:17px; padding:6px 12px; }
+.dlg-plate-label { font-weight:600; }
+/* Who is told about the change: a note and one line per person. */
+.dlg-who { margin:-6px 0 0; font-size:13.5px; line-height:1.5; color:var(--muted); }
+.dlg-who[hidden] { display:none; }
+.dlg-who p { margin:0 0 4px; }
+.dlg-who ul { margin:0; padding-left:18px; }
+.dlg-who li { overflow-wrap:anywhere; }
 .dlg-actions { display:flex; justify-content:flex-end; gap:10px; }
 /* From / Until sit side by side when there's room, and drop to one column only
    when they can't fit — each holds a date + time pair (below), which together
@@ -813,6 +824,10 @@ table.adm .bad { color:var(--danger); }
 /* Public guest activation page */
 .guestwrap { max-width:460px; margin:0 auto; padding:32px 18px 60px; }
 .guestcard form.htmx-request button { opacity:.55; pointer-events:none; } /* tap feedback while the live update is in flight */
+/* "Put ABC123 back on the permit": a sentence with a plate in it. As a flex
+   button each run of text was its own shrinkable item, so at phone width the
+   label broke into three ragged lines; laid out as text it wraps like a sentence. */
+.grevert { display:block; width:100%; text-align:center; line-height:1.8; }
 .gstat { margin-top:2px; }
 .gnow .gnuntil { color:var(--muted); font-size:13px; font-weight:500; }
 .gsub { display:flex; align-items:center; gap:7px; min-height:28px; margin:2px 0 0; font-size:13px; color:var(--muted); } /* fixed-height slot: applying/settled notes swap here without reflowing the page (28px fits the plate chip) */

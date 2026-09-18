@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/mailer"
 	"github.com/uppertoe/pstonn/internal/store"
 )
 
@@ -44,6 +45,7 @@ type ApplyOutcome struct {
 	PermitLabel string
 	Reg         string // the vehicle we tried to set
 	Name        string // friendly name of that vehicle ("" for an ad-hoc plate)
+	Color       string // that vehicle's plate colour (hex), so the mail's chip matches the app's ("" = neutral)
 	By          string // who made the change, when it was a guest activation ("" otherwise)
 	Source      string // "roster" / "override" / "guest" / "doorqr" / "picker" (success context)
 	OK          bool
@@ -84,6 +86,17 @@ type ApplyOutcome struct {
 	// the warning — otherwise the displaced car sits uncovered with nobody told.
 	DisplacedReg  string
 	DisplacedTold bool
+}
+
+// hero is the plate chip at the top of the HTML mail: the rego now on the
+// permit, in its colour, as the app shows it. Only a success has one; a failure
+// notice leads with what is still on the permit in words, and a chip there
+// would read as the change having gone through.
+func (o ApplyOutcome) hero() mailer.Hero {
+	if !o.OK {
+		return mailer.Hero{}
+	}
+	return mailer.Hero{Plate: o.Reg, Color: o.Color}
 }
 
 // actionNeeded reports a hard failure the user must act on (a non-transient

@@ -38,17 +38,17 @@ type outMessage struct {
 	// Critical marks safety-tier mail (see sendEmailCritical): deliver() lets it
 	// past a self-service unsubscribe, exactly as the inline path would have.
 	Critical bool
-	// HeroPlate/HeroColor render a centred plate chip in the HTML mail (driver-on
-	// notice); they ride the row because the outbox delivers after enqueue.
-	HeroPlate string
-	HeroColor string
+	// Hero renders a centred plate chip in the HTML mail (a plate-change notice,
+	// the driver-on notice); it rides the row because the outbox delivers after
+	// enqueue.
+	Hero mailer.Hero
 }
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 	it := store.OutboxItem{
 		Account: m.Account, DedupKey: m.DedupKey, Reason: m.Reason, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
-		NotBefore: m.NotBefore, Critical: m.Critical, HeroPlate: m.HeroPlate, HeroColor: m.HeroColor,
+		NotBefore: m.NotBefore, Critical: m.Critical, HeroPlate: m.Hero.Plate, HeroColor: m.Hero.Color, HeroCaption: m.Hero.Caption,
 	}
 	if s.enqueueHook != nil {
 		s.enqueueHook(it)
@@ -323,7 +323,7 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 			// damage the suppression list exists to prevent.
 			// The row's tier decides whether an unsubscribe blocks it, the same
 			// way the inline sender chose between sendEmail and sendEmailCritical.
-			e := s.sendEmailWith(ctx, addr, it.Subject, it.Body, it.Reason, it.Critical, mailer.Hero{Plate: it.HeroPlate, Color: it.HeroColor})
+			e := s.sendEmailWith(ctx, addr, it.Subject, it.Body, it.Reason, it.Critical, mailer.Hero{Plate: it.HeroPlate, Color: it.HeroColor, Caption: it.HeroCaption})
 			if errors.Is(e, ErrSuppressed) {
 				alog.Infof("skipping suppressed recipient %s (outbox row %d)", RedactEmail(addr), it.ID)
 				continue

@@ -689,7 +689,8 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 				{Milestone: store.MilestoneRegoEmail, Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add"}}}}, "Still to try"},
 		{"guest-picker-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Picker: true, Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Home permit", CurrentReg: "ABC123", MineReg: "ABC123", RevertPlate: "1QT4RM",
-			Cars: []vehicleView{{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#111"}, {ID: 2, Label: "Baba", Registration: "XYZ789", Color: "#222"}}, AllowOvernight: true}}, "Tap a rego to put it on the permit"},
+			Cars: []vehicleView{{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#111"}, {ID: 2, Label: "Baba", Registration: "XYZ789", Color: "#222"}}, AllowOvernight: true,
+			Audience: "The following people will be notified of the change:\njo@example.com — by email\nsam@example.com — by email at 6:00am, after their quiet hours"}}, "Tap a rego to put it on the permit"},
 		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "The Helds’ visitor permit"},

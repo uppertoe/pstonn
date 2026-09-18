@@ -238,6 +238,44 @@ func (s *Service) fanoutEnqueue(ctx context.Context, owner string, build func(d 
 	return n, nil
 }
 
+// Recipient is one account member as an apply outcome would reach them: by
+// which channels, and, when their quiet hours would hold it, from when. A page
+// that asks "are you sure?" before a change uses this to say who is told.
+type Recipient struct {
+	Email     string
+	ByEmail   bool
+	ByPush    bool
+	NotBefore time.Time // zero when the notice would go at once
+}
+
+// ApplyAudience lists who EnqueueApply would reach for o, decided by the same
+// rules it applies per member: a member muted by failures-only is left out, as
+// is one with no reachable channel. now is the moment the change would be made.
+func (s *Service) ApplyAudience(ctx context.Context, o ApplyOutcome, now time.Time) ([]Recipient, error) {
+	dels, err := s.accountDeliveries(ctx, o.Owner)
+	if err != nil {
+		return nil, err
+	}
+	c := s.tenantOf(ctx, o.Owner, o.TenantID)
+	var out []Recipient
+	for _, d := range dels {
+		if o.mutedByFailuresOnly(d.pref) {
+			continue
+		}
+		r := Recipient{
+			Email:     d.email,
+			ByEmail:   s.emailWanted(d.pref, o),
+			ByPush:    d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "",
+			NotBefore: s.deferUntil(d.pref, now, c.Loc, o),
+		}
+		if !r.ByEmail && !r.ByPush {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	c := s.tenantOf(ctx, o.Owner, o.TenantID)
 	subject, body, priority, tags := composeApply(o, c.Links.Portal)
@@ -258,6 +296,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 			Reason:    reasonAccount,
 			// The queued twin of NotifyApply's inline choice of sendEmailCritical.
 			Critical: o.actionNeeded(),
+			Hero:     o.hero(),
 		}
 		if s.emailWanted(d.pref, o) {
 			m.Recipients = []string{d.email}
@@ -324,6 +363,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 				NtfyPriority: priority, NtfyTag: tags, NotBefore: nb,
 				DedupKey: fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 				Reason:   reasonAccount,
+				Hero:     o.hero(),
 			}
 			if wantEmail {
 				m.Recipients = []string{d.email}
@@ -366,11 +406,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			// An action-needed failure ("change the plate yourself now or someone
 			// gets a fine") rides the critical path: a self-service unsubscribe
 			// mutes routine confirmations, not this.
-			send := s.sendEmail
-			if o.actionNeeded() {
-				send = s.sendEmailCritical
-			}
-			if e := send(ctx, d.email, subject, emailBody, reasonAccount); e != nil {
+			if e := s.sendEmailWith(ctx, d.email, subject, emailBody, reasonAccount, o.actionNeeded(), o.hero()); e != nil {
 				// Redacted throughout: the caller %v's this error into the log, and a
 				// server rejection echoes the address inside e itself.
 				errs = append(errs, "email "+RedactEmail(d.email)+": "+errText(e, d.email))
@@ -610,8 +646,11 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 		return nil
 	}
 	key := fmt.Sprintf("displaced|%s|%s|%s", to, permitLabel, oldReg)
+	// The chip leads the mail as it does on the site, captioned so a plate in a
+	// box does not read as "you are covered" — the opposite of the message.
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
-		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDisplace})
+		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDisplace,
+		Hero: mailer.Hero{Plate: oldReg, Caption: "No longer on the permit"}})
 }
 
 // NotifyDriverAdded tells a car's driver (a non-user, email only) that their car
@@ -652,7 +691,7 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 	key := fmt.Sprintf("driver-on|%s|%s|%s", to, plate, time.Now().In(s.loc).Format("2006-01-02"))
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
 		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn,
-		HeroPlate: plate, HeroColor: color})
+		Hero: mailer.Hero{Plate: plate, Color: color}})
 }
 
 // NotifyDriverFailed tells a car's driver (email only) that their car could not
@@ -684,7 +723,7 @@ func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, p
 	key := fmt.Sprintf("driver-fail|%s|%s|%s", to, plate, time.Now().In(s.loc).Format("2006-01-02"))
 	return s.enqueue(ctx, outMessage{Account: owner, Recipients: []string{to}, Subject: subject,
 		Body: strings.Join(lines, "\n"), DedupKey: key, Reason: reasonDriverOn,
-		HeroPlate: plate, HeroColor: color})
+		Hero: mailer.Hero{Plate: plate, Color: color}})
 }
 
 // DriftChange is one permit's council-side change as the scheduler's drift read
@@ -781,7 +820,7 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 			DedupKey:  fmt.Sprintf("drift|%s|%s|%s", d.email, owner, key),
 			NotBefore: s.quietDefer(d.pref, now, c.Loc),
 			Reason:    reasonAccount,
-			HeroPlate: hero,
+			Hero:      mailer.Hero{Plate: hero},
 		}
 		if d.pref.EmailEnabled {
 			m.Recipients = []string{d.email}

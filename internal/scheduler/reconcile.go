@@ -527,10 +527,12 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	wantInfo := vehByOwnerID[ownerVehicle{p.Owner, res.VehicleID}]
 	want := wantInfo.Registration
 	wantName := wantInfo.Label
+	wantColor := wantInfo.Color  // the saved vehicle's plate colour, for the mail's chip
 	wantRegion := wantInfo.State // the saved vehicle's registration state
 	if res.Registration != "" {  // an ad-hoc one-off plate (not a saved vehicle)
 		want = res.Registration
 		wantName = ""
+		wantColor = ""
 		wantRegion = res.State
 	}
 	if want == "" {
@@ -673,7 +675,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// members who only hear about problems.
 		resolves := s.closeFailureEpisode(ctx, p.ID)
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Source: string(res.Source), By: res.By, OK: true,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Color: wantColor, Source: string(res.Source), By: res.By, OK: true,
 			DisplacedReg: d.Reg, DisplacedTold: told, ResolvesFailure: resolves,
 		}, "success|"+prev+">"+want)
 		alog.Infof("permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)

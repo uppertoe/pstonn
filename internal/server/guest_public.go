@@ -441,8 +441,53 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 			view.SelectedReg = view.PendingReg
 		}
 	}
+	if gc.Grant.Picker {
+		view.Audience = s.pickerAudience(ctx, permit)
+	}
 	view.FP = guestFP(view)
 	return view
+}
+
+// pickerAudience says who on the account hears about a rego put on the permit
+// from the quick picker, for the confirm dialog: a heading line, then one line
+// per person naming the channel, joined by newlines (the dialog splits them
+// into a list). It is the same per-member decision the notice itself makes
+// (failures-only mutes it, email off drops the email, quiet hours hold it until
+// the morning). "" when nothing can be sent, so the dialog says nothing rather
+// than something wrong.
+func (s *Server) pickerAudience(ctx context.Context, permit model.Permit) string {
+	if s.notify == nil || !s.notify.Enabled() {
+		return ""
+	}
+	now := time.Now()
+	rs, err := s.notify.ApplyAudience(ctx, notify.ApplyOutcome{Owner: permit.Owner, TenantID: permit.TenantID, Source: "picker", OK: true}, now)
+	if err != nil {
+		alog.Infof("picker audience for %s: %v", redact.Email(permit.Owner), err)
+		return ""
+	}
+	return strings.Join(audienceLines(rs, s.locForPermit(ctx, permit)), "\n")
+}
+
+// audienceLines words a notice's recipients for the confirm dialog: a heading,
+// then each person with how they are told: by email now, by email once their
+// quiet hours end, or by push only. A member reachable both ways is listed
+// under email, the channel the household asked about. Nobody is one plain line.
+func audienceLines(rs []notify.Recipient, loc *time.Location) []string {
+	if len(rs) == 0 {
+		return []string{"No one is notified of this change, the way notifications are set on the account."}
+	}
+	out := []string{"The following people will be notified of the change:"}
+	for _, r := range rs {
+		switch {
+		case r.ByEmail && r.NotBefore.IsZero():
+			out = append(out, r.Email+" — by email")
+		case r.ByEmail:
+			out = append(out, r.Email+" — by email at "+r.NotBefore.In(loc).Format("3:04pm")+", after their quiet hours")
+		default:
+			out = append(out, r.Email+" — by push notification, not email")
+		}
+	}
+	return out
 }
 
 // guestFP fingerprints the state a poll could change. Everything else on the
@@ -591,7 +636,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	// The target is either an arbitrary plate (when the grant allows it, e.g. a
 	// visitor QR) or one of the grant's saved cars. Each becomes a fresh override,
 	// created now, so it wins the resolution tie-break for its window.
-	var reg, name, createdBy, regState string
+	var reg, name, color, createdBy, regState string
 	var overrideID int64
 	if plate := normalizeReg(r.FormValue("plate")); plate != "" && gc.Grant.AllowPlate {
 		if !validRego(plate) {
@@ -624,7 +669,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			s.renderGuestMenu(w, r, gc, permit, current, "", "Please choose one of the regos on your link.")
 			return
 		}
-		reg, name, createdBy, regState = chosen.Registration, chosen.Label, gc.Recipient, chosen.State
+		reg, name, color, createdBy, regState = chosen.Registration, chosen.Label, chosen.Color, gc.Recipient, chosen.State
 		id, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID)
 		if err != nil {
 			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your choice. Please try again."))
@@ -668,7 +713,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		disp, told := s.displacedDriver(bg, permit, current, reg, gc.Recipient)
-		s.notifyGuestApply(bg, permit, guestSource(gc), reg, name, createdBy, disp, told)
+		s.notifyGuestApply(bg, permit, guestSource(gc), reg, name, color, createdBy, disp, told)
 		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is now on the permit until "+until+".", "")
 		return
 	}
@@ -807,7 +852,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 		// A revert can't displace a third party: the guest's own overrides were
 		// just swept, and the baseline is only re-pinned when nothing else covers
 		// now — so there is no displaced booking to chase.
-		s.notifyGuestApply(bg, permit, guestSource(gc), target, "", createdBy+" (undo)", model.DisplacedBooking{}, false)
+		s.notifyGuestApply(bg, permit, guestSource(gc), target, "", "", createdBy+" (undo)", model.DisplacedBooking{}, false)
 		s.renderGuestMenu(w, r, gc, permit, target, target+" is back on the permit.", "")
 		return
 	}
@@ -917,7 +962,7 @@ func guestSource(gc guestCtx) string {
 	return "guest"
 }
 
-func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, source, reg, name, by string, d model.DisplacedBooking, told bool) {
+func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, source, reg, name, color, by string, d model.DisplacedBooking, told bool) {
 	if s.notify == nil {
 		return
 	}
@@ -934,7 +979,7 @@ func (s *Server) notifyGuestApply(ctx context.Context, permit model.Permit, sour
 	// path has no reconcile-loop retry behind it, so a fire-and-forget send could
 	// silently drop the "a guest put their car on your permit" notice.
 	outcome := notify.ApplyOutcome{
-		Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: reg, Name: name, By: by, Source: source, OK: true,
+		Owner: permit.Owner, TenantID: permit.TenantID, PermitLabel: permitLabel(permit), Reg: reg, Name: name, Color: color, By: by, Source: source, OK: true,
 		DisplacedReg: d.Reg, DisplacedTold: told,
 	}
 	if err := s.notify.EnqueueApply(ctx, outcome); err != nil {

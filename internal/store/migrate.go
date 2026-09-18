@@ -422,8 +422,9 @@ CREATE TABLE IF NOT EXISTS outbox (
     sent_at       TEXT NOT NULL DEFAULT '',
     reason        TEXT NOT NULL DEFAULT '',  -- "why you got this", shown in the mail footer
     critical      INTEGER NOT NULL DEFAULT 0, -- safety-tier mail: delivered past a self-service unsubscribe
-    hero_plate    TEXT NOT NULL DEFAULT '',  -- registration to render as a centred plate chip in the HTML mail (driver-on notice)
-    hero_color    TEXT NOT NULL DEFAULT ''   -- that plate's colour (hex), so the chip matches the on-site plate
+    hero_plate    TEXT NOT NULL DEFAULT '',  -- registration to render as a centred plate chip in the HTML mail
+    hero_color    TEXT NOT NULL DEFAULT '',  -- that plate's colour (hex), so the chip matches the on-site plate
+    hero_caption  TEXT NOT NULL DEFAULT ''   -- the line above the chip saying its standing ("No longer on the permit")
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 
@@ -624,6 +625,10 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// plate and its colour ride with the row (2026-09-02).
 		`ALTER TABLE outbox ADD COLUMN hero_plate TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE outbox ADD COLUMN hero_color TEXT NOT NULL DEFAULT ''`,
+		// Every plate-change notice now carries the chip, and the displaced-driver
+		// one needs a caption above it or the chip reads as "you are covered"
+		// (2026-09-18).
+		`ALTER TABLE outbox ADD COLUMN hero_caption TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
