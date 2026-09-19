@@ -17,7 +17,11 @@
 {{/* ================= APP (nav + pages) ================= */}}
 {{template "appbar" .}}
 {{template "appnav" .}}
-<main id="main" tabindex="-1">
+{{/* The app saved to a home screen is restored as it was when reopened (see
+     the refresh-on-return script in layout.html): after five minutes away the
+     page reloads, unless a modal, a dialog or a field being typed in would be
+     lost. Longer than the guest page's half-minute: the app holds forms. */}}
+<main id="main" tabindex="-1" data-refresh-on-return="300">
   {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
   {{if .Warn}}<div class="banner warn">{{template "ic-alert"}} {{.Warn}}</div>{{end}}
 

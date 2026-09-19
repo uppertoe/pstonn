@@ -156,14 +156,29 @@
   
   
   
+  
+  
+  
   (function () {
     var hiddenAt = 0;
-    function stale() { return document.querySelector('[data-refresh-on-return]') && hiddenAt && Date.now() - hiddenAt > 30000; }
+    function marker() { return document.querySelector('[data-refresh-on-return]'); }
+    function busy() {
+      var a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') && a.value) return true;
+      if (document.querySelector('dialog[open]')) return true;
+      return Array.prototype.some.call(document.querySelectorAll('.modal-wrap'), function (m) { return m.getClientRects().length > 0; });
+    }
+    function stale() {
+      var m = marker();
+      if (!m || !hiddenAt) return false;
+      var secs = parseInt(m.getAttribute('data-refresh-on-return'), 10) || 30;
+      return Date.now() - hiddenAt > secs * 1000;
+    }
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
-      if (stale()) { location.reload(); }
+      if (stale() && !busy()) { location.reload(); }
     });
-    addEventListener('pageshow', function (e) { if (e.persisted && document.querySelector('[data-refresh-on-return]')) location.reload(); });
+    addEventListener('pageshow', function (e) { if (e.persisted && marker() && !busy()) location.reload(); });
   })();
   
   
@@ -396,7 +411,8 @@ window.popClamp = window.popClamp || function (el, tries) {
   </nav>
 </div>
 
-<main id="main" tabindex="-1">
+
+<main id="main" tabindex="-1" data-refresh-on-return="300">
   
   
 
