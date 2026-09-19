@@ -467,21 +467,19 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		// override displaced (popover/aria only), skipped when the override IS the
 		// rostered car so it never says "ABC123 · usually ABC123".
 		adhoc := r.Source == model.SourceOverride && r.Registration != ""
-		usual := ""
+		usual, usualClear := "", false
 		if r.Source == model.SourceOverride {
 			// The roster car this override displaced must come from the DAY's cycle
 			// week, not the current one — the grid's second row usually isn't.
 			if ru := ruleBy[cyc.WeekAt(resolveAt)][day.Weekday()]; ru.Empty {
-				if !r.Empty {
-					usual = "no rego"
-				}
+				usualClear = !r.Empty
 			} else if reg := regByID[ru.VehicleID]; reg != "" && !model.SamePlate(reg, calReg) {
 				usual = reg
 			}
 		}
 		cal = append(cal, calView{
 			DayLabel: day.Format("Mon 2"), Reg: calReg, Color: calColor,
-			Adhoc: adhoc, Usual: usual, Empty: r.Empty,
+			Adhoc: adhoc, Usual: usual, UsualClear: usualClear, Empty: r.Empty,
 			Source: src, HasOneoff: hasOneoff, IsToday: isToday, Past: past,
 		})
 	}

@@ -241,10 +241,14 @@
      hidden). Measure after open and pull it back via --pop-shift, then scroll
      it fully into view for bottom-row cells. Re-measure from zero each open so
      a stale shift from a previous open/rotation doesn't stick. */}}
-window.popClamp = window.popClamp || function (el) {
+window.popClamp = window.popClamp || function (el, tries) {
   el.style.removeProperty('--pop-shift');
   var pad = 12, vw = document.documentElement.clientWidth;
   var r = el.getBoundingClientRect(), dx = 0;
+  // Not laid out yet (x-show has not applied on this tick): a zero rect read
+  // as "off the left edge" and shifted the popover the wrong way, off the
+  // right of a phone. Measure again next frame, a few times at most.
+  if (!r.width) { if ((tries || 0) < 5) requestAnimationFrame(function () { popClamp(el, (tries || 0) + 1); }); return; }
   if (r.left < pad) dx = pad - r.left;
   else if (r.right > vw - pad) dx = vw - pad - r.right;
   if (dx) el.style.setProperty('--pop-shift', dx + 'px');

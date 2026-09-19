@@ -853,16 +853,17 @@ type weekView struct {
 }
 
 type calView struct {
-	DayLabel  string // e.g. "Mon 21"
-	Reg       string
-	Color     string
-	Adhoc     bool   // covered by an override with a typed plate — no saved colour to show
-	Empty     bool   // the schedule leaves the permit with no rego this day (Reg "", Source set)
-	Usual     string // the roster plate an override displaced ("no rego" for an empty day), "" when not displaced
-	Source    string // "roster" | "override" | ""
-	HasOneoff bool
-	IsToday   bool
-	Past      bool // earlier this week; shown dimmed for context
+	DayLabel   string // e.g. "Mon 21"
+	Reg        string
+	Color      string
+	Adhoc      bool   // covered by an override with a typed plate — no saved colour to show
+	Empty      bool   // the schedule leaves the permit with no rego this day (Reg "", Source set)
+	Usual      string // the roster plate an override displaced, "" when not displaced
+	UsualClear bool   // the override displaced a "clear" roster day
+	Source     string // "roster" | "override" | ""
+	HasOneoff  bool
+	IsToday    bool
+	Past       bool // earlier this week; shown dimmed for context
 	// Today-only confirmation state, mirroring the status pill (see armPlatePoll).
 	// The calendar renders INTENT — for future days the only truth there is — but
 	// today's cell must not paint a plate the tenant hasn't confirmed with the

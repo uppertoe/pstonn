@@ -356,6 +356,14 @@ func TestQuickPickerActivation(t *testing.T) {
 	if p, _ := s.store.GetPermit(ctx, pid); p.ActiveRegistration != "XYZ789" {
 		t.Fatalf("refused clear changed the permit to %q", p.ActiveRegistration)
 	}
+	// A "clear" roster day is the other case the offer stands: ending the
+	// picker's booking lets the day clear, so the take-off is offered and works.
+	if err := s.store.SetEmptyRule(ctx, owner, pid, 0, today); err != nil {
+		t.Fatal(err)
+	}
+	if body := s.getGuest("/g/" + raw).Body.String(); !strings.Contains(body, "off the permit</button>") {
+		t.Fatalf("take-off withheld on a clear roster day:\n%s", body)
+	}
 	if err := s.store.ClearRule(ctx, owner, pid, 0, today); err != nil {
 		t.Fatal(err)
 	}

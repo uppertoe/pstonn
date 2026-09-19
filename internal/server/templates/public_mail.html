@@ -122,13 +122,15 @@
      stay self-contained: no fragment, no poll, nothing that needs the server.
      "Try again" is a real navigation to the same address (an empty href), so
      the worker tries the network again. */}}
-{{/* The brand alone: the public nav's links have nowhere to go offline. */}}
-<header class="appbar pubbar"><span class="brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></span></header>
+{{/* No header: the public nav's links have nowhere to go offline. The brand
+     sits in the card, over a greyed ring with the no-connection mark. */}}
 <main id="main" tabindex="-1" class="guestwrap">
-  <section class="guestcard">
-    <h1>You&rsquo;re offline</h1>
-    <p class="gresult">p.stonn needs a connection to reach the council and its own records, so nothing has been changed. Check your phone&rsquo;s connection and try again.</p>
-    <p style="margin-top:16px"><a class="btnlike" href="" hx-boost="false">Try again</a></p>
+  <section class="card hero offline">
+    <div class="brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    <div class="ring ring-off">{{template "ic-offline"}}</div>
+    <h2>You&rsquo;re offline</h2>
+    <p>p.stonn needs a connection to reach the council and its own records, so nothing has been changed. Check your phone&rsquo;s connection and try again.</p>
+    <a class="btnlike" href="" hx-boost="false">Try again</a>
   </section>
 </main>
 {{end}}

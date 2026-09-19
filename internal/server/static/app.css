@@ -390,6 +390,11 @@ tr:last-child td { border-bottom:0; }
 .cday .bar.applying { background:repeating-linear-gradient(-45deg, var(--muted) 0 3px, var(--line) 3px 7px) !important; }
 .cday .bar.unconf { background:repeating-linear-gradient(-45deg, var(--warn) 0 3px, var(--warn-soft) 3px 7px) !important; }
 .calwarn { color:var(--warn); font-size:12px; }
+/* The day popover's lines: what, why, and today's council status. */
+.cday .pop { text-align:left; }
+.cday .cal-what { margin-bottom:5px; }
+.cday .cal-why { font-size:12px; color:var(--muted); line-height:1.4; }
+.cday .cal-st { font-size:12px; margin-top:6px; color:var(--muted); }
 
 /* popover — centred with the standalone translate property, NOT transform:
    the rise animation ends at transform:none (fill both), which would wipe a
@@ -411,15 +416,10 @@ tr:last-child td { border-bottom:0; }
 :root[data-theme="dark"] .vopt.sel { color:var(--primary); }
 .vopt .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vopt .reg { margin-left:auto; flex:0 0 auto; }
-/* A second line under an option, saying what it does. */
-.vopt .sub2 { flex-basis:100%; font-size:11.5px; color:var(--muted); font-weight:400; white-space:normal; line-height:1.35; }
-.vopt:has(.sub2) { flex-wrap:wrap; row-gap:2px; }
-.vopt:has(.sub2) .lab { flex:1 1 0; min-width:0; white-space:normal; }
-/* A cell popover carrying the explained options needs more than the floor
-   width (the cell it hangs from is narrow, so it shrink-wraps to min-width);
-   popClamp still keeps it inside the viewport. */
-.pop:has(.sub2) { min-width:292px; }
-/* "Clear the permit": the icon sits where a rego's colour dot would. */
+/* The none/clear rows: a short hint on the right, where a rego's plate sits. */
+.vopt .hint { margin-left:auto; flex:0 0 auto; font-size:11.5px; color:var(--muted); font-weight:400; }
+.vopt.sel .hint { color:inherit; opacity:.75; }
+/* "Clear": the icon sits where a rego's colour dot would. */
 .vopt.vclear svg { width:14px; height:14px; flex:0 0 auto; color:var(--muted); }
 .vopt.vclear.sel svg { color:inherit; }
 .seg { display:flex; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden; }
@@ -1005,6 +1005,10 @@ table.adm .bad { color:var(--danger); }
 .hero { text-align:center; padding:34px 22px; max-width:520px; margin:26px auto; }
 .hero .ring { width:60px; height:60px; border-radius:16px; background:linear-gradient(135deg,var(--primary),var(--primary-2)); color:var(--on-primary); display:inline-flex; align-items:center; justify-content:center; margin-bottom:16px; box-shadow:var(--shadow-lg); }
 .hero .ring svg { width:28px; height:28px; }
+/* The offline page: the brand over a greyed ring carrying the no-connection mark. */
+.hero.offline .brand { justify-content:center; margin-bottom:22px; }
+.hero .ring.ring-off { background:var(--surface-2); color:var(--muted); border:1px solid var(--line); box-shadow:none; }
+.hero.offline .btnlike { margin-top:4px; }
 .hero h2 { margin:0 0 8px; font-size:21px; letter-spacing:-.02em; justify-content:center; }
 .hero p { margin:0 auto 18px; max-width:440px; color:var(--muted); }
 form.stack { display:grid; gap:11px; max-width:none; margin:0; text-align:left; }

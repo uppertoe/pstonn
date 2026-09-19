@@ -457,16 +457,17 @@ const pickerActor = "the quick picker"
 
 // pickerCanClear says whether the picker may offer to take the rego off the
 // permit, on the same terms as the schedule's own "Remove" button: the council
-// allows an empty permit, a rego is on it, and nothing is scheduled for now,
-// judged with this link's own bookings set aside, because taking the rego off
-// ends them first. When the roster or another booking covers the moment the
-// loop would put its rego straight back, so the offer is withheld.
+// allows an empty permit, a rego is on it, and nothing is scheduled for now
+// (or the day is a "clear" one), judged with this link's own bookings set
+// aside, because taking the rego off ends them first. When the roster or
+// another booking covers the moment the loop would put its rego straight
+// back, so the offer is withheld.
 func (s *Server) pickerCanClear(ctx context.Context, gc guestCtx, permit model.Permit, current string) bool {
 	if current == "" || s.tenant == nil || !s.tenant.Capabilities(ctx, permit.Owner, permit.TenantID).CanClearVehicle {
 		return false
 	}
 	res, err := s.resolveWithout(ctx, permit, gc.TokenID)
-	return err == nil && res.Source == model.SourceNone
+	return err == nil && (res.Source == model.SourceNone || res.Empty)
 }
 
 // resolveWithout resolves the permit's schedule for now with the overrides a
@@ -1005,7 +1006,7 @@ func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 	if res, err := s.resolveWithout(r.Context(), permit, gc.TokenID); err != nil {
 		s.serverError(w, err)
 		return
-	} else if res.Source != model.SourceNone {
+	} else if res.Source != model.SourceNone && !res.Empty {
 		s.renderGuestMenu(w, r, gc, permit, current, "", "The roster has a rego scheduled for now, so the permit can't be left empty. Change today's roster in the app instead.")
 		return
 	}
@@ -1044,7 +1045,7 @@ func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, cmp.Or(rerr, oerr))
 		return
 	}
-	if res := model.Resolve(time.Now().In(s.locForPermit(applyCtx, permit)), permit.Cycle(), rules, ovs); res.Source != model.SourceNone {
+	if res := model.Resolve(time.Now().In(s.locForPermit(applyCtx, permit)), permit.Cycle(), rules, ovs); res.Source != model.SourceNone && !res.Empty {
 		release()
 		s.kickScheduler()
 		s.renderGuestMenu(w, r, gc, permit, current, "", "A rego was just scheduled for now, so the permit can't be left empty.")
