@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=09ba22b031">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=09ba22b031">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=229056767a">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=229056767a">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=09ba22b031">
+<link rel="stylesheet" href="/static/app.css?v=229056767a">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=09ba22b031"></script>
-<script defer src="/static/alpine.min.js?v=09ba22b031"></script>
+<script src="/static/htmx.min.js?v=229056767a"></script>
+<script defer src="/static/alpine.min.js?v=229056767a"></script>
 
 
 <script>
@@ -210,10 +210,14 @@
 </script>
 <script>
 
-window.popClamp = window.popClamp || function (el) {
+window.popClamp = window.popClamp || function (el, tries) {
   el.style.removeProperty('--pop-shift');
   var pad = 12, vw = document.documentElement.clientWidth;
   var r = el.getBoundingClientRect(), dx = 0;
+  
+  
+  
+  if (!r.width) { if ((tries || 0) < 5) requestAnimationFrame(function () { popClamp(el, (tries || 0) + 1); }); return; }
   if (r.left < pad) dx = pad - r.left;
   else if (r.right > vw - pad) dx = vw - pad - r.right;
   if (dx) el.style.setProperty('--pop-shift', dx + 'px');
@@ -474,24 +478,24 @@ window.popClamp = window.popClamp || function (el) {
     
     <button type="button" class="chip noreg" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="Sun: the permit is cleared, no rego, change">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">no rego</span>
+            aria-label="Sun: clear, the rego is removed, change">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">clear</span>
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       
       <p class="tt">Sun: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sun</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt " @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear sel" @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -512,16 +516,16 @@ window.popClamp = window.popClamp || function (el) {
       
       <p class="tt">Mon: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Mon</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -542,16 +546,16 @@ window.popClamp = window.popClamp || function (el) {
       
       <p class="tt">Tue: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Tue</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -572,16 +576,16 @@ window.popClamp = window.popClamp || function (el) {
       
       <p class="tt">Wed: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Wed</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -602,16 +606,16 @@ window.popClamp = window.popClamp || function (el) {
       
       <p class="tt">Thu: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Thu</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -632,16 +636,16 @@ window.popClamp = window.popClamp || function (el) {
       
       <p class="tt">Fri: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Fri</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -662,16 +666,16 @@ window.popClamp = window.popClamp || function (el) {
       
       <p class="tt">Sat: choose a rego</p>
       <div class="vopts">
+        
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sat</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
-        
         <button type="button" class="vopt vclear " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
         
       </div>
       
@@ -697,7 +701,7 @@ window.popClamp = window.popClamp || function (el) {
   
   <div class="cday today" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2, today. ABC123, roster"
+       aria-label="Mon 2, today. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -705,14 +709,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Tue 3. no rego on the permit, roster"
+       aria-label="Tue 3. No rego, cleared. The roster clears the permit that day."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Tue 3</div>
     <div class="omk" aria-hidden="true"></div>
@@ -720,14 +726,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Tue 3</p>
-      <span class="noplate">no rego</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="noplate">no rego</span></div>
+      <div class="cal-why">The roster clears the permit that day.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -735,14 +743,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -750,14 +760,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -765,14 +777,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -780,14 +794,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -795,14 +811,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -810,14 +828,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -825,14 +845,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -840,14 +862,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -855,14 +879,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -870,14 +896,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -885,14 +913,16 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster"
+       aria-label="Mon 2. ABC123. From the roster."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -900,7 +930,9 @@ window.popClamp = window.popClamp || function (el) {
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      
+      <div class="cal-what"><span class="reg">ABC123</span></div>
+      <div class="cal-why">From the roster.</div>
       
     </div>
   </div>
