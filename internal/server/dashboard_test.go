@@ -586,7 +586,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"schedule-empty-day", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{Permits: []permitView{emptyDayPermitViewAt(loc, now)}},
-		}, "Leave the permit empty"},
+		}, "Clear the permit"},
 		// Right after adding a permit while another visitor permit is still unmanaged:
 		// the "manage another" control becomes the highlighted "set up your other permit".
 		{"schedule-more-to-set-up", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,

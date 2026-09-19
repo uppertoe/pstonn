@@ -414,7 +414,7 @@
          uses), and nothing scheduled (whatever is on the permit stays). */}}
     <button type="button" class="chip {{if .Empty}}noreg{{else if not .Reg}}empty{{end}}" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else if .Empty}}the permit is left with no rego, change{{else}}nothing scheduled, choose a rego{{end}}">
+            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else if .Empty}}the permit is cleared, no rego, change{{else}}nothing scheduled, choose a rego{{end}}">
       {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else if .Empty}}{{template "ic-empty"}}<span class="lab">no rego</span>{{else}}<span class="lab muted">none</span>{{end}}
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
@@ -434,7 +434,7 @@
              must be taken on purpose rather than brushed in the list. */}}
         <div class="vsep" role="separator"></div>
         <button type="button" class="vopt vempty {{if $emptyDay}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"empty"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">{{template "ic-empty"}}<span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"empty"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">{{template "ic-empty"}}<span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
         {{end}}
       </div>
       {{else}}
@@ -589,8 +589,8 @@
         {{/* Booking no rego is confirmed like any other act that leaves a car
              uncovered; the plate read-back (layout.html) leaves this alone when
              the plate field is not in play. */}}
-        :data-confirm="mode=='empty' ? 'Book the permit to have no rego? For as long as this booking runs, no car is covered on it.' : null"
-        :data-confirm-ok="mode=='empty' ? 'Book no rego' : null"
+        :data-confirm="mode=='empty' ? 'Clear the permit for this booking? For as long as it runs, no car is covered on it.' : null"
+        :data-confirm-ok="mode=='empty' ? 'Clear it' : null"
         x-data="{mode:'{{if .Vehicles}}car{{else}}plate{{end}}', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
                  endLabel(offset) {
                    const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
@@ -607,7 +607,7 @@
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Type a rego</button>
       {{if .CanEmpty}}{{/* The third choice is set apart (dashed, its own icon): it
            books the permit to have NO rego, and a car in the street loses cover. */}}
-      <button type="button" class="segempty" :class="{on: mode=='empty'}" @click="mode='empty'; sel=''; lbl=''; col=''; plate=''">{{template "ic-empty"}} No rego</button>{{end}}
+      <button type="button" class="segempty" :class="{on: mode=='empty'}" @click="mode='empty'; sel=''; lbl=''; col=''; plate=''">{{template "ic-empty"}} Clear permit</button>{{end}}
     </div>
     {{end}}{{/* Empty garage: no toggle — the modal opens straight on the plate
          field, which needs no saved cars, instead of an empty vehicle picker. */}}
@@ -690,7 +690,7 @@
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       {{/* Can't submit with neither a car nor a plate — the server refuses that
            anyway, but a button that fires only to bounce reads as broken. */}}
-      <button type="submit" :disabled="mode=='car' ? !sel : mode=='plate' ? !plate.trim() : false">{{template "ic-plus"}} <span x-text="mode=='empty' ? 'Book no rego' : 'Book'">Book</span></button>
+      <button type="submit" :disabled="mode=='car' ? !sel : mode=='plate' ? !plate.trim() : false">{{template "ic-plus"}} Book</button>
     </div>
   </form>
   </div>

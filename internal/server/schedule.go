@@ -1154,7 +1154,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// which is worth being able to see and attribute.
 	reg := plate
 	if empty {
-		reg = "no rego"
+		reg = clearBookingTarget
 	} else if reg == "" {
 		reg = s.plateOf(r.Context(), owner, vehicleID)
 	}
@@ -1186,7 +1186,7 @@ func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
 			if o.ID == oid {
 				gone = o.Registration
 				if o.Empty {
-					gone = "no rego"
+					gone = clearBookingTarget
 				} else if gone == "" {
 					gone = s.plateOf(r.Context(), owner, o.VehicleID)
 				}

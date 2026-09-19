@@ -40,7 +40,7 @@ func TestEmptyRosterDayAndBooking(t *testing.T) {
 		t.Fatalf("rules = %+v", rs)
 	}
 	body := w.Body.String()
-	for _, want := range []string{`class="chip noreg"`, `vopt vempty sel`, "Leave the permit empty", "Nothing scheduled on Mon"} {
+	for _, want := range []string{`class="chip noreg"`, `vopt vempty sel`, "Clear the permit", "Nothing scheduled on Mon"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("card after an empty day lacks %q:\n%s", want, excerpt(body))
 		}
@@ -66,7 +66,7 @@ func TestEmptyRosterDayAndBooking(t *testing.T) {
 	if body := w.Body.String(); !strings.Contains(body, `<span class="veh"><span class="noplate">no rego</span></span>`) {
 		t.Fatalf("the booking list does not show the no-rego booking:\n%s", excerpt(body))
 	}
-	if cs, _ := r.st.ListChanges(ctx, user, 5); len(cs) == 0 || changeText(cs[0]) != "added a one-off booking for no rego ("+cs[0].Detail+")" {
+	if cs, _ := r.st.ListChanges(ctx, user, 5); len(cs) == 0 || changeText(cs[0]) != "added a one-off booking that clears the permit ("+cs[0].Detail+")" {
 		t.Fatalf("change log after the no-rego booking = %+v", cs)
 	}
 

@@ -437,8 +437,12 @@ tr:last-child td { border-bottom:0; }
 .seg button.segempty svg { width:14px; height:14px; }
 .seg button.segempty.on { background:var(--surface-2); color:var(--ink); border-left-color:var(--muted); }
 /* The "no rego" booking pane: the mark, then what it means. */
-.emptybook { display:grid; gap:8px; justify-items:start; padding:12px 14px; border:2px dashed var(--line); border-radius:var(--radius-sm); }
+.emptybook { display:grid; gap:8px; justify-items:start; align-content:start; padding:12px 14px; border:2px dashed var(--line); border-radius:var(--radius-sm); flex:1; }
+/* The stacked panes share the tallest one's height; the dashed box fills it rather than leaving a gap under itself. */
+.segpane:has(.emptybook) { display:flex; flex-direction:column; }
 .emptybook p { margin:0; font-size:13px; color:var(--muted); line-height:1.45; }
+/* Three tabs at phone width: less side padding so each label keeps to one line. */
+@media (max-width:640px) { .seg:has(.segempty) button { padding:9px 6px; font-size:12.5px; } .seg button.segempty svg { display:none; } }
 /* Both panes share one grid cell, so the area is always the taller pane's
    height and the modal doesn't resize when switching tabs. */
 .segpanes { display:grid; }
