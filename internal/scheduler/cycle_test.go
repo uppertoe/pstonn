@@ -29,7 +29,7 @@ func TestReconcileFollowsTheCycleWeek(t *testing.T) {
 	}
 	// Wednesday 2026-09-09 UTC sits in the week anchored 2026-09-06 (week 0).
 	base := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
-	if _, err := st.AddCycleWeek(ctx, owner, pid, "2026-09-06"); err != nil {
+	if _, err := st.GrowCycle(ctx, owner, pid, "2026-09-06", 2); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetRule(ctx, owner, pid, 0, time.Wednesday, vehA); err != nil {

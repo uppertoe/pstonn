@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/uppertoe/pstonn/internal/model"
 )
 
 // The cycle grows and shrinks only at its end, in one transaction each way, and
@@ -21,9 +19,9 @@ func TestCycleWeekAddRemoveRestoreRoundTrip(t *testing.T) {
 	src, _, vehID := copyFixture(t, st, owner) // src: Monday+Friday in week 0
 
 	// Add: the new week is a copy of the last one, and the anchor lands.
-	n, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06")
+	n, err := st.GrowCycle(ctx, owner, src, "2026-09-06", 2)
 	if err != nil || n != 2 {
-		t.Fatalf("AddCycleWeek = %d, %v; want 2", n, err)
+		t.Fatalf("GrowCycle = %d, %v; want 2", n, err)
 	}
 	rules, err := st.ListRules(ctx, src)
 	if err != nil {
@@ -51,9 +49,9 @@ func TestCycleWeekAddRemoveRestoreRoundTrip(t *testing.T) {
 	if err := st.ClearRule(ctx, owner, src, 1, time.Friday); err != nil {
 		t.Fatal(err)
 	}
-	removed, n, err := st.RemoveLastCycleWeek(ctx, owner, src, "")
+	removed, n, err := st.ShrinkCycle(ctx, owner, src, "", 1)
 	if err != nil || n != 1 {
-		t.Fatalf("RemoveLastCycleWeek = %d, %v; want 1", n, err)
+		t.Fatalf("ShrinkCycle = %d, %v; want 1", n, err)
 	}
 	if len(removed) != 1 || removed[0].Weekday != time.Monday || removed[0].VehicleID != vehID {
 		t.Fatalf("removed week = %+v, want the edited week 1 (Monday only)", removed)
@@ -64,9 +62,9 @@ func TestCycleWeekAddRemoveRestoreRoundTrip(t *testing.T) {
 	}
 
 	// Restore: the week and its rules return under the given anchor.
-	n, err = st.RestoreCycleWeek(ctx, owner, src, removed, "2026-09-06")
+	n, err = st.RestoreCycle(ctx, owner, src, removed, "2026-09-06", 2)
 	if err != nil || n != 2 {
-		t.Fatalf("RestoreCycleWeek = %d, %v; want 2", n, err)
+		t.Fatalf("RestoreCycle = %d, %v; want 2", n, err)
 	}
 	rules, _ = st.ListRules(ctx, src)
 	week1 := 0
@@ -96,19 +94,24 @@ func TestCycleWeekBounds(t *testing.T) {
 	const owner = "owner@example.com"
 	src, _, _ := copyFixture(t, st, owner)
 
-	if _, _, err := st.RemoveLastCycleWeek(ctx, owner, src, ""); !errors.Is(err, ErrCycleWeek) {
+	if _, _, err := st.ShrinkCycle(ctx, owner, src, "", 1); !errors.Is(err, ErrCycleWeek) {
 		t.Fatalf("removing the only week: err = %v, want ErrCycleWeek", err)
 	}
-	for i := 2; i <= model.MaxCycleWeeks; i++ {
-		if n, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); err != nil || n != i {
-			t.Fatalf("add to %d: n=%d err=%v", i, n, err)
+	// Up the ladder: a week, a fortnight, four weeks; nothing past the cap, and
+	// a grow that is not a grow is refused.
+	for _, to := range []int{2, 4} {
+		if n, err := st.GrowCycle(ctx, owner, src, "2026-09-06", to); err != nil || n != to {
+			t.Fatalf("grow to %d: n=%d err=%v", to, n, err)
 		}
 	}
-	if _, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); !errors.Is(err, ErrCycleWeek) {
+	if _, err := st.GrowCycle(ctx, owner, src, "2026-09-06", 5); !errors.Is(err, ErrCycleWeek) {
 		t.Fatalf("fifth week: err = %v, want ErrCycleWeek", err)
 	}
+	if _, err := st.GrowCycle(ctx, owner, src, "2026-09-06", 3); !errors.Is(err, ErrCycleWeek) {
+		t.Fatalf("shrinking via grow: err = %v, want ErrCycleWeek", err)
+	}
 	// Owner scoping: someone else's permit is not found.
-	if _, _, err := st.RemoveLastCycleWeek(ctx, "other@example.com", src, ""); !errors.Is(err, ErrNotFound) {
+	if _, _, err := st.ShrinkCycle(ctx, "other@example.com", src, "", 1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign owner: err = %v, want ErrNotFound", err)
 	}
 }
@@ -124,7 +127,7 @@ func TestSetRuleRefusesUnreachableWeek(t *testing.T) {
 	if err := st.SetRule(ctx, owner, src, 1, time.Tuesday, vehID); !errors.Is(err, ErrCycleWeek) {
 		t.Fatalf("week 1 on a 1-week roster: err = %v, want ErrCycleWeek", err)
 	}
-	if _, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); err != nil {
+	if _, err := st.GrowCycle(ctx, owner, src, "2026-09-06", 2); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetRule(ctx, owner, src, 1, time.Tuesday, vehID); err != nil {
@@ -144,7 +147,7 @@ func TestCopyScheduleCarriesTheCycle(t *testing.T) {
 	const owner = "owner@example.com"
 	src, dst, vehID := copyFixture(t, st, owner)
 
-	if _, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); err != nil {
+	if _, err := st.GrowCycle(ctx, owner, src, "2026-09-06", 2); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetRule(ctx, owner, src, 1, time.Wednesday, vehID); err != nil {
@@ -196,7 +199,7 @@ func TestVehicleUsageReportsCycleWeeks(t *testing.T) {
 	st := copyStore(t)
 	const owner = "owner@example.com"
 	src, _, vehID := copyFixture(t, st, owner)
-	if _, err := st.AddCycleWeek(ctx, owner, src, "2026-09-06"); err != nil {
+	if _, err := st.GrowCycle(ctx, owner, src, "2026-09-06", 2); err != nil {
 		t.Fatal(err)
 	}
 	u, err := st.VehicleUsageFor(ctx, owner, vehID)

@@ -79,6 +79,42 @@ func TestEmptyRulesAndBookings(t *testing.T) {
 	if ovs, _ := s.ListOverrides(ctx, dst, now); len(ovs) != 1 || !ovs[0].Empty {
 		t.Fatalf("copied overrides = %+v", ovs)
 	}
+	// A cycle shrink hands back a clear day as a clear day (its vehicle is
+	// NULL, which the old scan choked on), and the restore puts it back.
+	if n, err := s.GrowCycle(ctx, owner, pid, "2026-09-06", 2); err != nil || n != 2 {
+		t.Fatalf("grow = %d, %v", n, err)
+	}
+	if err := s.SetEmptyRule(ctx, owner, pid, 1, time.Friday); err != nil {
+		t.Fatal(err)
+	}
+	removed, n, err := s.ShrinkCycle(ctx, owner, pid, "", 1)
+	if err != nil || n != 1 {
+		t.Fatalf("shrink = %d, %v", n, err)
+	}
+	clears := 0
+	for _, r := range removed {
+		if r.Week != 1 {
+			t.Fatalf("removed rule from week %d: %+v", r.Week, r)
+		}
+		if r.Empty && r.Weekday == time.Friday {
+			clears++
+		}
+	}
+	if clears != 1 {
+		t.Fatalf("the clear day did not come back from the shrink: %+v", removed)
+	}
+	if n, err := s.RestoreCycle(ctx, owner, pid, removed, "2026-09-06", 2); err != nil || n != 2 {
+		t.Fatalf("restore = %d, %v", n, err)
+	}
+	// Week 1 (a copy of week 0: Monday's rego and Tuesday's clear) plus its
+	// own Friday clear are all back.
+	if rules, _ := s.ListRules(ctx, pid); len(rules) != 5 || !rules[4].Empty || rules[4].Week != 1 || rules[4].Weekday != time.Friday {
+		t.Fatalf("rules after restore = %+v", rules)
+	}
+	if _, _, err := s.ShrinkCycle(ctx, owner, pid, "", 1); err != nil {
+		t.Fatal(err)
+	}
+
 	// Deleting the rego takes its day with it (the cascade) and leaves the
 	// empty day, which depends on no rego.
 	if _, err := s.DeleteVehicle(ctx, owner, vid); err != nil {

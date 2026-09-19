@@ -106,36 +106,43 @@ func TestCycleWeekEndpoints(t *testing.T) {
 		t.Fatalf("rules after add = %d, want the copied Monday in both weeks", len(rs))
 	}
 
-	// Cap: grow to four, then the fifth is refused.
-	for i := 0; i < 2; i++ {
-		if w := r.s.doHX(http.MethodPost, add, user, origin, nil); w.Code != http.StatusOK {
-			t.Fatalf("grow = %d", w.Code)
-		}
+	// Up the ladder: from a fortnight one add makes four weeks (3 and 4 copied
+	// from 1 and 2, so the Monday is in all four), and the cap refuses more.
+	w = r.s.doHX(http.MethodPost, add, user, origin, nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Added weeks 3 and 4, copied from weeks 1 and 2.") {
+		t.Fatalf("grow to four = %d: %s", w.Code, excerpt(w.Body.String()))
+	}
+	if p, _ := r.st.GetPermit(ctx, id); p.CycleWeeks != 4 {
+		t.Fatalf("cycle after the second add = %d weeks, want 4", p.CycleWeeks)
+	}
+	if rs, _ := r.st.ListRules(ctx, id); len(rs) != 4 {
+		t.Fatalf("rules after the second add = %d, want the Monday in all four weeks", len(rs))
 	}
 	if w := r.s.doHX(http.MethodPost, add, user, origin, nil); w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("fifth week = %d, want 422", w.Code)
 	}
 
-	// Remove the last week: the reply's banner carries the Undo payload.
+	// Down the ladder: one remove takes weeks 3 and 4 together, and the reply's
+	// banner carries the Undo payload for both.
 	w = r.s.doHX(http.MethodPost, "/permits/"+itoa64(id)+"/weeks/remove", user, origin, nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("remove = %d: %s", w.Code, excerpt(w.Body.String()))
 	}
 	body = w.Body.String()
-	if !strings.Contains(body, "Removed week 4") {
-		t.Fatalf("remove reply does not name the week: %s", excerpt(body))
+	if !strings.Contains(body, "Removed weeks 3 and 4.") {
+		t.Fatalf("remove reply does not name the weeks: %s", excerpt(body))
 	}
 	m := regexp.MustCompile(`name="undo" value="([^"]+)"`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("remove reply carries no undo payload: %s", excerpt(body))
 	}
-	if p, _ := r.st.GetPermit(ctx, id); p.CycleWeeks != 3 {
-		t.Fatalf("cycle after remove = %d weeks, want 3", p.CycleWeeks)
+	if p, _ := r.st.GetPermit(ctx, id); p.CycleWeeks != 2 {
+		t.Fatalf("cycle after remove = %d weeks, want 2", p.CycleWeeks)
 	}
 
-	// Undo restores the week and its Monday.
+	// Undo restores both weeks and their Mondays.
 	w = r.s.doHX(http.MethodPost, "/permits/"+itoa64(id)+"/weeks/restore", user, origin, url.Values{"undo": {m[1]}})
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Weeks 3 and 4 are back.") {
 		t.Fatalf("restore = %d: %s", w.Code, excerpt(w.Body.String()))
 	}
 	p, _ := r.st.GetPermit(ctx, id)
@@ -143,20 +150,25 @@ func TestCycleWeekEndpoints(t *testing.T) {
 		t.Fatalf("cycle after undo = %d weeks, want 4", p.CycleWeeks)
 	}
 	rs, _ = r.st.ListRules(ctx, id)
-	found := false
+	back := 0
 	for _, ru := range rs {
-		if ru.Week == 3 && ru.Weekday == time.Monday && ru.VehicleID == vid {
-			found = true
+		if ru.Week >= 2 && ru.Weekday == time.Monday && ru.VehicleID == vid {
+			back++
 		}
 	}
-	if !found {
-		t.Fatalf("undo did not restore week 4's Monday: %+v", rs)
+	if back != 2 {
+		t.Fatalf("undo did not restore both Mondays: %+v", rs)
+	}
+	// A second Undo of the same payload is refused: those weeks are back.
+	if w := r.s.doHX(http.MethodPost, "/permits/"+itoa64(id)+"/weeks/restore", user, origin, url.Values{"undo": {m[1]}}); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("repeated undo = %d, want 422", w.Code)
 	}
 
 	// A tampered payload is refused.
-	w = r.s.doHX(http.MethodPost, "/permits/"+itoa64(id)+"/weeks/restore", user, origin, url.Values{"undo": {"9:999999|nonsense"}})
-	if w.Code == http.StatusOK {
-		t.Fatal("a tampered undo payload was accepted")
+	for _, bad := range []string{"9:999999|nonsense", "4|9:1:999999|nonsense", "4|0:1:" + itoa64(vid) + "|", "7|-|"} {
+		if w := r.s.doHX(http.MethodPost, "/permits/"+itoa64(id)+"/weeks/restore", user, origin, url.Values{"undo": {bad}}); w.Code == http.StatusOK {
+			t.Fatalf("a tampered undo payload %q was accepted", bad)
+		}
 	}
 }
 
@@ -180,7 +192,7 @@ func TestCalendarCrossesTheCycleBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.st.AddCycleWeek(ctx, owner, id, "2026-09-06"); err != nil {
+	if _, err := r.st.GrowCycle(ctx, owner, id, "2026-09-06", 2); err != nil {
 		t.Fatal(err)
 	}
 	// Wednesdays differ by week; week 1's Wednesday also gets an override so

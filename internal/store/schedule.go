@@ -234,79 +234,73 @@ FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
 // caller (model.ReanchoredCycle needs the permit's timezone, which the store
 // does not know).
 
-// AddCycleWeek appends one week to a permit's roster cycle, seeded with a copy
-// of the (previously) last week's rules — the resolved car is unchanged at the
-// boundary until the new week is edited. Returns the new week count; capped at
-// model.MaxCycleWeeks.
-func (s *Store) AddCycleWeek(ctx context.Context, owner string, permitID int64, anchor string) (int, error) {
+// GrowCycle lengthens a permit's roster cycle to `to` weeks. Each new week is
+// seeded with a copy of the week one cycle earlier (week 3 from week 1, week 4
+// from week 2; week 2 from week 1), so the roster repeats as it did and the
+// resolved car is unchanged until a new week is edited. Returns the new week
+// count; refused when `to` is not longer or exceeds model.MaxCycleWeeks.
+func (s *Store) GrowCycle(ctx context.Context, owner string, permitID int64, anchor string, to int) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	var weeks int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?`, permitID, owner).Scan(&weeks); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrNotFound
-		}
+	weeks, err := cycleWeeksTx(ctx, tx, owner, permitID)
+	if err != nil {
 		return 0, err
 	}
-	if weeks < 1 {
-		weeks = 1
-	}
-	if weeks >= model.MaxCycleWeeks {
+	if to <= weeks || to > model.MaxCycleWeeks {
 		return weeks, ErrCycleWeek
 	}
-	if _, err := tx.ExecContext(ctx, `
+	for k := weeks; k < to; k++ {
+		if _, err := tx.ExecContext(ctx, `
 INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty)
 SELECT permit_id, ?, weekday, vehicle_id, empty FROM weekly_rule WHERE permit_id = ? AND cycle_week = ?`,
-		weeks, permitID, weeks-1); err != nil {
-		return 0, err
+			k, permitID, k-weeks); err != nil {
+			return 0, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`,
-		weeks+1, anchor, permitID); err != nil {
+		to, anchor, permitID); err != nil {
 		return 0, err
 	}
-	return weeks + 1, tx.Commit()
+	return to, tx.Commit()
 }
 
-// RemoveLastCycleWeek takes the last week off a permit's roster cycle,
-// returning the removed rules (the caller renders them into a stateless Undo).
-// Shrinking to one week clears the anchor: a plain weekly roster has no cycle.
-func (s *Store) RemoveLastCycleWeek(ctx context.Context, owner string, permitID int64, anchor string) (removed []model.WeeklyRule, newWeeks int, err error) {
+// ShrinkCycle shortens a permit's roster cycle to `to` weeks, taking the last
+// weeks off and returning their rules, with their week indices (the caller
+// renders them into a stateless Undo). Shrinking to one week clears the
+// anchor: a plain weekly roster has no cycle.
+func (s *Store) ShrinkCycle(ctx context.Context, owner string, permitID int64, anchor string, to int) (removed []model.WeeklyRule, newWeeks int, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer tx.Rollback()
-	var weeks int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?`, permitID, owner).Scan(&weeks); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, 0, ErrNotFound
-		}
+	weeks, err := cycleWeeksTx(ctx, tx, owner, permitID)
+	if err != nil {
 		return nil, 0, err
 	}
-	if weeks <= 1 {
+	if to < 1 || to >= weeks {
 		return nil, weeks, ErrCycleWeek
 	}
-	last := weeks - 1
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, permit_id, cycle_week, weekday, vehicle_id FROM weekly_rule
-WHERE permit_id = ? AND cycle_week = ? ORDER BY weekday`, permitID, last)
+		`SELECT id, permit_id, cycle_week, weekday, vehicle_id, empty FROM weekly_rule
+WHERE permit_id = ? AND cycle_week >= ? ORDER BY cycle_week, weekday`, permitID, to)
 	if err != nil {
 		return nil, 0, err
 	}
 	for rows.Next() {
 		var r model.WeeklyRule
 		var wd int
-		if err := rows.Scan(&r.ID, &r.PermitID, &r.Week, &wd, &r.VehicleID); err != nil {
+		var vid sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.PermitID, &r.Week, &wd, &vid, &r.Empty); err != nil {
 			rows.Close()
 			return nil, 0, err
 		}
 		r.Weekday = time.Weekday(wd)
+		r.VehicleID = vid.Int64 // 0 when NULL (a clear day)
 		removed = append(removed, r)
 	}
 	rows.Close()
@@ -314,28 +308,57 @@ WHERE permit_id = ? AND cycle_week = ? ORDER BY weekday`, permitID, last)
 		return nil, 0, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM weekly_rule WHERE permit_id = ? AND cycle_week = ?`, permitID, last); err != nil {
+		`DELETE FROM weekly_rule WHERE permit_id = ? AND cycle_week >= ?`, permitID, to); err != nil {
 		return nil, 0, err
 	}
-	if last == 1 {
+	if to == 1 {
 		anchor = "" // back to a plain weekly roster
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`, last, anchor, permitID); err != nil {
+		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`, to, anchor, permitID); err != nil {
 		return nil, 0, err
 	}
-	return removed, last, tx.Commit()
+	return removed, to, tx.Commit()
 }
 
-// RestoreCycleWeek is RemoveLastCycleWeek's undo: it re-appends one week with
-// the given (weekday → vehicle) rules. Rules are inserted fresh (new ids); the
-// caller has already validated vehicle ownership.
-func (s *Store) RestoreCycleWeek(ctx context.Context, owner string, permitID int64, rules []model.WeeklyRule, anchor string) (int, error) {
+// RestoreCycle is ShrinkCycle's undo: it lengthens the cycle back to `to`
+// weeks and re-inserts the removed rules at their own week indices. Rules are
+// inserted fresh (new ids); the caller has validated vehicle ownership and
+// that every rule's week lies in the weeks being restored.
+func (s *Store) RestoreCycle(ctx context.Context, owner string, permitID int64, rules []model.WeeklyRule, anchor string, to int) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+	weeks, err := cycleWeeksTx(ctx, tx, owner, permitID)
+	if err != nil {
+		return 0, err
+	}
+	if to <= weeks || to > model.MaxCycleWeeks {
+		return weeks, ErrCycleWeek
+	}
+	for _, r := range rules {
+		if r.Week < weeks || r.Week >= to {
+			return weeks, ErrCycleWeek
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id, empty = excluded.empty`,
+			permitID, r.Week, int(r.Weekday), nullableVehicle(r), r.Empty); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`,
+		to, anchor, permitID); err != nil {
+		return 0, err
+	}
+	return to, tx.Commit()
+}
+
+// cycleWeeksTx reads the owner's permit's cycle length inside tx (at least 1).
+func cycleWeeksTx(ctx context.Context, tx *sql.Tx, owner string, permitID int64) (int, error) {
 	var weeks int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?`, permitID, owner).Scan(&weeks); err != nil {
@@ -347,23 +370,7 @@ func (s *Store) RestoreCycleWeek(ctx context.Context, owner string, permitID int
 	if weeks < 1 {
 		weeks = 1
 	}
-	if weeks >= model.MaxCycleWeeks {
-		return weeks, ErrCycleWeek
-	}
-	for _, r := range rules {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty) VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id, empty = excluded.empty`,
-			permitID, weeks, int(r.Weekday), nullableVehicle(r), r.Empty); err != nil {
-			return 0, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE permit SET cycle_weeks = ?, cycle_anchor = ? WHERE id = ?`,
-		weeks+1, anchor, permitID); err != nil {
-		return 0, err
-	}
-	return weeks + 1, tx.Commit()
+	return weeks, nil
 }
 
 // ---- Overrides ----

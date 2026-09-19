@@ -444,6 +444,8 @@ tr:last-child td { border-bottom:0; }
 .wktabs .wkadd { flex:0 0 auto; padding:8px 12px; }
 .wktabs .wkadd svg { width:14px; height:14px; vertical-align:-2px; }
 .wknow { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:1px 6px; border-radius:999px; margin-left:5px; background:color-mix(in srgb, currentColor 14%, transparent); }
+/* Four tabs on a phone: tighter, and the "now" mark stays on the tab's line. */
+@media (max-width:640px) { .wktabs button { padding:8px 6px; font-size:12.5px; white-space:nowrap; } .wknow { margin-left:3px; padding:1px 4px; } }
 .wkremove { margin-top:10px; }
 /* The single-week card's doorway into the cycle: the .link-quiet look, on a
    button (it posts). Stripped of button chrome so it reads as a capability the

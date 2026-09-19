@@ -680,6 +680,14 @@ type permitView struct {
 	// "+" tab while under model.MaxCycleWeeks.
 	CycleWeeks int
 	CanAddWeek bool
+	// The week ladder is 1, 2, 4: the add control names the week or pair it
+	// adds ("week 2", "weeks 3 and 4"); the remove control names what goes and
+	// sits on the panes from RemoveFromWeek (1-based) up; AfterRemoveIndex is
+	// the 0-based tab to land on once they are gone.
+	AddWeeksLabel    string
+	RemoveWeeksLabel string
+	RemoveFromWeek   int
+	AfterRemoveIndex int
 	// CalRowLabels names each calendar row's cycle week ("This week — Week 2");
 	// nil for a plain weekly roster, where the rows need no distinguishing.
 	CalRowLabels []string

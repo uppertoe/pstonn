@@ -77,7 +77,8 @@
           @click="wk=1">Week 2</button>
   
   
-  <button type="button" class="wkadd" title="Add a week" aria-label="Add a week to the roster, copied from the last week"
+  
+  <button type="button" class="wkadd" title="Add " aria-label="Add  to the roster, copied from the weeks it has"
           hx-post="/permits/7/weeks/add" hx-target="#pbody-7" hx-swap="innerHTML"
           @click="wk=2"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg></button>
   
@@ -282,6 +283,10 @@
   </div>
   
   
+  <button type="button" class="ghost sm wkremove"
+          hx-post="/permits/7/weeks/remove" hx-target="#pbody-7" hx-swap="innerHTML"
+          @click="wk=0"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Remove </button>
+  
   </div>
   
   
@@ -482,7 +487,7 @@
   
   <button type="button" class="ghost sm wkremove"
           hx-post="/permits/7/weeks/remove" hx-target="#pbody-7" hx-swap="innerHTML"
-          @click="wk=Math.max(0, 1-1)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Remove week 2</button>
+          @click="wk=0"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Remove </button>
   
   </div>
   

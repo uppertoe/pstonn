@@ -390,7 +390,9 @@
           @click="wk={{.Index}}">Week {{.Num}}{{if .IsCurrent}} <span class="wknow" title="The cycle is in this week">now</span>{{end}}</button>
   {{end}}
   {{if .CanAddWeek}}
-  <button type="button" class="wkadd" title="Add a week" aria-label="Add a week to the roster, copied from the last week"
+  {{/* The ladder is a week, a fortnight, four weeks: from a fortnight this adds
+       weeks 3 and 4 together, as a copy of weeks 1 and 2. */}}
+  <button type="button" class="wkadd" title="Add {{.AddWeeksLabel}}" aria-label="Add {{.AddWeeksLabel}} to the roster, copied from the weeks it has"
           hx-post="/permits/{{$pid}}/weeks/add" hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"
           @click="wk={{.CycleWeeks}}">{{template "ic-plus"}}</button>
   {{end}}
@@ -447,12 +449,13 @@
   </div>
   {{end}}
   </div>
-  {{/* The last week is the only removable one — weeks keep their positions —
-       and removal is immediate, with the Undo in the reply's banner. */}}
-  {{if and $cycling (eq .Num $pv.CycleWeeks)}}
+  {{/* Weeks come off the end, back down the ladder: from four weeks both 3
+       and 4 go together, so the control sits on either of those panes; removal
+       is immediate, with the Undo in the reply's banner. */}}
+  {{if and $cycling (ge .Num $pv.RemoveFromWeek)}}
   <button type="button" class="ghost sm wkremove"
           hx-post="/permits/{{$pv.Permit.ID}}/weeks/remove" hx-target="#pbody-{{$pv.Permit.ID}}" hx-swap="innerHTML"
-          @click="wk=Math.max(0, {{.Index}}-1)">{{template "ic-x"}} Remove week {{.Num}}</button>
+          @click="wk={{$pv.AfterRemoveIndex}}">{{template "ic-x"}} Remove {{$pv.RemoveWeeksLabel}}</button>
   {{end}}
   </div>
   {{end}}

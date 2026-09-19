@@ -177,6 +177,33 @@ type WeeklyRule struct {
 // MaxCycleWeeks caps how many weeks a roster cycle may hold.
 const MaxCycleWeeks = 4
 
+// NextCycleWeeks is the length the roster grows to from weeks, on the ladder
+// the app offers: a week, a fortnight, four weeks. A three-week roster (the
+// model allows any length up to the cap; the pages never make one) grows to
+// four. ok is false at the top.
+func NextCycleWeeks(weeks int) (to int, ok bool) {
+	switch {
+	case weeks < 2:
+		return 2, true
+	case weeks < MaxCycleWeeks:
+		return MaxCycleWeeks, true
+	}
+	return weeks, false
+}
+
+// PrevCycleWeeks is the length the roster shrinks to from weeks, back down the
+// same ladder: four (or three) to a fortnight, a fortnight to a week. ok is
+// false for a plain weekly roster.
+func PrevCycleWeeks(weeks int) (to int, ok bool) {
+	switch {
+	case weeks > 2:
+		return 2, true
+	case weeks == 2:
+		return 1, true
+	}
+	return weeks, false
+}
+
 // Cycle is a permit's multi-week rotation. Weeks <= 1 (or no anchor) is the
 // plain weekly roster: every instant is week 0. Anchor is a bare local date
 // ("2006-01-02") naming a day in the week whose index is 0 — a date, not an

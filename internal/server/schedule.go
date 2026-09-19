@@ -558,6 +558,11 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			fmt.Sprintf("Next week — Week %d", (curWeek+1)%cyc.Weeks+1),
 		}
 	}
+	// The week ladder (1, 2, 4) decides what the add and remove controls say.
+	nextWeeks, canGrow := model.NextCycleWeeks(cyc.Weeks)
+	addLabel := weeksLabel(cyc.Weeks, nextWeeks)
+	removeFrom, _ := model.PrevCycleWeeks(cyc.Weeks)
+	removeLabel := weeksLabel(removeFrom, cyc.Weeks)
 	pv := permitView{
 		Permit: p, DesiredReg: desiredReg, DesiredSource: source, DesiredEmpty: res.Empty,
 		// The roster cell and the booking form offer "no rego" only where the
@@ -566,7 +571,8 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		Caps:     capsOf(caps),
 		Regions:  caps.Regions,
 		Weeks:    weeks, CurrentWeek: curWeek, CycleWeeks: cyc.Weeks,
-		CanAddWeek:   cyc.Weeks < model.MaxCycleWeeks,
+		CanAddWeek:    canGrow,
+		AddWeeksLabel: addLabel, RemoveWeeksLabel: removeLabel, RemoveFromWeek: removeFrom + 1, AfterRemoveIndex: removeFrom - 1,
 		CalRowLabels: calRowLabels,
 		Cal:          cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
 		ActiveColor: colorOfPlate(vviews, p.ActiveRegistration),
@@ -781,10 +787,11 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 
 // ---- roster cycle weeks ----
 
-// encodeWeekRules flattens a removed week's days into the stateless Undo
-// payload ("weekday:vehicle" pairs; "-" for an empty week, so the button's
-// presence never depends on the payload being non-empty). decodeWeekRules is
-// its strict inverse — anything malformed is refused, never coerced.
+// encodeWeekRules flattens the removed weeks' days into the stateless Undo
+// payload ("week:weekday:vehicle" triples, "e" for a clear day; "-" for no
+// days at all, so the button's presence never depends on the payload being
+// non-empty). decodeWeekRules is its strict inverse — anything malformed is
+// refused, never coerced.
 func encodeWeekRules(rules []model.WeeklyRule) string {
 	if len(rules) == 0 {
 		return "-"
@@ -792,10 +799,10 @@ func encodeWeekRules(rules []model.WeeklyRule) string {
 	parts := make([]string, 0, len(rules))
 	for _, r := range rules {
 		if r.Empty {
-			parts = append(parts, fmt.Sprintf("%d:e", int(r.Weekday))) // an empty day has no vehicle
+			parts = append(parts, fmt.Sprintf("%d:%d:e", r.Week, int(r.Weekday))) // a clear day has no vehicle
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%d:%d", int(r.Weekday), r.VehicleID))
+		parts = append(parts, fmt.Sprintf("%d:%d:%d", r.Week, int(r.Weekday), r.VehicleID))
 	}
 	return strings.Join(parts, ",")
 }
@@ -805,28 +812,38 @@ func decodeWeekRules(s string) ([]model.WeeklyRule, bool) {
 		return nil, true
 	}
 	var out []model.WeeklyRule
-	seen := map[int]bool{}
+	seen := map[[2]int]bool{}
 	for _, part := range strings.Split(s, ",") {
-		wd, vid, ok := strings.Cut(part, ":")
-		if !ok {
+		f := strings.Split(part, ":")
+		if len(f) != 3 {
 			return nil, false
 		}
-		w, werr := strconv.Atoi(wd)
-		if werr != nil || w < 0 || w > 6 || seen[w] {
+		wk, kerr := strconv.Atoi(f[0])
+		w, werr := strconv.Atoi(f[1])
+		if kerr != nil || werr != nil || wk < 1 || wk >= model.MaxCycleWeeks || w < 0 || w > 6 || seen[[2]int{wk, w}] {
 			return nil, false
 		}
-		seen[w] = true
-		if vid == "e" {
-			out = append(out, model.WeeklyRule{Weekday: time.Weekday(w), Empty: true})
+		seen[[2]int{wk, w}] = true
+		if f[2] == "e" {
+			out = append(out, model.WeeklyRule{Week: wk, Weekday: time.Weekday(w), Empty: true})
 			continue
 		}
-		v, verr := strconv.ParseInt(vid, 10, 64)
+		v, verr := strconv.ParseInt(f[2], 10, 64)
 		if verr != nil || v <= 0 {
 			return nil, false
 		}
-		out = append(out, model.WeeklyRule{Weekday: time.Weekday(w), VehicleID: v})
+		out = append(out, model.WeeklyRule{Week: wk, Weekday: time.Weekday(w), VehicleID: v})
 	}
 	return out, len(out) > 0
+}
+
+// weeksLabel names the weeks a grow or shrink touches, 1-based: "week 2" or
+// "weeks 3 and 4".
+func weeksLabel(from, to int) string {
+	if to-from <= 1 {
+		return fmt.Sprintf("week %d", from+1)
+	}
+	return fmt.Sprintf("weeks %d and %d", from+1, to)
 }
 
 // addCycleWeek appends one week to the roster cycle, seeded from the last week,
@@ -843,12 +860,15 @@ func (s *Server) addCycleWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().In(s.locForPermit(r.Context(), p))
 	cyc := p.Cycle()
-	if cyc.Weeks >= model.MaxCycleWeeks {
+	// The ladder is a week, a fortnight, four weeks: from a fortnight the two
+	// new weeks come as a copy of the fortnight, so the roster repeats as it did.
+	to, ok := model.NextCycleWeeks(cyc.Weeks)
+	if !ok {
 		s.formError(w, r, "A roster holds at most four weeks.")
 		return
 	}
-	next := model.ReanchoredCycle(now, cyc, cyc.Weeks+1)
-	n, err := s.store.AddCycleWeek(r.Context(), owner, p.ID, next.Anchor)
+	next := model.ReanchoredCycle(now, cyc, to)
+	n, err := s.store.GrowCycle(r.Context(), owner, p.ID, next.Anchor, to)
 	if err != nil {
 		if errors.Is(err, store.ErrCycleWeek) {
 			s.formError(w, r, "A roster holds at most four weeks.")
@@ -858,10 +878,10 @@ func (s *Server) addCycleWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.CycleWeeks, p.CycleAnchor = n, next.Anchor
-	s.logChange(r.Context(), owner, user, store.ActionCycleAdd, permitLabel(p), fmt.Sprintf("week %d", n))
-	notice := fmt.Sprintf("Added week %d, copied from week %d. The roster now repeats every %d weeks.", n, n-1, n)
-	if n == 2 {
-		notice = "Added week 2, copied from week 1. The roster now alternates between the two weeks."
+	s.logChange(r.Context(), owner, user, store.ActionCycleAdd, permitLabel(p), weeksLabel(cyc.Weeks, n))
+	notice := "Added week 2, copied from week 1. The roster now alternates between the two weeks."
+	if n > 2 {
+		notice = fmt.Sprintf("Added %s, copied from %s. The roster now repeats every %d weeks.", weeksLabel(cyc.Weeks, n), weeksLabel(0, cyc.Weeks), n)
 	}
 	s.respondPermitNotice(w, r, owner, p, notice)
 }
@@ -888,9 +908,12 @@ func (s *Server) removeCycleWeek(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "This roster is a single repeating week — there is no extra week to remove.")
 		return
 	}
-	inRemoved := cyc.WeekAt(now) == cyc.Weeks-1
-	next := model.ReanchoredCycle(now, cyc, cyc.Weeks-1)
-	removed, n, err := s.store.RemoveLastCycleWeek(ctx, owner, p.ID, next.Anchor)
+	// Back down the ladder: four weeks to a fortnight (both extra weeks go,
+	// with one Undo), a fortnight to a week.
+	to, _ := model.PrevCycleWeeks(cyc.Weeks)
+	inRemoved := cyc.WeekAt(now) >= to
+	next := model.ReanchoredCycle(now, cyc, to)
+	removed, n, err := s.store.ShrinkCycle(ctx, owner, p.ID, next.Anchor, to)
 	if err != nil {
 		if errors.Is(err, store.ErrCycleWeek) {
 			s.formError(w, r, "This roster is a single repeating week — there is no extra week to remove.")
@@ -901,21 +924,24 @@ func (s *Server) removeCycleWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	oldAnchor := p.CycleAnchor
 	p.CycleWeeks, p.CycleAnchor = n, next.Anchor
+	gone := weeksLabel(n, cyc.Weeks)
 	// Name what went, durably: the activity row is the only record once Undo lapses.
-	detail := fmt.Sprintf("week %d", cyc.Weeks)
+	detail := gone
 	if days := describeWeekRules(ctx, s, owner, removed); days != "" {
 		detail += " — " + days
 	}
 	s.logChange(ctx, owner, user, store.ActionCycleRemove, permitLabel(p), detail)
-	notice := fmt.Sprintf("Removed week %d.", cyc.Weeks)
+	notice := fmt.Sprintf("Removed %s.", gone)
 	if n == 1 {
-		notice = fmt.Sprintf("Removed week %d. The roster is back to a single repeating week.", cyc.Weeks)
+		notice = fmt.Sprintf("Removed %s. The roster is back to a single repeating week.", gone)
 	}
 	if inRemoved {
-		notice += fmt.Sprintf(" The cycle was in that week, so this week now runs week %d's roster.", next.WeekAt(now)+1)
+		notice += fmt.Sprintf(" The cycle was in a removed week, so this week now runs week %d's roster.", next.WeekAt(now)+1)
 		s.sched.KickPermit(p.ID)
 	}
-	undo := encodeWeekRules(removed) + "|" + oldAnchor
+	// The payload carries the old length (the days alone may be none), the
+	// days with their weeks, and the pre-remove anchor.
+	undo := strconv.Itoa(cyc.Weeks) + "|" + encodeWeekRules(removed) + "|" + oldAnchor
 	s.respondPermitUndo(w, r, owner, p, notice, undo)
 }
 
@@ -935,24 +961,31 @@ func (s *Server) restoreCycleWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	payload, anchor, okCut := strings.Cut(r.FormValue("undo"), "|")
+	const expired = "That undo has expired. Please add the weeks again by hand."
+	lengthStr, rest, okCut := strings.Cut(r.FormValue("undo"), "|")
+	payload, anchor, okCut2 := strings.Cut(rest, "|")
+	to, lerr := strconv.Atoi(lengthStr)
 	rules, okRules := decodeWeekRules(payload)
-	if !okCut || !okRules {
-		s.formError(w, r, "That undo has expired. Please add the week again by hand.")
+	if !okCut || !okCut2 || !okRules || lerr != nil || to < 2 || to > model.MaxCycleWeeks {
+		s.formError(w, r, expired)
 		return
 	}
 	if anchor != "" {
 		if _, err := time.Parse("2006-01-02", anchor); err != nil {
-			s.formError(w, r, "That undo has expired. Please add the week again by hand.")
+			s.formError(w, r, expired)
 			return
 		}
 	}
 	cyc := p.Cycle()
-	if cyc.Weeks >= model.MaxCycleWeeks {
-		s.formError(w, r, "A roster holds at most four weeks.")
+	if to <= cyc.Weeks {
+		s.formError(w, r, "Those weeks are already back on the roster.")
 		return
 	}
 	for _, ru := range rules {
+		if ru.Week < cyc.Weeks || ru.Week >= to {
+			s.formError(w, r, expired)
+			return
+		}
 		if ru.Empty {
 			continue
 		}
@@ -962,22 +995,27 @@ func (s *Server) restoreCycleWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	if anchor == "" {
 		// A 1→2 undo (the removed cycle had no anchor of its own to put back):
-		// anchor the way adding a week would.
-		anchor = model.ReanchoredCycle(time.Now().In(s.locForPermit(ctx, p)), cyc, cyc.Weeks+1).Anchor
+		// anchor the way adding weeks would.
+		anchor = model.ReanchoredCycle(time.Now().In(s.locForPermit(ctx, p)), cyc, to).Anchor
 	}
-	n, err := s.store.RestoreCycleWeek(ctx, owner, p.ID, rules, anchor)
+	n, err := s.store.RestoreCycle(ctx, owner, p.ID, rules, anchor, to)
 	if err != nil {
 		if errors.Is(err, store.ErrCycleWeek) {
-			s.formError(w, r, "A roster holds at most four weeks.")
+			s.formError(w, r, expired)
 			return
 		}
 		s.serverError(w, err)
 		return
 	}
+	back := weeksLabel(cyc.Weeks, n)
 	p.CycleWeeks, p.CycleAnchor = n, anchor
-	s.logChange(ctx, owner, user, store.ActionCycleRestore, permitLabel(p), fmt.Sprintf("week %d", n))
+	s.logChange(ctx, owner, user, store.ActionCycleRestore, permitLabel(p), back)
 	s.sched.KickPermit(p.ID)
-	s.respondPermitNotice(w, r, owner, p, fmt.Sprintf("Week %d is back.", n))
+	verb := "is"
+	if n-cyc.Weeks > 1 {
+		verb = "are"
+	}
+	s.respondPermitNotice(w, r, owner, p, strings.ToUpper(back[:1])+back[1:]+" "+verb+" back.")
 }
 
 // describeWeekRules names a removed week's days for the activity log
