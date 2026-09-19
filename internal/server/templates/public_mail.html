@@ -116,6 +116,23 @@
 </main>
 {{end}}
 
+{{define "page-offline"}}
+{{/* Served by the service worker (offline.go) in place of any navigation that
+     could not reach the server. Cached at install with its assets, so it must
+     stay self-contained: no fragment, no poll, nothing that needs the server.
+     "Try again" is a real navigation to the same address (an empty href), so
+     the worker tries the network again. */}}
+{{/* The brand alone: the public nav's links have nowhere to go offline. */}}
+<header class="appbar pubbar"><span class="brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></span></header>
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    <h1>You&rsquo;re offline</h1>
+    <p class="gresult">p.stonn needs a connection to reach the council and its own records, so nothing has been changed. Check your phone&rsquo;s connection and try again.</p>
+    <p style="margin-top:16px"><a class="btnlike" href="" hx-boost="false">Try again</a></p>
+  </section>
+</main>
+{{end}}
+
 {{define "page-message"}}
 {{/* ============ STYLED MESSAGE / ERROR PAGE ============
      The terminal notice most guards and failures land on (messagePage in

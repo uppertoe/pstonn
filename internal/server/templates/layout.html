@@ -167,10 +167,21 @@
   // no htmx — the poll's own next tick is the correct retry.
   addEventListener('htmx:sendError', function (e) {
     var cfg = e.detail && e.detail.requestConfig;
+    // A fragment request (a picker tile, a roster cell) that could not be sent
+    // while the browser says it is offline used to do nothing at all: say so.
+    // The boosted case below turns into a real navigation, which the service
+    // worker answers with the offline page.
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
   });
+  // The offline page (offline.go): a small service worker that serves /offline
+  // when a navigation cannot reach the server, for the pages saved to a home
+  // screen. Registered from every page so the first visit installs it.
+  if ('serviceWorker' in navigator) {
+    addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+  }
   // Surface server-side errors. htmx does NOT swap non-2xx bodies, so without
   // this every failed submit would appear to do nothing. Validation problems
   // arrive as 422 with a bare plain-text message; everything else (403/409/429/
@@ -402,6 +413,7 @@ window.popClamp = window.popClamp || function (el) {
 {{- else if eq .State "unsubscribe"}}{{template "page-unsubscribe" .}}
 {{- else if eq .State "guestdecide"}}{{template "page-guestdecide" .}}
 {{- else if eq .State "message"}}{{template "page-message" .}}
+{{- else if eq .State "offline"}}{{template "page-offline" .}}
 {{- else if eq .State "confirm"}}{{template "page-confirm" .}}
 {{- else if eq .State "terms"}}{{template "page-terms" .}}
 {{- else if eq .State "onboarding"}}{{template "page-onboarding" .}}

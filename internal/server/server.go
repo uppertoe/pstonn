@@ -441,9 +441,13 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /llms.txt", guardPublic, s.llmsTxt)              // public (SEO)
 	s.handle(mux, "GET /favicon.ico", guardPublic, s.faviconICO)        // public
 	s.handle(mux, "GET /site.webmanifest", guardPublic, s.siteManifest) // public
-	s.handle(mux, "GET /contact", guardPublic, s.contactPage)           // public
-	s.handle(mux, "POST /contact", guardPublic, s.submitContact)        // public, rate-limited
-	s.handle(mux, "GET /schedule", guardUser, s.schedule)               // appShell gates internally too; wrapped for uniformity with the other app pages
+	// The offline page and the worker that serves it (offline.go). Public at the
+	// proxy too, or the worker never registers.
+	s.handle(mux, "GET /offline", guardPublic, s.offline)
+	s.handle(mux, "GET /sw.js", guardPublic, s.serviceWorker)
+	s.handle(mux, "GET /contact", guardPublic, s.contactPage)    // public
+	s.handle(mux, "POST /contact", guardPublic, s.submitContact) // public, rate-limited
+	s.handle(mux, "GET /schedule", guardUser, s.schedule)        // appShell gates internally too; wrapped for uniformity with the other app pages
 	s.handle(mux, "GET /regos", guardUser, s.vehiclesPage)
 	// The page was /vehicles until 2026-09-12; bookmarks and history keep working.
 	s.handle(mux, "GET /vehicles", guardPublic, s.vehiclesRedirect) // a redirect reveals nothing; the edge gates /regos
