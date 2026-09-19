@@ -176,6 +176,20 @@
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
   });
+  // A page saved to a home screen is restored as it was when its app is
+  // reopened (Firefox on Android shows the old page with no fetch at all), so a
+  // guest link or the picker reopened hours later said what was on the permit
+  // then. A page carrying data-refresh-on-return reloads when it comes back
+  // into view after half a minute away, or from the back-forward cache.
+  (function () {
+    var hiddenAt = 0;
+    function stale() { return document.querySelector('[data-refresh-on-return]') && hiddenAt && Date.now() - hiddenAt > 30000; }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (stale()) { location.reload(); }
+    });
+    addEventListener('pageshow', function (e) { if (e.persisted && document.querySelector('[data-refresh-on-return]')) location.reload(); });
+  })();
   // The offline page (offline.go): a small service worker that serves /offline
   // when a navigation cannot reach the server, for the pages saved to a home
   // screen. Registered from every page so the first visit installs it.

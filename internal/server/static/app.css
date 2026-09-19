@@ -849,6 +849,7 @@ table.adm .bad { color:var(--danger); }
    button each run of text was its own shrinkable item, so at phone width the
    label broke into three ragged lines; laid out as text it wraps like a sentence. */
 .grevert { display:block; width:100%; text-align:center; line-height:1.8; }
+.grevert svg { display:inline-block; vertical-align:-3px; margin-right:1px; }
 .gstat { margin-top:2px; }
 .gnow .gnuntil { color:var(--muted); font-size:13px; font-weight:500; }
 .gsub { display:flex; align-items:center; gap:7px; min-height:28px; margin:2px 0 0; font-size:13px; color:var(--muted); } /* fixed-height slot: applying/settled notes swap here without reflowing the page (28px fits the plate chip) */

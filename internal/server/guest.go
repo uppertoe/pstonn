@@ -40,6 +40,7 @@ type guestActView struct {
 	Household      string            // the holder's chosen name for visitors ("the Nguyens"); "" = name only the permit
 	Council        string            // the permit's council, for the nameless heading
 	MineReg        string            // the rego THIS link put on the permit, when it is the one on now
+	MineColor      string            // MineReg's saved colour when it is one of the regos this page offers, so the badge matches the tile ("" = neutral)
 	MaskedReg      string            // someone else's rego on the permit, masked to its last two characters
 	PermitLabel    string            // which permit this affects
 	CurrentReg     string            // what is on the permit right now ("" if unknown)

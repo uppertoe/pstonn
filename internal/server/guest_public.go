@@ -417,6 +417,12 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 			} else {
 				view.MaskedReg = maskRego(current)
 			}
+			// In its colour when it is one of the regos on this page, as the tile is.
+			for _, c := range view.Cars {
+				if view.MineReg != "" && model.SamePlate(c.Registration, view.MineReg) {
+					view.MineColor = c.Color
+				}
+			}
 		}
 		now := time.Now()
 		view.PendingReg, view.Stalled = pendingState(current, want, stallSince(permit.ID, current, want, decidedAt, now), now)
