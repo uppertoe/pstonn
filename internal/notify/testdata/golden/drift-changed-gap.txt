@@ -5,6 +5,8 @@ Hero: AMY602
 
 AMY602 was put on your Visitor on the council's website, not through p.stonn. p.stonn has left it there until 14 Jul 6:00pm; after that your schedule takes over again when it next puts a rego on. If it should stay longer, book it or add it to the roster in p.stonn.
 
+We have also told sam@example.com (by email).
+
 https://p.stonn.org
 
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
@@ -14,6 +16,8 @@ Hero: AMY602
 
 AMY602 was put on your Visitor on the council's website, not through p.stonn. p.stonn has left it there until 14 Jul 6:00pm; after that your schedule takes over again when it next puts a rego on. If it should stay longer, book it or add it to the roster in p.stonn.
 
+We have also told sam@example.com (by email).
+
 https://p.stonn.org
 
 === OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
@@ -22,6 +26,8 @@ Subject: Your Visitor was changed to AMY602 on the council's website
 Hero: AMY602
 
 AMY602 was put on your Visitor on the council's website, not through p.stonn. p.stonn has left it there until 14 Jul 6:00pm; after that your schedule takes over again when it next puts a rego on. If it should stay longer, book it or add it to the roster in p.stonn.
+
+We have also told primary@example.com (by email and push notification).
 
 https://p.stonn.org
 

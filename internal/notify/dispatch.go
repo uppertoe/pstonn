@@ -295,20 +295,21 @@ func (r Recipient) Channel() string {
 	}
 }
 
-// alsoToldLine is the sentence in one member's copy naming everyone else this
-// outcome reaches: the other members of the account, each by their channel (and
-// held until their quiet hours end where they are), and the car's own driver
-// when they were emailed. A driver who is also a member is named once. "" when
-// nobody else is told, so a single-person household's confirmation stays as it
-// was rather than announcing that no one else exists.
-func alsoToldLine(rs []Recipient, self string, o ApplyOutcome) string {
+// alsoToldLine is the sentence in one member's copy naming everyone else the
+// notice reaches: the other members of the account, each by their channel (and
+// held until their quiet hours end where they are), and, for an apply, the
+// car's own driver when they were emailed (driver, with the rego). A driver who
+// is also a member is named once. "" when nobody else is told, so a
+// single-person household's copy stays as it was rather than announcing that
+// no one else exists.
+func alsoToldLine(rs []Recipient, self, driver, reg string) string {
 	var parts []string
 	driverListed := false
 	for _, r := range rs {
 		if strings.EqualFold(r.Email, self) {
 			continue
 		}
-		if strings.EqualFold(r.Email, o.DriverTold) {
+		if strings.EqualFold(r.Email, driver) {
 			driverListed = true
 		}
 		how := r.Channel()
@@ -317,8 +318,8 @@ func alsoToldLine(rs []Recipient, self string, o ApplyOutcome) string {
 		}
 		parts = append(parts, r.Email+" ("+how+")")
 	}
-	if o.DriverTold != "" && !driverListed && !strings.EqualFold(o.DriverTold, self) {
-		parts = append(parts, o.DriverTold+" (by email, as the driver of "+o.Reg+")")
+	if driver != "" && !driverListed && !strings.EqualFold(driver, self) {
+		parts = append(parts, driver+" (by email, as the driver of "+reg+")")
 	}
 	switch len(parts) {
 	case 0:
@@ -351,7 +352,7 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 		m := outMessage{
 			Account: o.Owner,
 			// This member's copy names the others, ahead of the app link.
-			Subject: subject, Body: body + alsoToldLine(audience, d.email, o) + tail, NtfyPriority: priority, NtfyTag: tags,
+			Subject: subject, Body: body + alsoToldLine(audience, d.email, o.DriverTold, o.Reg) + tail, NtfyPriority: priority, NtfyTag: tags,
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 			NotBefore: s.deferUntil(d.pref, now, c.Loc, o),
 			Reason:    reasonAccount,
@@ -402,7 +403,7 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 		due++
 		// This member's copy names the others, ahead of the app link; the shared
 		// body above is what every copy has in common.
-		also := alsoToldLine(audience, d.email, o)
+		also := alsoToldLine(audience, d.email, o.DriverTold, o.Reg)
 		body, emailBody := body+also, body+also+emailTail
 
 		// A retry of a partial delivery: this member was reached last time, so
@@ -880,8 +881,9 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 		subject = fmt.Sprintf("Your %s was changed to %s on the council's website", changes[0].PermitLabel, changes[0].Plate)
 	}
 	body := strings.Join(lines, "\n\n")
+	tail := ""
 	if s.appURL != "" {
-		body += "\n\n" + s.appURL
+		tail = "\n\n" + s.appURL
 	}
 	hero := ""
 	if len(changes) == 1 {
@@ -889,12 +891,28 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 	}
 	key := strings.Join(keyParts, ";")
 	now := time.Now()
-	_, err := s.fanoutEnqueue(ctx, owner, func(d memberPref) (outMessage, bool) {
+	// Who this round reaches, by the same rules as the loop below, so each
+	// copy can name the others.
+	dels, err := s.accountDeliveries(ctx, owner)
+	if err != nil {
+		return err
+	}
+	var audience []Recipient
+	for _, d := range dels {
+		if d.pref.FailuresOnly {
+			continue
+		}
+		r := Recipient{Email: d.email, ByEmail: d.pref.EmailEnabled, ByPush: d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "", NotBefore: s.quietDefer(d.pref, now, c.Loc)}
+		if r.ByEmail || r.ByPush {
+			audience = append(audience, r)
+		}
+	}
+	_, err = s.fanoutEnqueue(ctx, owner, func(d memberPref) (outMessage, bool) {
 		if d.pref.FailuresOnly {
 			return outMessage{}, false
 		}
 		m := outMessage{
-			Account: owner, Subject: subject, Body: body,
+			Account: owner, Subject: subject, Body: body + alsoToldLine(audience, d.email, "", "") + tail,
 			DedupKey:  fmt.Sprintf("drift|%s|%s|%s", d.email, owner, key),
 			NotBefore: s.quietDefer(d.pref, now, c.Loc),
 			Reason:    reasonAccount,
@@ -992,7 +1010,10 @@ func (s *Service) AccountChangeAudience(ctx context.Context, owner, actor string
 	if err != nil {
 		return nil, err
 	}
-	loc := s.tenantOf(ctx, owner, "").Loc
+	return s.accountChangeAudienceOf(dels, actor, s.tenantOf(ctx, owner, "").Loc, now), nil
+}
+
+func (s *Service) accountChangeAudienceOf(dels []memberPref, actor string, loc *time.Location, now time.Time) []Recipient {
 	var out []Recipient
 	for _, d := range dels {
 		if strings.EqualFold(d.email, actor) {
@@ -1009,7 +1030,7 @@ func (s *Service) AccountChangeAudience(ctx context.Context, owner, actor string
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out
 }
 
 func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary string) error {
@@ -1020,10 +1041,11 @@ func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary
 		"If that was expected, nothing to do.",
 		"If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.",
 	}
-	if s.appURL != "" {
-		lines = append(lines, "", s.appURL+"/activity")
-	}
 	body := strings.Join(lines, "\n")
+	tail := ""
+	if s.appURL != "" {
+		tail = "\n\n" + s.appURL + "/activity"
+	}
 	dels, err := s.accountDeliveries(ctx, owner)
 	if err != nil {
 		return err
@@ -1031,13 +1053,14 @@ func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary
 	now := time.Now()
 	// Account-level: the household's night is the night at their current tenant.
 	loc := s.tenantOf(ctx, owner, "").Loc
+	audience := s.accountChangeAudienceOf(dels, actor, loc, now)
 	var errs []string
 	for _, d := range dels {
 		if strings.EqualFold(d.email, actor) {
 			continue // don't tell someone about their own action
 		}
 		m := outMessage{
-			Account: owner, Subject: subject, Body: body, Reason: reasonAccount,
+			Account: owner, Subject: subject, Body: body + alsoToldLine(audience, d.email, "", "") + tail, Reason: reasonAccount,
 			NotBefore: s.quietDefer(d.pref, now, loc),
 			// Per-member and per-summary, so two members each hear once and a repeated
 			// identical action inside the dedup window doesn't double up.

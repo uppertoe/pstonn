@@ -310,6 +310,9 @@ func TestGoldenEmails(t *testing.T) {
 	})
 	run("guest-request", func() { _ = svc.NotifyGuestRequest(ctx, owner, "Visitor", "GUEST1", appURL+"/g/req/4", 4) })
 	run("account-change", func() { _ = svc.NotifyAccountChange(ctx, owner, member, "added the car ABC123 (Van)") })
+	run("account-change-picker", func() {
+		_ = svc.NotifyAccountChange(ctx, owner, "the quick picker", "The rego was taken off the permit \"Visitor\" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.")
+	})
 	run("fortnight-nudge", func() { _ = svc.SendFortnightNudge(ctx, owner) })
 	run("referral-invite", func() { _ = svc.SendReferralInvite(ctx, stranger, owner) })
 	run("admin-alert", func() {

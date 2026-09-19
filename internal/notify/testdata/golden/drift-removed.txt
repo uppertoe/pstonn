@@ -4,6 +4,8 @@ Subject: The rego was taken off your Visitor on the council's website
 
 The rego was taken off your Visitor on the council's website, not through p.stonn. Your schedule still says ABC123, so p.stonn is putting it back on now.
 
+We have also told sam@example.com (by email).
+
 https://p.stonn.org
 
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
@@ -12,6 +14,8 @@ Subject: The rego was taken off your Visitor on the council's website
 
 The rego was taken off your Visitor on the council's website, not through p.stonn. Your schedule still says ABC123, so p.stonn is putting it back on now.
 
+We have also told sam@example.com (by email).
+
 https://p.stonn.org
 
 === OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
@@ -19,6 +23,8 @@ Dedup: drift|sam@example.com|primary@example.com|Visitor=@-62135596800>ABC123|em
 Subject: The rego was taken off your Visitor on the council's website
 
 The rego was taken off your Visitor on the council's website, not through p.stonn. Your schedule still says ABC123, so p.stonn is putting it back on now.
+
+We have also told primary@example.com (by email and push notification).
 
 https://p.stonn.org
 

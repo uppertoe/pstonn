@@ -33,7 +33,7 @@ func TestAlsoToldLine(t *testing.T) {
 		{"the reader is the driver", []Recipient{jo}, "jo@example.com", ApplyOutcome{Reg: "NAN123", DriverTold: "jo@example.com"}, ""},
 	}
 	for _, c := range cases {
-		if got := alsoToldLine(c.rs, c.self, c.o); got != c.want {
+		if got := alsoToldLine(c.rs, c.self, c.o.DriverTold, c.o.Reg); got != c.want {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
 		}
 	}
