@@ -133,10 +133,6 @@ func (s *Server) permitLabelByID(ctx context.Context, owner string, permitID int
 
 // changeText renders one logged change as a sentence for the Activity page. The
 // store keeps stable slugs so wording can change here without rewriting history.
-// clearBookingTarget is the change-log target of a booking that clears the
-// permit, which has no rego to name; changeText words it with the verb.
-const clearBookingTarget = "no rego"
-
 func changeText(c store.Change) string {
 	switch c.Action {
 	case store.ActionPermitAdd:
@@ -165,14 +161,8 @@ func changeText(c store.Change) string {
 	case store.ActionCycleRestore:
 		return "restored " + c.Detail + " to the roster on " + c.Target
 	case store.ActionOverrideAdd:
-		if c.Target == clearBookingTarget {
-			return "added a one-off booking that clears the permit (" + c.Detail + ")"
-		}
 		return "added a one-off booking for " + c.Target + " (" + c.Detail + ")"
 	case store.ActionOverrideDelete:
-		if c.Target == clearBookingTarget {
-			return "cancelled a one-off booking that clears the permit"
-		}
 		return "cancelled a one-off booking" + optional(c.Target, " for ")
 	case store.ActionVehicleAdd:
 		return "added the rego " + c.Target

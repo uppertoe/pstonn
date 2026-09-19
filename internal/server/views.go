@@ -663,7 +663,7 @@ type permitView struct {
 	DesiredReg    string
 	DesiredSource string
 	DesiredEmpty  bool // the schedule wants no rego on the permit right now
-	CanEmpty      bool // the council allows an empty permit, so "no rego" is offered as a roster day and a booking
+	CanEmpty      bool // the council allows an empty permit, so "clear the permit" is offered as a roster day
 	// ActiveColor is the stored colour of whichever saved car is on the permit
 	// right now, or "" when the plate is not one of the household's cars (a
 	// visitor's ad-hoc plate). Empty is meaningful, not missing: it renders the

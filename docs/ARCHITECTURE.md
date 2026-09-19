@@ -51,8 +51,9 @@ shows something else, applies the change through the tenant mux. Page renders ne
 call the council synchronously; only the loop, keep-warm, drift and reconnect do.
 
 A resolution says one of three things: **this rego**, **no rego** (an "empty"
-roster day or booking, `Resolution.Empty`, applied as a clear and only offered
-where the council's permit can be left empty), or **nothing scheduled**
+roster day, `Resolution.Empty`, applied as a clear and only offered where the
+council's permit can be left empty; the model takes an empty booking too, but
+the booking form does not offer one), or **nothing scheduled**
 (`SourceNone`, the loop leaves whatever is on the permit alone). "Empty" is a
 scheduled state like a plate, not an event: drift holds a council-side plate
 against it as it would against a rostered rego, and the watchdog's `NextChange`

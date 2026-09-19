@@ -1093,14 +1093,6 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// the booking (audit), even though the permit belongs to the shared account.
 	plate := normalizeReg(r.FormValue("plate"))
 	vehicleID := atoi64(r.FormValue("vehicle_id"))
-	// "empty" books the permit to have no rego for the window. The form only
-	// offers it where the council allows an empty permit; this is the refusal
-	// for a hand-built request.
-	empty := strings.TrimSpace(r.FormValue("vehicle_id")) == "empty"
-	if empty && !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
-		s.formError(w, r, "This council's permit can't be left with no rego on it. Book a rego instead.")
-		return
-	}
 	// A one-off plate carries its own registration state; a saved-vehicle booking
 	// takes the vehicle's. Only a code the tenant offers is kept ("" = home state).
 	plateState := strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
@@ -1118,13 +1110,6 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 	switch {
-	case empty:
-		if _, err := s.store.CreateEmptyOverride(r.Context(), p.ID, startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
-			if !overLimit(err) {
-				s.serverError(w, err)
-			}
-			return
-		}
 	case plate != "":
 		if !validRego(plate) {
 			s.formError(w, r, plateFormatMsg)
@@ -1153,9 +1138,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// Record the window too: an open-ended booking beats the roster indefinitely,
 	// which is worth being able to see and attribute.
 	reg := plate
-	if empty {
-		reg = clearBookingTarget
-	} else if reg == "" {
+	if reg == "" {
 		reg = s.plateOf(r.Context(), owner, vehicleID)
 	}
 	window := "from " + startsAt.In(s.locForPermit(r.Context(), p)).Format("2 Jan 3:04pm")
@@ -1185,9 +1168,7 @@ func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
 		for _, o := range ovs {
 			if o.ID == oid {
 				gone = o.Registration
-				if o.Empty {
-					gone = clearBookingTarget
-				} else if gone == "" {
+				if gone == "" {
 					gone = s.plateOf(r.Context(), owner, o.VehicleID)
 				}
 			}

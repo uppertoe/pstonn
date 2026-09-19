@@ -429,11 +429,11 @@
           hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
         {{end}}
         {{if $pv.CanEmpty}}
-        {{/* Set apart, below a rule and dashed, with what it does spelt out: it
-             is the one choice that leaves a car in the street uncovered, so it
-             must be taken on purpose rather than brushed in the list. */}}
-        <div class="vsep" role="separator"></div>
-        <button type="button" class="vopt vempty {{if $emptyDay}}sel{{end}}" @click="open=false"
+        {{/* One more choice in the same list, on the same schedule as the rest:
+             the icon stands where a rego's colour dot would, and the second line
+             says what it does, since it is the one choice that leaves a car in
+             the street uncovered. */}}
+        <button type="button" class="vopt vclear {{if $emptyDay}}sel{{end}}" @click="open=false"
           hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"empty"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">{{template "ic-empty"}}<span class="lab">Clear the permit</span><span class="sub2">The rego is taken off for the day, so nothing is covered.</span></button>
         {{end}}
       </div>
@@ -586,11 +586,6 @@
   <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override" data-plate-confirm="plate"
         hx-post="/permits/{{.Permit.ID}}/override" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
-        {{/* Booking no rego is confirmed like any other act that leaves a car
-             uncovered; the plate read-back (layout.html) leaves this alone when
-             the plate field is not in play. */}}
-        :data-confirm="mode=='empty' ? 'Clear the permit for this booking? For as long as it runs, no car is covered on it.' : null"
-        :data-confirm-ok="mode=='empty' ? 'Clear it' : null"
         x-data="{mode:'{{if .Vehicles}}car{{else}}plate{{end}}', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
                  endLabel(offset) {
                    const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
@@ -601,13 +596,10 @@
                    if (same(d, tmw)) return 'Midnight tomorrow night';
                    return 'Midnight ' + d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
                  }}">
-    {{if or .Vehicles .CanEmpty}}
+    {{if .Vehicles}}
     <div class="seg">
-      {{if .Vehicles}}<button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>{{end}}
+      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Type a rego</button>
-      {{if .CanEmpty}}{{/* The third choice is set apart (dashed, its own icon): it
-           books the permit to have NO rego, and a car in the street loses cover. */}}
-      <button type="button" class="segempty" :class="{on: mode=='empty'}" @click="mode='empty'; sel=''; lbl=''; col=''; plate=''">{{template "ic-empty"}} Clear permit</button>{{end}}
     </div>
     {{end}}{{/* Empty garage: no toggle — the modal opens straight on the plate
          field, which needs no saved cars, instead of an empty vehicle picker. */}}
@@ -617,7 +609,7 @@
       <div class="segpane" :class="{hide: mode!='car'}">
         <label class="fld">Rego
           <div class="vpick">
-            <input type="hidden" name="vehicle_id" :value="sel" :disabled="mode!='car'">
+            <input type="hidden" name="vehicle_id" :value="sel">
             <button type="button" class="vpick-btn" @click="open=!open">
               <span class="dot" x-show="col" :style="`background:${col}`"></span>
               <span x-text="lbl || 'Choose a rego…'" :class="{'ph': !lbl}"></span>
@@ -647,15 +639,6 @@
         <p class="empty-note" style="margin-top:6px">Used for this booking only and not saved. If you book the same regos often, <a href="/regos">save them</a> for one-tap booking and the weekly roster.</p>
         {{end}}
       </div>
-      {{if .CanEmpty}}
-      <div class="segpane" :class="{hide: mode!='empty'}">
-        <input type="hidden" name="vehicle_id" value="empty" :disabled="mode!='empty'">
-        <div class="emptybook">
-          <span class="noplate">no rego</span>
-          <p>The rego is taken off the permit for this booking, so nothing is covered until it ends. Your roster takes over again after that.</p>
-        </div>
-      </div>
-      {{end}}
     </div>
     {{/* Separate date + time inputs rather than datetime-local: Firefox for
          Android (and some others) don't offer a time picker for datetime-local,
@@ -690,7 +673,7 @@
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       {{/* Can't submit with neither a car nor a plate — the server refuses that
            anyway, but a button that fires only to bounce reads as broken. */}}
-      <button type="submit" :disabled="mode=='car' ? !sel : mode=='plate' ? !plate.trim() : false">{{template "ic-plus"}} Book</button>
+      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()">{{template "ic-plus"}} Book</button>
     </div>
   </form>
   </div>
