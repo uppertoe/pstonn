@@ -159,7 +159,11 @@
 {{/* The household's own page: no "account holder is told", no referral (they
      have an account), and the way back into the app instead of a bookmark tip. */}}
 <p class="empty-note" style="margin-top:16px">Tap a rego. It stays on the permit until the end of the day; after that the roster takes over, or if nothing is scheduled it stays until the next change. Everything else, the roster, guests and settings, is in the app.</p>
-<a class="gtip" href="/schedule" hx-boost="false">Open p.stonn &rarr;</a>
+{{/* A new window: the picker is installed with its scope on /g/, so /schedule
+     is outside the app, and a phone that navigated the app window there had no
+     way back to the picker. In an installed app this hands the link to the
+     browser; in a tab it is a new tab. */}}
+<a class="gtip" href="/schedule" target="_blank" rel="noopener" hx-boost="false">Open p.stonn in your browser &nearr;</a>
 {{else}}
 {{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your rego to put it on the permit until the end of the day.{{else}}Tap your rego. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>{{end}}
 {{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>{{end}}
