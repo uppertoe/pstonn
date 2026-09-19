@@ -3,7 +3,7 @@ Dedup: drift|primary@example.com|primary@example.com|VPP16071=AMY602@1786336200>
 Subject: Your VPP16071 was changed to AMY602 on the council's website
 Hero: AMY602
 
-AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule takes it off again. If it should stay longer, book it or add it to the roster in p.stonn.
+AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule clears the permit again. If it should stay longer, book it or add it to the roster in p.stonn.
 
 https://p.stonn.org
 
@@ -12,7 +12,7 @@ Dedup: drift|primary@example.com|primary@example.com|VPP16071=AMY602@1786336200>
 Subject: Your VPP16071 was changed to AMY602 on the council's website
 Hero: AMY602
 
-AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule takes it off again. If it should stay longer, book it or add it to the roster in p.stonn.
+AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule clears the permit again. If it should stay longer, book it or add it to the roster in p.stonn.
 
 https://p.stonn.org
 
@@ -21,7 +21,7 @@ Dedup: drift|sam@example.com|primary@example.com|VPP16071=AMY602@1786336200>|ema
 Subject: Your VPP16071 was changed to AMY602 on the council's website
 Hero: AMY602
 
-AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule takes it off again. If it should stay longer, book it or add it to the roster in p.stonn.
+AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule clears the permit again. If it should stay longer, book it or add it to the roster in p.stonn.
 
 https://p.stonn.org
 

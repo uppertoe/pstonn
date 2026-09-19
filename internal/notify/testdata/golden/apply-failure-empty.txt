@@ -2,7 +2,7 @@
 Subject: Still updating your Visitor — it shows XYZ789 for now
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to take the rego off your Visitor, as your schedule says, but couldn't.
+p.stonn tried to clear your Visitor (regos are removed on this day, as scheduled) but couldn't.
 The permit still shows XYZ789, so that is the rego currently covered.
 
 The council was temporarily unavailable.
@@ -20,7 +20,7 @@ Title: Still updating your Visitor — it shows XYZ789 for now
 Priority: default
 Tags: warning
 
-p.stonn tried to take the rego off your Visitor, as your schedule says, but couldn't.
+p.stonn tried to clear your Visitor (regos are removed on this day, as scheduled) but couldn't.
 The permit still shows XYZ789, so that is the rego currently covered.
 
 The council was temporarily unavailable.
@@ -35,7 +35,7 @@ We have also told sam@example.com (by email).
 Subject: Still updating your Visitor — it shows XYZ789 for now
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to take the rego off your Visitor, as your schedule says, but couldn't.
+p.stonn tried to clear your Visitor (regos are removed on this day, as scheduled) but couldn't.
 The permit still shows XYZ789, so that is the rego currently covered.
 
 The council was temporarily unavailable.

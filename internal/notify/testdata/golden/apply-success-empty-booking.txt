@@ -2,7 +2,7 @@
 Subject: Permit updated: Visitor now has no rego
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor now has no rego on it, for a booking made by sam@example.com. Nothing is covered on that permit until that booking ends.
+Your Visitor now has no rego on it, for a one-off booking made by sam@example.com that clears the permit. Nothing is covered on that permit until that booking ends.
 
 Nothing to do — this is just your confirmation it went through.
 
@@ -15,7 +15,7 @@ Title: Permit updated: Visitor now has no rego
 Priority: default
 Tags: white_check_mark
 
-Your Visitor now has no rego on it, for a booking made by sam@example.com. Nothing is covered on that permit until that booking ends.
+Your Visitor now has no rego on it, for a one-off booking made by sam@example.com that clears the permit. Nothing is covered on that permit until that booking ends.
 
 Nothing to do — this is just your confirmation it went through.
 
@@ -25,7 +25,7 @@ We have also told sam@example.com (by email).
 Subject: Permit updated: Visitor now has no rego
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor now has no rego on it, for a booking made by sam@example.com. Nothing is covered on that permit until that booking ends.
+Your Visitor now has no rego on it, for a one-off booking made by sam@example.com that clears the permit. Nothing is covered on that permit until that booking ends.
 
 Nothing to do — this is just your confirmation it went through.
 
