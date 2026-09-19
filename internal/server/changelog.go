@@ -150,7 +150,7 @@ func changeText(c store.Change) string {
 	case store.ActionRosterClear:
 		return "cleared the roster for " + c.Target
 	case store.ActionRosterEmpty:
-		return "set " + c.Target + " to clear, so the rego is removed that day"
+		return "set " + c.Target + " to clear: regos are removed that day"
 	case store.ActionCycleAdd:
 		return "added " + c.Detail + " to the roster on " + c.Target
 	case store.ActionCycleRemove:

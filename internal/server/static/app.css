@@ -392,6 +392,9 @@ tr:last-child td { border-bottom:0; }
 .calwarn { color:var(--warn); font-size:12px; }
 /* The day popover's lines: what, why, and today's council status. */
 .cday .pop { text-align:left; }
+/* The "clear" value wherever it is shown outside a cell: the mark and the word. */
+.clearmark { display:inline-flex; align-items:center; gap:5px; color:var(--muted); font-weight:600; font-size:12.5px; }
+.clearmark svg { width:14px; height:14px; }
 .cday .cal-what { margin-bottom:5px; }
 .cday .cal-why { font-size:12px; color:var(--muted); line-height:1.4; }
 .cday .cal-st { font-size:12px; margin-top:6px; color:var(--muted); }

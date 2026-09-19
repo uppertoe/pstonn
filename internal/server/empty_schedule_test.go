@@ -40,7 +40,7 @@ func TestEmptyRosterDay(t *testing.T) {
 		t.Fatalf("rules = %+v", rs)
 	}
 	body := w.Body.String()
-	for _, want := range []string{`class="chip noreg"`, `vopt vclear sel`, `<span class="lab">Clear</span><span class="hint">the rego is removed</span>`, `<span class="lab">None</span><span class="hint">no change</span>`} {
+	for _, want := range []string{`class="chip noreg"`, `vopt vclear sel`, `<span class="lab">Clear</span><span class="hint">regos are removed</span>`, `<span class="lab">None</span><span class="hint">no change</span>`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("card after an empty day lacks %q:\n%s", want, excerpt(body))
 		}

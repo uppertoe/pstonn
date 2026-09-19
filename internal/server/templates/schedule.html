@@ -414,7 +414,7 @@
          uses), and nothing scheduled (whatever is on the permit stays). */}}
     <button type="button" class="chip {{if .Empty}}noreg{{else if not .Reg}}empty{{end}}" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else if .Empty}}clear, the rego is removed, change{{else}}none, choose a rego{{end}}">
+            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else if .Empty}}clear, regos are removed, change{{else}}none, choose a rego{{end}}">
       {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else if .Empty}}{{template "ic-empty"}}<span class="lab">clear</span>{{else}}<span class="lab muted">none</span>{{end}}
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
@@ -423,7 +423,7 @@
       <p class="tt">{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: choose a rego</p>
       <div class="vopts">
         {{/* Three kinds of choice, each a one-line row: none (the permit is left
-             as it is), a rego, or clear (the rego is removed). The hint on the
+             as it is), a rego, or clear (regos are removed). The hint on the
              right sits where a rego's plate would. */}}
         <button type="button" class="vopt {{if and (not $sel) (not $emptyDay)}}sel{{end}}" @click="open=false"
           hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="lab">None</span><span class="hint">no change</span></button>
@@ -433,7 +433,7 @@
         {{end}}
         {{if $pv.CanEmpty}}
         <button type="button" class="vopt vclear {{if $emptyDay}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"empty"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">{{template "ic-empty"}}<span class="lab">Clear</span><span class="hint">the rego is removed</span></button>
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"empty"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">{{template "ic-empty"}}<span class="lab">Clear</span><span class="hint">regos are removed</span></button>
         {{end}}
       </div>
       {{else}}
@@ -489,7 +489,7 @@
 <div class="oneoff-list">
   {{range .Overrides}}
   <div class="oneoff-item">
-    <span class="veh">{{if .Empty}}<span class="noplate">no rego</span>{{else}}{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span>{{end}}</span>
+    <span class="veh">{{if .Empty}}<span class="clearmark">{{template "ic-empty"}}clear</span>{{else}}{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span>{{end}}</span>
     {{/* Name whoever booked it. The account is shared, so "who decided this?" is
          a real question — and an open-ended booking beats the roster indefinitely,
          which is worth being able to attribute. */}}
@@ -698,7 +698,7 @@
       <p class="tt">{{.DayLabel}}</p>
       {{/* Three lines, each one thing: what is on the permit, why, and (today
            only) whether the council shows it yet. */}}
-      <div class="cal-what">{{if .Reg}}<span class="reg">{{.Reg}}</span>{{else if .Empty}}<span class="noplate">no rego</span>{{else}}<span class="muted">Nothing scheduled</span>{{end}}</div>
+      <div class="cal-what">{{if .Reg}}<span class="reg">{{.Reg}}</span>{{else if .Empty}}<span class="clearmark">{{template "ic-empty"}}clear</span>{{else}}<span class="muted">Nothing scheduled</span>{{end}}</div>
       {{if or .Reg .Empty}}<div class="cal-why">{{template "cal-why" .}}</div>{{end}}
       {{if .Unconfirmed}}<div class="cal-st calwarn">Not confirmed with the council.</div>{{else if .Applying}}<div class="cal-st">Still applying &mdash; not on the permit yet.</div>{{end}}
     </div>
@@ -706,8 +706,8 @@
 {{end}}
 
 {{/* The calendar day's "what", as text for the aria-label. */}}
-{{define "cal-what-text"}}{{if .Reg}}{{.Reg}}.{{else if .Empty}}No rego, cleared.{{else}}Nothing scheduled.{{end}}{{end}}
+{{define "cal-what-text"}}{{if .Reg}}{{.Reg}}.{{else if .Empty}}Clear: regos are removed.{{else}}Nothing scheduled.{{end}}{{end}}
 
-{{/* The calendar day's "why": the roster, or a one-off booking and what the
-     roster would otherwise have that day. */}}
-{{define "cal-why"}}{{if eq .Source "roster"}}{{if .Empty}}The roster clears the permit that day.{{else}}From the roster.{{end}}{{else if eq .Source "override"}}One-off booking{{if .UsualClear}}; the roster would clear the permit that day.{{else if .Usual}}; the roster has {{.Usual}} that day.{{else}}.{{end}}{{end}}{{end}}
+{{/* The calendar day's "why": scheduled by the roster, or a one-off booking,
+     which overrides whatever the roster has that day (a rego, or a clear). */}}
+{{define "cal-why"}}{{if eq .Source "roster"}}Scheduled by the roster.{{else if eq .Source "override"}}One-off booking{{if .UsualClear}}; it overrides the roster, which clears the permit that day.{{else if .Usual}}; it overrides the roster&rsquo;s {{.Usual}}.{{else}}.{{end}}{{end}}{{end}}

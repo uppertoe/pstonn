@@ -191,11 +191,11 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		}
 		switch {
 		case o.Empty && o.Source == "roster":
-			body = fmt.Sprintf("Your %s now has no rego on it for today, as your roster says. Nothing is covered on that permit until the schedule puts a rego on.%s", o.PermitLabel, confirm)
+			body = fmt.Sprintf("Your %s now has no rego on it for today, as scheduled by your roster (regos are removed on this day). Nothing is covered on that permit until a rego is put on.%s", o.PermitLabel, confirm)
 		case o.Empty && o.Source == "override" && o.By != "":
-			body = fmt.Sprintf("Your %s now has no rego on it, for a booking made by %s. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, o.By, confirm)
+			body = fmt.Sprintf("Your %s now has no rego on it, for a one-off booking made by %s that clears the permit. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, o.By, confirm)
 		case o.Empty && o.Source == "override":
-			body = fmt.Sprintf("Your %s now has no rego on it, for the booking you made. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, confirm)
+			body = fmt.Sprintf("Your %s now has no rego on it, for the one-off booking you made that clears the permit. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, confirm)
 		case o.Empty:
 			body = fmt.Sprintf("Your %s now has no rego on it.%s", o.PermitLabel, confirm)
 		case o.Source == "doorqr":
@@ -251,7 +251,7 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		}
 		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
 		if o.Empty {
-			lines[0] = fmt.Sprintf("p.stonn tried to take the rego off your %s, as your schedule says, but couldn't.", o.PermitLabel)
+			lines[0] = fmt.Sprintf("p.stonn tried to clear your %s (regos are removed on this day, as scheduled) but couldn't.", o.PermitLabel)
 		}
 		if o.CurrentReg != "" {
 			lines = append(lines, fmt.Sprintf("The permit still shows %s, so that is the rego currently covered.", o.CurrentReg))

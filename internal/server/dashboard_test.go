@@ -582,7 +582,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"schedule-empty-day", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{Permits: []permitView{emptyDayPermitViewAt(loc, now)}},
-		}, "the rego is removed"},
+		}, "regos are removed"},
 		// Right after adding a permit while another visitor permit is still unmanaged:
 		// the "manage another" control becomes the highlighted "set up your other permit".
 		{"schedule-more-to-set-up", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
@@ -859,7 +859,7 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p := samplePermitViewAt(loc, now)
 			p.Cal[2] = calView{DayLabel: "Tue 3", Reg: "XYZ789", Source: "override", Adhoc: true, Usual: "ABC123", HasOneoff: true}
 			return p
-		}, `the roster has ABC123 that day`},
+		}, `it overrides the roster&rsquo;s ABC123`},
 		// A cycling roster renders the week tabs (with the "now" mark on the
 		// current week), per-week panes, and the labelled calendar rows.
 		{"cycle-tabs", func() permitView {

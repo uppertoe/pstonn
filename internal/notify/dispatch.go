@@ -838,7 +838,7 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 		case d.Removed() && d.EmptiesAfter:
 			// Not reached today (the drift pass leaves a cleared plate off when the
 			// schedule says no rego), kept so the wording exists if that changes.
-			lines = append(lines, fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn. Your schedule says no rego, so it stays off.", d.PermitLabel))
+			lines = append(lines, fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn. Your schedule clears the permit now anyway, so it stays off.", d.PermitLabel))
 		case d.Removed():
 			line := fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn.", d.PermitLabel)
 			if d.PutsBack != "" {
@@ -854,7 +854,7 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 			if d.PutsBack != "" {
 				line += fmt.Sprintf(" Your schedule says %s, so p.stonn is putting that back on now.", d.PutsBack)
 			} else if d.EmptiesAfter {
-				line += " Your schedule says no rego, so p.stonn is taking it off now."
+				line += " Your schedule clears the permit now, so p.stonn is removing it."
 			}
 			line += fmt.Sprintf(" If %s should be on the permit, book it or add it to the roster in p.stonn.", d.Plate)
 			lines = append(lines, line)
@@ -863,7 +863,7 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 			if d.PutsBack != "" {
 				line += fmt.Sprintf(", when your schedule puts %s back on.", d.PutsBack)
 			} else if d.EmptiesAfter {
-				line += ", when your schedule takes it off again."
+				line += ", when your schedule clears the permit again."
 			} else {
 				line += "; after that your schedule takes over again when it next puts a rego on."
 			}
