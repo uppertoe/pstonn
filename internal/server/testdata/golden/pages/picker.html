@@ -142,10 +142,21 @@
   
   addEventListener('htmx:sendError', function (e) {
     var cfg = e.detail && e.detail.requestConfig;
+    
+    
+    
+    
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
   });
+  
+  
+  
+  if ('serviceWorker' in navigator) {
+    addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
+  }
   
   
   

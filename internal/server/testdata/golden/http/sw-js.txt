@@ -1,0 +1,42 @@
+GET /sw.js
+Status: 200
+Cache-Control: no-cache
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-NONCE' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+Content-Type: text/javascript; charset=utf-8
+Permissions-Policy: screen-wake-lock=(self), camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()
+Referrer-Policy: same-origin
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+
+// p.stonn offline page. Serves /offline when a navigation cannot reach the
+// server; caches nothing else and answers nothing else.
+var CACHE = 'pstonn-offline-6edb27dd7e';
+var ASSETS = ["/offline", "/static/app.css?v=6edb27dd7e", "/static/spacegrotesk-wordmark.woff2?v=6edb27dd7e", "/static/icon-192.png?v=6edb27dd7e", "/static/icon-180.png?v=6edb27dd7e"];
+var OFFLINE = ASSETS[0];
+
+self.addEventListener('install', function (e) {
+  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }).then(function () { return self.skipWaiting(); }));
+});
+
+self.addEventListener('activate', function (e) {
+  e.waitUntil(caches.keys().then(function (keys) {
+    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+  }).then(function () { return self.clients.claim(); }));
+});
+
+self.addEventListener('fetch', function (e) {
+  var req = e.request;
+  if (req.method !== 'GET') return;
+  if (req.mode === 'navigate') {
+    // The network first, always; the cached page only when the request itself
+    // fails (no connection), never for a server's own answer.
+    e.respondWith(fetch(req).catch(function () { return caches.match(OFFLINE); }));
+    return;
+  }
+  var url = new URL(req.url);
+  if (url.origin === self.location.origin && ASSETS.indexOf(url.pathname + url.search) !== -1) {
+    // The offline page's own assets: cached copy first, so the page draws with
+    // no connection; otherwise the network as normal.
+    e.respondWith(caches.match(req).then(function (hit) { return hit || fetch(req); }));
+  }
+});

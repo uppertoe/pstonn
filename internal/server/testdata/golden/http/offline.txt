@@ -1,10 +1,20 @@
+GET /offline
+Status: 200
+Cache-Control: no-cache
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-NONCE' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'
+Content-Type: text/html; charset=utf-8
+Permissions-Policy: screen-wake-lock=(self), camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), midi=()
+Referrer-Policy: same-origin
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="htmx-config" content='{"globalViewTransitions":true}'>
-<title></title>
+<title>p.stonn Visitor Permit Scheduler</title>
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
@@ -14,7 +24,7 @@
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
 <link rel="stylesheet" href="/static/app.css?v=6edb27dd7e">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
-<script>
+<script nonce="NONCE">
   
   (function () {
     var KEY = 'pstonn-theme', saved = localStorage.getItem(KEY);
@@ -56,7 +66,7 @@
     });
   })();
 </script>
-<script>
+<script nonce="NONCE">
   
   
   
@@ -122,11 +132,11 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=6edb27dd7e"></script>
-<script defer src="/static/alpine.min.js?v=6edb27dd7e"></script>
+<script nonce="NONCE" src="/static/htmx.min.js?v=6edb27dd7e"></script>
+<script nonce="NONCE" defer src="/static/alpine.min.js?v=6edb27dd7e"></script>
 
 
-<script>
+<script nonce="NONCE">
   
   
   addEventListener('htmx:beforeRequest', function (e) { var el = e.detail && e.detail.elt; if (el && el.classList && el.classList.contains('hx-quiet')) return; var b = document.getElementById('htmx-bar'); if (b) b.classList.add('on'); });
@@ -208,7 +218,7 @@
     t.classList.add('on');
   }
 </script>
-<script>
+<script nonce="NONCE">
 
 window.popClamp = window.popClamp || function (el) {
   el.style.removeProperty('--pop-shift');
@@ -337,25 +347,15 @@ window.popClamp = window.popClamp || function (el) {
 
 
 
+
+<header class="appbar pubbar"><span class="brand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></span></header>
 <main id="main" tabindex="-1" class="guestwrap">
-  <section class="guestcard" style="text-align:center">
-    <div class="gbrand" style="justify-content:center"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></div>
-    <h1 style="font-size:19px;margin:6px 0 4px">The Helds’ visitor permit</h1>
-    <p class="gnow" style="margin-top:6px">You asked to put <span class="plate">GUEST1</span> on the permit.</p>
-    
-    <div aria-live="polite">
-
-<div id="reqstatus" class="hx-quiet" hx-get="/g/req/4?n=nn&fp=" hx-trigger="every 3s" hx-swap="outerHTML transition:false">
-  <div class="gspin"></div>
-  <p class="gresult" style="font-weight:500;color:var(--muted)">Waiting for the resident to approve&hellip;</p>
-</div>
-
-</div>
+  <section class="guestcard">
+    <h1>You&rsquo;re offline</h1>
+    <p class="gresult">p.stonn needs a connection to reach the council and its own records, so nothing has been changed. Check your phone&rsquo;s connection and try again.</p>
+    <p style="margin-top:16px"><a class="btnlike" href="" hx-boost="false">Try again</a></p>
   </section>
-  
-  <p class="gcredit">This permit is managed with <a href="/" hx-boost="false">p.stonn</a> — free for City of Stonnington residents.</p>
 </main>
-
 
 
 
