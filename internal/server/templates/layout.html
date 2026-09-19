@@ -323,10 +323,14 @@ window.popClamp = window.popClamp || function (el) {
     if (!field || f.__confirmed) return;
     var inp = f.querySelector('[name="' + field + '"]');
     var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
-    if (!inp || inp.offsetParent === null || !v) { delete f.dataset.confirm; return; }
+    {{/* Only a read-back this listener set is cleared when the plate field is
+         out of play; a confirm the form put there itself (the booking form's
+         "no rego" mode) stands. */}}
+    if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
     f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
       'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
     f.dataset.confirmOk = 'It matches — continue';
+    f.__plateConfirm = true;
   }, true);
   {{/* The quick picker's "are you sure": one tap on a rego tile used to change
        the permit outright, and on a phone's home screen a tile is easy to brush.

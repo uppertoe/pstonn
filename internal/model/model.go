@@ -167,7 +167,11 @@ type WeeklyRule struct {
 	PermitID  int64
 	Week      int
 	Weekday   time.Weekday
-	VehicleID int64
+	VehicleID int64 // 0 when Empty
+	// Empty means the permit is deliberately left with no rego on this day:
+	// a third thing a day can say, beside "this rego" and no rule at all
+	// (which leaves whatever is on the permit alone).
+	Empty bool
 }
 
 // MaxCycleWeeks caps how many weeks a roster cycle may hold.
@@ -244,6 +248,9 @@ type Override struct {
 	CreatedBy    string
 	CreatedAt    time.Time // when it was booked; the tie-break for overlapping overrides
 	GuestTokenID int64     // the guest link that made it (0 = the household's own booking)
+	// Empty books the permit to have no rego on it for the window, the way a
+	// roster day can (WeeklyRule.Empty). VehicleID and Registration are unset.
+	Empty bool
 }
 
 // Source identifies why a particular vehicle is the resolved allocation.
@@ -263,6 +270,11 @@ type Resolution struct {
 	State        string // ad-hoc one-off plate's state code ("" for a saved-vehicle or roster resolution)
 	Source       Source
 	By           string // creator of the winning override ("" for roster/none)
+	// Empty says the schedule wants NO rego on the permit now: the winning rule
+	// or override was an "empty" one. VehicleID and Registration are unset. It
+	// is a scheduled state like any other, distinct from SourceNone (nothing
+	// scheduled, leave the permit as it is).
+	Empty bool
 
 	// Since is when this allocation BECAME the right answer: local midnight for a
 	// roster day, the start (or booking time) of a winning override. Zero for
@@ -326,7 +338,7 @@ func Resolve(now time.Time, c Cycle, rules []WeeklyRule, overrides []Override) R
 		}
 		return Resolution{
 			VehicleID: best.VehicleID, Registration: best.Registration, State: best.State,
-			Source: SourceOverride, By: best.CreatedBy,
+			Source: SourceOverride, By: best.CreatedBy, Empty: best.Empty,
 			Since: since, Scheduled: scheduled, Until: best.EndsAt,
 		}
 	}
@@ -354,9 +366,20 @@ func Resolve(now time.Time, c Cycle, rules []WeeklyRule, overrides []Override) R
 		// rosters are expressed in (see the doc comment), so the day boundary is read
 		// straight off it.
 		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		return Resolution{VehicleID: bestRule.VehicleID, Source: SourceRoster, Since: midnight, Scheduled: true}
+		return Resolution{VehicleID: bestRule.VehicleID, Empty: bestRule.Empty, Source: SourceRoster, Since: midnight, Scheduled: true}
 	}
 	return Resolution{Source: SourceNone}
+}
+
+// SameTarget reports whether two resolutions want the same thing on the permit:
+// the same saved vehicle, the same typed plate, or both empty. Sources are not
+// compared; an override handing back to a roster day with the same car is no
+// change.
+func (r Resolution) SameTarget(o Resolution) bool {
+	if r.Empty || o.Empty {
+		return r.Empty == o.Empty
+	}
+	return r.VehicleID == o.VehicleID && SamePlate(r.Registration, o.Registration)
 }
 
 // NextChange reports the first instant within (now, now+horizon] at which the
@@ -373,7 +396,9 @@ func Resolve(now time.Time, c Cycle, rules []WeeklyRule, overrides []Override) R
 //   - a transition OUT of a gap back to the same car is not a write either,
 //     because that car's plate is the one lingering;
 //   - an override handing back to a roster day with the same vehicle is no
-//     write, whatever the sources say.
+//     write, whatever the sources say;
+//   - an "empty" allocation (the permit deliberately left with no rego) is a
+//     write like any plate, since the scheduler clears the permit for it.
 //
 // When nothing is allocated at now, the lingering plate is unknowable here
 // (it lives on the permit row, not in the schedule), so the first future
@@ -408,7 +433,7 @@ func NextChange(now time.Time, horizon time.Duration, c Cycle, rules []WeeklyRul
 		if r.Source == SourceNone {
 			continue // entering a gap writes nothing; the last plate lingers
 		}
-		if !haveLast || r.VehicleID != last.VehicleID || !SamePlate(r.Registration, last.Registration) {
+		if !haveLast || !r.SameTarget(last) {
 			c := t
 			return &c
 		}

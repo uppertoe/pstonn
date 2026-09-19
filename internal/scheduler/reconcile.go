@@ -535,7 +535,22 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		wantColor = ""
 		wantRegion = res.State
 	}
-	if want == "" {
+	if res.Empty {
+		// The schedule wants NO rego on the permit: an "empty" roster day or
+		// booking. want is "" by construction, and SamePlate("", "") below reads an
+		// already-empty permit as correct. The write is a clear, not a set.
+		want, wantName, wantColor, wantRegion = "", "", "", ""
+		if !s.tenant.Capabilities(ctx, p.Owner, p.TenantID).CanClearVehicle {
+			// The pages never offer an empty day on such a permit; this is a
+			// permit that changed council under a schedule that has one.
+			if s.noteUnscheduled(p.ID, "noclear|"+model.NormPlate(p.ActiveRegistration)) {
+				alog.Warnf("permit %s: the schedule says no rego but this council's permit cannot be left empty; leaving %q on it",
+					p.CouncilPermitID, p.ActiveRegistration)
+			}
+			s.settle(ctx, p)
+			return false
+		}
+	} else if want == "" {
 		// The schedule points at a vehicle we cannot turn into a plate: the row was
 		// deleted under us, or it belongs to another owner (vehByOwnerID is
 		// owner-keyed precisely so that can never resolve). This used to be a fully
@@ -606,7 +621,11 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 	}
 
 	prev := p.ActiveRegistration // the plate we're changing away from
-	err = s.tenant.SetVehicle(ctx, p.Owner, p, want, wantRegion)
+	if res.Empty {
+		err = s.tenant.ClearVehicle(ctx, p.Owner, p)
+	} else {
+		err = s.tenant.SetVehicle(ctx, p.Owner, p, want, wantRegion)
+	}
 	var commitErr error
 	if err == nil {
 		commitErr = s.commitActive(ctx, p.ID, want)
@@ -675,10 +694,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// members who only hear about problems.
 		resolves := s.closeFailureEpisode(ctx, p.ID)
 		s.notifyUser(ctx, p, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Color: wantColor, Source: string(res.Source), By: res.By, OK: true,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Color: wantColor, Source: string(res.Source), By: res.By, OK: true, Empty: res.Empty,
 			DisplacedReg: d.Reg, DisplacedTold: told, DriverTold: driverTold, ResolvesFailure: resolves,
 		}, "success|"+prev+">"+want)
-		alog.Infof("permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
+		if res.Empty {
+			alog.Infof("permit %s -> no rego (%s)", p.CouncilPermitID, res.Source)
+		} else {
+			alog.Infof("permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
+		}
 		return true
 	case errors.Is(err, parking.ErrTenantUnavailable):
 		// Checked BEFORE ErrNotLinked, which it wraps. This is not "the household has
@@ -747,7 +770,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			tier = tierUrgent
 		}
 		s.escalateFailure(ctx, p, threshold, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Empty: res.Empty,
 			OK: false, CurrentReg: p.ActiveRegistration, CouncilDown: councilDown,
 			Reason: reason, Action: action, Transient: true, Urgent: confirmed,
 		}, tier)
@@ -761,7 +784,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.systemAlert(ctx, "not-captured",
 			"Council write endpoint not working (API shape change?)",
 			fmt.Sprintf("SetVehicle for permit %s returned ErrNotCaptured. If the council changed its API this affects ALL users; investigate promptly.", p.CouncilPermitID))
-		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
+		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), res.Empty, err, stats)
 		return true
 	case errors.Is(err, parking.ErrSessionExpired):
 		// The cookie died. Hand recovery to the reconnect worker (owner-deduplicated,
@@ -788,7 +811,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		reason := "p.stonn's sign-in to the council expired and signing back in hasn't succeeded yet, so your permit could not be updated."
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		s.escalateFailure(ctx, p, sessionNotifyThreshold, notify.ApplyOutcome{
-			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
+			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Empty: res.Empty,
 			OK: false, CurrentReg: p.ActiveRegistration,
 			Reason:    reason,
 			Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
@@ -797,7 +820,7 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		s.deferRetry(p.ID, 3)
 		return true
 	default:
-		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), err, stats)
+		s.handleApplyFailure(ctx, p, want, wantName, string(res.Source), res.Empty, err, stats)
 		alog.Errorf("permit %s apply error: %v", p.CouncilPermitID, err)
 		return true
 	}

@@ -662,6 +662,8 @@ type permitView struct {
 	Permit        model.Permit
 	DesiredReg    string
 	DesiredSource string
+	DesiredEmpty  bool // the schedule wants no rego on the permit right now
+	CanEmpty      bool // the council allows an empty permit, so "no rego" is offered as a roster day and a booking
 	// ActiveColor is the stored colour of whichever saved car is on the permit
 	// right now, or "" when the plate is not one of the household's cars (a
 	// visitor's ad-hoc plate). Empty is meaningful, not missing: it renders the
@@ -839,6 +841,7 @@ type dayView struct {
 	Reg        string
 	Label      string
 	Color      string
+	Empty      bool // the day leaves the permit with no rego (VehicleID 0, Reg "")
 }
 
 // weekView is one cycle week's roster pane.
@@ -854,7 +857,8 @@ type calView struct {
 	Reg       string
 	Color     string
 	Adhoc     bool   // covered by an override with a typed plate — no saved colour to show
-	Usual     string // the roster plate an override displaced, "" when not displaced
+	Empty     bool   // the schedule leaves the permit with no rego this day (Reg "", Source set)
+	Usual     string // the roster plate an override displaced ("no rego" for an empty day), "" when not displaced
 	Source    string // "roster" | "override" | ""
 	HasOneoff bool
 	IsToday   bool
@@ -871,8 +875,9 @@ type overrideView struct {
 	ID        int64
 	PermitID  int64
 	Reg       string
-	Label     string
+	Label     string // "No rego" for an empty booking
 	Color     string
+	Empty     bool // the booking leaves the permit with no rego
 	StartsAt  time.Time
 	EndsAt    *time.Time
 	CreatedBy string

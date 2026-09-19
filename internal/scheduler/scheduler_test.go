@@ -130,6 +130,12 @@ func (f *fakeTenant) upsertGridLocked(tenantPermitID string, mutate func(*parkin
 	f.permits = append(f.permits, pi)
 }
 
+// ClearVehicle records a clear as a SetVehicle of "" (the rest of the fake's
+// bookkeeping is shared), so a test reads it off setRegs like any write.
+func (f *fakeTenant) ClearVehicle(ctx context.Context, owner string, p model.Permit) error {
+	return f.SetVehicle(ctx, owner, p, "", "")
+}
+
 func (f *fakeTenant) SetVehicle(_ context.Context, _ string, p model.Permit, reg, region string) error {
 	if p.CouncilPermitID == f.panicOn {
 		panic("fakeCouncil: forced panic for " + p.CouncilPermitID)
@@ -218,7 +224,7 @@ func (f *fakeTenant) Capabilities(_ context.Context, _, tenantID string) provide
 	if c, ok := f.caps[tenantID]; ok {
 		return c
 	}
-	return provider.Capabilities{NeedsKeepWarm: true, SupportsRefresh: true, LoginKind: "password"}
+	return provider.Capabilities{NeedsKeepWarm: true, SupportsRefresh: true, LoginKind: "password", CanClearVehicle: true}
 }
 
 // ListPermitsComplete reports the list as complete unless a test sets partialPermits,
@@ -800,9 +806,9 @@ func TestFailureNotifyDedupAndSuccess(t *testing.T) {
 	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 
 	// Ticks are a minute apart in production; sleep so async delivery lands first.
-	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
-	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil) // identical → suppressed
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, rejectedErr(), nil) // identical → suppressed
 	time.Sleep(60 * time.Millisecond)
 	// Success (as the reconcile success branch would do).
 	s.clearFailStreak(ctx, p.ID)
@@ -839,7 +845,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 	s := New(st, &fakeTenant{}, time.UTC, Options{Notifier: fn})
 
 	for i := 0; i < failNotifyThreshold-1; i++ {
-		s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
+		s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, transientErr(), nil)
 		time.Sleep(30 * time.Millisecond)
 	}
 	if n := len(fn.appliedSnap()); n != 0 {
@@ -849,7 +855,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 		t.Fatal("transient failure should still be recorded in the activity log")
 	}
 	// The threshold-th consecutive failure now alarms.
-	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, transientErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	out := fn.outcomeSnap()
 	if len(out) != 1 || out[0].OK || !out[0].Transient {
@@ -857,7 +863,7 @@ func TestTransientFailureGracePeriod(t *testing.T) {
 	}
 	// A success resets the streak so the next blip gets a fresh grace period.
 	s.clearFailStreak(ctx, p.ID)
-	s.handleApplyFailure(ctx, p, "AVS619", "", "override", transientErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, transientErr(), nil)
 	time.Sleep(30 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 1 {
 		t.Fatalf("streak not reset after success; got %d notifications", n)
@@ -901,13 +907,13 @@ func TestFailureEscalatesWhenUserNotReached(t *testing.T) {
 	s.notifyRetry = 0
 
 	// A rejection alarms on the first tick.
-	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.adminSnap()); n != 1 {
 		t.Fatalf("admin escalations = %d, want 1 (user not reached)", n)
 	}
 	// Not marked delivered → an identical repeat is RE-attempted, not suppressed.
-	s.handleApplyFailure(ctx, p, "AVS619", "", "override", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "override", false, rejectedErr(), nil)
 	time.Sleep(60 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 2 {
 		t.Fatalf("undelivered failure must be retried; NotifyApply calls = %d, want 2", n)

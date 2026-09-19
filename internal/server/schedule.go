@@ -406,24 +406,25 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// Rules keyed by (cycle week, weekday). One map per week rather than a flat
 	// weekday map: the calendar's second row is usually a DIFFERENT cycle week,
 	// so a weekday-only lookup would show the wrong "usually X".
-	ruleBy := map[int]map[time.Weekday]int64{}
+	ruleBy := map[int]map[time.Weekday]model.WeeklyRule{}
 	for _, ru := range rules {
 		m := ruleBy[ru.Week]
 		if m == nil {
-			m = map[time.Weekday]int64{}
+			m = map[time.Weekday]model.WeeklyRule{}
 			ruleBy[ru.Week] = m
 		}
-		m[ru.Weekday] = ru.VehicleID
+		m[ru.Weekday] = ru
 	}
 	curWeek := cyc.WeekAt(now)
 	var weeks []weekView
 	for w := 0; w < cyc.Weeks; w++ {
 		var days []dayView
 		for _, wd := range weekdaysDisplay {
-			vid := ruleBy[w][wd]
+			ru := ruleBy[w][wd]
+			vid := ru.VehicleID
 			days = append(days, dayView{
 				PermitID: p.ID, Week: w, WeekdayNum: int(wd), Name: shortDay(wd),
-				VehicleID: vid, Reg: regByID[vid], Label: labelByID[vid], Color: colorByID[vid],
+				VehicleID: vid, Reg: regByID[vid], Label: labelByID[vid], Color: colorByID[vid], Empty: ru.Empty,
 			})
 		}
 		weeks = append(weeks, weekView{Index: w, Num: w + 1, IsCurrent: w == curWeek, Days: days})
@@ -470,13 +471,17 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		if r.Source == model.SourceOverride {
 			// The roster car this override displaced must come from the DAY's cycle
 			// week, not the current one — the grid's second row usually isn't.
-			if reg := regByID[ruleBy[cyc.WeekAt(resolveAt)][day.Weekday()]]; reg != "" && !model.SamePlate(reg, calReg) {
+			if ru := ruleBy[cyc.WeekAt(resolveAt)][day.Weekday()]; ru.Empty {
+				if !r.Empty {
+					usual = "no rego"
+				}
+			} else if reg := regByID[ru.VehicleID]; reg != "" && !model.SamePlate(reg, calReg) {
 				usual = reg
 			}
 		}
 		cal = append(cal, calView{
 			DayLabel: day.Format("Mon 2"), Reg: calReg, Color: calColor,
-			Adhoc: adhoc, Usual: usual,
+			Adhoc: adhoc, Usual: usual, Empty: r.Empty,
 			Source: src, HasOneoff: hasOneoff, IsToday: isToday, Past: past,
 		})
 	}
@@ -484,8 +489,11 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	var ovs []overrideView
 	for _, o := range overrides {
 		reg, label, color := dispReg(o.VehicleID, o.Registration)
+		if o.Empty {
+			reg, label, color = "", "No rego", ""
+		}
 		ovs = append(ovs, overrideView{
-			ID: o.ID, PermitID: p.ID, Reg: reg, Label: label,
+			ID: o.ID, PermitID: p.ID, Reg: reg, Label: label, Empty: o.Empty,
 			Color: color, StartsAt: o.StartsAt, EndsAt: o.EndsAt, CreatedBy: o.CreatedBy,
 		})
 	}
@@ -498,9 +506,13 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// tenant's confirmed record does not yet show. desiredReg != "" excludes an
 	// unresolvable schedule (a deleted vehicle), which the scheduler reports rather
 	// than applies, so it is not "applying". SamePlate, not !=, for the same reason
-	// the drift check uses it: the tenant echoes case/spacing variants.
+	// the drift check uses it: the tenant echoes case/spacing variants. An empty
+	// day wants nothing on the permit, so it is applying while a plate is still on.
 	applying := res.Source != model.SourceNone && desiredReg != "" &&
 		!model.SamePlate(desiredReg, p.ActiveRegistration)
+	if res.Empty {
+		applying = p.ActiveRegistration != ""
+	}
 	// The "nothing scheduled yet" nudge is for a NEW household that hasn't set up a
 	// roster and might mistake the empty card for "working". A household that hands
 	// visitors a QR code is using the permit exactly as intended, so once they've
@@ -546,10 +558,13 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		}
 	}
 	pv := permitView{
-		Permit: p, DesiredReg: desiredReg, DesiredSource: source,
-		Caps:    capsOf(caps),
-		Regions: caps.Regions,
-		Weeks:   weeks, CurrentWeek: curWeek, CycleWeeks: cyc.Weeks,
+		Permit: p, DesiredReg: desiredReg, DesiredSource: source, DesiredEmpty: res.Empty,
+		// The roster cell and the booking form offer "no rego" only where the
+		// council's permit can be left empty.
+		CanEmpty: caps.CanClearVehicle,
+		Caps:     capsOf(caps),
+		Regions:  caps.Regions,
+		Weeks:    weeks, CurrentWeek: curWeek, CycleWeeks: cyc.Weeks,
 		CanAddWeek:   cyc.Weeks < model.MaxCycleWeeks,
 		CalRowLabels: calRowLabels,
 		Cal:          cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
@@ -692,9 +707,13 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	// The car gets the same strictness: atoi64 mapped anything unparseable to 0,
 	// and 0 is the "clear this day" sentinel, so a mangled id (a stale page, a
 	// hand-edited form) silently emptied the roster day instead of being refused.
-	// Blank and "0" still mean clear; anything else has to be a real id.
+	// Blank and "0" still mean clear; "empty" leaves the permit with no rego that
+	// day; anything else has to be a real id.
 	var vehicleID int64
-	if raw := strings.TrimSpace(r.FormValue("vehicle_id")); raw != "" {
+	empty := false
+	if raw := strings.TrimSpace(r.FormValue("vehicle_id")); raw == "empty" {
+		empty = true
+	} else if raw != "" {
 		v, verr := strconv.ParseInt(raw, 10, 64)
 		if verr != nil || v < 0 {
 			s.formError(w, r, "That saved rego isn't valid. Please reload the page and try again.")
@@ -702,11 +721,20 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 		}
 		vehicleID = v
 	}
+	// The permit's portal may not allow an empty permit at all; the cell never
+	// offers the option then, and this is the authoritative refusal.
+	if empty && !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
+		s.formError(w, r, "This council's permit can't be left with no rego on it. Choose a rego for that day instead.")
+		return
+	}
 	var err error
 	var plate string
-	if vehicleID == 0 {
+	switch {
+	case empty:
+		err = s.store.SetEmptyRule(r.Context(), owner, p.ID, week, weekday)
+	case vehicleID == 0:
 		err = s.store.ClearRule(r.Context(), owner, p.ID, week, weekday)
-	} else {
+	default:
 		if !s.ownsVehicle(w, r, owner, vehicleID) {
 			return
 		}
@@ -720,7 +748,7 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	// A first roster day answers the "renewed this permit?" copy pitch: they are
 	// building a schedule by hand, so the pitch must not lead again. p is a local
 	// copy, so mirror the flag for the respondPermit render below.
-	if vehicleID != 0 && !p.CopyOfferDone {
+	if (vehicleID != 0 || empty) && !p.CopyOfferDone {
 		if err := s.store.MarkCopyOfferDone(r.Context(), owner, p.ID); err == nil {
 			p.CopyOfferDone = true
 		}
@@ -734,10 +762,14 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	if p.Cycle().Weeks > 1 {
 		dayName = fmt.Sprintf("%s (week %d)", weekday, week+1)
 	}
-	if vehicleID == 0 {
+	switch {
+	case empty:
+		s.logChange(r.Context(), owner, user, store.ActionRosterEmpty,
+			dayName+" on "+permitLabel(p), "")
+	case vehicleID == 0:
 		s.logChange(r.Context(), owner, user, store.ActionRosterClear,
 			dayName+" on "+permitLabel(p), "")
-	} else {
+	default:
 		s.logChange(r.Context(), owner, user, store.ActionRosterSet,
 			dayName+" on "+permitLabel(p), plate)
 	}
@@ -757,6 +789,10 @@ func encodeWeekRules(rules []model.WeeklyRule) string {
 	}
 	parts := make([]string, 0, len(rules))
 	for _, r := range rules {
+		if r.Empty {
+			parts = append(parts, fmt.Sprintf("%d:e", int(r.Weekday))) // an empty day has no vehicle
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%d:%d", int(r.Weekday), r.VehicleID))
 	}
 	return strings.Join(parts, ",")
@@ -774,11 +810,18 @@ func decodeWeekRules(s string) ([]model.WeeklyRule, bool) {
 			return nil, false
 		}
 		w, werr := strconv.Atoi(wd)
-		v, verr := strconv.ParseInt(vid, 10, 64)
-		if werr != nil || verr != nil || w < 0 || w > 6 || v <= 0 || seen[w] {
+		if werr != nil || w < 0 || w > 6 || seen[w] {
 			return nil, false
 		}
 		seen[w] = true
+		if vid == "e" {
+			out = append(out, model.WeeklyRule{Weekday: time.Weekday(w), Empty: true})
+			continue
+		}
+		v, verr := strconv.ParseInt(vid, 10, 64)
+		if verr != nil || v <= 0 {
+			return nil, false
+		}
 		out = append(out, model.WeeklyRule{Weekday: time.Weekday(w), VehicleID: v})
 	}
 	return out, len(out) > 0
@@ -908,6 +951,9 @@ func (s *Server) restoreCycleWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, ru := range rules {
+		if ru.Empty {
+			continue
+		}
 		if !s.ownsVehicle(w, r, owner, ru.VehicleID) {
 			return
 		}
@@ -940,7 +986,9 @@ func describeWeekRules(ctx context.Context, s *Server, owner string, rules []mod
 	}
 	var parts []string
 	for _, ru := range rules {
-		if plate := s.plateOf(ctx, owner, ru.VehicleID); plate != "" {
+		if ru.Empty {
+			parts = append(parts, ru.Weekday.String()+" no rego")
+		} else if plate := s.plateOf(ctx, owner, ru.VehicleID); plate != "" {
 			parts = append(parts, ru.Weekday.String()+" "+plate)
 		} else {
 			parts = append(parts, ru.Weekday.String())
@@ -1045,6 +1093,14 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// the booking (audit), even though the permit belongs to the shared account.
 	plate := normalizeReg(r.FormValue("plate"))
 	vehicleID := atoi64(r.FormValue("vehicle_id"))
+	// "empty" books the permit to have no rego for the window. The form only
+	// offers it where the council allows an empty permit; this is the refusal
+	// for a hand-built request.
+	empty := strings.TrimSpace(r.FormValue("vehicle_id")) == "empty"
+	if empty && !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
+		s.formError(w, r, "This council's permit can't be left with no rego on it. Book a rego instead.")
+		return
+	}
 	// A one-off plate carries its own registration state; a saved-vehicle booking
 	// takes the vehicle's. Only a code the tenant offers is kept ("" = home state).
 	plateState := strings.ToUpper(strings.TrimSpace(r.FormValue("plate_state")))
@@ -1062,6 +1118,13 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 	switch {
+	case empty:
+		if _, err := s.store.CreateEmptyOverride(r.Context(), p.ID, startsAt, endsAt, user, store.MaxLiveOverridesPerPermit); err != nil {
+			if !overLimit(err) {
+				s.serverError(w, err)
+			}
+			return
+		}
 	case plate != "":
 		if !validRego(plate) {
 			s.formError(w, r, plateFormatMsg)
@@ -1090,7 +1153,9 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// Record the window too: an open-ended booking beats the roster indefinitely,
 	// which is worth being able to see and attribute.
 	reg := plate
-	if reg == "" {
+	if empty {
+		reg = "no rego"
+	} else if reg == "" {
 		reg = s.plateOf(r.Context(), owner, vehicleID)
 	}
 	window := "from " + startsAt.In(s.locForPermit(r.Context(), p)).Format("2 Jan 3:04pm")
@@ -1120,7 +1185,9 @@ func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
 		for _, o := range ovs {
 			if o.ID == oid {
 				gone = o.Registration
-				if gone == "" {
+				if o.Empty {
+					gone = "no rego"
+				} else if gone == "" {
 					gone = s.plateOf(r.Context(), owner, o.VehicleID)
 				}
 			}

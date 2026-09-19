@@ -554,7 +554,7 @@ func (s *Scheduler) notifyUserThen(ctx context.Context, p model.Permit, o notify
 // alarm anyone); a tenant refusal, which won't fix itself, alarms on the first
 // tick. The message explains the cause, the consequence (what plate is still on
 // the permit), and what to do. It also feeds the systemic-failure detector.
-func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, wantName, source string, err error, stats *passStats) {
+func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want, wantName, source string, empty bool, err error, stats *passStats) {
 	kind, op := parking.FailureOf(err)
 	reason, action := describeFailure(kind, op)
 
@@ -587,6 +587,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 		PermitLabel: permitLabel(p),
 		Reg:         want,
 		Name:        wantName,
+		Empty:       empty,
 		OK:          false,
 		CurrentReg:  p.ActiveRegistration,
 		Reason:      reason,

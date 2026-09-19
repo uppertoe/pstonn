@@ -32,6 +32,9 @@ var alog = applog.For("scheduler")
 // reconcile and keep-warm logic be tested without real HTTP.
 type Tenant interface {
 	SetVehicle(ctx context.Context, owner string, p model.Permit, registration, region string) error
+	// ClearVehicle leaves the permit with no vehicle, for an "empty" roster day
+	// or booking. Only called where Capabilities reports CanClearVehicle.
+	ClearVehicle(ctx context.Context, owner string, p model.Permit) error
 	// Refresh keeps the owner's session with one tenant (tenant) alive.
 	Refresh(ctx context.Context, owner, tenantID string) error
 	// CurrentVehicle reads the plate the tenant actually has on the permit right

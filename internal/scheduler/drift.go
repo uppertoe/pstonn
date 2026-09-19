@@ -445,6 +445,12 @@ func (s *Scheduler) holdExternalChange(ctx context.Context, p model.Permit, actu
 	if res.Source == model.SourceNone {
 		return notify.DriftChange{}, detailBase, false // nothing scheduled: the plate is simply the permit's now
 	}
+	if res.Empty && actual == "" {
+		// The rego was taken off at the council while the schedule says the permit
+		// should have none: the council's record is what the schedule wants, and
+		// the next pass reads it as already correct. Nothing to hold, nothing to say.
+		return notify.DriftChange{}, detailBase + "; the schedule says no rego, so it stays off", false
+	}
 	vehicles, err := s.store.ListVehiclesFor(ctx, p.Owner)
 	if err != nil {
 		alog.Infof("vehicles for permit %s after drift: %v", p.CouncilPermitID, err)
@@ -474,7 +480,9 @@ func (s *Scheduler) holdExternalChange(ctx context.Context, p model.Permit, actu
 		end = next.In(loc)
 	}
 	change.HoldsUntil = end
-	change.PutsBack = plateOf(model.Resolve(end, p.Cycle(), rules, overrides))
+	then := model.Resolve(end, p.Cycle(), rules, overrides)
+	change.PutsBack = plateOf(then)
+	change.EmptiesAfter = then.Empty
 	if _, err := s.store.CreatePlateOverride(ctx, p.ID, actual, "", lnow, &end, externalActor); err != nil {
 		// The booking could not be recorded (most likely the live-booking cap), so
 		// the schedule will write over the plate on the next pass as it always did.
@@ -482,6 +490,10 @@ func (s *Scheduler) holdExternalChange(ctx context.Context, p model.Permit, actu
 		alog.Infof("hold council-side plate on permit %s: %v", p.CouncilPermitID, err)
 		change.HoldsUntil = time.Time{}
 		change.PutsBack = plateOf(res)
+		change.EmptiesAfter = res.Empty
+		if res.Empty {
+			return change, detailBase + "; the schedule says no rego, so it comes off", true
+		}
 		return change, detailBase + "; the schedule's rego goes back on", true
 	}
 	return change, detailBase + "; kept until " + model.EndText(end, loc), true

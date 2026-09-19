@@ -248,6 +248,16 @@ func TestGoldenEmails(t *testing.T) {
 	run("apply-success-picker", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "XYZ789", Name: "Baba", By: "the quick picker", Source: "picker", OK: true, DriverTold: "baba@example.com"})
 	})
+	run("apply-success-empty-roster", func() {
+		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Source: "roster", OK: true, Empty: true, DisplacedReg: "GUEST1", DisplacedTold: true})
+	})
+	run("apply-success-empty-booking", func() {
+		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Source: "override", By: "sam@example.com", OK: true, Empty: true})
+	})
+	run("apply-failure-empty", func() {
+		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Source: "roster", OK: false, Empty: true, CurrentReg: "XYZ789",
+			Reason: "The council was temporarily unavailable.", Action: "Nothing to do yet — p.stonn keeps trying.", Transient: true})
+	})
 	run("apply-failure-transient", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: false, CurrentReg: "XYZ789",
 			Reason: "The council was temporarily unavailable.", Action: "Nothing to do yet — p.stonn keeps trying.", Transient: true})
@@ -269,6 +279,9 @@ func TestGoldenEmails(t *testing.T) {
 	})
 	run("drift-changed-gap", func() {
 		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor", Plate: "AMY602", HoldsUntil: time.Date(2026, 7, 14, 18, 0, 0, 0, at.Location())}})
+	})
+	run("drift-changed-empty", func() {
+		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "VPP16071", Plate: "AMY602", HoldsUntil: at, EmptiesAfter: true}})
 	})
 	run("drift-removed", func() {
 		_ = svc.NotifyDriftChanged(ctx, owner, "", []DriftChange{{PermitLabel: "Visitor", Plate: "", PutsBack: "ABC123"}})

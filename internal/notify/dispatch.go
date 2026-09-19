@@ -333,10 +333,11 @@ func alsoToldLine(rs []Recipient, self string, o ApplyOutcome) string {
 func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 	c := s.tenantOf(ctx, o.Owner, o.TenantID)
 	subject, body, priority, tags := composeApply(o, c.Links.Portal)
+	tail := ""
 	if s.appURL != "" {
-		body += "\n\n" + s.appURL
+		tail += "\n\n" + s.appURL
 	}
-	body += s.firstApplyLine(ctx, o)
+	tail += s.firstApplyLine(ctx, o)
 	now := time.Now()
 	dels, err := s.accountDeliveries(ctx, o.Owner)
 	if err != nil {
@@ -349,7 +350,8 @@ func (s *Service) EnqueueApply(ctx context.Context, o ApplyOutcome) error {
 		}
 		m := outMessage{
 			Account: o.Owner,
-			Subject: subject, Body: body + alsoToldLine(audience, d.email, o), NtfyPriority: priority, NtfyTag: tags,
+			// This member's copy names the others, ahead of the app link.
+			Subject: subject, Body: body + alsoToldLine(audience, d.email, o) + tail, NtfyPriority: priority, NtfyTag: tags,
 			DedupKey:  fmt.Sprintf("apply|%s|%s|%s|%s|%t", d.email, o.Owner, o.PermitLabel, o.Reg, o.OK),
 			NotBefore: s.deferUntil(d.pref, now, c.Loc, o),
 			Reason:    reasonAccount,
@@ -378,11 +380,11 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 	}
 	c := s.tenantOf(ctx, o.Owner, o.TenantID)
 	subject, body, priority, tags := composeApply(o, c.Links.Portal)
-	emailBody := body
+	emailTail := ""
 	if s.appURL != "" {
-		emailBody += "\n\n" + s.appURL
+		emailTail += "\n\n" + s.appURL
 	}
-	emailBody += s.firstApplyLine(ctx, o)
+	emailTail += s.firstApplyLine(ctx, o)
 	var errs []string
 	due := 0
 	var seenKeys []string // every reached-memory key consulted by this delivery
@@ -398,10 +400,10 @@ func (s *Service) NotifyApply(ctx context.Context, o ApplyOutcome) (delivered in
 			continue // no reachable channel for this member
 		}
 		due++
-		// This member's copy names the others; the shared body above is what
-		// every copy has in common.
+		// This member's copy names the others, ahead of the app link; the shared
+		// body above is what every copy has in common.
 		also := alsoToldLine(audience, d.email, o)
-		body, emailBody := body+also, emailBody+also
+		body, emailBody := body+also, body+also+emailTail
 
 		// A retry of a partial delivery: this member was reached last time, so
 		// they still count as delivered, and only the members who were missed are
@@ -802,6 +804,10 @@ type DriftChange struct {
 	Plate       string    // the plate the council now shows; "" when it was cleared
 	HoldsUntil  time.Time // when the held plate gives way; zero when not held
 	PutsBack    string    // the plate the schedule puts on at HoldsUntil (or now, when Removed); "" when the schedule has a gap then
+	// EmptiesAfter says the schedule wants NO rego at HoldsUntil (or now, when
+	// not held): an "empty" day or booking. PutsBack is "" then, but the permit
+	// is deliberately emptied rather than left to a gap.
+	EmptiesAfter bool
 }
 
 // Removed reports a clearing rather than a new plate.
@@ -829,6 +835,10 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 	for _, d := range changes {
 		keyParts = append(keyParts, fmt.Sprintf("%s=%s@%d>%s", d.PermitLabel, d.Plate, d.HoldsUntil.Unix(), d.PutsBack))
 		switch {
+		case d.Removed() && d.EmptiesAfter:
+			// Not reached today (the drift pass leaves a cleared plate off when the
+			// schedule says no rego), kept so the wording exists if that changes.
+			lines = append(lines, fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn. Your schedule says no rego, so it stays off.", d.PermitLabel))
 		case d.Removed():
 			line := fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn.", d.PermitLabel)
 			if d.PutsBack != "" {
@@ -843,6 +853,8 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 			line := fmt.Sprintf("%s was put on your %s on the council's website, not through p.stonn.", d.Plate, d.PermitLabel)
 			if d.PutsBack != "" {
 				line += fmt.Sprintf(" Your schedule says %s, so p.stonn is putting that back on now.", d.PutsBack)
+			} else if d.EmptiesAfter {
+				line += " Your schedule says no rego, so p.stonn is taking it off now."
 			}
 			line += fmt.Sprintf(" If %s should be on the permit, book it or add it to the roster in p.stonn.", d.Plate)
 			lines = append(lines, line)
@@ -850,6 +862,8 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 			line := fmt.Sprintf("%s was put on your %s on the council's website, not through p.stonn. p.stonn has left it there until %s", d.Plate, d.PermitLabel, model.EndText(d.HoldsUntil, loc))
 			if d.PutsBack != "" {
 				line += fmt.Sprintf(", when your schedule puts %s back on.", d.PutsBack)
+			} else if d.EmptiesAfter {
+				line += ", when your schedule takes it off again."
 			} else {
 				line += "; after that your schedule takes over again when it next puts a rego on."
 			}

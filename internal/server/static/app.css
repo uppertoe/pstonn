@@ -347,6 +347,10 @@ tr:last-child td { border-bottom:0; }
 .rcell > .day { font-size:11px; color:var(--muted); text-align:center; margin-bottom:6px; font-weight:600; }
 .chip { width:100%; border:1px solid var(--line); background:var(--surface); border-radius:var(--radius-sm); padding:10px 8px; min-height:46px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; font-size:12.5px; color:var(--ink); text-align:center; transition:border-color .15s, box-shadow .15s, transform .08s; }
 .chip.empty { color:var(--muted); border-style:dashed; }
+/* An "empty" day: the permit deliberately left with no rego. The same dashed
+   no-rego mark the permit badge (.noplate) uses, so the two read as one state. */
+.chip.noreg { color:var(--muted); border:2px dashed var(--line); padding:9px 7px; }
+.chip.noreg svg { width:14px; height:14px; flex:0 0 auto; }
 .chip:hover { border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 14%,transparent); }
 .chip:active { transform:scale(.98); }
 .chip .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; min-width:0; }
@@ -377,6 +381,9 @@ tr:last-child td { border-bottom:0; }
      Accent stripes — the same accent as the .oneoff dot — say "covered, by a
      one-off" without inventing a colour the legend can't explain. */
 .cday .bar.adhoc { background:repeating-linear-gradient(-45deg, var(--accent) 0 3px, var(--accent-soft) 3px 7px); }
+/* A day the schedule leaves the permit with no rego: an outlined, dashed bar
+   (the roster cell's and the badge's no-rego mark, at bar size). */
+.cday .bar.emptyday { background:transparent; box-sizing:border-box; border:2px dashed color-mix(in srgb, var(--muted) 55%, var(--line)); }
 /* Today's cell when the shown plate is NOT the council-confirmed state: a
      change mid-apply hatches in the day's own colour; polls-exhausted amber.
      Both must beat the cell's inline background colour, hence !important. */
@@ -404,11 +411,34 @@ tr:last-child td { border-bottom:0; }
 :root[data-theme="dark"] .vopt.sel { color:var(--primary); }
 .vopt .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vopt .reg { margin-left:auto; flex:0 0 auto; }
+/* A second line under an option, saying what it does. */
+.vopt .sub2 { flex-basis:100%; font-size:11.5px; color:var(--muted); font-weight:400; white-space:normal; line-height:1.35; }
+.vopt:has(.sub2) { flex-wrap:wrap; row-gap:2px; }
+.vopt:has(.sub2) .lab { flex:1 1 0; min-width:0; white-space:normal; }
+.vsep { border-top:1px solid var(--line); margin:6px 2px 4px; }
+/* A cell popover carrying the explained options needs more than the floor
+   width (the cell it hangs from is narrow, so it shrink-wraps to min-width);
+   popClamp still keeps it inside the viewport. */
+.pop:has(.vempty) { min-width:292px; }
+/* "Leave the permit empty": set apart from the regos above it — dashed, in the
+   no-rego mark's grey, with its consequence spelt out — so it is chosen on
+   purpose and never brushed as one more rego. */
+.vopt.vempty { border:2px dashed var(--line); color:var(--muted); }
+.vopt.vempty svg { width:15px; height:15px; flex:0 0 auto; }
+.vopt.vempty .lab { font-weight:600; color:var(--ink); }
+.vopt.vempty.sel { background:var(--surface-2); border-color:var(--muted); color:var(--ink); }
 .seg { display:flex; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden; }
 .seg button { flex:1; background:var(--surface); color:var(--muted); box-shadow:none; border:0; border-radius:0; font-weight:600; font-size:13px; padding:9px 15px; }
 .seg button + button { border-left:1px solid var(--line); }
 .seg button.on { background:var(--primary); color:var(--on-primary); border-color:var(--primary); }
 .seg button:not(.on):hover { background:var(--surface-2); color:var(--ink); filter:none; box-shadow:none; }
+/* The booking form's "No rego" tab: dashed and iconed, apart from the two rego tabs. */
+.seg button.segempty { display:inline-flex; align-items:center; justify-content:center; gap:6px; border-left:2px dashed var(--line); }
+.seg button.segempty svg { width:14px; height:14px; }
+.seg button.segempty.on { background:var(--surface-2); color:var(--ink); border-left-color:var(--muted); }
+/* The "no rego" booking pane: the mark, then what it means. */
+.emptybook { display:grid; gap:8px; justify-items:start; padding:12px 14px; border:2px dashed var(--line); border-radius:var(--radius-sm); }
+.emptybook p { margin:0; font-size:13px; color:var(--muted); line-height:1.45; }
 /* Both panes share one grid cell, so the area is always the taller pane's
    height and the modal doesn't resize when switching tabs. */
 .segpanes { display:grid; }

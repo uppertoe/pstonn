@@ -32,7 +32,7 @@ func TestFlappingFailureReasonIsOneNoticeADay(t *testing.T) {
 		if i%2 == 1 {
 			err = write
 		}
-		s.handleApplyFailure(ctx, p, "AVS619", "", "roster", err, nil)
+		s.handleApplyFailure(ctx, p, "AVS619", "", "roster", false, err, nil)
 		time.Sleep(20 * time.Millisecond) // let the async delivery record its key
 	}
 	if n := len(fn.appliedSnap()); n != 1 {
@@ -40,13 +40,13 @@ func TestFlappingFailureReasonIsOneNoticeADay(t *testing.T) {
 	}
 	// A refusal of the SAME plate is the same episode: the household already knows
 	// this plate is not on the permit, and the cause is content, not a trigger.
-	s.handleApplyFailure(ctx, p, "AVS619", "", "roster", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "AVS619", "", "roster", false, rejectedErr(), nil)
 	time.Sleep(20 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 1 {
 		t.Fatalf("a refusal after a transient run = %d notices, want still 1 (same episode, same plate)", n)
 	}
 	// A DIFFERENT plate failing mid-episode is a new exposure, and is told.
-	s.handleApplyFailure(ctx, p, "NEW222", "", "roster", rejectedErr(), nil)
+	s.handleApplyFailure(ctx, p, "NEW222", "", "roster", false, rejectedErr(), nil)
 	time.Sleep(20 * time.Millisecond)
 	if n := len(fn.appliedSnap()); n != 2 {
 		t.Fatalf("a different plate failing = %d notices, want 2", n)

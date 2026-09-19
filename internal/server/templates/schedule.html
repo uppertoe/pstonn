@@ -406,24 +406,35 @@
   <div class="segpane{{if not .IsCurrent}}{{if $cycling}} hide{{end}}{{end}}" {{if $cycling}}role="tabpanel" aria-label="Week {{.Num}} roster" :class="{hide: wk!=={{.Index}}}"{{end}}>
   <div class="roster">
   {{range .Days}}
-  {{$pid := .PermitID}}{{$wk := .Week}}{{$wd := .WeekdayNum}}{{$sel := .VehicleID}}
+  {{$pid := .PermitID}}{{$wk := .Week}}{{$wd := .WeekdayNum}}{{$sel := .VehicleID}}{{$emptyDay := .Empty}}
   <div class="rcell" x-data="{open:false}">
     <div class="day">{{.Name}}</div>
-    <button type="button" class="chip {{if not .Reg}}empty{{end}}" @click="open=!open"
+    {{/* Three states: a rego, an "empty" day (the permit is deliberately left
+         with no rego, shown as the same dashed no-rego mark the permit badge
+         uses), and nothing scheduled (whatever is on the permit stays). */}}
+    <button type="button" class="chip {{if .Empty}}noreg{{else if not .Reg}}empty{{end}}" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else}}no rego, choose one{{end}}">
-      {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else}}<span class="lab muted">none</span>{{end}}
+            aria-label="{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: {{if .Reg}}{{.Reg}}, change{{else if .Empty}}the permit is left with no rego, change{{else}}nothing scheduled, choose a rego{{end}}">
+      {{if .Reg}}<span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Reg}}</span>{{else if .Empty}}{{template "ic-empty"}}<span class="lab">no rego</span>{{else}}<span class="lab muted">none</span>{{end}}
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
       {{if $vehicles}}
       <p class="tt">{{if $cycling}}Week {{$week.Num}}, {{end}}{{.Name}}: choose a rego</p>
       <div class="vopts">
-        <button type="button" class="vopt {{if not $sel}}sel{{end}}" @click="open=false"
-          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">No rego on {{.Name}}</button>
+        <button type="button" class="vopt {{if and (not $sel) (not $emptyDay)}}sel{{end}}" @click="open=false"
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"0"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="lab">Nothing scheduled on {{.Name}}</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         {{range $vehicles}}
         <button type="button" class="vopt {{if eq $sel .ID}}sel{{end}}" @click="open=false"
           hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"{{.ID}}"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML"><span class="dot" style="background:{{.Color}}"></span><span class="lab">{{.Label}}</span> <span class="reg">{{.Registration}}</span></button>
+        {{end}}
+        {{if $pv.CanEmpty}}
+        {{/* Set apart, below a rule and dashed, with what it does spelt out: it
+             is the one choice that leaves a car in the street uncovered, so it
+             must be taken on purpose rather than brushed in the list. */}}
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty {{if $emptyDay}}sel{{end}}" @click="open=false"
+          hx-post="/permits/{{$pid}}/rules" hx-vals='{"week":"{{$wk}}","weekday":"{{$wd}}","vehicle_id":"empty"}' hx-target="#pbody-{{$pid}}" hx-swap="innerHTML">{{template "ic-empty"}}<span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
         {{end}}
       </div>
       {{else}}
@@ -479,7 +490,7 @@
 <div class="oneoff-list">
   {{range .Overrides}}
   <div class="oneoff-item">
-    <span class="veh">{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span></span>
+    <span class="veh">{{if .Empty}}<span class="noplate">no rego</span>{{else}}{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span>{{end}}</span>
     {{/* Name whoever booked it. The account is shared, so "who decided this?" is
          a real question — and an open-ended booking beats the roster indefinitely,
          which is worth being able to attribute. */}}
@@ -575,6 +586,11 @@
   <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override" data-plate-confirm="plate"
         hx-post="/permits/{{.Permit.ID}}/override" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
+        {{/* Booking no rego is confirmed like any other act that leaves a car
+             uncovered; the plate read-back (layout.html) leaves this alone when
+             the plate field is not in play. */}}
+        :data-confirm="mode=='empty' ? 'Book the permit to have no rego? For as long as this booking runs, no car is covered on it.' : null"
+        :data-confirm-ok="mode=='empty' ? 'Book no rego' : null"
         x-data="{mode:'{{if .Vehicles}}car{{else}}plate{{end}}', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
                  endLabel(offset) {
                    const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
@@ -585,10 +601,13 @@
                    if (same(d, tmw)) return 'Midnight tomorrow night';
                    return 'Midnight ' + d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'});
                  }}">
-    {{if .Vehicles}}
+    {{if or .Vehicles .CanEmpty}}
     <div class="seg">
-      <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>
+      {{if .Vehicles}}<button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>{{end}}
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Type a rego</button>
+      {{if .CanEmpty}}{{/* The third choice is set apart (dashed, its own icon): it
+           books the permit to have NO rego, and a car in the street loses cover. */}}
+      <button type="button" class="segempty" :class="{on: mode=='empty'}" @click="mode='empty'; sel=''; lbl=''; col=''; plate=''">{{template "ic-empty"}} No rego</button>{{end}}
     </div>
     {{end}}{{/* Empty garage: no toggle — the modal opens straight on the plate
          field, which needs no saved cars, instead of an empty vehicle picker. */}}
@@ -598,7 +617,7 @@
       <div class="segpane" :class="{hide: mode!='car'}">
         <label class="fld">Rego
           <div class="vpick">
-            <input type="hidden" name="vehicle_id" :value="sel">
+            <input type="hidden" name="vehicle_id" :value="sel" :disabled="mode!='car'">
             <button type="button" class="vpick-btn" @click="open=!open">
               <span class="dot" x-show="col" :style="`background:${col}`"></span>
               <span x-text="lbl || 'Choose a rego…'" :class="{'ph': !lbl}"></span>
@@ -628,6 +647,15 @@
         <p class="empty-note" style="margin-top:6px">Used for this booking only and not saved. If you book the same regos often, <a href="/regos">save them</a> for one-tap booking and the weekly roster.</p>
         {{end}}
       </div>
+      {{if .CanEmpty}}
+      <div class="segpane" :class="{hide: mode!='empty'}">
+        <input type="hidden" name="vehicle_id" value="empty" :disabled="mode!='empty'">
+        <div class="emptybook">
+          <span class="noplate">no rego</span>
+          <p>The rego is taken off the permit for this booking, so nothing is covered until it ends. Your roster takes over again after that.</p>
+        </div>
+      </div>
+      {{end}}
     </div>
     {{/* Separate date + time inputs rather than datetime-local: Firefox for
          Android (and some others) don't offer a time picker for datetime-local,
@@ -662,7 +690,7 @@
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       {{/* Can't submit with neither a car nor a plate — the server refuses that
            anyway, but a button that fires only to bounce reads as broken. */}}
-      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()">{{template "ic-plus"}} Book</button>
+      <button type="submit" :disabled="mode=='car' ? !sel : mode=='plate' ? !plate.trim() : false">{{template "ic-plus"}} <span x-text="mode=='empty' ? 'Book no rego' : 'Book'">Book</span></button>
     </div>
   </form>
   </div>
@@ -678,15 +706,15 @@
 {{define "cal-day"}}
   <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if .Reg}}{{.Reg}}, {{if eq .Source "roster"}}roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}{{if .Unconfirmed}}. Not confirmed with the council — the permit may still show a different rego{{else if .Applying}}. Change still applying, not on the permit yet{{end}}"
+       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{if or .Reg .Empty}}{{if .Empty}}no rego on the permit{{else}}{{.Reg}}{{end}}, {{if eq .Source "roster"}}roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}}, usually {{.Usual}}{{end}}{{else}}nothing scheduled{{end}}{{if .HasOneoff}}, has a one-off booking{{end}}{{if .Unconfirmed}}. Not confirmed with the council — the permit may still show a different rego{{else if .Applying}}. Change still applying, not on the permit yet{{end}}"
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
     <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
-    <div class="bar{{if .Adhoc}} adhoc{{end}}{{if .Unconfirmed}} unconf{{else if .Applying}} applying{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
+    <div class="bar{{if .Adhoc}} adhoc{{end}}{{if .Empty}} emptyday{{end}}{{if .Unconfirmed}} unconf{{else if .Applying}} applying{{end}}" aria-hidden="true" {{if .Color}}style="background:{{.Color}}"{{end}}></div>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
       <p class="tt">{{.DayLabel}}</p>
-      {{if .Reg}}<span class="reg">{{.Reg}}</span> <span class="muted">· {{if eq .Source "roster"}}roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
+      {{if or .Reg .Empty}}{{if .Empty}}<span class="noplate">no rego</span>{{else}}<span class="reg">{{.Reg}}</span>{{end}} <span class="muted">· {{if eq .Source "roster"}}roster{{else if eq .Source "override"}}one-off booking{{else}}{{.Source}}{{end}}{{if .Usual}} · usually {{.Usual}}{{end}}</span>{{else}}<span class="muted">nothing scheduled</span>{{end}}
       {{if .Unconfirmed}}<br><span class="calwarn">not confirmed with the council</span>{{else if .Applying}}<br><span class="muted">still applying &mdash; not on the permit yet</span>{{end}}
     </div>
   </div>

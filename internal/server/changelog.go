@@ -33,7 +33,7 @@ func (s *Server) logChange(ctx context.Context, owner, actor, action, target, de
 // cleared household name or an emptied permit name earns nothing.
 func milestoneForChange(action, target string) (store.Milestone, bool) {
 	switch action {
-	case store.ActionRosterSet:
+	case store.ActionRosterSet, store.ActionRosterEmpty:
 		return store.MilestoneRoster, true
 	case store.ActionOverrideAdd:
 		return store.MilestoneBooking, true
@@ -149,6 +149,8 @@ func changeText(c store.Change) string {
 		return "set " + c.Target + " to " + c.Detail
 	case store.ActionRosterClear:
 		return "cleared the roster for " + c.Target
+	case store.ActionRosterEmpty:
+		return "set " + c.Target + " to no rego, so the permit is left empty that day"
 	case store.ActionCycleAdd:
 		return "added " + c.Detail + " to the roster on " + c.Target
 	case store.ActionCycleRemove:

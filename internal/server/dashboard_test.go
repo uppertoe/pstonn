@@ -52,6 +52,21 @@ func samplePermitViewAt(loc *time.Location, at time.Time) permitView {
 	}
 }
 
+// emptyDayPermitViewAt is samplePermitViewAt with the "empty" states in play:
+// the council allows an empty permit, Sunday is an empty day, tomorrow's
+// calendar cell is empty and a no-rego booking is listed.
+func emptyDayPermitViewAt(loc *time.Location, at time.Time) permitView {
+	pv := samplePermitViewAt(loc, at)
+	pv.CanEmpty = true
+	sun := &pv.Weeks[0].Days[0]
+	sun.VehicleID, sun.Reg, sun.Label, sun.Color, sun.Empty = 0, "", "", "", true
+	pv.Cal[1] = calView{DayLabel: "Tue 3", Source: "roster", Empty: true}
+	now := at.In(loc)
+	end := now.Add(4 * time.Hour)
+	pv.Overrides = append(pv.Overrides, overrideView{ID: 4, PermitID: 7, Label: "No rego", Empty: true, StartsAt: now, EndsAt: &end, CreatedBy: "a@b.com"})
+	return pv
+}
+
 // TestFillExpiry locks the calendar-day arithmetic behind the expiry labels.
 func TestFillExpiry(t *testing.T) {
 	loc := melbourne(t)
@@ -564,6 +579,14 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{Permits: []permitView{samplePermitViewAt(loc, now)}},
 		}, "Weekly roster"},
+		// "Empty the permit" as a schedule value: the council allows an empty
+		// permit, so the cell menu and the booking form offer it; Sunday is an
+		// empty day, the second calendar day is empty, and a no-rego booking is
+		// listed.
+		{"schedule-empty-day", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
+			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
+			App:      &appData{Permits: []permitView{emptyDayPermitViewAt(loc, now)}},
+		}, "Leave the permit empty"},
 		// Right after adding a permit while another visitor permit is still unmanaged:
 		// the "manage another" control becomes the highlighted "set up your other permit".
 		{"schedule-more-to-set-up", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,

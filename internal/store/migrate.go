@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -24,8 +25,12 @@ import (
 // Version 6 is a deliberate fence, not bookkeeping: an old binary's ListRules
 // would read every cycle week's rows and its Resolve tie-break could put the
 // WRONG week's car on a council permit — a silent wrong write — so the old
-// build must refuse to boot against this file instead.
-const schemaVersion = 6
+// build must refuse to boot against this file instead. 7 = "empty the permit"
+// as a schedule value: weekly_rule.vehicle_id nullable plus weekly_rule.empty
+// and override.empty. Also a fence: an old binary scanning a NULL vehicle_id
+// fails ListRules for that permit and silently stops reconciling it, and one
+// that read the row would treat the empty day as vehicle 0, "unresolvable".
+const schemaVersion = 7
 
 // migrationLockTTL bounds how long a dead migrator keeps the next start out. A
 // process killed mid-migration leaves the row claimed, and with no takeover window
@@ -225,7 +230,8 @@ CREATE TABLE IF NOT EXISTS weekly_rule (
     permit_id  INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
     cycle_week INTEGER NOT NULL DEFAULT 0, -- 0-based index into the permit's roster cycle
     weekday    INTEGER NOT NULL,          -- 0=Sunday .. 6=Saturday (time.Weekday)
-    vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
+    vehicle_id INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,  -- NULL for an "empty" day
+    empty      INTEGER NOT NULL DEFAULT 0, -- the permit is left with no rego this day (vehicle_id NULL)
     UNIQUE(permit_id, cycle_week, weekday)
 );
 
@@ -239,7 +245,8 @@ CREATE TABLE IF NOT EXISTS override (
     ends_at        TEXT,                       -- RFC3339 UTC, NULL = open-ended
     created_by     TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
-    guest_token_id INTEGER NOT NULL DEFAULT 0  -- which guest link created it (0 = not a guest change); lets a guest revert exactly their own changes
+    guest_token_id INTEGER NOT NULL DEFAULT 0, -- which guest link created it (0 = not a guest change); lets a guest revert exactly their own changes
+    empty          INTEGER NOT NULL DEFAULT 0  -- books the permit to have NO rego for the window (vehicle_id NULL, registration '')
 );
 CREATE INDEX IF NOT EXISTS idx_override_permit ON override(permit_id);
 
@@ -544,6 +551,11 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		`ALTER TABLE permit ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE outbox ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE override ADD COLUMN guest_token_id INTEGER NOT NULL DEFAULT 0`,
+		// "Empty the permit" as a schedule value (2026-09): a roster day or a
+		// booking that leaves the permit with no rego. Rows predating it are
+		// plate rows, so 0 is exact.
+		`ALTER TABLE override ADD COLUMN empty INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE weekly_rule ADD COLUMN empty INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE guest_token ADD COLUMN baseline_plate TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE guest_token ADD COLUMN baseline_until TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE council_session ADD COLUMN reconnected_at TEXT NOT NULL DEFAULT ''`,
@@ -723,11 +735,19 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 	// Rebuild `weekly_rule` if it predates the roster cycle: the unique key must
 	// widen from (permit_id, weekday) to include cycle_week, which SQLite cannot
 	// do in place. Existing rows land as cycle week 0 — behaviour-identical.
+	// Rebuilt again if vehicle_id is still NOT NULL: an "empty" day has no
+	// vehicle, and a NOT NULL constraint cannot be dropped in place either.
 	if has, err := s.columnExists("weekly_rule", "cycle_week"); err != nil {
 		return err
 	} else if !has {
 		if err := s.rebuildWeeklyRuleTable(); err != nil {
 			return fmt.Errorf("migrate weekly_rule table: %w", err)
+		}
+	} else if strict, err := s.weeklyRuleVehicleIsNotNull(); err != nil {
+		return err
+	} else if strict {
+		if err := s.rebuildWeeklyRuleTable(); err != nil {
+			return fmt.Errorf("migrate weekly_rule table (nullable vehicle): %w", err)
 		}
 	}
 	// Hash the outbox dedup keys older builds stored in plaintext. The key embeds
@@ -838,6 +858,7 @@ var (
 	overrideColumns = []rebuildColumn{
 		{"id", "NULL"}, {"permit_id", "0"}, {"vehicle_id", "NULL"}, {"registration", "''"}, {"state", "''"},
 		{"starts_at", "''"}, {"ends_at", "NULL"}, {"created_by", "''"}, {"created_at", "''"}, {"guest_token_id", "0"},
+		{"empty", "0"},
 	}
 	permitColumns = []rebuildColumn{
 		{"id", "NULL"}, {"owner", "''"}, {"council_id", "''"}, {"council_permit_id", "''"},
@@ -850,6 +871,7 @@ var (
 		// id is carried so the Resolve duplicate-row tie-break (highest ID wins)
 		// survives the rebuild unchanged.
 		{"id", "NULL"}, {"permit_id", "0"}, {"cycle_week", "0"}, {"weekday", "0"}, {"vehicle_id", "0"},
+		{"empty", "0"},
 	}
 	sessionColumns = []rebuildColumn{
 		{"owner", "''"}, {"council_id", "''"}, {"sub", "''"}, {"council_email", "''"}, {"cookie_sealed", "''"},
@@ -933,7 +955,8 @@ func (s *Store) rebuildOverrideTable() error {
     ends_at        TEXT,
     created_by     TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
-    guest_token_id INTEGER NOT NULL DEFAULT 0
+    guest_token_id INTEGER NOT NULL DEFAULT 0,
+    empty          INTEGER NOT NULL DEFAULT 0
 )`,
 		copyStmt,
 		`DROP TABLE override`,
@@ -947,11 +970,24 @@ func (s *Store) rebuildOverrideTable() error {
 	return tx.Commit()
 }
 
-// rebuildWeeklyRuleTable redefines weekly_rule with the cycle_week column and
-// the widened UNIQUE(permit_id, cycle_week, weekday), preserving rows and ids
-// (the Resolve tie-break keys on id). weekly_rule holds foreign keys but nothing
-// references it, so the DROP/RENAME is safe with foreign keys toggled off, per
-// the same guidance the override rebuild follows.
+// weeklyRuleVehicleIsNotNull reports whether the live weekly_rule still
+// declares vehicle_id NOT NULL (read from its stored definition), the shape
+// before "empty" days existed.
+func (s *Store) weeklyRuleVehicleIsNotNull() (bool, error) {
+	var sqlText string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'weekly_rule'`).Scan(&sqlText)
+	if err != nil {
+		return false, err
+	}
+	return regexp.MustCompile(`(?i)vehicle_id\s+INTEGER\s+NOT\s+NULL`).MatchString(sqlText), nil
+}
+
+// rebuildWeeklyRuleTable redefines weekly_rule with the cycle_week column, the
+// widened UNIQUE(permit_id, cycle_week, weekday) and a nullable vehicle_id (an
+// "empty" day has none), preserving rows and ids (the Resolve tie-break keys on
+// id). weekly_rule holds foreign keys but nothing references it, so the
+// DROP/RENAME is safe with foreign keys toggled off, per the same guidance the
+// override rebuild follows.
 func (s *Store) rebuildWeeklyRuleTable() error {
 	copyStmt, err := s.copyColumns("weekly_rule", "weekly_rule_new", weeklyRuleColumns)
 	if err != nil {
@@ -974,7 +1010,8 @@ func (s *Store) rebuildWeeklyRuleTable() error {
     permit_id  INTEGER NOT NULL REFERENCES permit(id) ON DELETE CASCADE,
     cycle_week INTEGER NOT NULL DEFAULT 0,
     weekday    INTEGER NOT NULL,
-    vehicle_id INTEGER NOT NULL REFERENCES vehicle(id) ON DELETE CASCADE,
+    vehicle_id INTEGER REFERENCES vehicle(id) ON DELETE CASCADE,
+    empty      INTEGER NOT NULL DEFAULT 0,
     UNIQUE(permit_id, cycle_week, weekday)
 )`,
 		copyStmt,

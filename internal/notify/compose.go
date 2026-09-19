@@ -48,11 +48,14 @@ type ApplyOutcome struct {
 	Color       string // that vehicle's plate colour (hex), so the mail's chip matches the app's ("" = neutral)
 	By          string // who made the change, when it was a guest activation ("" otherwise)
 	Source      string // "roster" / "override" / "guest" / "doorqr" / "picker" (success context)
-	OK          bool
-	CurrentReg  string // what is still on the permit on failure ("" if unknown)
-	Reason      string // one plain sentence: why it failed
-	Action      string // one plain sentence: what the user should do
-	Transient   bool   // failure expected to self-heal → soften wording
+	// Empty means the schedule asked for NO rego on the permit (an "empty" roster
+	// day or booking): Reg is "" and the change is a clear, not a set.
+	Empty      bool
+	OK         bool
+	CurrentReg string // what is still on the permit on failure ("" if unknown)
+	Reason     string // one plain sentence: why it failed
+	Action     string // one plain sentence: what the user should do
+	Transient  bool   // failure expected to self-heal → soften wording
 	// CouncilDown says we KNOW the council's own sign-in is down (the auth circuit is
 	// open) — so the household cannot reach the council either. It keeps the soft tier
 	// but names the cause plainly and drops the "do it yourself at the council" line,
@@ -183,7 +186,18 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 	if o.OK {
 		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, o.Reg)
 		const confirm = "\n\nNothing to do — this is just your confirmation it went through."
+		if o.Empty {
+			subject = fmt.Sprintf("Permit updated: %s now has no rego", o.PermitLabel)
+		}
 		switch {
+		case o.Empty && o.Source == "roster":
+			body = fmt.Sprintf("Your %s now has no rego on it for today, as your roster says. Nothing is covered on that permit until the schedule puts a rego on.%s", o.PermitLabel, confirm)
+		case o.Empty && o.Source == "override" && o.By != "":
+			body = fmt.Sprintf("Your %s now has no rego on it, for a booking made by %s. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, o.By, confirm)
+		case o.Empty && o.Source == "override":
+			body = fmt.Sprintf("Your %s now has no rego on it, for the booking you made. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, confirm)
+		case o.Empty:
+			body = fmt.Sprintf("Your %s now has no rego on it.%s", o.PermitLabel, confirm)
 		case o.Source == "doorqr":
 			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s approved a visitor's request from your printed QR code, so it overrides your schedule until that booking ends — then your roster takes over again.",
 				o.PermitLabel, car, o.By)
@@ -236,6 +250,9 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
 		}
 		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
+		if o.Empty {
+			lines[0] = fmt.Sprintf("p.stonn tried to take the rego off your %s, as your schedule says, but couldn't.", o.PermitLabel)
+		}
 		if o.CurrentReg != "" {
 			lines = append(lines, fmt.Sprintf("The permit still shows %s, so that is the rego currently covered.", o.CurrentReg))
 		} else {

@@ -13,7 +13,7 @@ import (
 
 func (s *Store) ListRules(ctx context.Context, permitID int64) ([]model.WeeklyRule, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, permit_id, cycle_week, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ? ORDER BY cycle_week, weekday`, permitID)
+		`SELECT id, permit_id, cycle_week, weekday, vehicle_id, empty FROM weekly_rule WHERE permit_id = ? ORDER BY cycle_week, weekday`, permitID)
 	if err != nil {
 		return nil, err
 	}
@@ -22,10 +22,15 @@ func (s *Store) ListRules(ctx context.Context, permitID int64) ([]model.WeeklyRu
 	for rows.Next() {
 		var r model.WeeklyRule
 		var wd int
-		if err := rows.Scan(&r.ID, &r.PermitID, &r.Week, &wd, &r.VehicleID); err != nil {
+		var vid sql.NullInt64
+		if err := rows.Scan(&r.ID, &r.PermitID, &r.Week, &wd, &vid, &r.Empty); err != nil {
 			return nil, err
 		}
 		r.Weekday = time.Weekday(wd)
+		r.VehicleID = vid.Int64 // 0 when NULL (an empty day)
+		if r.VehicleID == 0 && !r.Empty {
+			continue // neither a rego nor an empty day: a row no writer produces, ignored rather than resolved to nothing
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -55,10 +60,30 @@ func (s *Store) SetRule(ctx context.Context, owner string, permitID int64, week 
 		return ErrNotFound
 	}
 	res, err := s.db.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
-SELECT ?, ?, ?, ? WHERE ? < (SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?)
-ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty)
+SELECT ?, ?, ?, ?, 0 WHERE ? < (SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?)
+ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id, empty = 0`,
 		permitID, week, int(weekday), vehicleID, week, permitID, owner)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrCycleWeek
+	}
+	return nil
+}
+
+// SetEmptyRule makes a weekday of a cycle week an "empty" day: the permit is
+// left with no rego on it. The same guards as SetRule, minus the vehicle.
+func (s *Store) SetEmptyRule(ctx context.Context, owner string, permitID int64, week int, weekday time.Weekday) error {
+	if err := s.ownsPermit(ctx, owner, permitID); err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty)
+SELECT ?, ?, ?, NULL, 1 WHERE ? < (SELECT cycle_weeks FROM permit WHERE id = ? AND owner = ?)
+ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = NULL, empty = 1`,
+		permitID, week, int(weekday), week, permitID, owner)
 	if err != nil {
 		return err
 	}
@@ -168,8 +193,8 @@ SELECT (SELECT COUNT(*) FROM weekly_rule WHERE permit_id = ?)
 	}
 
 	rres, err := tx.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
-SELECT ?, cycle_week, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ?`, dstID, srcID)
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty)
+SELECT ?, cycle_week, weekday, vehicle_id, empty FROM weekly_rule WHERE permit_id = ?`, dstID, srcID)
 	if err != nil {
 		return 0, err
 	}
@@ -185,8 +210,8 @@ WHERE id = ?`, srcID, srcID, dstID); err != nil {
 		return 0, err
 	}
 	ores, err := tx.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at)
-SELECT ?, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at
+INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, empty)
+SELECT ?, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, empty
 FROM override WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)`,
 		dstID, srcID, nowStr)
 	if err != nil {
@@ -234,8 +259,8 @@ func (s *Store) AddCycleWeek(ctx context.Context, owner string, permitID int64, 
 		return weeks, ErrCycleWeek
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id)
-SELECT permit_id, ?, weekday, vehicle_id FROM weekly_rule WHERE permit_id = ? AND cycle_week = ?`,
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty)
+SELECT permit_id, ?, weekday, vehicle_id, empty FROM weekly_rule WHERE permit_id = ? AND cycle_week = ?`,
 		weeks, permitID, weeks-1); err != nil {
 		return 0, err
 	}
@@ -327,9 +352,9 @@ func (s *Store) RestoreCycleWeek(ctx context.Context, owner string, permitID int
 	}
 	for _, r := range rules {
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id) VALUES (?, ?, ?, ?)
-ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id`,
-			permitID, weeks, int(r.Weekday), r.VehicleID); err != nil {
+INSERT INTO weekly_rule (permit_id, cycle_week, weekday, vehicle_id, empty) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(permit_id, cycle_week, weekday) DO UPDATE SET vehicle_id = excluded.vehicle_id, empty = excluded.empty`,
+			permitID, weeks, int(r.Weekday), nullableVehicle(r), r.Empty); err != nil {
 			return 0, err
 		}
 	}
@@ -358,6 +383,19 @@ var ErrOverrideLimit = errors.New("store: permit has too many live overrides")
 // saved vehicle; vehicleID 0 with a non-empty registration is a one-off plate. Returns
 // ErrOverrideLimit when full.
 func (s *Store) CreateOverrideCapped(ctx context.Context, permitID, vehicleID int64, registration, state string, startsAt time.Time, endsAt *time.Time, createdBy string, limit int) (int64, error) {
+	if vehicleID == 0 && registration == "" {
+		return 0, errors.New("store: a booking needs a vehicle or a plate; use CreateEmptyOverride to leave the permit empty")
+	}
+	return s.createOverrideCapped(ctx, permitID, vehicleID, registration, state, startsAt, endsAt, createdBy, limit, false)
+}
+
+// CreateEmptyOverride books the permit to have no rego on it for the window:
+// the one booking shape with neither a vehicle nor a plate.
+func (s *Store) CreateEmptyOverride(ctx context.Context, permitID int64, startsAt time.Time, endsAt *time.Time, createdBy string, limit int) (int64, error) {
+	return s.createOverrideCapped(ctx, permitID, 0, "", "", startsAt, endsAt, createdBy, limit, true)
+}
+
+func (s *Store) createOverrideCapped(ctx context.Context, permitID, vehicleID int64, registration, state string, startsAt time.Time, endsAt *time.Time, createdBy string, limit int, empty bool) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -378,9 +416,9 @@ func (s *Store) CreateOverrideCapped(ctx context.Context, permitID, vehicleID in
 		state = "" // a saved-vehicle override takes its state from the vehicle, not the row
 	}
 	res, err := tx.ExecContext(ctx, `
-INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-		permitID, vid, registration, state, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC())
+INSERT INTO override (permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id, empty)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+		permitID, vid, registration, state, startsAt.UTC().Format(time.RFC3339), endsAtSQL(endsAt), createdBy, nowUTC(), empty)
 	if err != nil {
 		return 0, err
 	}
@@ -500,6 +538,14 @@ func (s *Store) DeleteGuestOverrides(ctx context.Context, permitID, guestTokenID
 	return err
 }
 
+// nullableVehicle is a rule's vehicle_id as SQL: NULL for an empty day.
+func nullableVehicle(r model.WeeklyRule) any {
+	if r.Empty || r.VehicleID == 0 {
+		return nil
+	}
+	return r.VehicleID
+}
+
 func endsAtSQL(endsAt *time.Time) sql.NullString {
 	if endsAt == nil {
 		return sql.NullString{}
@@ -513,7 +559,7 @@ func endsAtSQL(endsAt *time.Time) sql.NullString {
 func (s *Store) ListOverrides(ctx context.Context, permitID int64, now time.Time) ([]model.Override, error) {
 	nowStr := now.UTC().Format(time.RFC3339)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id
+SELECT id, permit_id, vehicle_id, registration, state, starts_at, ends_at, created_by, created_at, guest_token_id, empty
 FROM override
 WHERE permit_id = ? AND (ends_at IS NULL OR ends_at > ?)
 ORDER BY starts_at ASC`, permitID, nowStr)
@@ -527,10 +573,10 @@ ORDER BY starts_at ASC`, permitID, nowStr)
 		var starts, created string
 		var ends sql.NullString
 		var vid sql.NullInt64
-		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &o.State, &starts, &ends, &o.CreatedBy, &created, &o.GuestTokenID); err != nil {
+		if err := rows.Scan(&o.ID, &o.PermitID, &vid, &o.Registration, &o.State, &starts, &ends, &o.CreatedBy, &created, &o.GuestTokenID, &o.Empty); err != nil {
 			return nil, err
 		}
-		o.VehicleID = vid.Int64 // 0 when NULL (an ad-hoc plate)
+		o.VehicleID = vid.Int64 // 0 when NULL (an ad-hoc plate, or an empty booking)
 		if o.StartsAt, err = time.Parse(time.RFC3339, starts); err != nil {
 			return nil, err
 		}

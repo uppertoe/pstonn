@@ -17,6 +17,7 @@ const (
 	// Weekly roster
 	ActionRosterSet   = "roster.set"
 	ActionRosterClear = "roster.clear"
+	ActionRosterEmpty = "roster.empty" // a day set to leave the permit with no rego
 	// Roster cycle (multi-week rotation)
 	ActionCycleAdd     = "cycle.add"
 	ActionCycleRemove  = "cycle.remove"
