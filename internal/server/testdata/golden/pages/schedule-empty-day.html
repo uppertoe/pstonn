@@ -461,10 +461,10 @@ window.popClamp = window.popClamp || function (el) {
   <div class="rcell" x-data="{open:false}">
     <div class="day">Sun</div>
     
-    <button type="button" class="chip " @click="open=!open"
+    <button type="button" class="chip noreg" @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
-            aria-label="Sun: ABC123, change">
-      <span class="dot" style="background:#2f6feb"></span><span class="lab">ABC123</span>
+            aria-label="Sun: the permit is left with no rego, change">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">no rego</span>
     </button>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false"
          x-effect="open && $nextTick(() => popClamp($el))">
@@ -474,9 +474,14 @@ window.popClamp = window.popClamp || function (el) {
         <button type="button" class="vopt " @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sun</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
-        <button type="button" class="vopt sel" @click="open=false"
+        <button type="button" class="vopt " @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
+        
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty sel" @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
         
       </div>
       
@@ -504,6 +509,11 @@ window.popClamp = window.popClamp || function (el) {
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
+        
       </div>
       
     </div>
@@ -529,6 +539,11 @@ window.popClamp = window.popClamp || function (el) {
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
+        
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
         
       </div>
       
@@ -556,6 +571,11 @@ window.popClamp = window.popClamp || function (el) {
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
+        
       </div>
       
     </div>
@@ -581,6 +601,11 @@ window.popClamp = window.popClamp || function (el) {
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
+        
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
         
       </div>
       
@@ -608,6 +633,11 @@ window.popClamp = window.popClamp || function (el) {
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
         
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
+        
       </div>
       
     </div>
@@ -633,6 +663,11 @@ window.popClamp = window.popClamp || function (el) {
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
         
+        
+        
+        <div class="vsep" role="separator"></div>
+        <button type="button" class="vopt vempty " @click="open=false"
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"empty"}' hx-target="#pbody-7" hx-swap="innerHTML"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg><span class="lab">Leave the permit empty</span><span class="sub2">The rego is taken off the permit for the day, so nothing is covered.</span></button>
         
       </div>
       
@@ -673,15 +708,15 @@ window.popClamp = window.popClamp || function (el) {
 
   <div class="cday " x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2. ABC123, roster, has a one-off booking"
+       aria-label="Tue 3. no rego on the permit, roster"
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
-    <div class="cd" aria-hidden="true">Mon 2</div>
-    <div class="omk" aria-hidden="true"><span class="oneoff"></span></div>
-    <div class="bar" aria-hidden="true" style="background:#2f6feb"></div>
+    <div class="cd" aria-hidden="true">Tue 3</div>
+    <div class="omk" aria-hidden="true"></div>
+    <div class="bar emptyday" aria-hidden="true" ></div>
     <div class="pop" x-show="open" x-cloak @click.outside="open=false" aria-hidden="true"
          x-effect="open && $nextTick(() => popClamp($el))">
-      <p class="tt">Mon 2</p>
-      <span class="reg">ABC123</span> <span class="muted">· roster</span>
+      <p class="tt">Tue 3</p>
+      <span class="noplate">no rego</span> <span class="muted">· roster</span>
       
     </div>
   </div>
@@ -883,6 +918,16 @@ window.popClamp = window.popClamp || function (el) {
     </form>
   </div>
   
+  <div class="oneoff-item">
+    <span class="veh"><span class="noplate">no rego</span></span>
+    
+    
+    <span class="when"><span class="nb">Mon 10 Aug, 2:30pm</span> → <span class="nb">Mon 10 Aug, 6:30pm</span> <span class="by">· by a@b.com</span></span>
+    <form hx-post="/permits/7/overrides/4/delete" hx-target="#pbody-7" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
+      <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </form>
+  </div>
+  
 </div>
 
 
@@ -947,6 +992,7 @@ window.popClamp = window.popClamp || function (el) {
       <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Type a rego</button>
       
+      <button type="button" class="segempty" :class="{on: mode=='empty'}" @click="mode='empty'; sel=''; lbl=''; col=''; plate=''"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/></svg> No rego</button>
     </div>
     
     
@@ -981,6 +1027,14 @@ window.popClamp = window.popClamp || function (el) {
         
         <p class="empty-note" style="margin-top:6px">For a rego that is not one of your saved regos, such as a friend, a hire car or a tradie. It is used for this booking only and not saved.</p>
         
+      </div>
+      
+      <div class="segpane" :class="{hide: mode!='empty'}">
+        <input type="hidden" name="vehicle_id" value="empty" :disabled="mode!='empty'">
+        <div class="emptybook">
+          <span class="noplate">no rego</span>
+          <p>The rego is taken off the permit for this booking, so nothing is covered until it ends. Your roster takes over again after that.</p>
+        </div>
       </div>
       
     </div>

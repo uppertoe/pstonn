@@ -11,9 +11,9 @@ Nothing to do yet — p.stonn keeps trying.
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
 
-https://p.stonn.org
-
 We have also told sam@example.com (by email).
+
+https://p.stonn.org
 
 === NTFY pstonn-primary
 Title: Still updating your Visitor — it shows XYZ789 for now
@@ -44,7 +44,7 @@ Nothing to do yet — p.stonn keeps trying.
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
 
-https://p.stonn.org
-
 We have also told primary@example.com (by email and push notification).
+
+https://p.stonn.org
 

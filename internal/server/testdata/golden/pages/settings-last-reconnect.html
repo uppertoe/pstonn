@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=9909777633">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=9909777633">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=6edb27dd7e">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=6edb27dd7e">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=9909777633">
+<link rel="stylesheet" href="/static/app.css?v=6edb27dd7e">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=9909777633"></script>
-<script defer src="/static/alpine.min.js?v=9909777633"></script>
+<script src="/static/htmx.min.js?v=6edb27dd7e"></script>
+<script defer src="/static/alpine.min.js?v=6edb27dd7e"></script>
 
 
 <script>
@@ -271,10 +271,12 @@ window.popClamp = window.popClamp || function (el) {
     if (!field || f.__confirmed) return;
     var inp = f.querySelector('[name="' + field + '"]');
     var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
-    if (!inp || inp.offsetParent === null || !v) { delete f.dataset.confirm; return; }
+    
+    if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
     f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
       'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
     f.dataset.confirmOk = 'It matches — continue';
+    f.__plateConfirm = true;
   }, true);
   
   document.addEventListener('submit', function (e) {

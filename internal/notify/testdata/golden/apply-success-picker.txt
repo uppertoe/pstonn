@@ -7,9 +7,9 @@ Your Visitor is now set to Baba — XYZ789, from the quick picker on your phone.
 
 Nothing to do — this is just your confirmation it went through.
 
-https://p.stonn.org
-
 We have also told sam@example.com (by email) and baba@example.com (by email, as the driver of XYZ789).
+
+https://p.stonn.org
 
 === NTFY pstonn-primary
 Title: Permit updated: Visitor now shows XYZ789
@@ -31,7 +31,7 @@ Your Visitor is now set to Baba — XYZ789, from the quick picker on your phone.
 
 Nothing to do — this is just your confirmation it went through.
 
-https://p.stonn.org
-
 We have also told primary@example.com (by email and push notification) and baba@example.com (by email, as the driver of XYZ789).
+
+https://p.stonn.org
 

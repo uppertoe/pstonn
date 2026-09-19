@@ -85,6 +85,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Sun</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Sun: ABC123, change">
@@ -96,10 +97,11 @@
       <p class="tt">Week 1, Sun: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Sun</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sun</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -109,6 +111,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Mon</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Mon: ABC123, change">
@@ -120,10 +123,11 @@
       <p class="tt">Week 1, Mon: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Mon</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Mon</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -133,6 +137,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Tue</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Tue: ABC123, change">
@@ -144,10 +149,11 @@
       <p class="tt">Week 1, Tue: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Tue</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Tue</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -157,6 +163,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Wed</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Wed: ABC123, change">
@@ -168,10 +175,11 @@
       <p class="tt">Week 1, Wed: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Wed</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Wed</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -181,6 +189,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Thu</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Thu: ABC123, change">
@@ -192,10 +201,11 @@
       <p class="tt">Week 1, Thu: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Thu</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Thu</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -205,6 +215,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Fri</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Fri: ABC123, change">
@@ -216,10 +227,11 @@
       <p class="tt">Week 1, Fri: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Fri</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Fri</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -229,6 +241,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Sat</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 1, Sat: ABC123, change">
@@ -240,10 +253,11 @@
       <p class="tt">Week 1, Sat: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Sat</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sat</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"0","weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -262,6 +276,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Sun</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Sun: ABC123, change">
@@ -273,10 +288,11 @@
       <p class="tt">Week 2, Sun: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Sun</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"0","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sun</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"0","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -286,6 +302,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Mon</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Mon: ABC123, change">
@@ -297,10 +314,11 @@
       <p class="tt">Week 2, Mon: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Mon</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"1","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Mon</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"1","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -310,6 +328,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Tue</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Tue: ABC123, change">
@@ -321,10 +340,11 @@
       <p class="tt">Week 2, Tue: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Tue</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"2","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Tue</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"2","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -334,6 +354,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Wed</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Wed: ABC123, change">
@@ -345,10 +366,11 @@
       <p class="tt">Week 2, Wed: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Wed</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"3","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Wed</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"3","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -358,6 +380,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Thu</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Thu: ABC123, change">
@@ -369,10 +392,11 @@
       <p class="tt">Week 2, Thu: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Thu</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"4","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Thu</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"4","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -382,6 +406,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Fri</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Fri: ABC123, change">
@@ -393,10 +418,11 @@
       <p class="tt">Week 2, Fri: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Fri</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"5","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Fri</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"5","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       
@@ -406,6 +432,7 @@
   
   <div class="rcell" x-data="{open:false}">
     <div class="day">Sat</div>
+    
     <button type="button" class="chip " @click="open=!open"
             :aria-expanded="open" aria-haspopup="true"
             aria-label="Week 2, Sat: ABC123, change">
@@ -417,10 +444,11 @@
       <p class="tt">Week 2, Sat: choose a rego</p>
       <div class="vopts">
         <button type="button" class="vopt " @click="open=false"
-          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML">No rego on Sat</button>
+          hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"6","vehicle_id":"0"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="lab">Nothing scheduled on Sat</span><span class="sub2">Whatever rego is on the permit stays on it.</span></button>
         
         <button type="button" class="vopt sel" @click="open=false"
           hx-post="/permits/7/rules" hx-vals='{"week":"1","weekday":"6","vehicle_id":"1"}' hx-target="#pbody-7" hx-swap="innerHTML"><span class="dot" style="background:#2f6feb"></span><span class="lab">Van</span> <span class="reg">ABC123</span></button>
+        
         
       </div>
       

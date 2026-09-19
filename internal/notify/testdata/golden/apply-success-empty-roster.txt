@@ -1,35 +1,39 @@
 === EMAIL to primary@example.com
-Subject: Permit updated: Visitor now shows ABC123
+Subject: Permit updated: Visitor now has no rego
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
-Hero: ABC123 #3b82f6
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
+Your Visitor now has no rego on it for today, as your roster says. Nothing is covered on that permit until the schedule puts a rego on.
 
 Nothing to do — this is just your confirmation it went through.
+
+This replaced GUEST1, which an active booking had put on. We have emailed the person whose rego that is.
 
 We have also told sam@example.com (by email).
 
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Permit updated: Visitor now shows ABC123
+Title: Permit updated: Visitor now has no rego
 Priority: default
 Tags: white_check_mark
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
+Your Visitor now has no rego on it for today, as your roster says. Nothing is covered on that permit until the schedule puts a rego on.
 
 Nothing to do — this is just your confirmation it went through.
+
+This replaced GUEST1, which an active booking had put on. We have emailed the person whose rego that is.
 
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Permit updated: Visitor now shows ABC123
+Subject: Permit updated: Visitor now has no rego
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
-Hero: ABC123 #3b82f6
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
+Your Visitor now has no rego on it for today, as your roster says. Nothing is covered on that permit until the schedule puts a rego on.
 
 Nothing to do — this is just your confirmation it went through.
+
+This replaced GUEST1, which an active booking had put on. We have emailed the person whose rego that is.
 
 We have also told primary@example.com (by email and push notification).
 

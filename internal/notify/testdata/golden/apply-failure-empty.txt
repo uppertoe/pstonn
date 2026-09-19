@@ -1,12 +1,12 @@
 === EMAIL to primary@example.com
-Subject: Action needed: your Visitor still shows XYZ789
+Subject: Still updating your Visitor — it shows XYZ789 for now
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
+p.stonn tried to take the rego off your Visitor, as your schedule says, but couldn't.
 The permit still shows XYZ789, so that is the rego currently covered.
 
-The council rejected the change.
-Check the permit on the council's site.
+The council was temporarily unavailable.
+Nothing to do yet — p.stonn keeps trying.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
@@ -16,15 +16,15 @@ We have also told sam@example.com (by email).
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Action needed: your Visitor still shows XYZ789
-Priority: high
+Title: Still updating your Visitor — it shows XYZ789 for now
+Priority: default
 Tags: warning
 
-p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
+p.stonn tried to take the rego off your Visitor, as your schedule says, but couldn't.
 The permit still shows XYZ789, so that is the rego currently covered.
 
-The council rejected the change.
-Check the permit on the council's site.
+The council was temporarily unavailable.
+Nothing to do yet — p.stonn keeps trying.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
@@ -32,14 +32,14 @@ https://parkingpermits.stonnington.vic.gov.au/ssp/
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Action needed: your Visitor still shows XYZ789
+Subject: Still updating your Visitor — it shows XYZ789 for now
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
+p.stonn tried to take the rego off your Visitor, as your schedule says, but couldn't.
 The permit still shows XYZ789, so that is the rego currently covered.
 
-The council rejected the change.
-Check the permit on the council's site.
+The council was temporarily unavailable.
+Nothing to do yet — p.stonn keeps trying.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
