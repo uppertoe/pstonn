@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=18996c9cb1">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=18996c9cb1">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=09ba22b031">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=09ba22b031">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=18996c9cb1">
+<link rel="stylesheet" href="/static/app.css?v=09ba22b031">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=18996c9cb1"></script>
-<script defer src="/static/alpine.min.js?v=18996c9cb1"></script>
+<script src="/static/htmx.min.js?v=09ba22b031"></script>
+<script defer src="/static/alpine.min.js?v=09ba22b031"></script>
 
 
 <script>
@@ -946,9 +946,6 @@ window.popClamp = window.popClamp || function (el) {
   <form class="stack" method="post" action="/permits/7/override" data-plate-confirm="plate"
         hx-post="/permits/7/override" hx-target="#pbody-7" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
-        
-        :data-confirm="mode=='empty' ? 'Clear the permit for this booking? For as long as it runs, no car is covered on it.' : null"
-        :data-confirm-ok="mode=='empty' ? 'Clear it' : null"
         x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', plate:'', ends:'day', fromDate:'',
                  endLabel(offset) {
                    const d = this.fromDate ? new Date(this.fromDate + 'T12:00') : new Date();
@@ -963,7 +960,6 @@ window.popClamp = window.popClamp || function (el) {
     <div class="seg">
       <button type="button" :class="{on: mode=='car'}" @click="mode='car'; plate=''">A saved rego</button>
       <button type="button" :class="{on: mode=='plate'}" @click="mode='plate'; sel=''; lbl=''; col=''">Type a rego</button>
-      
     </div>
     
     
@@ -971,7 +967,7 @@ window.popClamp = window.popClamp || function (el) {
       <div class="segpane" :class="{hide: mode!='car'}">
         <label class="fld">Rego
           <div class="vpick">
-            <input type="hidden" name="vehicle_id" :value="sel" :disabled="mode!='car'">
+            <input type="hidden" name="vehicle_id" :value="sel">
             <button type="button" class="vpick-btn" @click="open=!open">
               <span class="dot" x-show="col" :style="`background:${col}`"></span>
               <span x-text="lbl || 'Choose a rego…'" :class="{'ph': !lbl}"></span>
@@ -999,7 +995,6 @@ window.popClamp = window.popClamp || function (el) {
         <p class="empty-note" style="margin-top:6px">For a rego that is not one of your saved regos, such as a friend, a hire car or a tradie. It is used for this booking only and not saved.</p>
         
       </div>
-      
     </div>
     
     <label class="fld">From
@@ -1023,7 +1018,7 @@ window.popClamp = window.popClamp || function (el) {
     <div class="modal-actions">
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       
-      <button type="submit" :disabled="mode=='car' ? !sel : mode=='plate' ? !plate.trim() : false"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Book</button>
+      <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Book</button>
     </div>
   </form>
   </div>
