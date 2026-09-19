@@ -367,15 +367,18 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 	// words, tells recent from settled: a spinner means a council read is in
 	// flight; the green tick means the council answered on this visit.
 	plateCheckedAgo := ""
+	var plateCheckedAt int64
 	switch {
 	case !confirmedAt.IsZero() && (plateRecent || !plateRefreshing):
 		plateCheckedAgo = "checked " + agoText(now, confirmedAt)
+		plateCheckedAt = confirmedAt.Unix()
 	case !plateRefreshing:
 		// Settled (a fresh reading agreed) but nothing stamped the instant — a
 		// permit from before the stamp existed, or a reading that lost the CAS.
 		// A tick beside "checking…" would be a contradiction; a fresh reading is
 		// by definition minutes old at most.
 		plateCheckedAgo = "checked just now"
+		plateCheckedAt = now.Unix()
 	}
 	// The permit's clock, converted BEFORE anything reads weekdays or cycle weeks
 	// from it (the instant-arithmetic above is timezone-indifferent). Taking date
@@ -582,6 +585,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		PlateRefreshing: plateRefreshing,
 		PlateRecent:     plateRecent,
 		PlateCheckedAgo: plateCheckedAgo,
+		PlateCheckedAt:  plateCheckedAt,
 		Applying:        applying,
 		// The honesty clock must survive a reload: PlateUnconfirmed used to be
 		// reachable only by leaving the tab open for the whole poll budget, because

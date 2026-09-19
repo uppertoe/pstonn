@@ -205,6 +205,27 @@
     });
     addEventListener('pageshow', function (e) { if (e.persisted && marker() && !busy()) location.reload(); });
   })();
+  // "checked 2 hr ago" on the permit badge counts from data-checked-at (Unix
+  // seconds) between polls, in the server's own words (agoText), so a tab left
+  // open does not say "just now" for hours. A poll that re-renders the badge
+  // brings a new stamp, or none; only spans carrying one are touched.
+  (function () {
+    function ago(secs) {
+      if (secs < 60) return 'just now';
+      if (secs < 3600) return Math.floor(secs / 60) + ' min ago';
+      if (secs < 48 * 3600) return Math.floor(secs / 3600) + ' hr ago';
+      return Math.floor(secs / 86400) + ' days ago';
+    }
+    function tick() {
+      var now = Date.now() / 1000;
+      document.querySelectorAll('.phint[data-checked-at]').forEach(function (el) {
+        var t = parseInt(el.getAttribute('data-checked-at'), 10);
+        if (t) el.textContent = 'checked ' + ago(Math.max(0, now - t));
+      });
+    }
+    setInterval(tick, 30000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') tick(); });
+  })();
   // The offline page (offline.go): a small service worker that serves /offline
   // when a navigation cannot reach the server, for the pages saved to a home
   // screen. Registered from every page so the first visit installs it.

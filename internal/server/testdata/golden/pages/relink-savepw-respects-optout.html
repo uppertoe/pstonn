@@ -183,6 +183,27 @@
   
   
   
+  
+  (function () {
+    function ago(secs) {
+      if (secs < 60) return 'just now';
+      if (secs < 3600) return Math.floor(secs / 60) + ' min ago';
+      if (secs < 48 * 3600) return Math.floor(secs / 3600) + ' hr ago';
+      return Math.floor(secs / 86400) + ' days ago';
+    }
+    function tick() {
+      var now = Date.now() / 1000;
+      document.querySelectorAll('.phint[data-checked-at]').forEach(function (el) {
+        var t = parseInt(el.getAttribute('data-checked-at'), 10);
+        if (t) el.textContent = 'checked ' + ago(Math.max(0, now - t));
+      });
+    }
+    setInterval(tick, 30000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') tick(); });
+  })();
+  
+  
+  
   if ('serviceWorker' in navigator) {
     addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
   }

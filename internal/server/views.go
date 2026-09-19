@@ -755,6 +755,10 @@ type permitView struct {
 	// PlateCheckedAgo is the hint text for PlateRecent ("checked 2 hr ago"); ""
 	// otherwise. Composed in Go so the golden renders pin it at a fixed clock.
 	PlateCheckedAgo string
+	// PlateCheckedAt is the instant PlateCheckedAgo counts from, as Unix
+	// seconds, so the page can keep the age honest between polls (a tab left
+	// open said "checked just now" for hours); 0 when there is no age to show.
+	PlateCheckedAt int64
 	// Applying: the schedule's desired plate for right now is not yet the plate the
 	// tenant confirms is on the permit — a change is in flight (a booking just made,
 	// a roster edit affecting today). Renders an "applying" spinner. Crucially this
