@@ -205,10 +205,15 @@
     });
     addEventListener('pageshow', function (e) { if (e.persisted && marker() && !busy()) location.reload(); });
   })();
-  // "checked 2 hr ago" on the permit badge counts from data-checked-at (Unix
-  // seconds) between polls, in the server's own words (agoText), so a tab left
-  // open does not say "just now" for hours. A poll that re-renders the badge
-  // brings a new stamp, or none; only spans carrying one are touched.
+  // "checked 2 hr ago" counts from data-checked-at (Unix seconds) between
+  // polls, in the server's own words (agoText), so a page left open does not
+  // say "just now" for hours. On the schedule it is the permit badge's hint;
+  // on a guest link or the picker it is the "On the permit now" line, which
+  // also turns into "Last known on the permit" (the .stale class) once the
+  // reading is older than the server's own five-minute window, since those
+  // pages only poll while a change is pending. A poll or reload that re-renders
+  // the element brings a new stamp, or none; only elements carrying one are
+  // touched, and the text lands in the .gchecked span when there is one.
   (function () {
     function ago(secs) {
       if (secs < 60) return 'just now';
@@ -218,9 +223,15 @@
     }
     function tick() {
       var now = Date.now() / 1000;
-      document.querySelectorAll('.phint[data-checked-at]').forEach(function (el) {
+      document.querySelectorAll('[data-checked-at]').forEach(function (el) {
         var t = parseInt(el.getAttribute('data-checked-at'), 10);
-        if (t) el.textContent = 'checked ' + ago(Math.max(0, now - t));
+        if (!t) return;
+        var secs = Math.max(0, now - t);
+        var line = el.classList.contains('gnow');
+        var target = line ? el.querySelector('.gchecked') : el;
+        if (!target) return;
+        target.textContent = 'checked ' + ago(secs);
+        if (line) el.classList.toggle('stale', secs >= 300);
       });
     }
     setInterval(tick, 30000);

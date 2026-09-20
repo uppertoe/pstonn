@@ -707,7 +707,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 				{Milestone: store.MilestoneRego, Label: "Save the rego of someone who visits you", Done: true},
 				{Milestone: store.MilestoneRegoEmail, Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add"}}}}, "Still to try"},
 		{"guest-picker-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
-			Token: "tok", Picker: true, Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Home permit", CurrentReg: "ABC123", MineReg: "ABC123", RevertPlate: "1QT4RM",
+			Token: "tok", Picker: true, Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Home permit", CurrentReg: "ABC123", MineReg: "ABC123", RevertPlate: "1QT4RM", CheckedAt: 1700000000,
 			Cars: []vehicleView{
 				{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#111", Audience: "The following people will be notified of the change:\njo@example.com — by email\nsam@example.com — by email at 6:00am, after their quiet hours\nnanny@example.com — by email, as the driver of ABC123"},
 				{ID: 2, Label: "Baba", Registration: "XYZ789", Color: "#222", Audience: "The following people will be notified of the change:\njo@example.com — by email\nsam@example.com — by email at 6:00am, after their quiet hours"}}, AllowOvernight: true,
@@ -719,6 +719,9 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "The Helds’ visitor permit"},
+		{"guest-menu-last-known", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23", CheckedAgo: "4 hr ago", CheckedAt: 1700000000,
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "checked 4 hr ago"},
 		{"guest-bookmark-tip", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", PermitLabel: "Visitor Permit",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "add it to your home screen"},

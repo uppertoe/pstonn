@@ -69,23 +69,34 @@ func (s *Server) guestCurrentPlate(ctx context.Context, gc guestCtx, permit mode
 	return current
 }
 
+// guestPlateFreshness is the guest page's freshness window: a reading younger
+// than this is "on the permit now"; older is "last known", with its age. The
+// page's script applies the same threshold as the stamp ages on an open page.
+const guestPlateFreshness = 5 * time.Minute
+
 // guestPlateCheckedAgo reports how long ago the plate shown to a guest was
-// actually confirmed with the tenant, as display text — "" while the reading is
-// fresh (or unknown). The guest page's "On the permit now" line is the single
-// most load-bearing sentence in the app for a visitor about to walk away from
-// their car, and it used to state a cached value as present-tense fact with no
-// age bound: during a tenant outage "now" could be days old.
-func (s *Server) guestPlateCheckedAgo(ctx context.Context, permit model.Permit) string {
+// actually confirmed with the tenant: as display text — "" while the reading is
+// fresh (or unknown) — and as the instant the reading was taken, in Unix
+// seconds (0 when unknown), so the page can keep counting from it. The guest
+// page's "On the permit now" line is the single most load-bearing sentence in
+// the app for a visitor about to walk away from their car, and it used to state
+// a cached value as present-tense fact with no age bound: during a tenant
+// outage "now" could be days old.
+func (s *Server) guestPlateCheckedAgo(ctx context.Context, permit model.Permit) (string, int64) {
 	if s.tenant == nil {
-		return ""
+		return "", 0
 	}
 	_, age, fresh, err := s.tenant.CurrentVehicleCached(ctx, permit.Owner,
-		model.Permit{TenantID: permit.TenantID, CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, 5*time.Minute)
-	if err != nil || fresh {
-		return ""
+		model.Permit{TenantID: permit.TenantID, CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}, guestPlateFreshness)
+	if err != nil {
+		return "", 0
 	}
 	now := time.Now()
-	return agoText(now, now.Add(-age))
+	at := now.Add(-age)
+	if fresh {
+		return "", at.Unix()
+	}
+	return agoText(now, at), at.Unix()
 }
 
 // revertPlate decides whether a guest may revert, and to what: the captured
@@ -393,7 +404,7 @@ func (s *Server) buildGuestView(r *http.Request, gc guestCtx, permit model.Permi
 	view.Council = s.tenantViewFor(ctx, permit.Owner).Name
 	if !gc.Grant.RequestOnly {
 		view.CurrentReg = current
-		view.CheckedAgo = s.guestPlateCheckedAgo(ctx, permit)
+		view.CheckedAgo, view.CheckedAt = s.guestPlateCheckedAgo(ctx, permit)
 		want, _, decidedAt, until := s.guestDesired(ctx, permit)
 		// Offer "put it back" only while THIS link's activation is still the winning
 		// plate. If the owner (or their schedule) has since booked over it, the guest

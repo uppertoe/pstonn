@@ -45,6 +45,7 @@ type guestActView struct {
 	PermitLabel    string            // which permit this affects
 	CurrentReg     string            // what is on the permit right now ("" if unknown)
 	CheckedAgo     string            // how long ago CurrentReg was confirmed with the tenant; "" while fresh ("4 hr ago" turns "on now" into "last known")
+	CheckedAt      int64             // the instant CheckedAgo counts from, as Unix seconds, so the line keeps counting on a page left open (0 = no reading to count from)
 	Cars           []vehicleView     // the cars this link may activate
 	AllowOvernight bool              // whether the overnight checkbox is offered
 	AllowPlate     bool              // whether the visitor may type an arbitrary plate
