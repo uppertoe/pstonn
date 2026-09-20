@@ -13,7 +13,7 @@
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
 <link rel="stylesheet" href="/static/app.css?v=d5a503a8c1">
-<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="manifest" href="/g/manifest/tok">
 <script>
   
   (function () {
@@ -402,92 +402,57 @@ window.popClamp = window.popClamp || function (el, tries) {
 
 
 
+<main id="main" tabindex="-1" class="guestwrap">
+  <section class="guestcard">
+    <div class="gbrand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="word">p<span class="dot">.</span>stonn</span></div>
+    <h1>The Helds’ visitor permit</h1>
+    <div id="gbody" data-refresh-on-return>
 
-<header class="appbar">
+
+
+<div class="gstat">
   
   
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
-  <div class="appbar-r">
+  <p class="gnow stale" data-checked-at="1700000000"><span class="gnow-stale">Last known on the permit:</span><span class="gnow-fresh">On the permit now:</span> <span class="plate masked" title="Someone else's rego">••••23</span> <span class="gnuntil gnow-stale">&middot; <span class="gchecked">checked 4 hr ago</span></span></p>
+  <p class="gsub"></p>
+</div>
+
+
+
+
+
+<form method="post" action="/g/tok" class="stack" style="margin-top:14px" data-plate-confirm="plate" hx-post="/g/tok" hx-target="#gbody" hx-swap="innerHTML">
+  
+  <p class="sub">Tap your rego to put it on the permit</p>
+  <div class="gcars">
     
-    <a href="/features" hx-boost="false" class="howlink" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
-    <button class="icon-btn" type="button" data-theme-toggle title="Toggle light / dark" aria-label="Toggle theme">
-      <span class="th-moon"><svg viewBox="0 0 24 24"><path d="M21 12.8A8 8 0 1 1 11.2 3a6 6 0 0 0 9.8 9.8z"/></svg></span><span class="th-sun"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg></span>
+    <button class="gcar" style="--plate:#111" type="submit" name="vehicle_id" value="1">
+      <span class="dot" style="background:#111"></span>
+      <span class="glabel">Mum</span>
+      <span class="plate" style="--plate:#111">AAA111</span>
+      
     </button>
-    <div class="usermenu" x-data="{open:false}" @click.outside="open=false" @keydown.escape.window="open=false">
-      <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></button>
-      <div class="menu" x-show="open" x-cloak>
-        <div class="menu-email">a@b.com</div>
-        
-        
-        <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
-        
-        <span class="menu-note">Session handled by your login provider</span>
-      </div>
-    </div>
+    
   </div>
-</header>
+  
+  
+  
+  
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" name="overnight" style="margin-top:2px"> <span>I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps your rego on until the end of tomorrow instead of the end of today.</span></span></label>
+  
+  
+</form>
 
-<main id="main" tabindex="-1">
-  
-  
-  
-  
-  <div class="banner warn" style="align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>
-    <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
-    Either the password is wrong, or your ePermits account isn’t under <strong>a@b.com</strong>.
-    <span style="display:block;margin-top:12px">• <strong>Forgot your council password — or never set one?</strong> <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then come back and link. This is the most common fix.</span>
-    
-    <span style="display:block;margin-top:10px">&bull; <strong>Council account under a different email?</strong> Sign out, then sign back in here with that address.</span>
-    
-    <span style="display:block;margin-top:10px;font-size:13px">Unsure which it is? Try your details at the council’s own <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer" hx-boost="false">ePermits site</a> first.</span>
-  </span></div>
-  
-  
-  
-  
-  <section class="card hero">
-    <div class="ring"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></div>
-    
-    
-    <h2>Link your council account</h2>
-    <p>
-      Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.
-    </p>
-    
-    
-    <form class="stack" method="post" action="/tenant/link"
-          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
-      <label class="fld">Council email (your verified sign-in)
-        <input type="email" value="a@b.com" autocomplete="username" disabled>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email — it can’t be changed here.
-        If your council account uses a different address, sign out and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
-        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
-      </p>
-      <label class="fld">Council password
-        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">Forgot it — or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then link here.</p>
-      <label class="optin">
-        
-        <input type="checkbox" name="save_password" value="1" checked>
-        <span>
-          <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
-          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
-        </span>
-      </label>
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</button>
-    </form>
-    
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
-    
-    
+
+
+<p class="empty-note" style="margin-top:16px">Tap your rego. It stays on the permit until the end of the day. The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>
+<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>
+
+
+</div>
   </section>
+  
+  <p class="gcredit">This permit is managed with <a href="/" hx-boost="false">p.stonn</a> — free for City of Stonnington residents.</p>
 </main>
 
 
