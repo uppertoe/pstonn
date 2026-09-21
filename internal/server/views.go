@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -280,8 +281,15 @@ type onboardData struct {
 	// The throttle used to answer with a bare 429 message page — a dead end that
 	// was the last thing an early sign-up saw before leaving. The wait is real,
 	// but it should arrive WITH the likely fix (wrong password vs wrong ePermits
-	// email) so the pause becomes checking time, not giving-up time.
+	// email) so the pause becomes checking time, not giving-up time. Set from
+	// the limiter itself, not only the redirect's query string, so the form is
+	// gone for the whole wait however the page is reached, and back the moment
+	// tenantLink would accept a submit again.
 	LinkThrottled bool
+	// LinkWait is the remaining pause in words ("about 12 minutes"), for the
+	// throttled state. The old banner said "about 15 minutes" on every visit,
+	// which on the sixth submit at minute six was simply wrong.
+	LinkWait string
 	// InAppBrowser marks a visitor inside a social app's built-in webview
 	// (Facebook, Messenger, Instagram), where password managers don't auto-fill.
 	// The onboarding page uses it to suggest opening the real browser BEFORE the
@@ -1040,10 +1048,18 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// matters more than account status. The banner's content lives in the
 		// template (it needs structure: lead line, button row, fallback link),
 		// not in this prose field.
-		if r.URL.Query().Get("link") == "rejected" {
+		// The throttle is keyed the way tenantLink keys it (the signed-in user,
+		// who is the primary on this page), and it is asked, not spent.
+		if wait := s.tenantTry.retryAfter(user); wait > 0 {
+			base.Onboard.LinkThrottled = true
+			base.Onboard.LinkWait = waitWords(wait)
+		} else if r.URL.Query().Get("link") == "rejected" {
 			base.Onboard.LinkHelp = true
 		} else if r.URL.Query().Get("link") == "throttled" {
-			base.Onboard.LinkThrottled = true
+			// The redirect landed after the window lapsed (or the limiter was
+			// reset by a restart): nothing is refused now, so offer the form
+			// with the rejected-login help rather than a wait that is over.
+			base.Onboard.LinkHelp = true
 		} else
 		// A RETURNING household is not a signup. The paths that end a session
 		// (idle retirement, a rejected saved password, a manual disconnect)
@@ -1097,4 +1113,14 @@ func inAppBrowser(ua string) bool {
 		strings.Contains(ua, "FB_IAB") ||
 		strings.Contains(ua, "Instagram") ||
 		strings.Contains(ua, "GSA/") // the Google app's webview (a rejected signup arrived this way, 2026-08-24)
+}
+
+// waitWords renders a remaining pause the way a person would say it, rounding
+// up so the promise is never broken: "about 12 minutes", "about a minute".
+func waitWords(d time.Duration) string {
+	m := int((d + time.Minute - 1) / time.Minute)
+	if m <= 1 {
+		return "about a minute"
+	}
+	return fmt.Sprintf("about %d minutes", m)
 }

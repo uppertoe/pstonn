@@ -511,7 +511,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		// first failed attempt burns tenant lockout budget.
 		{"link-form offers reset beside the password field", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc, Onboard: &onboardData{}},
 			"idm/account/ForgotPassword"},
-		{"link-throttled deep-links the reset too", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true}, Loc: loc},
+		{"link-throttled deep-links the reset too", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about 3 minutes"}, Loc: loc},
 			"idm/account/ForgotPassword"},
 		// Inside a social in-app webview the password manager can't auto-fill;
 		// the advice must appear BEFORE the field defeats them, and only there —
@@ -524,11 +524,18 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"terms heads-up names the ePermits password", dashboardData{User: user, State: "terms", IsPrimary: true, Loc: loc,
 			Terms: termsView{Version: tm.Version, Clauses: tm.Clauses, Intro: tm.Intro}},
 			"ePermits password"},
-		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true},
+		// The paused state REPLACES the password form for as long as tenantLink
+		// would refuse a submit, and says how long that is in minutes actually
+		// left (observed live 2026-09-21: six submits into the wall while a
+		// banner above the still-open form said "please wait").
+		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about 12 minutes"},
 			LogoutURL: "https://auth.example.com/logout", Loc: loc},
-			"please wait about 15 minutes"},
-		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true}, Loc: loc},
+			"paused for about 12 minutes"},
+		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about a minute"}, Loc: loc},
 			"your ePermits account must be under"},
+		{"link-throttled offers sign-out as a button", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about a minute"},
+			LogoutURL: "https://auth.example.com/logout", Loc: loc},
+			`class="btnlike sm">Sign out</a>`},
 		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc, Onboard: &onboardData{}}, "Waiting for the account owner"},
 		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{OfferedCount: 1, Pick: []pickView{
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},

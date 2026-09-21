@@ -30,21 +30,6 @@
     <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)))}}</span>
   </span></div>
   {{end}}
-  {{if .Onboard.LinkThrottled}}
-  {{/* Too many council sign-in attempts: the wait is real (it protects their
-       council account from its own lockout), but it must arrive WITH the likely
-       fixes so the pause becomes checking time rather than giving-up time. Same
-       remedies as the rejected banner: the sign-out button and the council's
-       own site as the place to verify credentials meanwhile. */}}
-  <div class="banner warn" style="align-items:flex-start">{{template "ic-alert"}} <span>
-    <strong>Paused after several sign-in tries &mdash; please wait about 15 minutes.</strong><br>
-    Too many attempts in a row could lock your real council account, so p.stonn stops first.
-    <span style="display:block;margin-top:10px">While you wait, two things worth checking:</span>
-    <span style="display:block;margin-top:6px">{{T "onboarding.throttled_password" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)) "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)))}}</span>
-    <span style="display:block;margin-top:6px">&bull; Your email &mdash; your {{.Tenant.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address,
-    {{- if .LogoutURL}} <a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}} sign out{{end}} and sign back in here with that one.</span>
-  </span></div>
-  {{end}}
   {{/* A pending invitation is answered HERE, not only on Settings: every app page
        for a person with no council link renders this onboarding page — Settings
        included — so an invitee could never reach the accept button, and was left
@@ -69,6 +54,29 @@
       Please try again in a while{{if .Contact}}, or <a href="/contact">get in touch</a> and you&rsquo;ll hear when there&rsquo;s room{{end}}.
       Nothing to undo &mdash; no details were taken.
     </p>
+    {{else}}
+    {{if .Onboard.LinkThrottled}}
+    <h2>Paused after several sign-in tries</h2>
+    {{/* Too many council sign-in attempts: the wait is real (it protects their
+         council account from its own lockout), and for as long as it runs the
+         password form is GONE, not sitting under a banner that says stop. The
+         2026-09-21 sign-up read that layout as an invitation: four rejected
+         logins, then six more submits into the throttle in seventy seconds,
+         then gone. What stays are the two likely fixes, with the sign-out fix
+         as a real button, and the wait in minutes that are actually left. */}}
+    <p>
+      <strong>The council didn&rsquo;t accept those sign-ins, so p.stonn has paused for {{.Onboard.LinkWait}}.</strong>
+      Too many attempts in a row could lock your real council account, which is why it stops first. The password form comes back when the pause ends.
+    </p>
+    {{/* The checks read as a list, so they sit left-aligned like the form
+         they stand in for, inside the hero's centred column. */}}
+    <div style="text-align:left;max-width:440px;margin:0 auto;display:grid;gap:10px">
+      <p style="margin:0">While you wait, two things worth checking:</p>
+      <p style="margin:0">{{T "onboarding.throttled_password" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)) "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)))}}</p>
+      <p style="margin:0">&bull; Your email &mdash; your {{.Tenant.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address, sign out and sign back in here with that one.</p>
+      {{if .LogoutURL}}<p style="margin:0"><a href="{{.LogoutURL}}" hx-boost="false" class="btnlike sm">Sign out</a></p>{{end}}
+    </div>
+    <p class="empty-note" style="margin:18px auto 0">Nothing was kept from those attempts. <a href="/schedule">Check again</a> once the pause is over.</p>
     {{else}}
     <h2>{{if .Relink}}Reconnect your council account{{else}}Link your council account{{end}}</h2>
     <p>
@@ -144,6 +152,7 @@
          it here, so "use a password you haven't used elsewhere" read as
          nonsense. The real advice is about reuse of that council password. */}}
     <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
+    {{end}}
     {{end}}
     {{else}}
     <h2>Waiting for the account owner</h2>

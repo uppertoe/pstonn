@@ -323,6 +323,11 @@ type CouncilConfig struct {
 	// exercise. 0 lands writes inside the call, which is how a healthy council
 	// behaves and what a screen recording of the app should show.
 	SandboxApplyDelay time.Duration
+	// SandboxRejectPassword is the one council password the sandbox refuses
+	// (COUNCIL_SANDBOX_REJECT_PASSWORD, default "wrong"): the fake accepts any
+	// other. It exists so the rejected-login and throttled onboarding states can
+	// be walked in a browser without a real portal.
+	SandboxRejectPassword string
 }
 
 // Load reads and validates configuration from the environment.
@@ -385,27 +390,28 @@ func Load() (*Config, error) {
 		ProxySecret:      strings.TrimSpace(os.Getenv("PROXY_SECRET")),
 		CookieSecure:     env("COOKIE_SECURE", "true") != "false",
 		Council: CouncilConfig{
-			Issuer:              env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
-			ClientID:            env("COUNCIL_CLIENT_ID", "ePermits.ssp.web"),
-			RedirectURI:         env("COUNCIL_REDIRECT_URI", "https://parkingpermits.stonnington.vic.gov.au/ssp/callback"),
-			Scopes:              strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
-			APIBase:             env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
-			SessionMaxAge:       time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
-			WarmInterval:        envDuration("COUNCIL_WARM_INTERVAL", DefaultWarmInterval),
-			RolloverWindow:      envDurationOff("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
-			DriftInterval:       envDurationOff("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
-			IdleWindow:          envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
-			WarmSafetyMargin:    envDuration("COUNCIL_WARM_SAFETY_MARGIN", time.Hour),
-			ExpiryWarningMargin: envDuration("COUNCIL_EXPIRY_WARNING_MARGIN", 2*time.Hour),
-			GovRatePerMin:       envInt("COUNCIL_GOV_RATE", 60),
-			GovBurst:            envInt("COUNCIL_GOV_BURST", 10),
-			GovLoginRatePerMin:  envInt("COUNCIL_GOV_LOGIN_RATE", 12),
-			GovLoginBurst:       envInt("COUNCIL_GOV_LOGIN_BURST", 6),
-			GovConcurrency:      envInt("COUNCIL_GOV_CONCURRENCY", 4),
-			Sandbox:             env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
-			SandboxApplyDelay:   envDurationOff("COUNCIL_SANDBOX_APPLY_DELAY", 6*time.Second),
-			ReminderLead:        time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
-			ExpiryLead:          time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
+			Issuer:                env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
+			ClientID:              env("COUNCIL_CLIENT_ID", "ePermits.ssp.web"),
+			RedirectURI:           env("COUNCIL_REDIRECT_URI", "https://parkingpermits.stonnington.vic.gov.au/ssp/callback"),
+			Scopes:                strings.Fields(env("COUNCIL_SCOPES", "openid profile ePermits.ssp.api.all")),
+			APIBase:               env("COUNCIL_API_BASE", "https://parkingpermits.stonnington.vic.gov.au/ssp-svc"),
+			SessionMaxAge:         time.Duration(envInt("COUNCIL_SESSION_MAX_AGE_DAYS", 90)) * 24 * time.Hour,
+			WarmInterval:          envDuration("COUNCIL_WARM_INTERVAL", DefaultWarmInterval),
+			RolloverWindow:        envDurationOff("COUNCIL_ROLLOVER_WINDOW", 60*time.Minute),
+			DriftInterval:         envDurationOff("COUNCIL_DRIFT_INTERVAL", 6*time.Hour),
+			IdleWindow:            envDuration("COUNCIL_IDLE_WINDOW", 10*time.Hour),
+			WarmSafetyMargin:      envDuration("COUNCIL_WARM_SAFETY_MARGIN", time.Hour),
+			ExpiryWarningMargin:   envDuration("COUNCIL_EXPIRY_WARNING_MARGIN", 2*time.Hour),
+			GovRatePerMin:         envInt("COUNCIL_GOV_RATE", 60),
+			GovBurst:              envInt("COUNCIL_GOV_BURST", 10),
+			GovLoginRatePerMin:    envInt("COUNCIL_GOV_LOGIN_RATE", 12),
+			GovLoginBurst:         envInt("COUNCIL_GOV_LOGIN_BURST", 6),
+			GovConcurrency:        envInt("COUNCIL_GOV_CONCURRENCY", 4),
+			Sandbox:               env("COUNCIL_SANDBOX", "") == "1" || env("COUNCIL_SANDBOX", "") == "true",
+			SandboxApplyDelay:     envDurationOff("COUNCIL_SANDBOX_APPLY_DELAY", 6*time.Second),
+			SandboxRejectPassword: env("COUNCIL_SANDBOX_REJECT_PASSWORD", "wrong"),
+			ReminderLead:          time.Duration(envInt("COUNCIL_REMINDER_LEAD_DAYS", 7)) * 24 * time.Hour,
+			ExpiryLead:            time.Duration(envInt("COUNCIL_EXPIRY_LEAD_DAYS", 14)) * 24 * time.Hour,
 		},
 		AuthLogoutURL: strings.TrimSpace(os.Getenv("AUTH_LOGOUT_URL")),
 		TermsPath:     strings.TrimSpace(os.Getenv("TERMS_PATH")),

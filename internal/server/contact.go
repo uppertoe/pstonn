@@ -179,6 +179,38 @@ func (rl *rateLimiter) allow(key string) bool {
 	return true
 }
 
+// retryAfter reports how long key stays refused: zero when the next allow()
+// would pass, otherwise the time until the oldest counted attempt leaves the
+// window. It records nothing, so a page may ask it on every render without the
+// render itself spending an attempt. The onboarding page uses it to take the
+// council password form away for exactly as long as tenantLink would refuse
+// it: a form that stays open under a "please wait" banner reads as an
+// invitation, and the third stalled sign-up (2026-09-21) took it — six more
+// submits into the wall in seventy seconds, then gone.
+func (rl *rateLimiter) retryAfter(key string) time.Duration {
+	if rl == nil {
+		return 0
+	}
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	live := 0
+	var oldest time.Time
+	for _, t := range rl.hits[key] {
+		if t.After(cutoff) {
+			if live == 0 || t.Before(oldest) {
+				oldest = t
+			}
+			live++
+		}
+	}
+	if live < rl.limit {
+		return 0
+	}
+	return oldest.Add(rl.window).Sub(now)
+}
+
 // clientIP extracts the caller's IP for rate-limiting. Behind the platform's
 // single Caddy reverse proxy the trustworthy value is the RIGHTMOST
 // X-Forwarded-For entry: Caddy appends the address it actually received the

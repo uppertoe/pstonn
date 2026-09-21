@@ -342,6 +342,64 @@ func TestTenantLinkThrottleRedirectsToGuidance(t *testing.T) {
 	if loc := w.Header().Get("Location"); loc != "/schedule?link=throttled" {
 		t.Fatalf("throttled redirect = %q, want /schedule?link=throttled", loc)
 	}
+	// For as long as the budget is spent, the onboarding page has NO password
+	// form — however it is reached, not only via the redirect — and it says
+	// how long is left. The 2026-09-21 sign-up submitted six more times into a
+	// form that stayed open under a "please wait" banner.
+	for _, path := range []string{"/schedule?link=throttled", "/schedule"} {
+		w = s.doReq("GET", path, owner, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s while throttled = %d, want 200", path, w.Code)
+		}
+		body := w.Body.String()
+		if strings.Contains(body, `name="portal_password"`) {
+			t.Fatalf("GET %s while throttled still offers the council password form", path)
+		}
+		if !strings.Contains(body, "paused for about 15 minutes") {
+			t.Fatalf("GET %s while throttled does not name the wait; body:\n%s", path, body)
+		}
+	}
+	// Once nothing is refused any more the form is back, even on the stale
+	// redirect URL: a wait that is over must not be shown.
+	s.tenantTry = newRateLimiter(4, 15*time.Minute)
+	w = s.doReq("GET", "/schedule?link=throttled", owner, "", nil)
+	if body := w.Body.String(); !strings.Contains(body, `name="portal_password"`) || strings.Contains(body, "Paused after several") {
+		t.Fatalf("GET /schedule?link=throttled after the window still hides the form")
+	}
+}
+
+// TestRateLimiterRetryAfter: retryAfter answers without spending an attempt,
+// is zero while the budget remains, and counts down from the oldest attempt
+// that is still inside the window.
+func TestRateLimiterRetryAfter(t *testing.T) {
+	rl := newRateLimiter(2, 10*time.Minute)
+	if d := rl.retryAfter("k"); d != 0 {
+		t.Fatalf("fresh key retryAfter = %v, want 0", d)
+	}
+	rl.allow("k")
+	if d := rl.retryAfter("k"); d != 0 {
+		t.Fatalf("one attempt in: retryAfter = %v, want 0", d)
+	}
+	rl.allow("k")
+	d := rl.retryAfter("k")
+	if d <= 9*time.Minute || d > 10*time.Minute {
+		t.Fatalf("budget spent: retryAfter = %v, want just under 10m", d)
+	}
+	if rl.retryAfter("k") == 0 || rl.allow("k") {
+		t.Fatal("asking retryAfter must not spend or reset the budget")
+	}
+	if len(rl.hits["k"]) != 2 {
+		t.Fatalf("refused attempts must not extend the window: %d hits recorded", len(rl.hits["k"]))
+	}
+	// Age the oldest attempt out of the window: the budget is open again.
+	rl.hits["k"][0] = time.Now().Add(-11 * time.Minute)
+	if d := rl.retryAfter("k"); d != 0 {
+		t.Fatalf("after the oldest attempt aged out: retryAfter = %v, want 0", d)
+	}
+	var nilRL *rateLimiter
+	if nilRL.retryAfter("k") != 0 {
+		t.Fatal("a nil limiter refuses nothing")
+	}
 }
 
 // TestGuestTokenAuthz covers the token roles: an unknown or revoked token gets the

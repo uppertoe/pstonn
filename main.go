@@ -156,6 +156,7 @@ func run() error {
 		// not a property of the connector, so it is applied here rather than in Build.
 		if fp, ok := prov.(*fake.Provider); ok {
 			fp.ApplyDelay = cfg.Council.SandboxApplyDelay
+			fp.RejectPassword = cfg.Council.SandboxRejectPassword
 		}
 		if tenant.Enabled {
 			clients[tenant.ID] = parking.NewClientFor(tenant.ID, prov, st, box, transport)
