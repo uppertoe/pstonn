@@ -68,15 +68,21 @@
       <strong>The council didn&rsquo;t accept those sign-ins, so p.stonn has paused for {{.Onboard.LinkWait}}.</strong>
       Too many attempts in a row could lock your real council account, which is why it stops first. The password form comes back when the pause ends.
     </p>
-    {{/* The checks read as a list, so they sit left-aligned like the form
-         they stand in for, inside the hero's centred column. */}}
-    <div style="text-align:left;max-width:440px;margin:0 auto;display:grid;gap:10px">
-      <p style="margin:0">While you wait, two things worth checking:</p>
-      <p style="margin:0">{{T "onboarding.throttled_password" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)) "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)))}}</p>
-      <p style="margin:0">&bull; Your email &mdash; your {{.Tenant.Terms.portal}} account must be under <strong>{{.User.Email}}</strong>. If it uses a different address, sign out and sign back in here with that one.</p>
-      {{if .LogoutURL}}<p style="margin:0"><a href="{{.LogoutURL}}" hx-boost="false" class="btnlike sm">Sign out</a></p>{{end}}
+    {{/* Everything below the lead is one left-aligned column, like the form it
+         stands in for. The email leads and gets its own bordered section: it is
+         the thing most people in this state have wrong, and a bold word inside
+         a sentence was not enough to make anyone look at it. */}}
+    <div style="text-align:left;max-width:440px;margin:0 auto;display:grid;gap:14px">
+      <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px">
+        <p class="empty-note" style="margin:0 0 7px">The email p.stonn is trying to link</p>
+        <span class="reg" style="font-size:15px;padding:7px 12px;word-break:break-all">{{.User.Email}}</span>
+        <p style="margin:10px 0 0">Your {{.Tenant.Terms.portal}} account must be under this address. If it uses a different one, sign out and sign back in here with that one.</p>
+        {{if .LogoutURL}}<p style="margin:10px 0 0"><a href="{{.LogoutURL}}" hx-boost="false" class="btnlike sm">Sign out</a></p>{{end}}
+      </div>
+      <p style="margin:0">{{T "onboarding.paused_password" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)) "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)) "b" (strong))}}</p>
+      {{if .Contact}}<p style="margin:0">Still stuck? <a href="/contact">Get in touch</a> and we&rsquo;ll help you work out which it is.</p>{{end}}
+      <p class="empty-note" style="margin:0">Nothing was kept from those attempts. <a href="/schedule">Check again</a> once the pause is over.</p>
     </div>
-    <p class="empty-note" style="margin:18px auto 0">Nothing was kept from those attempts. <a href="/schedule">Check again</a> once the pause is over.</p>
     {{else}}
     <h2>{{if .Relink}}Reconnect your council account{{else}}Link your council account{{end}}</h2>
     <p>
