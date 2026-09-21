@@ -417,7 +417,7 @@ window.popClamp = window.popClamp || function (el, tries) {
       <button class="icon-btn" type="button" @click="open=!open" :aria-expanded="open" aria-haspopup="menu" aria-label="Account menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></button>
       <div class="menu" x-show="open" x-cloak>
         <div class="menu-email">a@b.com</div>
-        
+        <a href="/contact" class="menu-item"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg> Contact</a>
         
         <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
         
@@ -453,7 +453,7 @@ window.popClamp = window.popClamp || function (el, tries) {
         
       </div>
       <p style="margin:0"><strong>Or the password.</strong> Try it at the council’s own <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer" hx-boost="false">ePermits site</a>; if it fails there too, <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">reset it at the council</a>.</p>
-      
+      <p style="margin:0">Still stuck? <a href="/contact">Get in touch</a> and we&rsquo;ll help you work out which it is.</p>
       <p class="empty-note" style="margin:0">Nothing was kept from those attempts. <a href="/schedule">Check again</a> once the pause is over.</p>
     </div>
     
