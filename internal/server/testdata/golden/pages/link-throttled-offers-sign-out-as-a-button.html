@@ -433,63 +433,26 @@ window.popClamp = window.popClamp || function (el, tries) {
   
   
   
-  <div class="banner warn" style="align-items:flex-start"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> <span>
-    <strong>The council didn&rsquo;t accept that sign-in.</strong><br>
-    Either the password is wrong, or your ePermits account isn’t under <strong>a@b.com</strong>.
-    <span style="display:block;margin-top:12px">• <strong>Forgot your council password — or never set one?</strong> <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then come back and link. This is the most common fix.</span>
-    
-    <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-      <span>&bull; <strong>Council account under a different email?</strong></span>
-      <a href="https://auth.example.com/logout" hx-boost="false" class="btnlike sm">Sign out</a>
-      <span>then sign back in here with that address.</span>
-    </span>
-    
-    <span style="display:block;margin-top:10px;font-size:13px">Unsure which it is? Try your details at the council’s own <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer" hx-boost="false">ePermits site</a> first.</span>
-  </span></div>
-  
-  
   
   <section class="card hero">
     <div class="ring"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></div>
     
     
     
-    <h2>Link your council account</h2>
+    <h2>Paused after several sign-in tries</h2>
+    
     <p>
-      Sign in once with your City of Stonnington ePermits details. p.stonn keeps an encrypted session so it can update your permit for you.
+      <strong>The council didn&rsquo;t accept those sign-ins, so p.stonn has paused for about a minute.</strong>
+      Too many attempts in a row could lock your real council account, which is why it stops first. The password form comes back when the pause ends.
     </p>
     
-    
-    <form class="stack" method="post" action="/tenant/link"
-          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
-      <label class="fld">Council email (your verified sign-in)
-        <input type="email" value="a@b.com" autocomplete="username" disabled>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email — it can’t be changed here.
-        If your council account uses a different address, <a href="https://auth.example.com/logout" hx-boost="false">sign out</a> and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
-        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
-      </p>
-      <label class="fld">Council password
-        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">Forgot it — or never set one? <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">Reset it at the council</a>, then link here.</p>
-      <label class="optin">
-        
-        <input type="checkbox" name="save_password" value="1" checked>
-        <span>
-          <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
-          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
-        </span>
-      </label>
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</button>
-    </form>
-    
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
+    <div style="text-align:left;max-width:440px;margin:0 auto;display:grid;gap:10px">
+      <p style="margin:0">While you wait, two things worth checking:</p>
+      <p style="margin:0">• Your password — try it at the council’s own <a href="https://parkingpermits.stonnington.vic.gov.au/ssp/" target="_blank" rel="noopener noreferrer" hx-boost="false">ePermits site</a>. If it fails there too, <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">reset it at the council</a>.</p>
+      <p style="margin:0">&bull; Your email &mdash; your ePermits account must be under <strong>a@b.com</strong>. If it uses a different address, sign out and sign back in here with that one.</p>
+      <p style="margin:0"><a href="https://auth.example.com/logout" hx-boost="false" class="btnlike sm">Sign out</a></p>
+    </div>
+    <p class="empty-note" style="margin:18px auto 0">Nothing was kept from those attempts. <a href="/schedule">Check again</a> once the pause is over.</p>
     
     
     
