@@ -530,18 +530,18 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		// banner above the still-open form said "please wait").
 		{"link-throttled pairs the wait with the remedies", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about 12 minutes"},
 			LogoutURL: "https://auth.example.com/logout", Loc: loc},
-			"paused for about 12 minutes"},
+			"stopped trying for about 12 minutes"},
 		{"link-throttled names the ePermits email check", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about a minute"}, Loc: loc},
-			"Your ePermits account must be under this address"},
+			"If your ePermits account uses a different email"},
 		{"link-throttled offers sign-out as a button", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about a minute"},
 			LogoutURL: "https://auth.example.com/logout", Loc: loc},
 			`class="btnlike sm">Sign out</a>`},
 		// The email gets its own section, set like a plate: it is the thing most
 		// people in this state have wrong, and bold-in-a-sentence went unread.
 		{"link-throttled sets the email apart", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about a minute"}, Loc: loc},
-			`The email p.stonn is trying to link`},
+			`p.stonn is attempting to sign in with this email:`},
 		{"link-throttled offers contact when it is on", dashboardData{User: user, State: "onboarding", IsPrimary: true, Contact: true, Onboard: &onboardData{LinkThrottled: true, LinkWait: "about a minute"}, Loc: loc},
-			`Still stuck? <a href="/contact">Get in touch</a>`},
+			`<a href="/contact">contact us</a> for assistance`},
 		{"onboarding-secondary", dashboardData{User: user, State: "onboarding", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc, Onboard: &onboardData{}}, "Waiting for the account owner"},
 		{"picker", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{OfferedCount: 1, Pick: []pickView{
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},

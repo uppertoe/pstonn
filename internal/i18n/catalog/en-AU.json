@@ -20,7 +20,7 @@
     "onboarding.rejected_lead": "Either the password is wrong, or your {{.Tenant.Terms.portal}} account isn’t under {{slot \"b\"}}{{.User.Email}}{{endslot}}.",
     "onboarding.rejected_reset": "• {{slot \"b\"}}Forgot your council password — or never set one?{{endslot}} {{slot \"reset\"}}Reset it at the council{{endslot}}, then come back and link. This is the most common fix.",
     "onboarding.rejected_try_portal": "Unsure which it is? Try your details at the council’s own {{slot \"portal\"}}{{.Tenant.Terms.portal_site}}{{endslot}} first.",
-    "onboarding.paused_password": "{{slot \"b\"}}Or the password.{{endslot}} Try it at the council’s own {{slot \"portal\"}}{{.Tenant.Terms.portal_site}}{{endslot}}; if it fails there too, {{slot \"reset\"}}reset it at the council{{endslot}}.",
+    "onboarding.paused_password": "If the email is correct, double-check the password: try it at the council’s own {{slot \"portal\"}}{{.Tenant.Terms.portal_site}}{{endslot}}, and if it fails there too, {{slot \"reset\"}}reset it at the council{{endslot}}.",
     "onboarding.picker_error": "If this keeps happening, check the council's own {{.Tenant.Terms.portal_site}} is working.",
     "onboarding.picker_none": "If you expected a visitor permit here, check it on the council's own {{.Tenant.Terms.portal_site}}: it may have expired, or be held by another resident at your address. It's also possible the council changed something on its side that p.stonn doesn't recognise yet",
     "onboarding.picker_apply": "Apply for a visitor permit on the council's {{.Tenant.Terms.portal_site}} first, then come back and it will appear here.",

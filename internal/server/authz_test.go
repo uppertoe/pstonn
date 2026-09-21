@@ -355,7 +355,7 @@ func TestTenantLinkThrottleRedirectsToGuidance(t *testing.T) {
 		if strings.Contains(body, `name="portal_password"`) {
 			t.Fatalf("GET %s while throttled still offers the council password form", path)
 		}
-		if !strings.Contains(body, "paused for about 15 minutes") {
+		if !strings.Contains(body, "stopped trying for about 15 minutes") {
 			t.Fatalf("GET %s while throttled does not name the wait; body:\n%s", path, body)
 		}
 	}
@@ -363,7 +363,7 @@ func TestTenantLinkThrottleRedirectsToGuidance(t *testing.T) {
 	// redirect URL: a wait that is over must not be shown.
 	s.tenantTry = newRateLimiter(4, 15*time.Minute)
 	w = s.doReq("GET", "/schedule?link=throttled", owner, "", nil)
-	if body := w.Body.String(); !strings.Contains(body, `name="portal_password"`) || strings.Contains(body, "Paused after several") {
+	if body := w.Body.String(); !strings.Contains(body, `name="portal_password"`) || strings.Contains(body, "paused your council sign-in") {
 		t.Fatalf("GET /schedule?link=throttled after the window still hides the form")
 	}
 }

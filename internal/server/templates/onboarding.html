@@ -56,7 +56,7 @@
     </p>
     {{else}}
     {{if .Onboard.LinkThrottled}}
-    <h2>Paused after several sign-in tries</h2>
+    <h2>p.stonn has paused your council sign-in</h2>
     {{/* Too many council sign-in attempts: the wait is real (it protects their
          council account from its own lockout), and for as long as it runs the
          password form is GONE, not sitting under a banner that says stop. The
@@ -65,8 +65,8 @@
          then gone. What stays are the two likely fixes, with the sign-out fix
          as a real button, and the wait in minutes that are actually left. */}}
     <p>
-      <strong>The council didn&rsquo;t accept those sign-ins, so p.stonn has paused for {{.Onboard.LinkWait}}.</strong>
-      Too many attempts in a row could lock your real council account, which is why it stops first. The password form comes back when the pause ends.
+      <strong>The council did not accept any of those sign-ins. p.stonn has stopped trying for {{.Onboard.LinkWait}}.</strong>
+      A few more failed attempts could lock your council account itself. You can enter your password again once the pause ends.
     </p>
     {{/* Everything below the lead is one left-aligned column, like the form it
          stands in for. The email leads and gets its own bordered section: it is
@@ -74,14 +74,14 @@
          a sentence was not enough to make anyone look at it. */}}
     <div style="text-align:left;max-width:440px;margin:0 auto;display:grid;gap:14px">
       <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px">
-        <p class="empty-note" style="margin:0 0 7px">The email p.stonn is trying to link</p>
+        <p class="empty-note" style="margin:0 0 7px">p.stonn is attempting to sign in with this email:</p>
         <span class="reg" style="font-size:15px;padding:7px 12px;word-break:break-all">{{.User.Email}}</span>
-        <p style="margin:10px 0 0">Your {{.Tenant.Terms.portal}} account must be under this address. If it uses a different one, sign out and sign back in here with that one.</p>
+        <p style="margin:10px 0 0">If your {{.Tenant.Terms.portal}} account uses a different email, sign out, then sign back in here with that address.</p>
         {{if .LogoutURL}}<p style="margin:10px 0 0"><a href="{{.LogoutURL}}" hx-boost="false" class="btnlike sm">Sign out</a></p>{{end}}
       </div>
-      <p style="margin:0">{{T "onboarding.paused_password" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)) "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)) "b" (strong))}}</p>
-      {{if .Contact}}<p style="margin:0">Still stuck? <a href="/contact">Get in touch</a> and we&rsquo;ll help you work out which it is.</p>{{end}}
-      <p class="empty-note" style="margin:0">Nothing was kept from those attempts. <a href="/schedule">Check again</a> once the pause is over.</p>
+      <p style="margin:0">{{T "onboarding.paused_password" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)) "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)))}}</p>
+      {{if .Contact}}<p style="margin:0">If you still can&rsquo;t connect, you can <a href="/contact">contact us</a> for assistance.</p>{{end}}
+      <p class="empty-note" style="margin:0">p.stonn has not saved your details yet. Once the pause ends, <a href="/schedule">reload this page</a> and enter your password again.</p>
     </div>
     {{else}}
     <h2>{{if .Relink}}Reconnect your council account{{else}}Link your council account{{end}}</h2>
