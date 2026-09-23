@@ -2,15 +2,17 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
-    ":pinDigests"
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests"
   ],
   "labels": ["dependencies"],
   "postUpdateOptions": ["gomodTidy"],
+  "configMigration": true,
   "customManagers": [
     {
       "customType": "regex",
       "description": "Bump the CI workflow's setup-go go-version in step with the toolchain, so a Go security patch clears govulncheck everywhere at once.",
-      "fileMatch": ["^\\.github/workflows/[^/]+\\.ya?ml$"],
+      "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
       "matchStrings": ["go-version:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version"
@@ -18,7 +20,7 @@
     {
       "customType": "regex",
       "description": "Track the govulncheck pin in the CI workflow (go install golang.org/x/vuln/cmd/govulncheck@vX.Y.Z) so the scanner itself does not go stale.",
-      "fileMatch": ["^\\.github/workflows/[^/]+\\.ya?ml$"],
+      "managerFilePatterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"],
       "matchStrings": ["go install golang\\.org/x/vuln/cmd/govulncheck@(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"],
       "depNameTemplate": "golang.org/x/vuln",
       "packageNameTemplate": "golang.org/x/vuln",
