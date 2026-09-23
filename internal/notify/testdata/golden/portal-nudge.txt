@@ -1,0 +1,18 @@
+=== EMAIL to primary@example.com
+Subject: p.stonn has synced with your council account
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+Your ePermits account at City of Stonnington has been updated with a new number plate: AAA111
+
+Changing number plates at the City of Stonnington website works just fine with p.stonn, but there is an easier way.
+
+If you would like, we can help you set up a guest pass link for your visitors, a quick picker for regos on your phone, or put number plate changes on a schedule.
+
+Give it a try:
+https://p.stonn.org
+
+Or let us know if you need a hand:
+https://p.stonn.org/contact
+
+This is the only time p.stonn will raise it.
+

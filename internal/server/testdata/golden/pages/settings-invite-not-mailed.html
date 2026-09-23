@@ -427,62 +427,118 @@ window.popClamp = window.popClamp || function (el, tries) {
   </div>
 </header>
 
-<main id="main" tabindex="-1">
+
+
+<div class="navwrap">
+  <nav class="nav">
+    <a href="/schedule" class="nav-item " style="--hue:var(--sec-schedule)"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg><span>Schedule</span></a>
+    <a href="/regos" class="nav-item " style="--hue:var(--sec-vehicles)"><svg viewBox="0 0 24 24"><path d="M4 12l1.2-3.4A2 2 0 0 1 7.1 7h6.8a2 2 0 0 1 1.9 1.6L17 12"/><path d="M3 16h15v-2.4a1.7 1.7 0 0 0-.9-1.5L16 11H5l-1 .3a1.7 1.7 0 0 0-1 1.5z"/><circle cx="6.5" cy="16.5" r="1.1"/><circle cx="14.5" cy="16.5" r="1.1"/><path d="M20 9l1 .8a1.7 1.7 0 0 1 .7 1.4V15h-2"/></svg><span>Regos</span></a>
+    <a href="/guests" class="nav-item " style="--hue:var(--sec-guests)"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg><span>Guests</span></a>
+    <a href="/activity" class="nav-item " style="--hue:var(--sec-activity)"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5 7 5-14L17 12h4"/></svg><span>Activity</span></a>
+    <a href="/settings" class="nav-item active" style="--hue:var(--sec-settings)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+
+
+<main id="main" tabindex="-1" data-refresh-on-return="300">
+  
+  <div class="banner warn"><svg viewBox="0 0 24 24"><path d="M12 4l9 15H3z"/><path d="M12 10v4M12 17h.01"/></svg> Invitation recorded for nanny@example.com. No email was sent, so you will need to tell them to sign in and accept it.</div>
+
   
   
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></span> Settings</div>
+  <p class="subtitle">Your council connection and account.</p>
   
-  
-  
-  <section class="card hero">
-    <div class="ring"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></div>
+
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></span> Council connection</h2>
     
     
     
-    <h2>Reconnect your council account</h2>
-    <p>
-      p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, regos and schedule are all still here.
+    <div class="row" style="margin-top:14px" x-data="{del:false}">
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
+        <button type="submit" class="ghost"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Unlink account</button>
+      </form>
+      <button type="button" class="danger" @click="del=!del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Delete all my data</button>
+      <form method="post" action="/account/delete" class="row" x-show="del" x-cloak style="gap:8px">
+        <input name="confirm" placeholder="Type DELETE" autocomplete="off" style="width:130px">
+        <button type="submit" class="danger">Confirm</button>
+      </form>
+    </div>
+    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything from the live database straight away; backup copies age out afterwards.</p>
+    
+  </section>
+  
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2 id="shared"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span> Shared access</h2>
+    
+    <p class="subtitle">Let up to two other people help manage this account. They sign in with their own email, so there is nothing to share but the access itself.</p>
+    
+    <ul style="list-style:none;padding:0;margin:14px 0 0;display:grid;gap:8px">
       
-    </p>
-    
-    
-    <form class="stack" method="post" action="/tenant/link"
-          hx-sync="this:drop" hx-disabled-elt="find button[type=submit]">
-      <label class="fld">Council email (your verified sign-in)
-        <input type="email" value="a@b.com" autocomplete="username" disabled>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">
-        Your ePermits account must use this same email — it can’t be changed here.
-        If your council account uses a different address, sign out and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
-        invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
-      </p>
-      <label class="fld">Council password
-        <input name="portal_password" type="password" autocomplete="current-password" required autofocus>
-      </label>
-      
-      <p class="empty-note" style="margin-top:-4px">If you have an ePermits account but do not know the password, you can <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword" target="_blank" rel="noopener noreferrer" hx-boost="false">reset it at the council</a>, then come back and link here.</p>
-      
-      <p class="empty-note" style="margin-top:-4px">If you have never used ePermits, you will need to <a href="https://parkingpermits.stonnington.vic.gov.au/idm/account/Register" target="_blank" rel="noopener noreferrer" hx-boost="false">create an account at the council</a> first. p.stonn can only link to an account you already hold.</p>
-      <label class="optin">
-        
-        <input type="checkbox" name="save_password" value="1" checked>
-        <span>
-          <strong>Save my password so p.stonn can reconnect on its own.</strong>
-          It is stored encrypted and used only to sign back in when the council ends the session, which happens whenever you sign in to the ePermits site yourself.
-          Without it, you will need to reconnect here manually each time, and the schedule will not run until you do.
+      <li class="row" style="justify-content:space-between">
+        <span><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg> <strong>nanny@example.com</strong>
+          <span class="muted">invited 1 Jul 2026 — waiting for them to accept</span>
+          
         </span>
-      </label>
-      <button type="submit"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Link account</button>
-    </form>
+        <span class="row" style="gap:6px">
+        
+        
+        <form method="post" action="/account/members/resend">
+          <input type="hidden" name="email" value="nanny@example.com">
+          <button type="submit" class="ghost sm"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg> Send again</button>
+        </form>
+        
+        <form method="post" action="/account/members/remove" data-confirm="Withdraw the invitation to nanny@example.com?" data-confirm-ok="Withdraw">
+          <input type="hidden" name="email" value="nanny@example.com">
+          <button type="submit" class="ghost sm"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Withdraw</button>
+        </form>
+        </span>
+      </li>
+      
+    </ul>
     
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
+    
+    <form method="post" action="/account/members" class="row" style="margin-top:14px;gap:8px">
+      <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
+      <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Add person</button>
+    </form>
+    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do. Once they accept they can set the schedule and manage regos, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
+    
+    
+  </section>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2 id="notifications"><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span> Notifications</h2>
+    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
+    
+    <p class="empty-note">No notification channels are set up by the operator. Configure <code>SMTP_*</code> (email) or <code>NTFY_BASE_URL</code> (push) to enable this.</p>
+    
+  </section>
+  <section class="card" style="--hue:var(--sec-settings)">
+    <h2><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span> Account</h2>
+    <div class="row" style="justify-content:space-between">
+      <span class="muted">Signed in as <strong style="color:var(--ink)">a@b.com</strong></span>
+      
+    </div>
+    <p class="empty-note" style="margin-top:12px">There is no p.stonn password. You sign in with a one-time code sent to this email address.</p>
+    
+    <form method="post" action="/account/household-name" id="household" class="row" style="margin-top:14px;align-items:flex-end;gap:10px;flex-wrap:wrap">
+      <label class="fld" style="flex:1 1 220px;margin:0"><span>Household name</span>
+        <input type="text" name="household_name" value="" maxlength="40" placeholder="e.g. the Nguyens" autocomplete="off">
+      </label>
+      <button type="submit" class="ghost">Save</button>
+    </form>
+    <p class="empty-note" style="margin-top:6px">Shown to your visitors instead of your email, on guest links and QR pages. Leave it blank and they see only the permit.</p>
+    
     
     
     
   </section>
-</main>
 
+
+
+
+</main>
 
 
 

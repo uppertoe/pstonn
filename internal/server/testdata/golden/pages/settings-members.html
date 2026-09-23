@@ -480,10 +480,14 @@ window.popClamp = window.popClamp || function (el, tries) {
         <span><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg> <strong>nanny@example.com</strong>
           <span class="muted">added 1 Jul 2026</span>
         </span>
+        <span class="row" style="gap:6px">
+        
+        
         <form method="post" action="/account/members/remove" data-confirm="Remove nanny@example.com? They lose access to this account." data-confirm-ok="Remove">
           <input type="hidden" name="email" value="nanny@example.com">
           <button type="submit" class="ghost sm"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Remove</button>
         </form>
+        </span>
       </li>
       
     </ul>

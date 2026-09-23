@@ -1,0 +1,13 @@
+=== EMAIL to guest@example.com
+Subject: A reminder that shared access is waiting for you
+Provenance: You received this at guest@example.com because someone gave this address shared access to their p.stonn account. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+primary@example.com gave you shared access to their p.stonn account a few days ago, which schedules a City of Stonnington visitor parking permit. The invitation is still waiting for you to accept it.
+
+Sign in with this email address, where you will get a one-time code to confirm it is you, then tap Accept on the page you land on.
+
+Sign in to p.stonn:
+https://p.stonn.org
+
+If you would rather not, you can ignore this email and the invitation will sit there harmlessly. This is the only reminder p.stonn sends.
+

@@ -1,0 +1,15 @@
+=== EMAIL to primary@example.com
+Subject: Your invitation has not been accepted yet
+Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
+
+You invited guest@example.com to share your p.stonn account, and they have not accepted it yet. Until they do, they cannot see or change your City of Stonnington visitor permit.
+
+They need to sign in to p.stonn with that email address and tap Accept. p.stonn let them know when you invited them, and has now sent them one reminder.
+
+If the address was wrong, or they would rather not, you can withdraw the invitation under Settings, where you can also send it again.
+
+Open Settings:
+https://p.stonn.org/settings#shared
+
+This is the only reminder p.stonn sends.
+
