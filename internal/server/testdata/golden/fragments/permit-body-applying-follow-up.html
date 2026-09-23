@@ -57,7 +57,7 @@
 
 
 <p class="sub" id="roster">Weekly roster</p>
-<p class="empty-note rostercap">Which rego is on the permit each day of the week.</p>
+<p class="empty-note rostercap">Create a roster for the regos applied to the permit on each day of the week.</p>
 
 <div class="segpanes">
   
@@ -274,7 +274,7 @@
   
   <div class="cday today" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="Mon 2, today. ABC123. Scheduled by the roster. Still applying, not on the permit yet."
+       aria-label="Mon 2, today. ABC123. Scheduled by the roster. p.stonn is still putting this rego on the permit."
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">Mon 2</div>
     <div class="omk" aria-hidden="true"></div>
@@ -285,7 +285,7 @@
       
       <div class="cal-what"><span class="reg">ABC123</span></div>
       <div class="cal-why">Scheduled by the roster.</div>
-      <div class="cal-st">Still applying &mdash; not on the permit yet.</div>
+      <div class="cal-st">p.stonn is still putting this rego on the permit.</div>
     </div>
   </div>
 

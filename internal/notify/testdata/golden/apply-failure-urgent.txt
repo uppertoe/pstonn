@@ -1,9 +1,9 @@
 === EMAIL to primary@example.com
-Subject: Action needed: your Visitor still shows XYZ789
+Subject: Action needed: your permit “Visitor” still shows XYZ789
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
-The permit still shows XYZ789, so that is the rego currently covered.
+p.stonn has not been able to put Van — ABC123 on your permit “Visitor”.
+XYZ789 is still on the permit, so the car with that rego is the one covered.
 
 The council rejected the change.
 Check the permit on the council's site.
@@ -16,12 +16,12 @@ We have also told sam@example.com (by email).
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Action needed: your Visitor still shows XYZ789
+Title: Action needed: your permit “Visitor” still shows XYZ789
 Priority: high
 Tags: warning
 
-p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
-The permit still shows XYZ789, so that is the rego currently covered.
+p.stonn has not been able to put Van — ABC123 on your permit “Visitor”.
+XYZ789 is still on the permit, so the car with that rego is the one covered.
 
 The council rejected the change.
 Check the permit on the council's site.
@@ -32,11 +32,11 @@ https://parkingpermits.stonnington.vic.gov.au/ssp/
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Action needed: your Visitor still shows XYZ789
+Subject: Action needed: your permit “Visitor” still shows XYZ789
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to set your Visitor to Van — ABC123 but couldn't.
-The permit still shows XYZ789, so that is the rego currently covered.
+p.stonn has not been able to put Van — ABC123 on your permit “Visitor”.
+XYZ789 is still on the permit, so the car with that rego is the one covered.
 
 The council rejected the change.
 Check the permit on the council's site.

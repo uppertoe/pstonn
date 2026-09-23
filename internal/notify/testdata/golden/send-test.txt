@@ -2,12 +2,12 @@
 Subject: p.stonn test notification
 Provenance: You received this at primary@example.com because you asked p.stonn to send a test notification. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-This is a test. Your permit-change notifications are set up correctly.
+This is a test from p.stonn. If you can read it, your notifications are reaching you.
 
 === NTFY pstonn-primary
 Title: p.stonn test notification
 Priority: default
 Tags: bell
 
-This is a test. Your permit-change notifications are set up correctly.
+This is a test from p.stonn. If you can read it, your notifications are reaching you.
 

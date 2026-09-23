@@ -4,7 +4,7 @@ Provenance: You received this at guest@example.com because someone gave this add
 
 primary@example.com gave you shared access to their p.stonn account a few days ago, which schedules a City of Stonnington visitor parking permit. The invitation is still waiting for you to accept it.
 
-Sign in with this email address, where you will get a one-time code to confirm it is you, then tap Accept on the page you land on.
+Sign in with this email address, and p.stonn will send you a one-time code to confirm it is you. Then tap Accept on the page that opens.
 
 Sign in to p.stonn:
 https://p.stonn.org

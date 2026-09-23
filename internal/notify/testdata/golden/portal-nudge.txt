@@ -1,18 +1,18 @@
 === EMAIL to primary@example.com
-Subject: p.stonn has synced with your council account
+Subject: p.stonn has noticed a change you made on the council’s website
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your ePermits account at City of Stonnington has been updated with a new number plate: AAA111
+Someone on your account put a new number plate on your visitor permit using the City of Stonnington ePermits site: AAA111
 
-Changing number plates at the City of Stonnington website works just fine with p.stonn, but there is an easier way.
+Changing number plates on the City of Stonnington website works just fine with p.stonn. There is also an easier way.
 
-If you would like, we can help you set up a guest pass link for your visitors, a quick picker for regos on your phone, or put number plate changes on a schedule.
+If you would like, we can help you set up a guest pass for your visitors, a quick picker for regos on your phone, or put number plate changes on a schedule.
 
-Give it a try:
+Open p.stonn:
 https://p.stonn.org
 
-Or let us know if you need a hand:
+Contact us for assistance:
 https://p.stonn.org/contact
 
-This is the only time p.stonn will raise it.
+p.stonn will not send you this note again.
 

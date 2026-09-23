@@ -1,35 +1,35 @@
 === EMAIL to primary@example.com
-Subject: Permit updated: Visitor now shows ABC123
+Subject: ABC123 is now on your permit “Visitor”
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 Hero: ABC123 #3b82f6
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
+Van — ABC123 is on your permit “Visitor” for today, as scheduled by your roster.
 
-Nothing to do — this is just your confirmation it went through.
+This is simply to confirm the change, and you don’t need to do anything.
 
 We have also told sam@example.com (by email).
 
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Permit updated: Visitor now shows ABC123
+Title: ABC123 is now on your permit “Visitor”
 Priority: default
 Tags: white_check_mark
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
+Van — ABC123 is on your permit “Visitor” for today, as scheduled by your roster.
 
-Nothing to do — this is just your confirmation it went through.
+This is simply to confirm the change, and you don’t need to do anything.
 
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Permit updated: Visitor now shows ABC123
+Subject: ABC123 is now on your permit “Visitor”
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 Hero: ABC123 #3b82f6
 
-Your Visitor is now set to Van — ABC123 for today, as scheduled by your roster.
+Van — ABC123 is on your permit “Visitor” for today, as scheduled by your roster.
 
-Nothing to do — this is just your confirmation it went through.
+This is simply to confirm the change, and you don’t need to do anything.
 
 We have also told primary@example.com (by email and push notification).
 

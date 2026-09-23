@@ -6,14 +6,14 @@ Hi,
 
 Your visitor-permit scheduler is still running and updating your permit automatically.
 
-We haven't seen you in p.stonn for a while, so this is a check that you still want it running. If you do nothing, it will stop on Monday 17 August 2026 and you'll need to link your council account again.
+We haven’t seen you in p.stonn for a while, so this is a check that you still want it running. If you do nothing, it will stop on Monday 17 August 2026 and you’ll need to link your council account again.
 
-(Opening p.stonn and signing in does the same thing as clicking below — either way the clock resets.)
+Signing in to p.stonn does the same thing as clicking below.
 
 Confirm and keep it running (one click):
 https://p.stonn.org/tenant/confirm?token=abc
 
-If you no longer want the service, just ignore this email and it will stop on its own.
+If you no longer want the service, you can ignore this email and it will stop on its own.
 
 -- p.stonn
 

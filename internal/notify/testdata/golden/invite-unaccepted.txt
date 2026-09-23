@@ -11,5 +11,5 @@ If the address was wrong, or they would rather not, you can withdraw the invitat
 Open Settings:
 https://p.stonn.org/settings#shared
 
-This is the only reminder p.stonn sends.
+p.stonn will not remind them again.
 

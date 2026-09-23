@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=d5a503a8c1">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=d5a503a8c1">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=7800ed8c23">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=7800ed8c23">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=d5a503a8c1">
+<link rel="stylesheet" href="/static/app.css?v=7800ed8c23">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=d5a503a8c1"></script>
-<script defer src="/static/alpine.min.js?v=d5a503a8c1"></script>
+<script src="/static/htmx.min.js?v=7800ed8c23"></script>
+<script defer src="/static/alpine.min.js?v=7800ed8c23"></script>
 
 
 <script>
@@ -146,7 +146,7 @@
     
     
     
-    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('You are offline, so p.stonn has not made that change. Check your connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
@@ -233,7 +233,7 @@
       showToast((x.responseText || 'Something needs your attention.').trim());
       return;
     }
-    var msg = 'Something went wrong. Please try again.';
+    var msg = 'p.stonn could not finish that request. Please try again.';
     var body = x.responseText || '';
     if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
       try {
@@ -349,9 +349,9 @@ window.popClamp = window.popClamp || function (el, tries) {
     var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
     
     if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
-    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
-      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
-    f.dataset.confirmOk = 'It matches — continue';
+    f.dataset.confirm = 'You typed ' + v + '. Check it against the car’s actual number plate: ' +
+      'letter O and zero 0, and letter I and one 1, are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches';
     f.__plateConfirm = true;
   }, true);
   
@@ -425,53 +425,52 @@ window.popClamp = window.popClamp || function (el, tries) {
     <p>p.stonn is a free, unofficial tool for scheduling your City of Stonnington visitor parking permit. It is not affiliated with or endorsed by the council. See <a href="/features" hx-boost="false">what p.stonn can do</a>.</p>
 
     <h2 class="about-h2">The short version</h2>
-    <p>p.stonn signs in to your council account and changes which rego is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
-    <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and you can delete everything you&rsquo;ve stored on request. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
-    <p class="sec-more">The detail is below &mdash; open any section that matters to you.</p>
+    <p>p.stonn signs in to your council account and changes which rego is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. p.stonn encrypts that connection on the server, and your council password too if you choose to save it.</p>
+    <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and “Delete all my data” in Settings removes everything you’ve stored. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
 
     <details class="sec"><summary>What&rsquo;s encrypted, and what isn&rsquo;t</summary>
-      <p>Encrypted with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your printed and visitor QR links.</p>
-      <p>Stored as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it. It is kept readable because that is what running the service reliably needs.</p>
+      <p>p.stonn encrypts these with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your printed and visitor QR links.</p>
+      <p>p.stonn stores these as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it.</p>
     </details>
 
     <details class="sec"><summary>How the connection ends</summary>
-      <p>It lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). About a week before, p.stonn emails a one-click link to keep it going. This is deliberate: it should not hold access to the council account of someone who has moved away or stopped using it.</p>
-      <p>You can also end it yourself any time &mdash; disconnect in Settings (immediate), or change your council password, which ends the stored session (an access token already issued may keep working for up to about an hour).</p>
+      <p>The connection lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). About a week before, p.stonn emails a one-click link to keep it going. This is deliberate: p.stonn should not hold access to the council account of someone who has moved away or stopped using it.</p>
+      <p>You can also end the connection yourself any time. Disconnecting in Settings ends it immediately. Changing your council password ends the stored session (an access token already issued may keep working for up to about an hour).</p>
     </details>
 
     <details class="sec"><summary>Your council password, and signing in</summary>
-      <p>Saved by default, encrypted, so p.stonn can sign back in on its own when the council ends a session &mdash; without it, a lapsed session stops your schedule until you reconnect by hand. Untick &ldquo;Save my password&rdquo; when you link, or turn it off later in Settings, and it is erased and never stored again.</p>
-      <p>Your p.stonn sign-in is separate: a one-time code to your verified email. You can only ever link the council account whose email matches it. (Self-hosters: the app trusts whatever verified email its sign-in layer supplies.)</p>
+      <p>p.stonn saves your password by default, encrypted, so it can sign back in on its own when the council ends a session. Without it, a lapsed session stops your schedule until you reconnect by hand. Untick “Save my password” when you link, or turn it off later in Settings, and p.stonn erases it and never stores it again.</p>
+      <p>Your p.stonn sign-in is separate: p.stonn sends a one-time code to your verified email. You can only ever link the council account whose email matches it.</p>
     </details>
 
     <details class="sec"><summary>What data p.stonn holds</summary>
-      <p><strong>About you:</strong> your email, your regos and their labels, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
-      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any email you attached to a rego, and the number plates visitors typed at a printed QR code. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
+      <p><strong>About you:</strong> your email, your regos and their labels, your schedule, your permit details, a log of the changes p.stonn has made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
+      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest pass to, any email you attached to a rego, and the number plates visitors typed at a printed QR. If an address bounces or its owner reports our email as spam, p.stonn adds it to a do-not-email list and stops trying it.</p>
     </details>
 
     <details class="sec"><summary>How long it is kept</summary>
-      <p>Activity and change logs: 90 days. A visitor&rsquo;s number plate from a printed QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
+      <p>p.stonn keeps activity and change logs for 90 days, and a visitor’s number plate from a printed QR for 7 days after the scan. A revoked guest pass stops naming its recipient after 30 days. p.stonn deletes the content of each notification as soon as it has gone out. The server’s own operational logs hold number plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (the first letter and the domain). Those logs are limited in size and age, so they cover about the last couple of weeks. On the do-not-email list, p.stonn removes a bounce or an unsubscribe after two years, but keeps a spam complaint so that a request to stop never quietly lapses.</p>
     </details>
 
     <details class="sec"><summary>How your data is used</summary>
-      <p>Only to run this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where a feature needs it: with the email provider that delivers your notifications, the push server if you turn push on, and the council itself when it changes your permit.</p>
-      <p>The server administrator can technically see what is stored on the server &mdash; that is true of any self-hosted tool. p.stonn is small and personal, and your data is used only to run the service for you: never sold, never shared beyond what a feature needs, and never looked at for anything else.</p>
+      <p>p.stonn uses your data only to run the service for you. We never sell it or use it for advertising. The app has no trackers or analytics, and your browser makes no requests to any third party. p.stonn shares data only where a feature needs it: with the email provider that delivers your notifications, with the push service if you turn push notifications on, and with the council when p.stonn changes your permit.</p>
+      <p>The server administrator can technically see what is stored on the server, as with any self-hosted tool. p.stonn is small and personal, and we use your data only to run the service for you. We never sell it, never share it beyond what a feature needs, and never look at it for anything else.</p>
     </details>
 
     <details class="sec"><summary>Deleting your data</summary>
       <p>&ldquo;Delete all my data&rdquo; in Settings clears everything from the live database straight away: your session, saved password, schedule, regos, guest passes, logs, and anything queued to be emailed to you. It also removes your traces from any account you were a member of, including guest passes you created there.</p>
-      <p>Backups are the exception: encrypted backups run daily and thin out over time (roughly the last week daily, the last month weekly, then monthly for about three months), so deleted data can linger in a backup for up to about three months before it is gone for good. Backups are not reachable through the app and are encrypted with a key held separately from the server.</p>
+      <p>Backups are the exception. p.stonn takes an encrypted backup daily and thins them out over time (roughly the last week daily, the last month weekly, then monthly for about three months), so deleted data can linger in a backup for up to about three months before it is gone for good. Backups are not reachable through the app. We hold the key that encrypts them separately from the server.</p>
     </details>
 
     <details class="sec"><summary>If the server were compromised</summary>
-      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can &mdash; to view what is held in your ePermits account and manage the permits in it. Changing your ePermits password shuts the session out immediately. Encryption makes that exposure unlikely, using a password that is unique to your council account keeps any fallout contained there, and &mdash; as with any online service &mdash; none of this is an absolute guarantee.</p>
+      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can, to view what is held in your ePermits account and manage the permits in it. Changing your ePermits password shuts the session out immediately. Encryption makes that exposure unlikely. Using a password that is unique to your council account keeps any fallout contained there. As with any online service, none of this is an absolute guarantee.</p>
     </details>
 
     <h2 class="about-h2">Notifications</h2>
-    <p>p.stonn tries to tell you, by email and/or push, each time it changes your permit or can&rsquo;t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Treat it as a convenience, not a guarantee &mdash; you remain responsible for your permit and for any fines.</p>
+    <p>p.stonn tries to tell you, by email or push, each time it changes your permit or can’t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. You remain responsible for your permit and for any fines.</p>
 
     <h2 class="about-h2">For the City of Stonnington</h2>
-    <p>If you work for the council and have questions about this service, please get in touch via the <a href="/contact">contact form</a> &mdash; happy to talk. p.stonn acts only with each resident&rsquo;s own login, on their own permit, and only when that resident&rsquo;s schedule needs a change. It signs in the same way the ePermits website does, then uses the council&rsquo;s own permit API to change the vehicle &mdash; and on those API requests it identifies itself as p.stonn, with a link back to this site. It keeps its load light: a single plate change is three requests (read the current vehicle, change it, read back to confirm), fewer than a resident doing the same by hand in a browser; between changes it touches the council only a handful of times a day &mdash; one request roughly every eight hours to keep the session from lapsing, and a permit read twice a day to stay in sync. All told that is on the order of a dozen requests across a whole day for one household, spaced out and backing off if the portal is busy. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
+    <p>If you work for the council and have questions about this service, please get in touch through the <a href="/contact">contact form</a>. We would be glad to talk. p.stonn acts only with each resident’s own login, on their own permit, and only when that resident’s schedule needs a change. It signs in the same way the ePermits website does, then uses the council’s own permit API to change the rego, and it identifies itself on those requests as p.stonn, with a link back to this site. p.stonn keeps its load light. A single change of rego takes three requests (reading the current rego, changing it and reading it back to confirm), which is fewer than a resident makes doing the same by hand in a browser. Between changes, p.stonn contacts the council only a handful of times a day: one request roughly every eight hours to keep the session open, and a permit read twice a day to stay in step. That comes to about a dozen requests across a whole day for one household, spaced out and slowing down if the portal is busy. If the council offers permit scheduling itself, or an official way for residents to delegate access, p.stonn will either adopt it or close.</p>
 
     <h2 class="about-h2">No promises</h2>
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>

@@ -1,33 +1,33 @@
 === EMAIL to primary@example.com
-Subject: Your Visitor expires on 24 Aug 2026
+Subject: Your permit “Visitor” expires on 24 Aug 2026
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor is due to expire on 24 Aug 2026.
+Your permit “Visitor” is due to expire on 24 Aug 2026.
 
-p.stonn keeps setting the rego, but it cannot renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
+p.stonn keeps setting the rego, but it cannot renew the permit itself, so please renew it with the council to keep it valid. Once you renew, you can copy your schedule onto the new permit in p.stonn.
 
 Open p.stonn: https://p.stonn.org
 Renew with the council: https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === NTFY pstonn-primary
-Title: Your Visitor expires on 24 Aug 2026
+Title: Your permit “Visitor” expires on 24 Aug 2026
 Priority: default
 Tags: calendar
 
-Your Visitor is due to expire on 24 Aug 2026.
+Your permit “Visitor” is due to expire on 24 Aug 2026.
 
-p.stonn keeps setting the rego, but it cannot renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
+p.stonn keeps setting the rego, but it cannot renew the permit itself, so please renew it with the council to keep it valid. Once you renew, you can copy your schedule onto the new permit in p.stonn.
 
 Open p.stonn: https://p.stonn.org
 Renew with the council: https://parkingpermits.stonnington.vic.gov.au/ssp/
 
 === EMAIL to sam@example.com
-Subject: Your Visitor expires on 24 Aug 2026
+Subject: Your permit “Visitor” expires on 24 Aug 2026
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor is due to expire on 24 Aug 2026.
+Your permit “Visitor” is due to expire on 24 Aug 2026.
 
-p.stonn keeps setting the rego, but it cannot renew the permit itself — renew it with the council so it stays valid. Once you renew, you can copy your schedule onto the new permit in the app.
+p.stonn keeps setting the rego, but it cannot renew the permit itself, so please renew it with the council to keep it valid. Once you renew, you can copy your schedule onto the new permit in p.stonn.
 
 Open p.stonn: https://p.stonn.org
 Renew with the council: https://parkingpermits.stonnington.vic.gov.au/ssp/

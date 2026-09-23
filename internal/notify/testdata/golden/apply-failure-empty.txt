@@ -1,12 +1,12 @@
 === EMAIL to primary@example.com
-Subject: Still updating your Visitor — it shows XYZ789 for now
+Subject: Your permit “Visitor” still shows XYZ789 while p.stonn keeps trying
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to clear your Visitor (regos are removed on this day, as scheduled) but couldn't.
-The permit still shows XYZ789, so that is the rego currently covered.
+p.stonn has not been able to clear your permit “Visitor” (regos are removed on this day, as scheduled).
+XYZ789 is still on the permit, so the car with that rego is the one covered.
 
 The council was temporarily unavailable.
-Nothing to do yet — p.stonn keeps trying.
+You don’t need to do anything yet. p.stonn will keep trying.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
@@ -16,15 +16,15 @@ We have also told sam@example.com (by email).
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Still updating your Visitor — it shows XYZ789 for now
+Title: Your permit “Visitor” still shows XYZ789 while p.stonn keeps trying
 Priority: default
 Tags: warning
 
-p.stonn tried to clear your Visitor (regos are removed on this day, as scheduled) but couldn't.
-The permit still shows XYZ789, so that is the rego currently covered.
+p.stonn has not been able to clear your permit “Visitor” (regos are removed on this day, as scheduled).
+XYZ789 is still on the permit, so the car with that rego is the one covered.
 
 The council was temporarily unavailable.
-Nothing to do yet — p.stonn keeps trying.
+You don’t need to do anything yet. p.stonn will keep trying.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/
@@ -32,14 +32,14 @@ https://parkingpermits.stonnington.vic.gov.au/ssp/
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Still updating your Visitor — it shows XYZ789 for now
+Subject: Your permit “Visitor” still shows XYZ789 while p.stonn keeps trying
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn tried to clear your Visitor (regos are removed on this day, as scheduled) but couldn't.
-The permit still shows XYZ789, so that is the rego currently covered.
+p.stonn has not been able to clear your permit “Visitor” (regos are removed on this day, as scheduled).
+XYZ789 is still on the permit, so the car with that rego is the one covered.
 
 The council was temporarily unavailable.
-Nothing to do yet — p.stonn keeps trying.
+You don’t need to do anything yet. p.stonn will keep trying.
 
 You can set the rego on your permit yourself at the council:
 https://parkingpermits.stonnington.vic.gov.au/ssp/

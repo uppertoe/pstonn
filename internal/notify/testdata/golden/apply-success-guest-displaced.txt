@@ -1,41 +1,41 @@
 === EMAIL to primary@example.com
-Subject: Permit updated: Visitor now shows GUEST1
+Subject: GUEST1 is now on your permit “Visitor”
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 Hero: GUEST1
 
-Your Visitor is now set to GUEST1.
+GUEST1 is now on your permit “Visitor”.
 
-dad@example.com activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.
+dad@example.com put it on with their guest pass. When the booking ends, your roster takes over, or if nothing is scheduled, the rego stays on until the next change.
 
-This replaced ABC123, which an active booking had put on. We have emailed the person whose rego that is.
+To make this change, p.stonn removed ABC123, which a booking had set. We have emailed the person whose rego that is.
 
 We have also told sam@example.com (by email).
 
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Permit updated: Visitor now shows GUEST1
+Title: GUEST1 is now on your permit “Visitor”
 Priority: default
 Tags: white_check_mark
 
-Your Visitor is now set to GUEST1.
+GUEST1 is now on your permit “Visitor”.
 
-dad@example.com activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.
+dad@example.com put it on with their guest pass. When the booking ends, your roster takes over, or if nothing is scheduled, the rego stays on until the next change.
 
-This replaced ABC123, which an active booking had put on. We have emailed the person whose rego that is.
+To make this change, p.stonn removed ABC123, which a booking had set. We have emailed the person whose rego that is.
 
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Permit updated: Visitor now shows GUEST1
+Subject: GUEST1 is now on your permit “Visitor”
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 Hero: GUEST1
 
-Your Visitor is now set to GUEST1.
+GUEST1 is now on your permit “Visitor”.
 
-dad@example.com activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.
+dad@example.com put it on with their guest pass. When the booking ends, your roster takes over, or if nothing is scheduled, the rego stays on until the next change.
 
-This replaced ABC123, which an active booking had put on. We have emailed the person whose rego that is.
+To make this change, p.stonn removed ABC123, which a booking had set. We have emailed the person whose rego that is.
 
 We have also told primary@example.com (by email and push notification).
 

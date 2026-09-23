@@ -1,9 +1,9 @@
 === OUTBOX account= recipients=guest@example.com ntfy=// reason=this address is the contact for a rego that was on a visitor permit
 Dedup: displaced|guest@example.com|Visitor|AAA111
-Subject: Heads up: AAA111 is no longer covered on the visitor permit
+Subject: AAA111 is no longer on the visitor parking permit
 Hero: AAA111 (No longer on the permit)
 
-Your rego AAA111 came off the visitor parking permit for Visitor at 2:30pm: a one-off booking started.
+At 2:30pm, a one-off booking started, so your rego AAA111 is no longer on the visitor parking permit (“Visitor”).
 
-If your car is still parked there it's no longer covered. Move it, or put it back on with your link, or check with the permit holder.
+If your car is still parked there, it is no longer covered. You can move it, put your rego back on with your guest pass if you have one, or check with the permit holder.
 

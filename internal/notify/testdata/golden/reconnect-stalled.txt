@@ -1,39 +1,39 @@
 === EMAIL to primary@example.com
-Subject: p.stonn can't reach the council — your permit schedule is paused
+Subject: p.stonn has not been able to sign in to the council for over an hour
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
+p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until p.stonn can sign in, none of the changes on your schedule will happen.
 
-That means any change your schedule should make will not happen: if a different rego needs to be on the permit, change it yourself on the council website now, or that car is not covered and can be fined.
+If a different rego needs to be on the permit, please change it yourself on the council website now. Otherwise the car parked there is not covered and could be fined.
 
-p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
+p.stonn will keep trying, and your schedule will carry on by itself once the council accepts the sign-in. If you need to link your council account again, we will email you.
 
 Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 Open p.stonn: https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: p.stonn can't reach the council — your permit schedule is paused
+Title: p.stonn has not been able to sign in to the council for over an hour
 Priority: high
 Tags: warning
 
-p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
+p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until p.stonn can sign in, none of the changes on your schedule will happen.
 
-That means any change your schedule should make will not happen: if a different rego needs to be on the permit, change it yourself on the council website now, or that car is not covered and can be fined.
+If a different rego needs to be on the permit, please change it yourself on the council website now. Otherwise the car parked there is not covered and could be fined.
 
-p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
+p.stonn will keep trying, and your schedule will carry on by itself once the council accepts the sign-in. If you need to link your council account again, we will email you.
 
 Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 Open p.stonn: https://p.stonn.org
 
 === EMAIL to sam@example.com
-Subject: p.stonn can't reach the council — your permit schedule is paused
+Subject: p.stonn has not been able to sign in to the council for over an hour
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until it can, your visitor permit schedule is NOT being applied.
+p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. Until p.stonn can sign in, none of the changes on your schedule will happen.
 
-That means any change your schedule should make will not happen: if a different rego needs to be on the permit, change it yourself on the council website now, or that car is not covered and can be fined.
+If a different rego needs to be on the permit, please change it yourself on the council website now. Otherwise the car parked there is not covered and could be fined.
 
-p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. If this persists, it will email you again if re-linking becomes necessary.
+p.stonn will keep trying, and your schedule will carry on by itself once the council accepts the sign-in. If you need to link your council account again, we will email you.
 
 Council portal: https://parkingpermits.stonnington.vic.gov.au/ssp/
 Open p.stonn: https://p.stonn.org

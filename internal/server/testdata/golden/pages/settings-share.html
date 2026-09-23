@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=d5a503a8c1">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=d5a503a8c1">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=7800ed8c23">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=7800ed8c23">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=d5a503a8c1">
+<link rel="stylesheet" href="/static/app.css?v=7800ed8c23">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=d5a503a8c1"></script>
-<script defer src="/static/alpine.min.js?v=d5a503a8c1"></script>
+<script src="/static/htmx.min.js?v=7800ed8c23"></script>
+<script defer src="/static/alpine.min.js?v=7800ed8c23"></script>
 
 
 <script>
@@ -146,7 +146,7 @@
     
     
     
-    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('You are offline, so p.stonn has not made that change. Check your connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
@@ -233,7 +233,7 @@
       showToast((x.responseText || 'Something needs your attention.').trim());
       return;
     }
-    var msg = 'Something went wrong. Please try again.';
+    var msg = 'p.stonn could not finish that request. Please try again.';
     var body = x.responseText || '';
     if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
       try {
@@ -349,9 +349,9 @@ window.popClamp = window.popClamp || function (el, tries) {
     var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
     
     if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
-    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
-      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
-    f.dataset.confirmOk = 'It matches — continue';
+    f.dataset.confirm = 'You typed ' + v + '. Check it against the car’s actual number plate: ' +
+      'letter O and zero 0, and letter I and one 1, are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches';
     f.__plateConfirm = true;
   }, true);
   
@@ -406,7 +406,7 @@ window.popClamp = window.popClamp || function (el, tries) {
 <header class="appbar">
   
   
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor permit scheduler</span></span></a>
   <div class="appbar-r">
     
     <a href="/features" hx-boost="false" class="howlink" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
@@ -421,7 +421,7 @@ window.popClamp = window.popClamp || function (el, tries) {
         
         <a href="/share" class="menu-item"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg> Share p.stonn</a>
         
-        <span class="menu-note">Session handled by your login provider</span>
+        <span class="menu-note">Your login provider manages your sign-in.</span>
       </div>
     </div>
   </div>
@@ -447,7 +447,7 @@ window.popClamp = window.popClamp || function (el, tries) {
   
   
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></span> Settings</div>
-  <p class="subtitle">Your council connection and account.</p>
+  <p class="subtitle">Here you can manage your council connection and account.</p>
   
 
   <section class="card" style="--hue:var(--sec-settings)">
@@ -456,7 +456,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     
     
     <div class="row" style="margin-top:14px" x-data="{del:false}">
-      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? p.stonn keeps your schedule and resumes it when you link again." data-confirm-ok="Unlink">
         <button type="submit" class="ghost"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg> Unlink account</button>
       </form>
       <button type="button" class="danger" @click="del=!del"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Delete all my data</button>
@@ -465,7 +465,7 @@ window.popClamp = window.popClamp || function (el, tries) {
         <button type="submit" class="danger">Confirm</button>
       </form>
     </div>
-    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything from the live database straight away; backup copies age out afterwards.</p>
+    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all my data</strong> removes everything straight away, although copies stay in our encrypted backups for up to about three months.</p>
     
   </section>
   
@@ -481,15 +481,15 @@ window.popClamp = window.popClamp || function (el, tries) {
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do. Once they accept they can set the schedule and manage regos, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
+    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself. p.stonn asks that person to accept the next time they sign in, and they get access only if they do. Once they accept they can set the schedule and manage regos, but they cannot unlink the council account, delete the account, or change who has access. If someone already uses p.stonn with their own permits, p.stonn tells them they need to decline, because joining would hide their own.</p>
     
     
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
     <h2 id="notifications"><span class="ic"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span> Notifications</h2>
-    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
+    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or when it cannot. Delivery isn’t guaranteed, so you are still responsible for the permit. Your changes here save as you make them.</p>
     
-    <p class="empty-note">No notification channels are set up by the operator. Configure <code>SMTP_*</code> (email) or <code>NTFY_BASE_URL</code> (push) to enable this.</p>
+    <p class="empty-note">The person who runs this p.stonn server has not set up email or push notifications. If you need them, you can <a href="/contact">contact us</a> for assistance.</p>
     
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
@@ -506,7 +506,7 @@ window.popClamp = window.popClamp || function (el, tries) {
       </label>
       <button type="submit" class="ghost">Save</button>
     </form>
-    <p class="empty-note" style="margin-top:6px">Shown to your visitors instead of your email, on guest links and QR pages. Leave it blank and they see only the permit.</p>
+    <p class="empty-note" style="margin-top:6px">Your visitors see this instead of your email on guest passes and QR pages. If you leave it blank, they see the council’s name instead.</p>
     
     
     

@@ -1,8 +1,8 @@
 === OUTBOX account= recipients=primary@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|primary@example.com|primary@example.com|Visitor=@-62135596800>ABC123|email|primary@example.com
-Subject: The rego was taken off your Visitor on the council's website
+Subject: Someone removed the rego from your permit “Visitor” on the council’s website
 
-The rego was taken off your Visitor on the council's website, not through p.stonn. Your schedule still says ABC123, so p.stonn is putting it back on now.
+Someone removed the rego from your permit “Visitor” on the council’s website. Your schedule still says ABC123, so p.stonn is putting it back on now.
 
 We have also told sam@example.com (by email).
 
@@ -10,9 +10,9 @@ https://p.stonn.org
 
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|primary@example.com|primary@example.com|Visitor=@-62135596800>ABC123|ntfy
-Subject: The rego was taken off your Visitor on the council's website
+Subject: Someone removed the rego from your permit “Visitor” on the council’s website
 
-The rego was taken off your Visitor on the council's website, not through p.stonn. Your schedule still says ABC123, so p.stonn is putting it back on now.
+Someone removed the rego from your permit “Visitor” on the council’s website. Your schedule still says ABC123, so p.stonn is putting it back on now.
 
 We have also told sam@example.com (by email).
 
@@ -20,9 +20,9 @@ https://p.stonn.org
 
 === OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|sam@example.com|primary@example.com|Visitor=@-62135596800>ABC123|email|sam@example.com
-Subject: The rego was taken off your Visitor on the council's website
+Subject: Someone removed the rego from your permit “Visitor” on the council’s website
 
-The rego was taken off your Visitor on the council's website, not through p.stonn. Your schedule still says ABC123, so p.stonn is putting it back on now.
+Someone removed the rego from your permit “Visitor” on the council’s website. Your schedule still says ABC123, so p.stonn is putting it back on now.
 
 We have also told primary@example.com (by email and push notification).
 

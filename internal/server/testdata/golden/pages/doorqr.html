@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=d5a503a8c1">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=d5a503a8c1">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=7800ed8c23">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=7800ed8c23">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=d5a503a8c1">
+<link rel="stylesheet" href="/static/app.css?v=7800ed8c23">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=d5a503a8c1"></script>
-<script defer src="/static/alpine.min.js?v=d5a503a8c1"></script>
+<script src="/static/htmx.min.js?v=7800ed8c23"></script>
+<script defer src="/static/alpine.min.js?v=7800ed8c23"></script>
 
 
 <script>
@@ -146,7 +146,7 @@
     
     
     
-    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('You are offline, so p.stonn has not made that change. Check your connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
@@ -233,7 +233,7 @@
       showToast((x.responseText || 'Something needs your attention.').trim());
       return;
     }
-    var msg = 'Something went wrong. Please try again.';
+    var msg = 'p.stonn could not finish that request. Please try again.';
     var body = x.responseText || '';
     if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
       try {
@@ -349,9 +349,9 @@ window.popClamp = window.popClamp || function (el, tries) {
     var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
     
     if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
-    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
-      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
-    f.dataset.confirmOk = 'It matches — continue';
+    f.dataset.confirm = 'You typed ' + v + '. Check it against the car’s actual number plate: ' +
+      'letter O and zero 0, and letter I and one 1, are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches';
     f.__plateConfirm = true;
   }, true);
   
@@ -406,7 +406,7 @@ window.popClamp = window.popClamp || function (el, tries) {
 <header class="appbar">
   
   
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor permit scheduler</span></span></a>
   <div class="appbar-r">
     
     <a href="/features" hx-boost="false" class="howlink" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
@@ -435,7 +435,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     <p class="posterfor">Printed QR for <strong>Visitor Permit</strong></p>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button type="button" data-print><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg> Print</button>
-      <form method="post" action="/guests/door/3/revoke" data-confirm="Remove this printed QR? Any copy you printed stops working, and any visitor's rego you approved through it comes off the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Remove</button></form>
+      <form method="post" action="/guests/door/3/revoke" data-confirm="Remove this printed QR? Any copy you printed stops working, and p.stonn removes any visitor’s rego you approved through it from the permit now. To get a different code, print a new one afterwards." data-confirm-ok="Remove"><button type="submit" class="ghost sm"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/></svg> Remove</button></form>
     </div>
   </div>
 
@@ -446,18 +446,18 @@ window.popClamp = window.popClamp || function (el, tries) {
     </div>
     <div class="poster-body">
       <h1 class="poster-title">Visitor parking permit</h1>
-      <p class="poster-lead">Scan to use this parking permit. The household confirms on their phone.</p>
+      <p class="poster-lead">Scan the code to ask to use this parking permit. The resident confirms each request on their phone.</p>
       <div class="poster-qbox"><img src="data:image/png;base64,AAAA" alt="Scan to request the visitor parking permit" width="240" height="240"></div>
       <ol class="poster-steps">
-        <li>Point your phone camera at the code</li>
-        <li>Enter your number plate</li>
-        <li>The resident gets a notification and approves it &mdash; then your rego is on the permit</li>
+        <li>Point your phone’s camera at the code.</li>
+        <li>Enter your number plate.</li>
+        <li>The resident receives a notification. Once they approve, p.stonn puts your rego on the permit.</li>
       </ol>
       <p class="poster-note">Nothing goes on the permit until the resident approves.</p>
     </div>
-    <div class="poster-foot">Set up with p.stonn · an unofficial City of Stonnington permit helper</div>
+    <div class="poster-foot">This poster was made with p.stonn, which is unofficial and not run by the City of Stonnington.</div>
   </article>
-  <p class="posterhint noprint">Print it, laminate it, leave it up. This code doesn't expire &mdash; reopen this page any time to reprint the very same one.</p>
+  <p class="posterhint noprint">Print it, laminate it and leave it up. This code keeps working until you remove it, and you can reopen this page any time to reprint the very same one.</p>
 </main>
 
 

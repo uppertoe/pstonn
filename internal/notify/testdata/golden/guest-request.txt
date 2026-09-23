@@ -1,30 +1,30 @@
 === OUTBOX account= recipients=primary@example.com ntfy=/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: guestreq|primary@example.com|primary@example.com|Visitor|GUEST1|email|primary@example.com
-Subject: Approve GUEST1 on your Visitor?
+Subject: A visitor is asking to put GUEST1 on your permit “Visitor”
 
-Someone scanned your printed QR code and is asking to put GUEST1 on your Visitor.
+Someone scanned your printed QR and is asking to put GUEST1 on your permit “Visitor”.
 
-Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.
+Open p.stonn to approve or decline. If you approve, p.stonn puts GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you do.
 
 https://p.stonn.org/g/req/4
 
 === OUTBOX account= recipients= ntfy=pstonn-primary/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: guestreq|primary@example.com|primary@example.com|Visitor|GUEST1|ntfy
-Subject: Approve GUEST1 on your Visitor?
+Subject: A visitor is asking to put GUEST1 on your permit “Visitor”
 
-Someone scanned your printed QR code and is asking to put GUEST1 on your Visitor.
+Someone scanned your printed QR and is asking to put GUEST1 on your permit “Visitor”.
 
-Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.
+Open p.stonn to approve or decline. If you approve, p.stonn puts GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you do.
 
 https://p.stonn.org/g/req/4
 
 === OUTBOX account= recipients=sam@example.com ntfy=/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: guestreq|sam@example.com|primary@example.com|Visitor|GUEST1|email|sam@example.com
-Subject: Approve GUEST1 on your Visitor?
+Subject: A visitor is asking to put GUEST1 on your permit “Visitor”
 
-Someone scanned your printed QR code and is asking to put GUEST1 on your Visitor.
+Someone scanned your printed QR and is asking to put GUEST1 on your permit “Visitor”.
 
-Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.
+Open p.stonn to approve or decline. If you approve, p.stonn puts GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you do.
 
 https://p.stonn.org/g/req/4
 

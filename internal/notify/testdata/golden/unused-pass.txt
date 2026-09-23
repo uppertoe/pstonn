@@ -1,12 +1,12 @@
 === EMAIL to primary@example.com
-Subject: The guest passes you sent have not been accessed yet
+Subject: The guest passes you sent have not been used yet
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-We're checking in because the guest passes you created for nanny@example.com and gran@example.com have not been accessed or used yet.
+The guest passes you created for nanny@example.com and gran@example.com have not been opened or used yet.
 
-It may be worth checking with your guests to see whether they received the email containing their pass. Or, you can re-send the pass by opening the guests tab:
+You may want to check with your guests that they received the email with their pass. You can also send the pass again from the Guests tab:
 
 https://p.stonn.org/guests
 
-The links will still work, so if they've received the pass there's nothing else you need to do.
+The links still work, so if they have received the pass, you don’t need to do anything else.
 

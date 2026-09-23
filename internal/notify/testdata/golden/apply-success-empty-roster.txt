@@ -1,39 +1,39 @@
 === EMAIL to primary@example.com
-Subject: Permit updated: Visitor now has no rego
+Subject: Your permit “Visitor” now has no rego on it
 Provenance: You received this at primary@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor now has no rego on it for today, as scheduled by your roster (regos are removed on this day). Nothing is covered on that permit until a rego is put on.
+Your permit “Visitor” has no rego on it for today, as scheduled by your roster (regos are removed on this day). No car is covered by that permit until you select a rego.
 
-Nothing to do — this is just your confirmation it went through.
+This is simply to confirm the change, and you don’t need to do anything.
 
-This replaced GUEST1, which an active booking had put on. We have emailed the person whose rego that is.
+To make this change, p.stonn removed GUEST1, which a booking had set. We have emailed the person whose rego that is.
 
 We have also told sam@example.com (by email).
 
 https://p.stonn.org
 
 === NTFY pstonn-primary
-Title: Permit updated: Visitor now has no rego
+Title: Your permit “Visitor” now has no rego on it
 Priority: default
 Tags: white_check_mark
 
-Your Visitor now has no rego on it for today, as scheduled by your roster (regos are removed on this day). Nothing is covered on that permit until a rego is put on.
+Your permit “Visitor” has no rego on it for today, as scheduled by your roster (regos are removed on this day). No car is covered by that permit until you select a rego.
 
-Nothing to do — this is just your confirmation it went through.
+This is simply to confirm the change, and you don’t need to do anything.
 
-This replaced GUEST1, which an active booking had put on. We have emailed the person whose rego that is.
+To make this change, p.stonn removed GUEST1, which a booking had set. We have emailed the person whose rego that is.
 
 We have also told sam@example.com (by email).
 
 === EMAIL to sam@example.com
-Subject: Permit updated: Visitor now has no rego
+Subject: Your permit “Visitor” now has no rego on it
 Provenance: You received this at sam@example.com because this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit. p.stonn is a free, unofficial scheduler for City of Stonnington visitor parking permits.
 
-Your Visitor now has no rego on it for today, as scheduled by your roster (regos are removed on this day). Nothing is covered on that permit until a rego is put on.
+Your permit “Visitor” has no rego on it for today, as scheduled by your roster (regos are removed on this day). No car is covered by that permit until you select a rego.
 
-Nothing to do — this is just your confirmation it went through.
+This is simply to confirm the change, and you don’t need to do anything.
 
-This replaced GUEST1, which an active booking had put on. We have emailed the person whose rego that is.
+To make this change, p.stonn removed GUEST1, which a booking had set. We have emailed the person whose rego that is.
 
 We have also told primary@example.com (by email and push notification).
 

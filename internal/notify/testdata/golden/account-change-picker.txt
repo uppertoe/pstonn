@@ -1,37 +1,37 @@
 === OUTBOX account= recipients=primary@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
-Dedup: acctchange|primary@example.com|primary@example.com|The rego was taken off the permit "Visitor" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.|email|primary@example.com
-Subject: A change was made to your p.stonn setup
+Dedup: acctchange|primary@example.com|primary@example.com|Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.|email|primary@example.com
+Subject: Someone made a change to your p.stonn account
 
-The rego was taken off the permit "Visitor" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.
+Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.
 
-If that was expected, nothing to do.
-If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+If you expected this change, you don’t need to do anything.
+If you did not, open the Activity page in p.stonn, which lists every change and who made it. You can see who has shared access under Settings.
 
 We have also told sam@example.com (by email).
 
 https://p.stonn.org/activity
 
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
-Dedup: acctchange|primary@example.com|primary@example.com|The rego was taken off the permit "Visitor" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.|ntfy
-Subject: A change was made to your p.stonn setup
+Dedup: acctchange|primary@example.com|primary@example.com|Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.|ntfy
+Subject: Someone made a change to your p.stonn account
 
-The rego was taken off the permit "Visitor" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.
+Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.
 
-If that was expected, nothing to do.
-If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+If you expected this change, you don’t need to do anything.
+If you did not, open the Activity page in p.stonn, which lists every change and who made it. You can see who has shared access under Settings.
 
 We have also told sam@example.com (by email).
 
 https://p.stonn.org/activity
 
 === OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
-Dedup: acctchange|sam@example.com|primary@example.com|The rego was taken off the permit "Visitor" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.|email|sam@example.com
-Subject: A change was made to your p.stonn setup
+Dedup: acctchange|sam@example.com|primary@example.com|Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.|email|sam@example.com
+Subject: Someone made a change to your p.stonn account
 
-The rego was taken off the permit "Visitor" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.
+Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.
 
-If that was expected, nothing to do.
-If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+If you expected this change, you don’t need to do anything.
+If you did not, open the Activity page in p.stonn, which lists every change and who made it. You can see who has shared access under Settings.
 
 We have also told primary@example.com (by email and push notification).
 

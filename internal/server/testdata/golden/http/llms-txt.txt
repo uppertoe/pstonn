@@ -10,21 +10,21 @@ X-Frame-Options: DENY
 
 # p.stonn
 
-> Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.
+> p.stonn is a free, unofficial tool for scheduling the rego on your City of Stonnington visitor parking permit, with a weekly roster, a guest pass for family, or a QR code for tradies.
 
-p.stonn is a free, unofficial tool for residents of the City of Stonnington who hold a visitor parking permit on the council's ePermits site. The resident signs in to the council once; from then on p.stonn puts the right number plate on the permit for them — a weekly roster for regular visitors, one-off bookings, an on-screen QR code a visitor scans at the door, a printable QR code that asks the resident to approve each visitor, and standing guest links for family and carers. It changes only which rego is on the permit, exactly as the resident could by hand on the council's site. It is not run by or affiliated with the council.
+p.stonn is a free, unofficial tool for residents of the City of Stonnington who hold a visitor parking permit on the council's ePermits site. The resident signs in to the council once, and from then on p.stonn puts the right number plate on the permit for them. It offers a weekly roster for regular visitors, bookings, a visitor QR shown on screen, a printed QR that the resident confirms on their phone, guest passes for family and carers, and a quick picker on the resident’s home screen. It changes only which rego is on the permit, exactly as the resident could by hand on the council's site. It is not run by or affiliated with the council.
 
 ## Pages
 
-- [Stonnington visitor parking permits, on a schedule — p.stonn](https://p.stonn.org/): Free tool to schedule the car on your City of Stonnington visitor parking permit — a weekly roster, a family link, or a QR code for tradies. Unofficial.
-- [What p.stonn can do with your Stonnington visitor permit](https://p.stonn.org/features): Connect your Stonnington ePermits login once; p.stonn sets your visitor permit to your car schedule, with one-off bookings, visitor QR codes, a printable QR and guest passes.
-- [Frequently asked questions](https://p.stonn.org/faq): Answers about scheduling your City of Stonnington visitor parking permit with p.stonn — recurring visitor parking, sharing with family, cost, and safety.
-- [Security and privacy](https://p.stonn.org/security): What p.stonn encrypts, how long it keeps your data, what a breach could reach, and how to delete everything. A free, unofficial Stonnington parking tool.
-- [Contact](https://p.stonn.org/contact): Questions about p.stonn, the free scheduler for City of Stonnington visitor parking permits? Get in touch.
+- [Stonnington visitor parking permits, on a schedule — p.stonn](https://p.stonn.org/): p.stonn is a free, unofficial tool for scheduling the rego on your City of Stonnington visitor parking permit, with a weekly roster, a guest pass for family, or a QR code for tradies.
+- [What p.stonn can do with your Stonnington visitor permit](https://p.stonn.org/features): Connect your Stonnington ePermits login once, and p.stonn puts the right rego on your visitor permit on your schedule, with one-off bookings, visitor QR codes, a printed QR and guest passes.
+- [Frequently asked questions](https://p.stonn.org/faq): These answers cover scheduling your City of Stonnington visitor parking permit with p.stonn, including recurring visitors, sharing with family, cost and safety.
+- [Security & data](https://p.stonn.org/security): This page explains what p.stonn encrypts, how long it keeps your data, what a breach could reach and how to delete everything. p.stonn is a free, unofficial Stonnington parking tool.
+- [Contact](https://p.stonn.org/contact): If you have questions about p.stonn, the free scheduler for City of Stonnington visitor parking permits, get in touch.
 
 ## Guides
 
-- [How do I change the car on my Stonnington visitor permit?](https://p.stonn.org/guide/change-car-on-visitor-permit): Changing the vehicle on a City of Stonnington visitor parking permit: the steps on the council's ePermits site, and how to stop doing it by hand.
-- [Visitor parking for a cleaner, nanny or carer in Stonnington](https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer): A City of Stonnington visitor permit covers one car at a time. How to handle a cleaner, nanny or carer who comes every week without changing the plate by hand.
-- [Do visitors need a paper permit in Stonnington?](https://p.stonn.org/guide/paper-visitor-permits): City of Stonnington visitor parking permits are digital by default: nothing to display, but the number plate has to be right before each visitor parks. What that means in practice.
-- [Where do I log in to my Stonnington parking permit?](https://p.stonn.org/guide/parking-permit-login): The City of Stonnington’s parking permit login is its ePermits site. What to sign in with, how to reset the password, what to do if you have never registered, and how to stop logging in at all.
+- [How do I change the car on my Stonnington visitor permit?](https://p.stonn.org/guide/change-car-on-visitor-permit): This guide explains how to change the rego on a City of Stonnington visitor parking permit on the council’s ePermits site, and how to stop doing it by hand.
+- [Visitor parking for a cleaner, nanny or carer in Stonnington](https://p.stonn.org/guide/visitor-parking-cleaner-nanny-carer): A City of Stonnington visitor permit covers one rego at a time. This guide explains how to handle a cleaner, nanny or carer who comes every week without changing the number plate by hand.
+- [Do visitors need a paper permit in Stonnington?](https://p.stonn.org/guide/paper-visitor-permits): City of Stonnington visitor parking permits are digital by default, so there is nothing to display, but the number plate has to be right before each visitor parks. This guide explains what that means in practice.
+- [Where do I log in to my Stonnington parking permit?](https://p.stonn.org/guide/parking-permit-login): The City of Stonnington’s parking permit login is its ePermits site. This guide covers what to sign in with, how to reset the password, what to do if you have never registered, and how to stop signing in at all.

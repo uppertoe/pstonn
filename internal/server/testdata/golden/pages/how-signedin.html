@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=d5a503a8c1">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=d5a503a8c1">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=7800ed8c23">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=7800ed8c23">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=d5a503a8c1">
+<link rel="stylesheet" href="/static/app.css?v=7800ed8c23">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,10 +122,10 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=d5a503a8c1"></script>
-<script defer src="/static/alpine.min.js?v=d5a503a8c1"></script>
-<link rel="stylesheet" href="/static/demos.css?v=d5a503a8c1">
-<script defer src="/static/demos.js?v=d5a503a8c1"></script>
+<script src="/static/htmx.min.js?v=7800ed8c23"></script>
+<script defer src="/static/alpine.min.js?v=7800ed8c23"></script>
+<link rel="stylesheet" href="/static/demos.css?v=7800ed8c23">
+<script defer src="/static/demos.js?v=7800ed8c23"></script>
 
 <script>
   
@@ -147,7 +147,7 @@
     
     
     
-    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('You are offline, so p.stonn has not made that change. Check your connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
@@ -234,7 +234,7 @@
       showToast((x.responseText || 'Something needs your attention.').trim());
       return;
     }
-    var msg = 'Something went wrong. Please try again.';
+    var msg = 'p.stonn could not finish that request. Please try again.';
     var body = x.responseText || '';
     if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
       try {
@@ -350,9 +350,9 @@ window.popClamp = window.popClamp || function (el, tries) {
     var v = inp ? (inp.value || '').toUpperCase().replace(/[\s\-.·]+/g, '') : '';
     
     if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
-    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
-      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
-    f.dataset.confirmOk = 'It matches — continue';
+    f.dataset.confirm = 'You typed ' + v + '. Check it against the car’s actual number plate: ' +
+      'letter O and zero 0, and letter I and one 1, are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches';
     f.__plateConfirm = true;
   }, true);
   
@@ -407,7 +407,7 @@ window.popClamp = window.popClamp || function (el, tries) {
 <header class="appbar">
   
   
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span></span></a>
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor permit scheduler</span></span></a>
   <div class="appbar-r">
     
     <a href="/features" hx-boost="false" class="howlink active" aria-current="page" aria-label="Features"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.6-2.4 2-2.4 3.4"/><path d="M12 17h.01"/></svg><span class="howlink-txt">Features</span></a>
@@ -445,7 +445,7 @@ window.popClamp = window.popClamp || function (el, tries) {
   
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
-    <p>Everything p.stonn can do, in five short animations &mdash; sample regos and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
+    <p>These six short animations show everything p.stonn can do, using sample regos and names. The visitor features further down are the ones most households have not tried yet.</p>
   </section>
   
 
@@ -456,7 +456,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     <section class="feature">
       <div class="feature-text">
         <h2>A rego for each day</h2>
-        <p>Set which rego is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster can run over a fortnight or four weeks and rotates through them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
+        <p>Set which rego is on the permit for each day of the week, such as the nanny on weekdays and grandparents on the weekend. If your helpers alternate, the roster can run over a fortnight or four weeks and rotate through them. p.stonn keeps the council permit in sync, so you’re not signing in every time a different person visits.</p>
       </div>
       <div class="feature-demo">
         
@@ -465,7 +465,7 @@ window.popClamp = window.popClamp || function (el, tries) {
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg></span> This week</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
           <div class="dm-picker">
-            <div class="ph">Which rego?</div>
+            <div class="ph">Choose a rego</div>
             <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
             <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
             <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
@@ -485,7 +485,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     <section class="feature">
       <div class="feature-text">
         <h2>One-off bookings</h2>
-        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; make a booking for a set window. Your roster takes back over the moment it ends.</p>
+        <p>When something breaks the routine, such as a weekend visitor, an overnight stay or a holiday, make a booking for a set window. Your roster takes back over the moment it ends.</p>
       </div>
       <div class="feature-demo">
         
@@ -508,7 +508,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     <section class="feature">
       <div class="feature-text">
         <h2>Add a visitor with a QR</h2>
-        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and it is on the permit until the end of the day &mdash; no account, nothing to install.</p>
+        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it and types their number plate, and p.stonn puts it on the permit until the end of the day. They don’t need an account or anything installed.</p>
         <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
       <div class="feature-demo">
@@ -525,7 +525,7 @@ window.popClamp = window.popClamp || function (el, tries) {
           <div class="dm-qrstage">
             <div class="dm-fade" data-vqqr>
               <img class="dm-qr dm-qr-lg" src="/static/demo-qr.svg" alt="" width="128" height="128">
-              <div class="dm-qrline">Stops working in 15 minutes &mdash; your permit itself is unchanged.</div>
+              <div class="dm-qrline">This QR stops working in 15 minutes. Showing it does not change your permit.</div>
             </div>
           </div>
           <div class="dm-screen dm-over" data-vqguest>
@@ -544,7 +544,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     <section class="feature">
       <div class="feature-text">
         <h2>A printed QR you confirm on your phone</h2>
-        <p>Print a QR code once and stick it on the fridge or by the hallway door &mdash; wherever your visitors will see it. It keeps working indefinitely, and each scan asks you to confirm on your phone: you get a notification with the visitor&rsquo;s rego, and nothing goes on the permit until you say yes.</p>
+        <p>Print a QR code once and stick it on the fridge or by the front door, wherever your visitors will see it. It keeps working until you remove it, and you confirm each scan on your phone: you get a notification with the visitor’s rego, and p.stonn changes nothing until you say yes.</p>
       </div>
       <div class="feature-demo">
         
@@ -560,7 +560,7 @@ window.popClamp = window.popClamp || function (el, tries) {
                 <div class="dm-tape"></div>
                 <div class="dm-paper-kicker">Visitor parking</div>
                 <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:64px;height:64px;margin:6px auto 5px;display:block">
-                <div class="dm-paper-lead">Scan to use this permit. The household confirms on their phone.</div>
+                <div class="dm-paper-lead">Scan the code to ask to use this permit. The resident confirms each request on their phone.</div>
               </div>
             </div>
             <div class="dm-mobile">
@@ -568,7 +568,7 @@ window.popClamp = window.popClamp || function (el, tries) {
               <div class="dm-mobile-screen">
                 <div class="dm-mscene dm-fade" data-dqpush>
                   <div class="dm-mpush"><span class="dm-mbadge"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></svg></span>
-                    <div class="dm-mtxt"><b>Approve <span class="dm-rego">1QW4RT</span>?</b><br>Someone scanned your printed QR.</div>
+                    <div class="dm-mtxt"><b>A visitor is asking to put <span class="dm-rego">1QW4RT</span> on your permit “Visitor”</b><br>Someone scanned your printed QR.</div>
                   </div>
                   <div class="dm-actions">
                     <div class="dm-btn dm-btn-sm" data-dqok><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg> Approve</div>
@@ -591,8 +591,8 @@ window.popClamp = window.popClamp || function (el, tries) {
     <section class="feature">
       <div class="feature-text">
         <h2>A pass for regular visitors</h2>
-        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their rego and it is on the permit until the end of the day, and you&rsquo;re told each time.</p>
-        <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
+        <p>For the people who come every week, such as the nanny or your parents, send a guest pass. They keep the link; when they arrive they tap their rego and it is on the permit until the end of the day. p.stonn tells you each time.</p>
+        <p>A pass works whenever they choose, until you delete it, so only send it to people you trust.</p>
       </div>
       <div class="feature-demo">
         
@@ -600,7 +600,7 @@ window.popClamp = window.popClamp || function (el, tries) {
         <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.4a3.2 3.2 0 0 1 0 5.8"/><path d="M17 19.5a5.5 5.5 0 0 0-2.6-4.7"/></svg></span> Your guest&rsquo;s phone</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to put a rego on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your rego. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span><div class="bd"><div class="ttl">Your link to put a rego on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your rego. <b>Bookmark it</b>, because the same link works every time.</div></div></div>
           
           <div class="dm-gsub">Tap your rego to put it on the permit.</div>
           <div class="dm-gcars">
@@ -622,7 +622,7 @@ window.popClamp = window.popClamp || function (el, tries) {
       <div class="feature-text">
         <h2>One tap from your own home screen</h2>
         <p>Save the quick picker to your phone and every rego in the household becomes a button. Tap one and it is on the permit until the end of the day, with no sign-in, exactly as a booking made in the app would be.</p>
-        <p>It offers every rego you have, so one you add later appears on it by itself. If the phone is lost, a new link stops the old one working.</p>
+        <p>The quick picker offers every rego you have, so one you add later appears on it by itself. If the phone is lost, a new link stops the old one working.</p>
       </div>
       <div class="feature-demo">
         
@@ -630,7 +630,7 @@ window.popClamp = window.popClamp || function (el, tries) {
         <figure class="dm" data-demo="picker">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18h3"/></svg></span> Your own phone</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-push" data-pkhome><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span><div class="bd"><div class="ttl">p.stonn <span class="ago">home screen</span></div><div class="msg">Home permit &mdash; <b>one tap</b> opens the picker, no sign-in.</div></div></div>
+          <div class="dm-push" data-pkhome><span class="badge" style="background:var(--primary)"><svg viewBox="0 0 24 24"><path d="M8.5 18.5V5.5h4.6a4 4 0 0 1 0 8H8.5" stroke-width="2.2"/></svg></span><div class="bd"><div class="ttl">p.stonn <span class="ago">home screen</span></div><div class="msg"><b>One tap</b> on your home screen opens the quick picker without signing in.</div></div></div>
           <div class="dm-gsub">Tap a rego to put it on the permit.</div>
           <div class="dm-gcars">
             <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan&rsquo;s car</span><span class="dm-tick"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></span></div>

@@ -1,9 +1,9 @@
 === OUTBOX account= recipients=primary@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|primary@example.com|primary@example.com|VPP16071=AMY602@1786336200>|email|primary@example.com
-Subject: Your VPP16071 was changed to AMY602 on the council's website
+Subject: Someone put AMY602 on your permit “VPP16071” on the council’s website
 Hero: AMY602
 
-AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule clears the permit again. If it should stay longer, book it or add it to the roster in p.stonn.
+Someone put AMY602 on your permit “VPP16071” on the council’s website. p.stonn will leave it there until 10 Aug 2:30pm, when your schedule clears the permit again. If AMY602 needs to stay longer, you can make a booking for it or add it to the roster in p.stonn.
 
 We have also told sam@example.com (by email).
 
@@ -11,10 +11,10 @@ https://p.stonn.org
 
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|primary@example.com|primary@example.com|VPP16071=AMY602@1786336200>|ntfy
-Subject: Your VPP16071 was changed to AMY602 on the council's website
+Subject: Someone put AMY602 on your permit “VPP16071” on the council’s website
 Hero: AMY602
 
-AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule clears the permit again. If it should stay longer, book it or add it to the roster in p.stonn.
+Someone put AMY602 on your permit “VPP16071” on the council’s website. p.stonn will leave it there until 10 Aug 2:30pm, when your schedule clears the permit again. If AMY602 needs to stay longer, you can make a booking for it or add it to the roster in p.stonn.
 
 We have also told sam@example.com (by email).
 
@@ -22,10 +22,10 @@ https://p.stonn.org
 
 === OUTBOX account= recipients=sam@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: drift|sam@example.com|primary@example.com|VPP16071=AMY602@1786336200>|email|sam@example.com
-Subject: Your VPP16071 was changed to AMY602 on the council's website
+Subject: Someone put AMY602 on your permit “VPP16071” on the council’s website
 Hero: AMY602
 
-AMY602 was put on your VPP16071 on the council's website, not through p.stonn. p.stonn has left it there until 10 Aug 2:30pm, when your schedule clears the permit again. If it should stay longer, book it or add it to the roster in p.stonn.
+Someone put AMY602 on your permit “VPP16071” on the council’s website. p.stonn will leave it there until 10 Aug 2:30pm, when your schedule clears the permit again. If AMY602 needs to stay longer, you can make a booking for it or add it to the roster in p.stonn.
 
 We have also told primary@example.com (by email and push notification).
 

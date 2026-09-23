@@ -62,7 +62,7 @@
 
 
 <p class="sub">Roster &mdash; repeats every 2 weeks</p>
-<p class="empty-note rostercap">Which rego is on the permit each day of the week.</p>
+<p class="empty-note rostercap">Create a roster for the regos applied to the permit on each day of the week.</p>
 
 <div class="seg wktabs" role="tablist" aria-label="Roster weeks"
      @keydown.arrow-right.prevent="wk=(wk+1)%2" @keydown.arrow-left.prevent="wk=(wk+2-1)%2">
@@ -70,7 +70,7 @@
   
   <button type="button" role="tab"
           class="on" :class="{on: wk===0}" :aria-selected="wk===0" :tabindex="wk===0 ? 0 : -1"
-          @click="wk=0">Week 1 <span class="wknow" title="The cycle is in this week">now</span></button>
+          @click="wk=0">Week 1 <span class="wknow" title="This is the current week of the roster.">now</span></button>
   
   <button type="button" role="tab"
           class="" :class="{on: wk===1}" :aria-selected="wk===1" :tabindex="wk===1 ? 0 : -1"

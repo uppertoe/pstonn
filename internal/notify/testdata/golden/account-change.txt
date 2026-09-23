@@ -1,22 +1,22 @@
 === OUTBOX account= recipients=primary@example.com ntfy=// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
-Dedup: acctchange|primary@example.com|primary@example.com|added the car ABC123 (Van)|email|primary@example.com
-Subject: A change was made to your p.stonn setup
+Dedup: acctchange|primary@example.com|primary@example.com|added the rego ABC123 (Van)|email|primary@example.com
+Subject: Someone made a change to your p.stonn account
 
-added the car ABC123 (Van)
+added the rego ABC123 (Van)
 
-If that was expected, nothing to do.
-If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+If you expected this change, you don’t need to do anything.
+If you did not, open the Activity page in p.stonn, which lists every change and who made it. You can see who has shared access under Settings.
 
 https://p.stonn.org/activity
 
 === OUTBOX account= recipients= ntfy=pstonn-primary// reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
-Dedup: acctchange|primary@example.com|primary@example.com|added the car ABC123 (Van)|ntfy
-Subject: A change was made to your p.stonn setup
+Dedup: acctchange|primary@example.com|primary@example.com|added the rego ABC123 (Van)|ntfy
+Subject: Someone made a change to your p.stonn account
 
-added the car ABC123 (Van)
+added the rego ABC123 (Van)
 
-If that was expected, nothing to do.
-If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.
+If you expected this change, you don’t need to do anything.
+If you did not, open the Activity page in p.stonn, which lists every change and who made it. You can see who has shared access under Settings.
 
 https://p.stonn.org/activity
 
