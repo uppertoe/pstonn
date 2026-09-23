@@ -28,7 +28,7 @@
        centring separately. Shown only when the account has MORE THAN ONE linked
        area — with one there is nothing to disambiguate — and stays visible on
        mobile (unlike the tag) because knowing your area matters most there. */}}
-  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor Permit Scheduler</span>{{if gt (len .Tenants) 1}}<span class="area-name" title="Current area">{{.Tenant.Short}}</span>{{end}}</span></a>
+  <a href="/" hx-boost="false" class="brand brand-link"><span class="mark">{{template "ic-monogram"}}</span> <span class="brand-text"><span class="word">p<span class="dot">.</span>stonn</span> <span class="brand-tag">Visitor permit scheduler</span>{{if gt (len .Tenants) 1}}<span class="area-name" title="Current area">{{.Tenant.Short}}</span>{{end}}</span></a>
   <div class="appbar-r">
     {{/* The feature tour, kept visible beside the profile button rather than in
          the menu — the visitor features go undiscovered, and a control nobody
@@ -56,7 +56,7 @@
         <a href="/share" class="menu-item">{{template "ic-link"}} Share p.stonn</a>
         {{if .User.IsAdmin}}<a href="/admin" class="menu-item">{{template "ic-gear"}} Admin</a>{{end}}
         {{if .LogoutURL}}<a href="{{.LogoutURL}}" class="menu-item">{{template "ic-logout"}} Sign out</a>
-        {{else}}<span class="menu-note">Session handled by your login provider</span>{{end}}
+        {{else}}<span class="menu-note">Your login provider manages your sign-in.</span>{{end}}
       </div>
     </div>
   </div>

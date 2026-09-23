@@ -61,7 +61,7 @@ func TestUnsubscribeFlow(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET = %d, want 200", w.Code)
 		}
-		if !strings.Contains(w.Body.String(), "Stop emails to this address?") {
+		if !strings.Contains(w.Body.String(), "Stop emails to this address") {
 			t.Fatal("GET should render a confirmation, not act")
 		}
 		if bad, _, _ := s.store.IsSuppressed(ctx, victim); bad {

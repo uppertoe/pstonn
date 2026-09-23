@@ -28,7 +28,7 @@ const (
 	reasonDisplace = "this address is the contact for a rego that was on a visitor permit"
 	reasonDriverOn = "this address is the contact for a rego put on a visitor parking permit"
 	reasonTest     = "you asked p.stonn to send a test notification"
-	reasonOnboard  = "you signed up for p.stonn with it but haven't connected a council account yet"
+	reasonOnboard  = "you signed up for p.stonn with this address but have not yet linked a council account"
 	reasonReferral = "someone who uses p.stonn asked us to tell you about it"
 )
 

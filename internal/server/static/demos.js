@@ -61,14 +61,14 @@
       if (cap) { cap.innerHTML = "A weekly schedule that keeps your council permit in sync."; cap.classList.add("show"); }
       return;
     }
-    var steps = [[100, reset], [260, function () { say("Set which car is on your permit each day."); }]];
+    var steps = [[100, reset], [260, function () { say("Choose which rego is on your permit each day."); }]];
     PLAN.forEach(function (id, i) { steps.push([620 + i * 200, function () { fill(cells[i], id, false); }]); });
-    steps.push([2300, function () { say("<b>p.stonn sets your council permit to match &mdash; automatically.</b>"); }]);
+    steps.push([2300, function () { say("<b>p.stonn updates your council permit to match, automatically.</b>"); }]);
     steps.push([2560, function () { settle(); if (sync) { sync.classList.add("pulse"); setTimeout(function () { sync.classList.remove("pulse"); }, 600); } }]);
     steps.push([4300, function () { say("You get an email or push each time it changes."); }]);
     steps.push([4500, function () { show(push, true); }]);
     steps.push([6600, function () { show(push, false); }]);
-    steps.push([7050, function () { say("Or share a link so visitors set their own car."); }]);
+    steps.push([7050, function () { say("Or send a guest pass so visitors put their own rego on."); }]);
     steps.push([7250, function () { show(guest, true); }]);
     steps.push([9500, function () { show(guest, false); }]);
     loop(steps, 10600);
@@ -89,11 +89,11 @@
     function moveTo(el) { cpos = center(el); place(1); cursor.classList.add("on"); }
     function tap(i) { cells[i].classList.add("tap"); setTimeout(function () { cells[i].classList.remove("tap"); }, 200); }
 
-    if (reduced) { PLAN.forEach(function (id, i) { fill(cells[i], id, true); }); cells[TODAY].classList.add("today"); pdot.style.background = CARS[PLAN[TODAY]].v; prego.textContent = CARS[PLAN[TODAY]].rego; cap.innerHTML = "Set a car for each day. <b>p.stonn keeps the council permit in sync.</b>"; cap.classList.add("show"); return; }
+    if (reduced) { PLAN.forEach(function (id, i) { fill(cells[i], id, true); }); cells[TODAY].classList.add("today"); pdot.style.background = CARS[PLAN[TODAY]].v; prego.textContent = CARS[PLAN[TODAY]].rego; cap.innerHTML = "Set a rego for each day. <b>p.stonn keeps the council permit in sync.</b>"; cap.classList.add("show"); return; }
 
     function build() {
       return [
-        [150, function () { reset(); say("Pick a car for each day."); }],
+        [150, function () { reset(); say("Pick a rego for each day."); }],
         [700, function () { moveTo(cells[0]); }],
         [1300, function () {
           place(.82); tap(0); var c = center(cells[0]);
@@ -113,17 +113,17 @@
         [3450, function () { fill(cells[2], 1, true); tap(2); }],
         [3650, function () { fill(cells[3], 1, true); tap(3); }],
         [3850, function () { fill(cells[4], 1, true); tap(4); }],
-        [4300, function () { say("Give the weekend different cars if you like."); moveTo(cells[5]); }],
+        [4300, function () { say("Give the weekend different regos if you like."); moveTo(cells[5]); }],
         [4650, function () { place(.82); tap(5); }],
         [4820, function () { place(1); fill(cells[5], 2, true); }],
         [5050, function () { moveTo(cells[6]); }],
         [5400, function () { place(.82); tap(6); }],
         [5570, function () { place(1); fill(cells[6], 3, true); cursor.classList.remove("on"); }],
-        [6050, function () { say("<b>p.stonn sets your council permit to match, automatically.</b>"); }],
+        [6050, function () { say("<b>p.stonn updates your council permit to match, automatically.</b>"); }],
         [6300, function () { cells[TODAY].classList.add("today"); }],
         [6600, function () { pdot.style.background = CARS[PLAN[TODAY]].v; prego.textContent = CARS[PLAN[TODAY]].rego; sync.classList.add("pulse"); }],
         [7200, function () { sync.classList.remove("pulse"); }],
-        [7900, function () { say("No more logging in every time someone helps with the kids."); }]
+        [7900, function () { say("You no longer need to sign in every time someone helps with the kids."); }]
       ];
     }
     requestAnimationFrame(function () { requestAnimationFrame(function () { loop(build(), 10600); }); });
@@ -209,7 +209,7 @@
       cars.forEach(function (c) { c.classList.add("in"); });
       pick().classList.add("on"); settle();
       var cap = root.querySelector(".dm-caption span");
-      if (cap) { cap.innerHTML = "They tap their car — <b>on until the end of today</b>, and you're told."; cap.classList.add("show"); }
+      if (cap) { cap.innerHTML = "They tap their rego, and it stays <b>on until the end of today</b>. p.stonn tells you each time."; cap.classList.add("show"); }
       return;
     }
     function reset() {
@@ -219,15 +219,15 @@
     }
     var steps = [
       [150, reset],
-      [300, function () { say("Send the pass once &mdash; they keep the link."); }],
+      [300, function () { say("Send the pass once, and they keep the link."); }],
       [700, function () { show(mail, true); }],
-      [2900, function () { show(mail, false); say("When they arrive, they tap their car."); }]
+      [2900, function () { show(mail, false); say("When they arrive, they tap their rego."); }]
     ];
     cars.forEach(function (c, i) { steps.push([3300 + i * 200, function () { c.classList.add("in"); }]); });
     steps.push([4500, function () { pick().classList.add("on"); }]);
     steps.push([4800, function () { guntil.textContent = "applying…"; }]);
     steps.push([5600, function () { settle(); pulse(sync); }]);
-    steps.push([5900, function () { say("<b>On until the end of today</b> &mdash; and you're told each time."); }]);
+    steps.push([5900, function () { say("<b>It stays on until the end of today</b>, and p.stonn tells you each time."); }]);
     loop(steps, 9200);
   }
 
@@ -244,7 +244,7 @@
       cars.forEach(function (c) { c.classList.add("in"); });
       car(CHOICE).classList.add("on"); settle();
       var cap = root.querySelector(".dm-caption span");
-      if (cap) { cap.innerHTML = "One tap from your home screen &mdash; <b>on until the end of today</b>."; cap.classList.add("show"); }
+      if (cap) { cap.innerHTML = "One tap on your home screen puts a rego <b>on until the end of today</b>."; cap.classList.add("show"); }
       return;
     }
     function reset() {
@@ -254,7 +254,7 @@
     }
     var steps = [
       [150, reset],
-      [300, function () { say("Save the picker to your home screen once."); }],
+      [300, function () { say("Save the quick picker to your home screen once."); }],
       [700, function () { show(home, true); }],
       [2700, function () { show(home, false); say("Then tap a rego whenever you need it on the permit."); }],
       [3100, function () { car(1).classList.add("in"); }],
@@ -262,7 +262,7 @@
       [4300, function () { car(CHOICE).classList.add("on"); }],
       [4600, function () { until.textContent = "applying…"; }],
       [5400, function () { settle(); pulse(sync); }],
-      [5700, function () { say("<b>On until the end of today</b> &mdash; then the roster takes over."); }],
+      [5700, function () { say("<b>It stays on until the end of today</b>, and then the roster takes over."); }],
       [7900, function () { say("Add a rego in the app and it appears here by itself."); }],
       [8300, function () { car(3).classList.add("in"); }]
     ];
@@ -284,22 +284,22 @@
     if (reduced) {
       show(qr, true); settle();
       var cap = root.querySelector(".dm-caption span");
-      if (cap) { cap.innerHTML = "The visitor scans this, types their plate &mdash; <b>done</b>. It stops working after 15 minutes."; cap.classList.add("show"); }
+      if (cap) { cap.innerHTML = "The visitor scans this and types their number plate. It stops working after 15 minutes."; cap.classList.add("show"); }
       return;
     }
     loop([
       [150, reset],
-      [300, function () { say("A visitor arrives &mdash; tap <b>Show visitor QR</b>."); }],
+      [300, function () { say("When a visitor arrives, tap <b>Show visitor QR</b>."); }],
       [1300, function () { press(btn); }],
       [1550, function () { show(qr, true); }],
       [2700, function () { say("They scan it straight off your screen."); }],
-      [4100, function () { show(guest, true); say("No app, no account &mdash; they type their plate."); }],
+      [4100, function () { show(guest, true); say("They type their number plate, with no app and no account."); }],
       [4800, function () { fld.classList.add("lit"); show(plate, true); }],
       [5300, function () { fld.classList.remove("lit"); }],
       [5800, function () { press(put); }],
       [6100, function () { statSpin(stat, "Changing to <b>XYZ789</b>&hellip;"); }],
       [7400, function () { statOk(stat, "<b>XYZ789</b> is on the permit until the end of today."); }],
-      [8800, function () { show(guest, false); say("<b>Done.</b> The code stops working after 15 minutes."); }],
+      [8800, function () { show(guest, false); say("<b>Their rego is on the permit.</b> The code stops working after 15 minutes."); }],
       [9000, function () { settle(); pulse(sync); }]
     ], 11800);
   }
@@ -313,18 +313,18 @@
     if (reduced) {
       show(done, true);
       var cap = root.querySelector(".dm-caption span");
-      if (cap) { cap.innerHTML = "A scan only <b>asks</b> &mdash; nothing goes on the permit until you approve it from your phone."; cap.classList.add("show"); }
+      if (cap) { cap.innerHTML = "A scan only sends you a request, and p.stonn changes nothing until you approve it from your phone."; cap.classList.add("show"); }
       return;
     }
     loop([
       [150, reset],
-      [300, function () { say("Print it once &mdash; it can live on the fridge for years."); }],
+      [300, function () { say("Print it once, and it can live on the fridge for years."); }],
       [2300, function () { paper.classList.add("lit"); say("A visitor scans it and asks to use the permit."); }],
       [3100, function () { paper.classList.remove("lit"); }],
       [4300, function () { show(push, true); say("Your phone gets the request, wherever you are."); }],
       [6600, function () { press(ok); }],
       [7000, function () { show(push, false); show(done, true); }],
-      [7600, function () { say("<b>Nothing goes on the permit until you say yes.</b>"); }]
+      [7600, function () { say("<b>p.stonn changes nothing until you say yes.</b>"); }]
     ], 10600);
   }
 

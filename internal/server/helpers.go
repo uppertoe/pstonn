@@ -130,7 +130,7 @@ func (s *Server) messageWithLink(w http.ResponseWriter, code int, msg, label, hr
 
 func (s *Server) serverError(w http.ResponseWriter, err error) {
 	alog.Errorf("server error: %v", err)
-	s.message(w, http.StatusInternalServerError, "Something went wrong. Please try again.")
+	s.message(w, http.StatusInternalServerError, "p.stonn could not finish that request. Please try again.")
 }
 
 func redirectHome(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +150,7 @@ func normalizeReg(s string) string { return model.NormPlate(s) }
 // actually produces fines — visually confusable characters — because the
 // tenant will store whatever well-formed string it is given (see validRego).
 const plateFormatMsg = "Enter a valid number plate: 2–8 letters and numbers, e.g. ABC123. " +
-	"Check it against the plate itself — letter O vs zero 0 and letter I vs one 1 are easy to mix up."
+	"Check it against the plate itself, because letter O and zero 0, and letter I and one 1, are easy to mix up."
 
 // validRego reports whether s (already normalised: upper-case, no spaces) is a
 // plausible number plate: 2–8 alphanumeric characters. It is a sanity gate to
@@ -204,5 +204,5 @@ func atoi64(s string) int64 {
 // covers the likeliest real cause — a truncated link from an email or chat.
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	s.message(w, http.StatusNotFound,
-		"There's nothing at this address. If you followed a link from an email or message, it may have been cut short — try copying the whole link.")
+		"There's nothing at this address. If you followed a link from an email or message, it may have been cut short, so try copying the whole link.")
 }

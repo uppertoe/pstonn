@@ -180,17 +180,17 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 	heardFrom := !guestScanner.allow("greq:"+rateLimitKey(r)) || (haveMine && mine.Status == "pending")
 	if !ownRepeat && heardFrom {
 		if reserved, err := s.store.PendingGuestRequestsInReserve(r.Context(), gc.Grant.ID); err == nil && reserved {
-			s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please knock or contact them directly.")
+			s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please contact the resident directly.")
 			return
 		}
 	}
 	reqID, nonce, created, err := s.store.CreateGuestRequest(r.Context(), gc.Grant.ID, permit.ID, permit.Owner, plate, plateState, randNonce())
 	if errors.Is(err, store.ErrGuestRequestLimit) {
-		s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please knock or contact them directly.")
+		s.renderGuestResult(w, "", false, "There are already several requests waiting for the resident. Please contact the resident directly.")
 		return
 	}
 	if err != nil {
-		s.renderGuestResult(w, "", false, "Something went wrong sending your request. Please try again.")
+		s.renderGuestResult(w, "", false, "p.stonn could not send your request. Please try again.")
 		return
 	}
 	if !created {
@@ -206,7 +206,7 @@ func (s *Server) guestRequest(w http.ResponseWriter, r *http.Request, gc guestCt
 				Wait: &guestWaitView{Plate: mine.Plate, ReqID: mine.ID, Nonce: myNonce, Status: mine.Status}})
 			return
 		}
-		s.renderGuestResult(w, "", true, "A request for "+plate+" is already waiting for the resident to approve. There's nothing more to do here — if it isn't approved shortly, try knocking.")
+		s.renderGuestResult(w, "", true, "A request for "+plate+" is already waiting for the resident to approve. Please contact the resident if approval is taking longer than you expect.")
 		return
 	}
 	s.notifyGuestRequest(r.Context(), permit, plate, reqID)
@@ -378,7 +378,7 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 	g, err := s.store.PrintedGrantByID(r.Context(), owner, atoi64(r.PathValue("id")))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			s.message(w, http.StatusNotFound, "That door QR is no longer available.")
+			s.message(w, http.StatusNotFound, "That printed QR is no longer available.")
 			return
 		}
 		s.serverError(w, err)
@@ -399,7 +399,7 @@ func (s *Server) viewDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The at-rest key changed, so we can't reproduce the printed code. Ask the
 		// holder to replace it (which mints a fresh one they can reprint).
-		s.message(w, http.StatusConflict, "This code can't be shown again on this server. Remove it on the Guests page, then create a new printed QR for this permit.")
+		s.message(w, http.StatusConflict, "p.stonn can no longer show this printed QR. Remove it on the Guests tab, then print a new QR for this permit.")
 		return
 	}
 	url := s.guestLink(raw)
@@ -443,7 +443,7 @@ func (s *Server) revokeDoorQR(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionDoorQRRevoke, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" removed a printed QR code on your p.stonn account. Any copy already printed and put up has stopped working, and p.stonn is taking any rego approved through it back off the permit now — check the permit directly if this is urgent.")
+			user+" removed a printed QR on your p.stonn account. Every printed copy has stopped working, and p.stonn is removing any rego approved through it from the permit.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)
@@ -482,28 +482,28 @@ const (
 
 // decideCapFullMessage is shown when an approval hits the guest-booking
 // sub-cap; shared by both front doors so the wording can never drift.
-const decideCapFullMessage = "This permit already has the maximum number of active guest bookings. Remove one before approving another."
+const decideCapFullMessage = "This permit already has as many guest bookings as it can hold. Remove one before you approve another."
 
 // decidePermitInactiveMessage: approving a request against a permit the tenant
 // has since cancelled (or that has expired) must refuse loudly. Silently
 // "approving" would strand the visitor on a permit that protects nobody.
-const decidePermitInactiveMessage = "This permit is no longer active (cancelled or expired), so nothing can go on it. The visitor has not been approved — let them know."
+const decidePermitInactiveMessage = "The council lists this permit as cancelled or expired, so p.stonn cannot put anything on it. You have not approved the visitor, so please let them know."
 
 // permitInactiveNoNewLinks refuses minting any guest surface (pass, visitor QR,
 // door QR) for a permit that is cancelled or expired: every link would promise
 // parking cover the permit can no longer give.
-const permitInactiveNoNewLinks = "That permit is no longer active, so guest links and QR codes can't be created for it."
+const permitInactiveNoNewLinks = "That permit is no longer active, so you cannot create guest passes or QRs for it."
 
 // permitInactivePassFrozen refuses re-sending or editing a pass whose permit has
 // died — a re-send would rotate away the recipient's token (the very thing that
 // starts working again after a renewal copy) and email a born-dead link in its
 // place; an edit can add recipients, which is minting by another door.
-const permitInactivePassFrozen = "That pass's permit is no longer active, so its links can't be re-sent or offered to new people. Renewed the permit? Use “Copy schedule from another permit” — the pass moves across and its links start working again."
+const permitInactivePassFrozen = "That pass’s permit is no longer active, so you cannot re-send its links or add people to it. If you have renewed the permit, use “Copy schedule from another permit” on the new one, and the pass will move across and its links will work again."
 
 // permitInactiveNoPoster refuses showing the printable poster for a dead
 // permit's door QR: the POST mint gate calls reprinting one "as misleading as
 // minting a fresh one", and the view page is the same artifact one click later.
-const permitInactiveNoPoster = "That permit is no longer active, so its printed QR can't be shown or reprinted. Renewed the permit? Use “Copy schedule from another permit” — the door QR moves across and the printed poster keeps working."
+const permitInactiveNoPoster = "That permit is no longer active, so you cannot show or reprint its printed QR. If you have renewed the permit, use “Copy schedule from another permit” on the new one, and the printed QR will move across and keep working."
 
 // refuseDeadGrantPermit answers the request with msg when the grant's permit is
 // cancelled or expired, reporting whether it wrote a response. An unknown grant
@@ -697,7 +697,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 // them retrying a link that will never work again.
 func guestCreateMessage(err error, fallback string) string {
 	if errors.Is(err, store.ErrGuestOverrideRefused) {
-		return "This link is no longer active, so the permit wasn't changed. Please ask the household for a new one."
+		return "This link is no longer active, so the permit has not changed. Please ask the resident for a new one."
 	}
 	return fallback
 }
@@ -746,9 +746,9 @@ func (s *Server) authoriseGuestApply(ctx context.Context, tokenID, overrideID in
 
 func (d guestApplyDenial) message() string {
 	if d == guestApplyRevoked {
-		return "This link was turned off just now, so the permit wasn't changed."
+		return "The resident has just turned this link off, so the permit has not changed."
 	}
-	return "We couldn't check your link just now, so the permit wasn't changed. Please try again."
+	return "p.stonn could not check your link just now, so the permit has not changed. Please try again."
 }
 
 // claimPermitApplies takes the per-permit apply claim for every id before a revocation

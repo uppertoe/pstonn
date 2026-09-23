@@ -66,7 +66,7 @@ func htmlDocument(subject, body, footer, provenance, unsubURL string, hero Hero)
 	if provenance != "" {
 		b.WriteString(`<div style="margin-bottom:12px;">` + template.HTMLEscapeString(provenance) + `</div>`)
 	}
-	b.WriteString(`<div>p<span style="color:` + colPrimary + `;">.</span>stonn — a free, unofficial tool.`)
+	b.WriteString(`<div>p<span style="color:` + colPrimary + `;">.</span>stonn is a free, unofficial tool.`)
 	if footer != "" {
 		b.WriteString(` ` + template.HTMLEscapeString(footer))
 	}

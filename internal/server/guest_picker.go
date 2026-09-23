@@ -207,13 +207,13 @@ func (s *Server) createPicker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		s.formError(w, r, "Could not read the form. Please try again.")
+		s.formError(w, r, "p.stonn could not read the form. Please try again.")
 		return
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
 	vehicleIDs, allowOvernight, allVehicles := pickerForm(r)
 	if !allVehicles && len(vehicleIDs) == 0 {
-		s.formError(w, r, "Tick at least one rego for the picker to offer, or offer every rego.")
+		s.formError(w, r, "Tick at least one rego for the quick picker to offer, or choose to offer every rego.")
 		return
 	}
 	// Refuse a dead permit before minting anything, failing closed on a store
@@ -258,12 +258,12 @@ func (s *Server) updatePicker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		s.formError(w, r, "Could not read the form. Please try again.")
+		s.formError(w, r, "p.stonn could not read the form. Please try again.")
 		return
 	}
 	vehicleIDs, allowOvernight, allVehicles := pickerForm(r)
 	if !allVehicles && len(vehicleIDs) == 0 {
-		s.formError(w, r, "Tick at least one rego for the picker to offer, or offer every rego.")
+		s.formError(w, r, "Tick at least one rego for the quick picker to offer, or choose to offer every rego.")
 		return
 	}
 	pg, err := s.store.PickerGrant(r.Context(), owner)
@@ -291,7 +291,7 @@ func (s *Server) updatePicker(w http.ResponseWriter, r *http.Request) {
 		s.kickScheduler()
 	}
 	s.logChange(r.Context(), owner, user, store.ActionPickerUpdate, "", "")
-	s.respondPickerCard(w, r, owner, false, "Quick picker updated.", "updated")
+	s.respondPickerCard(w, r, owner, false, "You updated the quick picker.", "updated")
 }
 
 // rotatePicker gives the picker a fresh link, for a lost or replaced phone. The
@@ -331,7 +331,7 @@ func (s *Server) rotatePicker(w http.ResponseWriter, r *http.Request) {
 	s.logChange(r.Context(), owner, user, store.ActionPickerRotate, "", "")
 	// Every phone in the household that saved the old link has lost it.
 	s.notifyDestructive(r.Context(), owner, user,
-		user+" gave the quick picker a new link. The one saved on any phone has stopped working; open the Guests tab to save the new one.")
+		user+" gave the quick picker a new link. The link saved on any phone has stopped working, so open the Guests tab to save the new one.")
 	s.respondPickerCard(w, r, owner, false, "The quick picker has a new link. The one on your phone has stopped working, so open this one and save it again.", "newlink")
 }
 
@@ -364,8 +364,8 @@ func (s *Server) deletePicker(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionPickerDelete, "", "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" deleted the quick picker on your p.stonn account. Its link has stopped working, and p.stonn is taking any rego it put on the permit back off now.")
+			user+" deleted the quick picker on your p.stonn account. Its link no longer works, and p.stonn is removing any rego it set on the permit.")
 		s.kickScheduler()
 	}
-	s.respondPickerCard(w, r, owner, false, "Quick picker deleted. Its link has stopped working.", "deleted")
+	s.respondPickerCard(w, r, owner, false, "You deleted the quick picker, and its link no longer works.", "deleted")
 }

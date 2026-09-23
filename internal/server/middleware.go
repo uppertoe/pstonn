@@ -233,7 +233,7 @@ func (s *Server) accountForWrite(w http.ResponseWriter, r *http.Request) (user, 
 	user, owner, isPrimary, err := s.resolveAccountStrict(r.Context())
 	if err != nil {
 		alog.Errorf("accountForWrite %s: membership lookup failed; refusing the mutation: %v", redact.Email(user), err)
-		s.message(w, http.StatusServiceUnavailable, "We couldn't confirm your account just now. Please try again in a moment.")
+		s.message(w, http.StatusServiceUnavailable, "p.stonn couldn’t confirm your account just now. Please try again in a moment.")
 		return "", "", false, false
 	}
 	return user, owner, isPrimary, true
@@ -254,7 +254,7 @@ func (s *Server) withUser(h http.HandlerFunc) http.HandlerFunc {
 		// have side effects, and resetting the idle clock is one — it extends how
 		// long a tenant session is held for a household that may have left.
 		if isStateChanging(r) && !sameOrigin(r) {
-			s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
+			s.message(w, http.StatusForbidden, "p.stonn could not verify this request. Please reload the page and try again.")
 			return
 		}
 		// Being here resets the account's idle clock (see decideWarm): the

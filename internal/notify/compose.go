@@ -184,49 +184,49 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 		car = fmt.Sprintf("%s — %s", o.Name, o.Reg)
 	}
 	if o.OK {
-		subject = fmt.Sprintf("Permit updated: %s now shows %s", o.PermitLabel, o.Reg)
-		const confirm = "\n\nNothing to do — this is just your confirmation it went through."
+		subject = fmt.Sprintf("%s is now on your permit “%s”", o.Reg, o.PermitLabel)
+		const confirm = "\n\nThis is simply to confirm the change, and you don’t need to do anything."
 		if o.Empty {
-			subject = fmt.Sprintf("Permit updated: %s now has no rego", o.PermitLabel)
+			subject = fmt.Sprintf("Your permit “%s” now has no rego on it", o.PermitLabel)
 		}
 		switch {
 		case o.Empty && o.Source == "roster":
-			body = fmt.Sprintf("Your %s now has no rego on it for today, as scheduled by your roster (regos are removed on this day). Nothing is covered on that permit until a rego is put on.%s", o.PermitLabel, confirm)
+			body = fmt.Sprintf("Your permit “%s” has no rego on it for today, as scheduled by your roster (regos are removed on this day). No car is covered by that permit until you select a rego.%s", o.PermitLabel, confirm)
 		case o.Empty && o.Source == "override" && o.By != "":
-			body = fmt.Sprintf("Your %s now has no rego on it, for a one-off booking made by %s that clears the permit. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, o.By, confirm)
+			body = fmt.Sprintf("Your permit “%s” has no rego on it, because %s has scheduled the permit to be cleared. No car is covered by that permit until the booking ends.%s", o.PermitLabel, o.By, confirm)
 		case o.Empty && o.Source == "override":
-			body = fmt.Sprintf("Your %s now has no rego on it, for the one-off booking you made that clears the permit. Nothing is covered on that permit until that booking ends.%s", o.PermitLabel, confirm)
+			body = fmt.Sprintf("Your permit “%s” has no rego on it, because you scheduled the permit to be cleared. No car is covered by that permit until the booking ends.%s", o.PermitLabel, confirm)
 		case o.Empty:
-			body = fmt.Sprintf("Your %s now has no rego on it.%s", o.PermitLabel, confirm)
+			body = fmt.Sprintf("Your permit “%s” now has no rego on it.%s", o.PermitLabel, confirm)
 		case o.Source == "doorqr":
-			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s approved a visitor's request from your printed QR code, so it overrides your schedule until that booking ends — then your roster takes over again.",
-				o.PermitLabel, car, o.By)
+			body = fmt.Sprintf("%s is now on your permit “%s”.\n\n%s approved a visitor’s request from your printed QR. When the booking ends, your roster takes over, or if nothing is scheduled, the rego stays on until the next change.",
+				car, o.PermitLabel, o.By)
 		case o.Source == "guest":
-			body = fmt.Sprintf("Your %s is now set to %s.\n\n%s activated it with a guest link, so it overrides your schedule until that booking ends — then your roster takes over again.",
-				o.PermitLabel, car, o.By)
+			body = fmt.Sprintf("%s is now on your permit “%s”.\n\n%s put it on with their guest pass. When the booking ends, your roster takes over, or if nothing is scheduled, the rego stays on until the next change.",
+				car, o.PermitLabel, o.By)
 		case o.Source == "picker":
-			body = fmt.Sprintf("Your %s is now set to %s, from the quick picker on your phone. It stays until that booking ends — then your roster takes over again.%s",
-				o.PermitLabel, car, confirm)
+			body = fmt.Sprintf("%s is now on your permit “%s”. Someone in your household put it on with the quick picker. When the booking ends, your roster takes over, or if nothing is scheduled, the rego stays on until the next change.%s",
+				car, o.PermitLabel, confirm)
 		case o.Source == "override" && o.By != "":
 			// Name whoever made the booking. On a shared account this is the only
 			// signal distinguishing "the schedule ran" from "someone booked over it",
 			// and the plate alone doesn't say who decided it.
-			body = fmt.Sprintf("Your %s is now set to %s, for a one-off booking made by %s.%s",
-				o.PermitLabel, car, o.By, confirm)
+			body = fmt.Sprintf("%s is now on your permit “%s”, for a booking %s made.%s",
+				car, o.PermitLabel, o.By, confirm)
 		case o.Source == "roster":
 			// "your roster", not "your weekly roster": a multi-week cycle is still
 			// the roster, and the weekly case loses nothing.
-			body = fmt.Sprintf("Your %s is now set to %s for today, as scheduled by your roster.%s", o.PermitLabel, car, confirm)
+			body = fmt.Sprintf("%s is on your permit “%s” for today, as scheduled by your roster.%s", car, o.PermitLabel, confirm)
 		case o.Source == "override":
-			body = fmt.Sprintf("Your %s is now set to %s, for the one-off booking you made.%s", o.PermitLabel, car, confirm)
+			body = fmt.Sprintf("%s is now on your permit “%s”, for the booking you made.%s", car, o.PermitLabel, confirm)
 		default:
-			body = fmt.Sprintf("Your %s is now set to %s.%s", o.PermitLabel, car, confirm)
+			body = fmt.Sprintf("%s is now on your permit “%s”.%s", car, o.PermitLabel, confirm)
 		}
 		if o.DisplacedReg != "" {
 			if o.DisplacedTold {
-				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on. We have emailed the person whose rego that is.", o.DisplacedReg)
+				body += fmt.Sprintf("\n\nTo make this change, p.stonn removed %s, which a booking had set. We have emailed the person whose rego that is.", o.DisplacedReg)
 			} else {
-				body += fmt.Sprintf("\n\nThis replaced %s, which an active booking had put on. We had no way to reach whoever drives it — if %s is still parked there, please let them know it's no longer covered.", o.DisplacedReg, o.DisplacedReg)
+				body += fmt.Sprintf("\n\nTo make this change, p.stonn removed %s, which a booking had set. We have no way to contact that person, so if %s is still parked there, please let them know the car is no longer covered.", o.DisplacedReg, o.DisplacedReg)
 			}
 		}
 	} else {
@@ -239,24 +239,24 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 			// The council itself is down; name that, and don't promise it "shows X for
 			// now" as if a quick retry will fix it. Neutral "council" (not a hard-coded
 			// name) for the multi-council guard.
-			subject = fmt.Sprintf("The council's system is down — your %s change is waiting", o.PermitLabel)
+			subject = fmt.Sprintf("Your permit “%s” will change once the council’s system is back", o.PermitLabel)
 		case o.CurrentReg != "" && soft:
-			subject = fmt.Sprintf("Still updating your %s — it shows %s for now", o.PermitLabel, o.CurrentReg)
+			subject = fmt.Sprintf("Your permit “%s” still shows %s while p.stonn keeps trying", o.PermitLabel, o.CurrentReg)
 		case o.CurrentReg != "":
-			subject = fmt.Sprintf("Action needed: your %s still shows %s", o.PermitLabel, o.CurrentReg)
+			subject = fmt.Sprintf("Action needed: your permit “%s” still shows %s", o.PermitLabel, o.CurrentReg)
 		case soft:
-			subject = fmt.Sprintf("Still updating your %s", o.PermitLabel)
+			subject = fmt.Sprintf("p.stonn is still trying to update your permit “%s”", o.PermitLabel)
 		default:
-			subject = fmt.Sprintf("Action needed: your %s wasn't updated", o.PermitLabel)
+			subject = fmt.Sprintf("Action needed: p.stonn could not update your permit “%s”", o.PermitLabel)
 		}
-		lines := []string{fmt.Sprintf("p.stonn tried to set your %s to %s but couldn't.", o.PermitLabel, car)}
+		lines := []string{fmt.Sprintf("p.stonn has not been able to put %s on your permit “%s”.", car, o.PermitLabel)}
 		if o.Empty {
-			lines[0] = fmt.Sprintf("p.stonn tried to clear your %s (regos are removed on this day, as scheduled) but couldn't.", o.PermitLabel)
+			lines[0] = fmt.Sprintf("p.stonn has not been able to clear your permit “%s” (regos are removed on this day, as scheduled).", o.PermitLabel)
 		}
 		if o.CurrentReg != "" {
-			lines = append(lines, fmt.Sprintf("The permit still shows %s, so that is the rego currently covered.", o.CurrentReg))
+			lines = append(lines, fmt.Sprintf("%s is still on the permit, so the car with that rego is the one covered.", o.CurrentReg))
 		} else {
-			lines = append(lines, "The rego on the permit has not been changed.")
+			lines = append(lines, "The rego on the permit has not changed.")
 		}
 		if o.Reason != "" {
 			lines = append(lines, "", o.Reason)
@@ -314,13 +314,13 @@ func unusedPassMessage(to []string, appURL string) (subject, body string) {
 	// is the true sentence whether that came from one pass form or two. The
 	// household's grants are grouped by the caller and named here once.
 	many := len(to) != 1
-	pass, guest, link, have := "pass", "guest", "The link", "has"
+	pass, guest, link, have := "pass", "guest", "The link still works", "has"
 	if many {
-		pass, guest, link, have = "passes", "guests", "The links", "have"
+		pass, guest, link, have = "passes", "guests", "The links still work", "have"
 	}
-	subject = fmt.Sprintf("The guest %s you sent have not been accessed yet", pass)
+	subject = fmt.Sprintf("The guest %s you sent have not been used yet", pass)
 	if !many {
-		subject = "The guest pass you sent has not been accessed yet"
+		subject = "The guest pass you sent has not been used yet"
 	}
 	// A grant whose recipients have all been revoked still deserves a readable
 	// sentence, so the list is simply left out rather than printed empty.
@@ -329,15 +329,15 @@ func unusedPassMessage(to []string, appURL string) (subject, body string) {
 		forWhom = " for " + who
 	}
 	lines := []string{
-		fmt.Sprintf("We're checking in because the guest %s you created%s %s not been accessed or used yet.", pass, forWhom, have),
+		fmt.Sprintf("The guest %s you created%s %s not been opened or used yet.", pass, forWhom, have),
 		"",
-		fmt.Sprintf("It may be worth checking with your %s to see whether they received the email containing their pass. Or, you can re-send the pass by opening the guests tab:", guest),
+		fmt.Sprintf("You may want to check with your %s that they received the email with their pass. You can also send the pass again from the Guests tab:", guest),
 		"",
 	}
 	if appURL != "" {
 		lines = append(lines, appURL+"/guests", "")
 	}
-	lines = append(lines, fmt.Sprintf("%s will still work, so if they've received the pass there's nothing else you need to do.", link))
+	lines = append(lines, fmt.Sprintf("%s, so if they have received the pass, you don’t need to do anything else.", link))
 	return subject, strings.Join(lines, "\n")
 }
 
@@ -356,25 +356,25 @@ func unusedPassMessage(to []string, appURL string) (subject, body string) {
 // contactURL may be empty, in which case the offer of help is dropped rather than
 // pointed at a dead link.
 func portalNudgeMessage(plate, appURL, contactURL string, c mailTenant) (subject, body string) {
-	subject = "p.stonn has synced with your council account"
+	subject = "p.stonn has noticed a change you made on the council’s website"
 	lines := []string{
 		say(c, "mail.portal_nudge_lead", map[string]any{"Plate": plate}),
 		"",
 		say(c, "mail.portal_nudge_fine", nil),
 		"",
-		"If you would like, we can help you set up a guest pass link for your visitors, a quick picker for regos on your phone, or put number plate changes on a schedule.",
+		"If you would like, we can help you set up a guest pass for your visitors, a quick picker for regos on your phone, or put number plate changes on a schedule.",
 		"",
 	}
 	// A SHORT "do this:" line directly above a URL becomes that button's label in
 	// the HTML alternative (mailer/html.go), so the invitation and the address are
 	// two lines, not one sentence wrapped around a link.
 	if appURL != "" {
-		lines = append(lines, "Give it a try:", appURL, "")
+		lines = append(lines, "Open p.stonn:", appURL, "")
 	}
 	if contactURL != "" {
-		lines = append(lines, "Or let us know if you need a hand:", contactURL, "")
+		lines = append(lines, "Contact us for assistance:", contactURL, "")
 	}
-	lines = append(lines, "This is the only time p.stonn will raise it.")
+	lines = append(lines, "p.stonn will not send you this note again.")
 	return subject, strings.Join(lines, "\n")
 }
 
@@ -382,12 +382,12 @@ func portalNudgeMessage(plate, appURL, contactURL string, c mailTenant) (subject
 // content — each line answers a distinct observed drop-off cause — is testable
 // without an SMTP conversation.
 func onboardNudgeMessage(to, appURL string, c mailTenant) (subject, body string) {
-	subject = "One step left to start managing your visitor permit"
+	subject = "One step remains before p.stonn can manage your visitor permit"
 	// Layout note: a SHORT "do this:" line directly above each URL becomes that
 	// button's label in the HTML alternative (see mailer/html.go). Folding the
 	// label into the preceding sentence puts the whole sentence on the button.
 	lines := []string{
-		"You signed up for p.stonn, but it isn't connected to your council account yet — so nothing is running. The weekly roster, guest QR codes and one-off bookings all start from that one connection.",
+		"You signed up for p.stonn, but you have not linked your council account yet, so p.stonn cannot do anything for you. The roster, bookings, guest passes and visitor QR all depend on that link.",
 		"",
 		say(c, "mail.nudge_connect", nil),
 		"",
@@ -402,23 +402,23 @@ func onboardNudgeMessage(to, appURL string, c mailTenant) (subject, body string)
 	// its public URL keeps the advice without the address.
 	if appURL != "" {
 		lines = append(lines,
-			"3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill.",
+			"3. If you signed up from a Facebook link, you were using Facebook’s built-in browser, which does not fill in saved passwords.",
 			"Open p.stonn in Safari or Chrome:",
 			appURL,
 			"")
 	} else {
 		lines = append(lines,
-			"3. Your usual browser. If you signed up from a Facebook link, you were inside Facebook's built-in browser, where saved passwords don't auto-fill. Open p.stonn in Safari or Chrome instead.",
+			"3. If you signed up from a Facebook link, you were using Facebook’s built-in browser, which does not fill in saved passwords. Please open p.stonn in Safari or Chrome instead.",
 			"")
 	}
 	lines = append(lines,
-		"One thing to know: p.stonn manages VISITOR permits only — the permit your visitors' regos go on — and only one you already hold; it can't apply for one, and it never touches a resident permit.",
+		"p.stonn can only manage a visitor permit you already hold, and it never changes a resident permit or applies for a new one.",
 		"",
 		say(c, "mail.nudge_apply", nil),
 		"Register with the council:",
 		c.Links.Register,
 		"",
-		"This is the only reminder p.stonn sends. If you've decided it's not for you, there's nothing to undo — your details go no further than the sign-up you made.",
+		"This is the only reminder p.stonn sends. If you’ve decided it’s not for you, there’s nothing to undo. Your details go no further than the sign-up you made.",
 	)
 	return subject, strings.Join(lines, "\n")
 }

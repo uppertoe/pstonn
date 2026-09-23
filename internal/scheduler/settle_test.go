@@ -124,10 +124,10 @@ func TestSettleCorrectionWordingFollowsWhatWasDelivered(t *testing.T) {
 	// Nothing was ever delivered: the close-out must not claim to correct a notice.
 	s.settle(ctx, open("wording-1"))
 	got := actionOf(0)
-	if !strings.Contains(got, "Nothing to apply now") || !strings.Contains(got, "GUEST22") {
+	if !strings.Contains(got, "You don’t need to do anything now") || !strings.Contains(got, "GUEST22") {
 		t.Fatalf("the never-applied fact must still be sent, got %q", got)
 	}
-	if strings.Contains(got, "corrects the earlier notice") {
+	if strings.Contains(got, "corrects our earlier message") {
 		t.Fatalf("the close-out refers to a notice that was never sent: %q", got)
 	}
 
@@ -138,7 +138,7 @@ func TestSettleCorrectionWordingFollowsWhatWasDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.settle(ctx, pTold)
-	if got := actionOf(1); !strings.Contains(got, "corrects the earlier notice") {
+	if got := actionOf(1); !strings.Contains(got, "corrects our earlier message") {
 		t.Fatalf("a delivered notice must be corrected, got %q", got)
 	}
 
@@ -148,7 +148,7 @@ func TestSettleCorrectionWordingFollowsWhatWasDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.settle(ctx, pOther)
-	if got := actionOf(2); strings.Contains(got, "corrects the earlier notice") {
+	if got := actionOf(2); strings.Contains(got, "corrects our earlier message") {
 		t.Fatalf("a notice about another plate was treated as the one being corrected: %q", got)
 	}
 }

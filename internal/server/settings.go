@@ -27,13 +27,13 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	base.Checklist = s.checklistFor(ctx, owner, user, base.IsPrimary, "settings")
 	base.Settings.HouseholdName = s.householdOrEmpty(ctx, owner)
 	if r.URL.Query().Get("autoreconnect") == "off" {
-		base.Flash = "Your saved council password has been removed. p.stonn will no longer reconnect on its own."
+		base.Flash = "You removed your saved council password. p.stonn will no longer reconnect on its own."
 	}
 	if r.URL.Query().Get("named") == "1" {
 		if base.Settings.HouseholdName == "" {
-			base.Flash = "Household name cleared. Visitors now see only the permit."
+			base.Flash = "You cleared the household name. Visitors now see the council’s name instead."
 		} else {
-			base.Flash = "Household name saved. Visitors now see it instead of your email."
+			base.Flash = "You saved the household name. Visitors now see it instead of your email."
 		}
 	}
 	if cs, err := s.store.GetTenantSession(ctx, owner); err == nil {
@@ -77,9 +77,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.URL.Query().Get("tested") == "1" {
-		base.Flash = "Test notification sent."
+		base.Flash = "p.stonn sent you a test notification."
 		if r.URL.Query().Get("confirm") == "1" {
-			base.Flash = "Test notification sent. Tap Confirm on the one that reaches your phone — once you have, you can turn off email."
+			base.Flash = "p.stonn sent you a test notification. Tap Confirm on the one that reaches your phone. Once you have, you can turn off email."
 		}
 	}
 	// Every address below is validated before it is composed into a message. These
@@ -94,11 +94,11 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		if n := atoi(r.URL.Query().Get("revoked")); n > 0 {
 			// Name the count: guest links they created have stopped working, and the
 			// owner should not first learn that from a visitor whose link is dead.
-			pass := "guest pass"
-			if n > 1 {
-				pass = "guest passes"
+			if n == 1 {
+				base.Flash += " The guest pass they created also stopped working, so anyone holding the link can no longer use the permit."
+			} else {
+				base.Flash += fmt.Sprintf(" The %d guest passes they created also stopped working, so anyone holding those links can no longer use the permit.", n)
 			}
-			base.Flash += fmt.Sprintf(" %d %s they created also stopped working, so anyone holding those links can no longer use the permit.", n, pass)
 		}
 	}
 	// An invitation is an offer, not access, so the wording must not promise the
@@ -106,12 +106,12 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	// see inviteSent.
 	if invited := r.URL.Query().Get("invited"); looksLikeEmail(invited) {
 		if r.URL.Query().Get("mailed") == "1" {
-			base.Flash = "Invitation sent to " + invited + ". They will be asked to accept it the next time they sign in, and will have access only once they do."
+			base.Flash = "You sent an invitation to " + invited + ". p.stonn will ask them to accept it the next time they sign in, and they will have access only once they do."
 		} else {
 			// A warn, not the green tick: the invitation exists but the person has not
 			// been told, and the owner has to act. Reporting that under a tick read as
 			// "done" and left the invitee waiting for an email nobody sent.
-			base.Warn = "Invitation recorded for " + invited + ". No email was sent, so you will need to tell them to sign in and accept it."
+			base.Warn = "You invited " + invited + ", but p.stonn did not send an email, so you will need to tell them to sign in and accept it."
 		}
 	}
 	// Resending says nothing new about the invited person's state, so it reuses the
@@ -119,19 +119,19 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	// refused, say so plainly rather than report a send that did not happen.
 	if resent := r.URL.Query().Get("resent"); looksLikeEmail(resent) {
 		if r.URL.Query().Get("mailed") == "1" {
-			base.Flash = "Invitation sent to " + resent + " again. They will be asked to accept it the next time they sign in, and will have access only once they do."
+			base.Flash = "You sent the invitation to " + resent + " again. p.stonn will ask them to accept it the next time they sign in, and they will have access only once they do."
 		} else {
-			base.Warn = "p.stonn has emailed " + resent + " recently, so nothing was sent just now. The invitation still stands, and you can try again later."
+			base.Warn = "p.stonn has emailed " + resent + " recently, so it has not sent anything just now. The invitation still stands. You can try again later."
 		}
 	}
 	if wd := r.URL.Query().Get("withdrawn"); looksLikeEmail(wd) {
-		base.Flash = "Invitation to " + wd + " withdrawn. It granted no access, so nothing of theirs was changed."
+		base.Flash = "You withdrew the invitation to " + wd + ". It granted no access, so nothing of theirs has changed."
 	}
 	if joined := r.URL.Query().Get("joined"); looksLikeEmail(joined) {
 		base.Flash = "You now share " + joined + "'s account."
 	}
 	if r.URL.Query().Get("declined") == "1" {
-		base.Flash = "Invitation declined. Nothing was shared, and your own account is unaffected."
+		base.Flash = "You declined the invitation. Nothing was shared. Your own account is unaffected."
 	}
 	// Notification preferences are per-person: each user (primary or secondary)
 	// controls how THEY are notified, keyed to their own signed-in email.
@@ -149,7 +149,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 	base.Settings.Notify = s.notifyViewOf(ctx, user, pref)
 	// Terms acceptance is per person; show the signed-in user's own consent.
 	if c, err := s.store.LatestConsent(ctx, base.User.Email); err == nil {
-		base.Terms.Accepted = fmt.Sprintf("v%s on %s", c.Version, c.AgreedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006"))
+		base.Terms.Accepted = fmt.Sprintf("(v%s) on %s", c.Version, c.AgreedAt.In(s.locFor(ctx, owner)).Format("2 Jan 2006"))
 	}
 	base.Terms.Clauses = s.terms.Clauses
 	// Shared access: the owner sees who has access; a secondary sees whose account.
@@ -218,7 +218,7 @@ func (s *Server) resumeEmail(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	status := "Email resumed."
+	status := "You resumed email."
 	if cleared, err := s.store.UnsuppressIfUnsubscribed(r.Context(), user); err != nil {
 		s.serverError(w, err)
 		return
@@ -292,7 +292,7 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 	// it — so the "only tell me when something's wrong" preference was unreachable.
 	pref.FailuresOnly = r.FormValue("failures_only") != ""
 	// Quiet hours: hold overnight notices and deliver them at a chosen local hour.
-	nudged, nudgeMsg := false, "The two times must differ; end time moved."
+	nudged, nudgeMsg := false, "The two times must differ, so p.stonn moved the end time."
 	if r.FormValue("quiet_enabled") != "" {
 		pref.QuietFrom = clampHour(r.FormValue("quiet_from"), 22)
 		pref.QuietUntil = clampHour(r.FormValue("quiet_until"), 6)
@@ -307,7 +307,7 @@ func (s *Server) saveNotify(w http.ResponseWriter, r *http.Request) {
 		if span := ((pref.QuietUntil - pref.QuietFrom) + 24) % 24; span > notify.MaxQuietHours {
 			pref.QuietUntil = (pref.QuietFrom + notify.MaxQuietHours) % 24
 			nudged = true
-			nudgeMsg = fmt.Sprintf("Quiet hours are capped at %d hours; end time moved.", notify.MaxQuietHours)
+			nudgeMsg = fmt.Sprintf("Quiet hours are capped at %d hours, so p.stonn moved the end time.", notify.MaxQuietHours)
 		}
 	} else {
 		pref.QuietFrom, pref.QuietUntil = 0, 0 // equal ⇒ disabled (immediate delivery)
@@ -345,11 +345,11 @@ func (s *Server) regenTopic(w http.ResponseWriter, r *http.Request) {
 	// and a household running push-only would now have no proven channel at all, so
 	// email comes back on until the new topic is confirmed (the same rule saveNotify
 	// applies when they try to switch it off).
-	status := "New topic. Subscribe to it in the ntfy app, then tap Send a test to my phone and Confirm on the notification."
+	status := "p.stonn made a new topic. Subscribe to it in the ntfy app, then tap Send a test to my phone and Confirm on the notification."
 	pref.NtfyConfirmedAt = ""
 	if !pref.EmailEnabled {
 		pref.EmailEnabled = true
-		status += " Email is back on until you have."
+		status += " p.stonn has turned email back on until you do."
 	}
 	if err := s.store.SetNotifyPref(r.Context(), pref); err != nil {
 		s.serverError(w, err)
@@ -380,7 +380,7 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 		// Details (SMTP hosts, dial errors, ntfy URLs) go to the log, not the
 		// browser.
 		alog.Infof("test notify %s: %v", redact.Email(user), err)
-		s.message(w, http.StatusBadGateway, "Couldn't send the test notification. Check your channels in Settings, and ask the operator to check the logs if it keeps failing.")
+		s.message(w, http.StatusBadGateway, "p.stonn couldn’t send the test notification. Check your notification settings, and if this keeps failing, you can contact us for assistance.")
 		return
 	}
 	if isHX(r) && !isBoosted(r) {
@@ -389,9 +389,9 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 			s.serverError(w, err)
 			return
 		}
-		status := "Test notification sent."
+		status := "p.stonn sent you a test notification."
 		if awaiting {
-			status = "Test notification sent. Tap Confirm on the one that reaches your phone, and push is proven."
+			status = "p.stonn sent you a test notification. Tap Confirm on the one that reaches your phone. Once you have, you can turn off email."
 		}
 		s.renderNotify(w, r, user, pref, status, "")
 		return
@@ -449,17 +449,17 @@ func (s *Server) testPush(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		alog.Infof("test push %s: %v", redact.Email(user), err)
-		s.renderNotify(w, r, user, pref, "", "Couldn't reach the push server just now. Please try again shortly.")
+		s.renderNotify(w, r, user, pref, "", "p.stonn couldn’t reach the push server just now. Please try again shortly.")
 		return
 	}
 	nv := s.notifyViewOf(r.Context(), user, pref)
-	nv.Status = "Test sent to your phone."
+	nv.Status = "p.stonn sent a test to your phone."
 	if awaiting {
 		// The box itself shows "sent" and what to do next, and starts polling
 		// ntfyStatus so the page flips to confirmed on its own when the phone is
 		// tapped — the person is looking at this box, not at a status line below it.
 		nv.PushSent = true
-		nv.Status = "Test sent to your phone — tap Confirm on the notification when it arrives."
+		nv.Status = "p.stonn sent a test to your phone. Tap Confirm on the notification when it arrives."
 	}
 	s.renderNotifyView(w, r, nv)
 }

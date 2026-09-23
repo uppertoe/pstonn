@@ -18,12 +18,12 @@ import (
 // email is configured), plus push if enabled. Returns the number of channels
 // that accepted the message.
 func (s *Service) NotifyRelinkRequired(ctx context.Context, owner, tenantID string) int {
-	subject := "Action needed: reconnect your p.stonn council account"
+	subject := "Action needed: reconnect your council account to p.stonn"
 	body := "Your council connection has expired, so p.stonn has stopped updating your visitor permit.\n\n" +
-		"Please open the app and re-link your council account so your schedule keeps running. " +
+		"Please open p.stonn and link your council account again so your schedule keeps running. " +
 		"Until you do, set the rego on your permit directly with the council to avoid a fine."
 	if s.appURL != "" {
-		body += "\n\nRe-link: " + s.appURL
+		body += "\n\nLink again: " + s.appURL
 	}
 	body += "\nCouncil portal: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
 	return s.broadcastAccount(ctx, owner, "relink", subject, body)
@@ -37,13 +37,13 @@ func (s *Service) NotifyRelinkRequired(ctx context.Context, owner, tenantID stri
 // the permit at the tenant directly until service resumes. Returns the number
 // of channels that accepted the message.
 func (s *Service) NotifyReconnectStalled(ctx context.Context, owner, tenantID string) int {
-	subject := "p.stonn can't reach the council — your permit schedule is paused"
+	subject := "p.stonn has not been able to sign in to the council for over an hour"
 	body := "p.stonn's sign-in to the council expired, and it has not been able to sign back in for over an hour. " +
-		"Until it can, your visitor permit schedule is NOT being applied.\n\n" +
-		"That means any change your schedule should make will not happen: if a different rego needs to be on the permit, " +
-		"change it yourself on the council website now, or that car is not covered and can be fined.\n\n" +
-		"p.stonn keeps retrying automatically and your schedule resumes on its own once the council accepts the sign-in again. " +
-		"If this persists, it will email you again if re-linking becomes necessary."
+		"Until p.stonn can sign in, none of the changes on your schedule will happen.\n\n" +
+		"If a different rego needs to be on the permit, please change it yourself on the council website now. " +
+		"Otherwise the car parked there is not covered and could be fined.\n\n" +
+		"p.stonn will keep trying, and your schedule will carry on by itself once the council accepts the sign-in. " +
+		"If you need to link your council account again, we will email you."
 	body += "\n\nCouncil portal: " + s.tenantOf(ctx, owner, tenantID).Links.Portal
 	if s.appURL != "" {
 		body += "\nOpen p.stonn: " + s.appURL
@@ -89,10 +89,10 @@ func (s *Service) broadcastAccount(ctx context.Context, owner, tag, subject, bod
 // number of channels that accepted the message.
 func (s *Service) NotifyPermitExpiry(ctx context.Context, owner, tenantID, permitLabel string, expiry time.Time) int {
 	date := expiry.Format("2 Jan 2006")
-	subject := fmt.Sprintf("Your %s expires on %s", permitLabel, date)
-	body := fmt.Sprintf("Your %s is due to expire on %s.\n\n", permitLabel, date) +
-		"p.stonn keeps setting the rego, but it cannot renew the permit itself — renew it with the council so it stays valid. " +
-		"Once you renew, you can copy your schedule onto the new permit in the app."
+	subject := fmt.Sprintf("Your permit “%s” expires on %s", permitLabel, date)
+	body := fmt.Sprintf("Your permit “%s” is due to expire on %s.\n\n", permitLabel, date) +
+		"p.stonn keeps setting the rego, but it cannot renew the permit itself, so please renew it with the council to keep it valid. " +
+		"Once you renew, you can copy your schedule onto the new permit in p.stonn."
 	if s.appURL != "" {
 		body += "\n\nOpen p.stonn: " + s.appURL
 	}
@@ -528,7 +528,7 @@ func (s *Service) SendTest(ctx context.Context, user, confirmURL string) error {
 		return err
 	}
 	const subject = "p.stonn test notification"
-	const body = "This is a test. Your permit-change notifications are set up correctly."
+	const body = "This is a test from p.stonn. If you can read it, your notifications are reaching you."
 	var errs []string
 	if pref.EmailEnabled && s.mail.Enabled() {
 		if e := s.sendEmail(ctx, user, subject, body, reasonTest); e != nil {
@@ -563,7 +563,7 @@ func (s *Service) SendTestPush(ctx context.Context, user, confirmURL string) err
 
 func (s *Service) sendTestPush(ctx context.Context, topic, confirmURL string) error {
 	const subject = "p.stonn test notification"
-	body := "This is a test. Your permit-change notifications are set up correctly."
+	body := "This is a test from p.stonn. If you can read it, your notifications are reaching you."
 	var extra map[string]string
 	if confirmURL != "" {
 		body += " Tap Confirm so p.stonn knows push notifications reach this phone."
@@ -587,8 +587,8 @@ func (s *Service) NotifyDisconnected(ctx context.Context, owner string) error {
 	if err != nil {
 		return err
 	}
-	const subject = "Your p.stonn account has been disconnected"
-	const body = "You declined p.stonn's updated terms, so your council account has been disconnected and your permit is no longer being managed.\n\nPlease check your visitor permit with the council. To reconnect, sign in again and accept the terms."
+	const subject = "p.stonn has disconnected your council account"
+	const body = "You declined p.stonn’s updated terms, so p.stonn has disconnected your council account and is no longer managing your permit.\n\nPlease check your visitor permit with the council. To reconnect, sign in again and accept the terms."
 	var errs []string
 	if s.mail.Enabled() {
 		// "Your permit is no longer being managed" is a safety notice, not a
@@ -617,13 +617,13 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	if !s.mail.Enabled() {
 		return nil
 	}
-	subject := "You have been given access to a p.stonn account"
+	subject := ownerEmail + " has shared their p.stonn account with you"
 	lines := []string{
 		say(s.tenantOf(ctx, ownerEmail, ""), "mail.invite_lead", map[string]any{"Owner": ownerEmail}),
 		"",
-		"Sign in with this email address — you will get a one-time code to confirm it is you — then tap Accept on the page you land on.",
+		"Sign in with this email address, and p.stonn will send you a one-time code to confirm it is you. Then tap Accept on the page that opens.",
 		"",
-		"Already using p.stonn with your own permits? The invitation is under Settings. You can't join another account while you keep your own.",
+		"If you already use p.stonn for your own permits, you will find the invitation under Settings. You can’t join another account while you keep your own.",
 	}
 	if s.appURL != "" {
 		lines = append(lines, "", s.appURL)
@@ -646,7 +646,7 @@ func (s *Service) SendInviteReminder(ctx context.Context, to, ownerEmail string)
 	lines := []string{
 		say(s.tenantOf(ctx, ownerEmail, ""), "mail.invite_reminder_lead", map[string]any{"Owner": ownerEmail}),
 		"",
-		"Sign in with this email address, where you will get a one-time code to confirm it is you, then tap Accept on the page you land on.",
+		"Sign in with this email address, and p.stonn will send you a one-time code to confirm it is you. Then tap Accept on the page that opens.",
 	}
 	if s.appURL != "" {
 		lines = append(lines, "", "Sign in to p.stonn:", s.appURL)
@@ -676,7 +676,7 @@ func (s *Service) SendInviteUnaccepted(ctx context.Context, to, memberEmail stri
 	if s.appURL != "" {
 		lines = append(lines, "", "Open Settings:", s.appURL+"/settings#shared")
 	}
-	lines = append(lines, "", "This is the only reminder p.stonn sends.")
+	lines = append(lines, "", "p.stonn will not remind them again.")
 	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonAccount)
 }
 
@@ -755,7 +755,7 @@ func (s *Service) SendGuestLink(ctx context.Context, to, ownerEmail, fromName, t
 		"",
 		url,
 		"",
-		"Tip: bookmark this link or add it to your phone's home screen — then next time you can open it in one tap, without hunting for this email. The same link works every time.",
+		"You can bookmark this link or add it to your phone’s home screen, so that next time it opens in one tap. The same link works every time.",
 		"",
 		"Keep this link to yourself. If you were not expecting it, you can ignore this email.",
 		"",
@@ -775,12 +775,12 @@ func (s *Service) NotifyDriverDisplaced(ctx context.Context, owner, to, permitLa
 	// What happened, when, whose permit, what to do — never the replacing plate:
 	// that is another visitor's registration, and it gives this driver nothing to
 	// act on.
-	subject := fmt.Sprintf("Heads up: %s is no longer covered on the visitor permit", oldReg)
+	subject := fmt.Sprintf("%s is no longer on the visitor parking permit", oldReg)
 	when := at.In(s.loc).Format("3:04pm")
 	lines := []string{
-		fmt.Sprintf("Your rego %s came off the visitor parking permit for %s at %s: %s.", oldReg, permitLabel, when, how),
+		fmt.Sprintf("At %s, %s, so your rego %s is no longer on the visitor parking permit (“%s”).", when, how, oldReg, permitLabel),
 		"",
-		"If your car is still parked there it's no longer covered. Move it, or put it back on with your link, or check with the permit holder.",
+		"If your car is still parked there, it is no longer covered. You can move it, put your rego back on with your guest pass if you have one, or check with the permit holder.",
 	}
 	if !s.displacedTo.allow(to) {
 		alog.Infof("displaced-driver notice to %s throttled (per-recipient cap)", RedactEmail(to))
@@ -815,13 +815,13 @@ func (s *Service) NotifyDriverAdded(ctx context.Context, owner, tenantID, to, pl
 		"",
 		"---",
 		"",
-		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee \u2014 if you're unsure, check with them.",
+		"p.stonn sent this note automatically for the permit holder, who uses it to keep the permit up to date. If you are unsure whether you are covered, please check with them.",
 	}
 	if s.appURL != "" {
 		lines = append(lines, "",
 			"---",
 			"",
-			fmt.Sprintf("If you have your own %s visitor parking permit, p.stonn can schedule it for you too \u2014 free.", c.Short),
+			fmt.Sprintf("If you have your own %s visitor parking permit, p.stonn can schedule it for you too, free of charge.", c.Short),
 			s.appURL)
 	}
 	if !s.driverAddedTo.allow(to) {
@@ -845,17 +845,17 @@ func (s *Service) NotifyDriverFailed(ctx context.Context, owner, tenantID, to, p
 		return nil
 	}
 	c := s.tenantOf(ctx, owner, tenantID)
-	cause := "p.stonn couldn't update the permit"
+	because := ""
 	if councilDown {
-		cause = "the council's system is down right now"
+		because = ", because the council’s system is not responding"
 	}
-	subject := fmt.Sprintf("%s couldn't be put on a %s visitor parking permit", plate, c.Short)
+	subject := fmt.Sprintf("%s is not yet on a %s visitor parking permit", plate, c.Short)
 	lines := []string{
-		fmt.Sprintf("Your rego %s could not be put on the %s visitor parking permit: %s. It may not be covered right now; p.stonn keeps trying and will put it on as soon as it can.", plate, c.Name, cause),
+		fmt.Sprintf("p.stonn has not yet been able to put your rego %s on the %s visitor parking permit%s. Until the rego is on, your car may not be covered. p.stonn will keep trying.", plate, c.Name, because),
 		"",
 		"---",
 		"",
-		"This is an automatic note from p.stonn, which the permit holder uses to keep the permit up to date. It's a convenience, not a guarantee — if you're unsure, check with them.",
+		"p.stonn sent this note automatically for the permit holder, who uses it to keep the permit up to date. If you are unsure whether you are covered, please check with them.",
 	}
 	if !s.driverFailedTo.allow(to) {
 		alog.Infof("driver-failed notice to %s throttled (per-recipient cap)", RedactEmail(to))
@@ -913,46 +913,46 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 		case d.Removed() && d.EmptiesAfter:
 			// Not reached today (the drift pass leaves a cleared plate off when the
 			// schedule says no rego), kept so the wording exists if that changes.
-			lines = append(lines, fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn. Your schedule clears the permit now anyway, so it stays off.", d.PermitLabel))
+			lines = append(lines, fmt.Sprintf("Someone removed the rego from your permit “%s” on the council’s website. Your schedule clears the permit now anyway, so it stays off.", d.PermitLabel))
 		case d.Removed():
-			line := fmt.Sprintf("The rego was taken off your %s on the council's website, not through p.stonn.", d.PermitLabel)
+			line := fmt.Sprintf("Someone removed the rego from your permit “%s” on the council’s website.", d.PermitLabel)
 			if d.PutsBack != "" {
 				line += fmt.Sprintf(" Your schedule still says %s, so p.stonn is putting it back on now.", d.PutsBack)
 			} else {
-				line += " Your schedule takes over again when it next puts a rego on."
+				line += " p.stonn will leave the permit as it is until your schedule next puts a rego on."
 			}
 			lines = append(lines, line)
 		case d.HoldsUntil.IsZero():
 			// Something is scheduled but the plate could not be held (the permit is
 			// at its live-booking cap): the schedule writes over it as before.
-			line := fmt.Sprintf("%s was put on your %s on the council's website, not through p.stonn.", d.Plate, d.PermitLabel)
+			line := fmt.Sprintf("Someone put %s on your permit “%s” on the council’s website.", d.Plate, d.PermitLabel)
 			if d.PutsBack != "" {
 				line += fmt.Sprintf(" Your schedule says %s, so p.stonn is putting that back on now.", d.PutsBack)
 			} else if d.EmptiesAfter {
-				line += " Your schedule clears the permit now, so p.stonn is removing it."
+				line += fmt.Sprintf(" Your schedule clears the permit now, so p.stonn is removing %s.", d.Plate)
 			}
-			line += fmt.Sprintf(" If %s should be on the permit, book it or add it to the roster in p.stonn.", d.Plate)
+			line += fmt.Sprintf(" If %s should be on the permit, you can make a booking for it or add it to the roster in p.stonn.", d.Plate)
 			lines = append(lines, line)
 		default:
-			line := fmt.Sprintf("%s was put on your %s on the council's website, not through p.stonn. p.stonn has left it there until %s", d.Plate, d.PermitLabel, model.EndText(d.HoldsUntil, loc))
+			line := fmt.Sprintf("Someone put %s on your permit “%s” on the council’s website. p.stonn will leave it there until %s", d.Plate, d.PermitLabel, model.EndText(d.HoldsUntil, loc))
 			if d.PutsBack != "" {
-				line += fmt.Sprintf(", when your schedule puts %s back on.", d.PutsBack)
+				line += fmt.Sprintf(", when your schedule sets %s on the permit again.", d.PutsBack)
 			} else if d.EmptiesAfter {
 				line += ", when your schedule clears the permit again."
 			} else {
-				line += "; after that your schedule takes over again when it next puts a rego on."
+				line += ". After that, it stays on until your schedule next puts a rego on."
 			}
-			line += " If it should stay longer, book it or add it to the roster in p.stonn."
+			line += fmt.Sprintf(" If %s needs to stay longer, you can make a booking for it or add it to the roster in p.stonn.", d.Plate)
 			lines = append(lines, line)
 		}
 	}
 	switch {
 	case len(changes) > 1:
-		subject = "Your permits were changed on the council's website"
+		subject = "Someone changed your permits on the council’s website"
 	case changes[0].Removed():
-		subject = fmt.Sprintf("The rego was taken off your %s on the council's website", changes[0].PermitLabel)
+		subject = fmt.Sprintf("Someone removed the rego from your permit “%s” on the council’s website", changes[0].PermitLabel)
 	default:
-		subject = fmt.Sprintf("Your %s was changed to %s on the council's website", changes[0].PermitLabel, changes[0].Plate)
+		subject = fmt.Sprintf("Someone put %s on your permit “%s” on the council’s website", changes[0].Plate, changes[0].PermitLabel)
 	}
 	body := strings.Join(lines, "\n\n")
 	tail := ""
@@ -1009,11 +1009,11 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 // hours are NOT honoured — the visitor is standing at the door now, and the
 // request expires unanswered within the hour.
 func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string, reqID int64) error {
-	subject := fmt.Sprintf("Approve %s on your %s?", plate, permitLabel)
+	subject := fmt.Sprintf("A visitor is asking to put %s on your permit “%s”", plate, permitLabel)
 	lines := []string{
-		fmt.Sprintf("Someone scanned your printed QR code and is asking to put %s on your %s.", plate, permitLabel),
+		fmt.Sprintf("Someone scanned your printed QR and is asking to put %s on your permit “%s”.", plate, permitLabel),
 		"",
-		"Open p.stonn to allow it (until the end of the day) or decline. Nothing is on the permit until you approve.",
+		fmt.Sprintf("Open p.stonn to approve or decline. If you approve, p.stonn puts %s on the permit until the end of the day. p.stonn will not change the permit unless you do.", plate),
 	}
 	if url != "" {
 		lines = append(lines, "", url)
@@ -1045,8 +1045,8 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 			em := m
 			em.Recipients = []string{d.email}
 			if link := s.GuestDecideURL(reqID, d.email); link != "" {
-				em.Body = body + "\n\nOr approve or decline in one tap, no sign-in needed:\n" + link +
-					"\n(This link can only answer this one request, and only from your address.)"
+				em.Body = body + "\n\nApprove or decline without signing in:\n" + link +
+					"\nThis link works only for this request, and only for you."
 			}
 			if e := s.enqueueSplit(ctx, em); e != nil {
 				errs = append(errs, RedactEmail(d.email)+": "+errText(e, d.email))
@@ -1108,12 +1108,12 @@ func (s *Service) accountChangeAudienceOf(dels []memberPref, actor string, loc *
 }
 
 func (s *Service) NotifyAccountChange(ctx context.Context, owner, actor, summary string) error {
-	subject := "A change was made to your p.stonn setup"
+	subject := "Someone made a change to your p.stonn account"
 	lines := []string{
 		summary,
 		"",
-		"If that was expected, nothing to do.",
-		"If it wasn't, open p.stonn — the Activity page lists every change and who made it, and you can review who has shared access in Settings.",
+		"If you expected this change, you don’t need to do anything.",
+		"If you did not, open the Activity page in p.stonn, which lists every change and who made it. You can see who has shared access under Settings.",
 	}
 	body := strings.Join(lines, "\n")
 	tail := ""
@@ -1169,13 +1169,13 @@ func (s *Service) SendFortnightNudge(ctx context.Context, to string) error {
 	if base == "" {
 		base = "https://p.stonn.org"
 	}
-	subject := "p.stonn — a quick one"
+	subject := "Passing p.stonn on to a neighbour"
 	body := strings.Join([]string{
-		"Hi — you've had p.stonn looking after your visitor permit for a couple of weeks now.",
+		"Hi, you’ve had p.stonn looking after your visitor permit for a couple of weeks now.",
 		"",
 		say(s.tenantOf(ctx, to, ""), "mail.fortnight_line", nil),
 		"",
-		"Send them an invite: " + base + "/share",
+		"Send them an invitation: " + base + "/share",
 		"Or print a card with a QR code they can scan to get started: " + base + "/share#card",
 	}, "\n")
 	return s.sendEmail(ctx, to, subject, body, reasonAccount)
@@ -1196,7 +1196,7 @@ func (s *Service) SendReferralInvite(ctx context.Context, to, sender string) err
 		"",
 		"Have a look: https://p.stonn.org",
 		"",
-		"If you weren't expecting this, you can ignore it — nothing else will be sent.",
+		"If you weren’t expecting this, you can ignore it, and we won’t send anything else.",
 	}, "\n")
 	return s.sendEmail(ctx, to, subject, body, reasonReferral)
 }

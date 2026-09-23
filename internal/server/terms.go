@@ -142,7 +142,7 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		alog.Infof("secondary %s declined updated terms, left the shared account", redact.Email(user))
-		msg := "You declined the terms. Your shared access has been removed. The account owner's data is unaffected."
+		msg := "You declined the terms, so p.stonn has removed your shared access. The account owner’s data is unaffected."
 		if s.logoutURL() != "" {
 			s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), ".")
 			return
@@ -171,11 +171,11 @@ func (s *Server) declineTerms(w http.ResponseWriter, r *http.Request) {
 	// Only claim a disconnection if there was one. A first-time visitor who reads
 	// the terms and declines never linked anything, and telling them their permit
 	// is no longer managed is alarming and false.
-	msg := "You declined the terms. Nothing was set up, and nothing has changed with the council."
+	msg := "You declined the terms. p.stonn has not set anything up, and nothing has changed with the council."
 	after := ". You can come back and accept any time."
 	if wasLinked {
-		msg = "You declined the terms. Your council account has been disconnected and p.stonn has stopped managing the permit. Please check its current state with the council."
-		after = ", or accept the terms below to reconnect."
+		msg = "You declined the terms. p.stonn has disconnected your council account and stopped managing the permit. Please check which rego is on the permit with the council."
+		after = ", or open p.stonn again to accept the terms and reconnect."
 	}
 	if s.logoutURL() != "" {
 		s.messageWithLink(w, http.StatusOK, msg, "Sign out", s.logoutURL(), after)

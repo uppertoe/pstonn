@@ -46,7 +46,7 @@ func TestSettleRetractsANeverAppliedBooking(t *testing.T) {
 	var retraction *notify.ApplyOutcome
 	for retraction == nil {
 		for _, o := range nf.outcomeSnap() {
-			if strings.Contains(o.Reason, "never applied") {
+			if strings.Contains(o.Reason, "p.stonn never made it") {
 				o := o
 				retraction = &o
 				break
@@ -107,7 +107,7 @@ func TestSettleRecordsRecoveryWhenTheChangeLanded(t *testing.T) {
 
 	// No retraction: the change DID land, so "never applied" would be wrong.
 	for _, o := range nf.outcomeSnap() {
-		if strings.Contains(o.Reason, "never applied") {
+		if strings.Contains(o.Reason, "p.stonn never made it") {
 			t.Fatalf("retraction sent for a change that DID land: %+v", o)
 		}
 	}
@@ -117,7 +117,7 @@ func TestSettleRecordsRecoveryWhenTheChangeLanded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading last apply: %v", err)
 	}
-	if last.Status != "success" || last.Registration != "AAA111" || !strings.Contains(last.Detail, "recovered") {
+	if last.Status != "success" || last.Registration != "AAA111" || !strings.Contains(last.Detail, "went through on a later attempt") {
 		t.Fatalf("want a recovery success row for AAA111, got status=%q reg=%q detail=%q",
 			last.Status, last.Registration, last.Detail)
 	}

@@ -442,7 +442,7 @@ const externalActor = "the council's website"
 //     now (the kicked reconcile does it) and the note says so. Cover being
 //     restored is the safe direction, and a booking cannot hold "no plate".
 func (s *Scheduler) holdExternalChange(ctx context.Context, p model.Permit, actual string, now time.Time) (notify.DriftChange, string, bool) {
-	const detailBase = "changed on the council's website, not through p.stonn"
+	const detailBase = "changed on the council’s website"
 	loc := s.locOf(p.Owner, p.TenantID)
 	lnow := now.In(loc)
 	rules, err := s.store.ListRules(ctx, p.ID)
@@ -553,7 +553,7 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 		}
 	}
 	if d.Contact != "" {
-		s.warnDisplacedHow(ctx, p, d, prev, "it was changed at the council")
+		s.warnDisplacedHow(ctx, p, d, prev, "the permit holder changed the rego on the council’s website")
 	}
 }
 

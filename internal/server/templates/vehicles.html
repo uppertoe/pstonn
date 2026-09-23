@@ -1,7 +1,7 @@
 {{define "page-vehicles"}}
   {{/* ---------- VEHICLES ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-vehicles)"><span class="ic">{{template "ic-cars"}}</span> Regos</div>
-  <p class="subtitle">The regos of the people who visit you. Each gets a colour that is used across the schedule.</p>
+  <p class="subtitle">These are the regos of the people who visit you. Each rego has its own colour, which the schedule uses too.</p>
   {{template "checklist" .}}
   <section class="card" style="--hue:var(--sec-vehicles)">
     <div class="vlist">
@@ -39,7 +39,7 @@
           <span>Email this person when their rego goes on the permit</span>
         </label>
       {{else}}
-      <p class="empty-note">No regos saved yet. Add the regos of the people who visit you.</p>
+      <p class="empty-note">You have not saved any regos yet. Add the regos of the people who visit you.</p>
       {{end}}
     </div>
     <form method="post" action="/regos" id="add" class="row vaddform" style="margin-top:14px" data-plate-confirm="registration">
@@ -48,7 +48,7 @@
       {{if .Regions}}<select name="state" class="vstate" aria-label="{{T "vehicle.state_label" .}}" title="{{T "vehicle.state_label" .}}">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>{{end}}
       <button type="submit">{{template "ic-plus"}} Add</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">An email address is optional. It pre-fills guest passes and, unless you untick it above, tells that person when their rego goes on the permit. See <a href="/guests">Guests</a>.</p>
+    <p class="empty-note" style="margin-top:10px">An email address is optional. If you add one, p.stonn fills it in on guest passes and, unless you untick the box above, emails that person each time it puts their rego on the permit. See <a href="/guests">Guests</a>.</p>
   </section>
 {{if .BookFAB}}
 {{/* Same corner, same words as the Schedule page's button. hx-push-url drops

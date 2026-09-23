@@ -57,7 +57,7 @@ func TestGuestActivateOutageMessage(t *testing.T) {
 	post := s.postGuest("/g/"+raw, "203.0.113.5", "", url.Values{"vehicle_id": {itoa64(van)}}).Body.String()
 	pollBody := s.getGuest("/g/live/" + raw).Body.String() // no fp -> forces a render
 	for _, c := range []struct{ name, body string }{{"POST", post}, {"poll", pollBody}} {
-		if !strings.Contains(c.body, "system is down") || !strings.Contains(c.body, "may not be on the permit yet") || !strings.Contains(c.body, "NSW123") {
+		if !strings.Contains(c.body, "system is not responding") || !strings.Contains(c.body, "may not be on the permit yet") || !strings.Contains(c.body, "NSW123") {
 			t.Fatalf("outage %s: want the honest 'council down' pending naming NSW123; got:\n%s", c.name, excerpt(c.body))
 		}
 		if strings.Contains(c.body, "Changing to") {
@@ -86,7 +86,7 @@ func TestGuestActivateOutageMessage(t *testing.T) {
 		t.Fatal("poll 204'd on the up→down transition — the outage flip was missed (fingerprint bug)")
 	}
 	pb := poll.Body.String()
-	if !strings.Contains(pb, "system is down") || strings.Contains(pb, "Changing to") {
+	if !strings.Contains(pb, "system is not responding") || strings.Contains(pb, "Changing to") {
 		t.Fatalf("poll must repaint to the outage copy on the transition; got:\n%s", excerpt(pb))
 	}
 }
@@ -129,7 +129,7 @@ func TestDoorQROutagePollStatus(t *testing.T) {
 	}
 
 	body := s.getGuest("/g/req/" + itoa64(reqID) + "?n=" + nonce).Body.String()
-	if !strings.Contains(body, "system is down right now") || !strings.Contains(body, "may not be on the permit yet") {
+	if !strings.Contains(body, "system is not responding at the moment") || !strings.Contains(body, "may not be on the permit yet") {
 		t.Fatalf("door-QR outage poll: want the honest outage copy; got:\n%s", excerpt(body))
 	}
 	if strings.Contains(body, "putting") {

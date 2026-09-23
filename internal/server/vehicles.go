@@ -58,11 +58,11 @@ func (s *Server) vehiclesPage(w http.ResponseWriter, r *http.Request) {
 	base.Checklist = s.checklistFor(r.Context(), base.Owner, base.User.Email, base.IsPrimary, "vehicles")
 	if r.URL.Query().Get("added") == "1" {
 		// The landing after adding a permit with no rego saved yet (see addPermit).
-		base.Flash = "Permit added. Add the regos of the people who visit you, then set up the schedule."
+		base.Flash = "You added the permit. Add the regos of the people who visit you, then set up the schedule."
 	}
 	if r.URL.Query().Get("saved") == "1" {
 		// Saving a driver email otherwise changes nothing visible on the page.
-		base.Flash = "Driver email saved."
+		base.Flash = "You saved the email address for that rego."
 	}
 	// Every value here is validated before it is composed into the banner: the plate
 	// against the same rego rule the rest of the app uses, the two figures as plain
@@ -109,8 +109,8 @@ func (s *Server) addVehicle(w http.ResponseWriter, r *http.Request) {
 			// They joined a household while this request was in flight; a 500 would be a
 			// lie about whose fault it is, and they need to know where their cars live now.
 			s.message(w, http.StatusConflict,
-				"You've joined another p.stonn household, so regos are managed on that household's account now. "+
-					"Add it there, or leave the shared household from Settings to manage your own again.")
+				"You have joined another p.stonn account, so you now manage regos on that account. "+
+					"Add the rego there, or leave the shared account from Settings to manage your own again.")
 			return
 		}
 		s.serverError(w, err)
@@ -154,9 +154,9 @@ func (s *Server) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 	// Gating this on a resolved plate meant a transient read error turned a
 	// cascading delete of roster days and bookings into a silent one — the exact
 	// invisible change the notice exists to surface.
-	named := "a car"
+	named := "a rego"
 	if plate != "" {
-		named = "the car " + plate
+		named = "the rego " + plate
 	}
 	// The full detail — which weekdays on which permit — goes into the durable places:
 	// the account's change log (visible on Activity) and the notification. It is
@@ -216,7 +216,7 @@ func usageSentence(u store.VehicleUsage) string {
 	}
 	out := ""
 	if len(parts) > 0 {
-		out = joinWords(parts) + " now have nothing scheduled. Those days will keep whatever registration is currently on the permit until you set them again."
+		out = joinWords(parts) + " now have nothing scheduled. Those days will keep whatever rego is currently on the permit until you set them again."
 	}
 	if u.LiveOverrides > 0 {
 		booking := "booking"
@@ -226,7 +226,11 @@ func usageSentence(u store.VehicleUsage) string {
 		if out != "" {
 			out += " "
 		}
-		out += fmt.Sprintf("%d current one-off %s using it %s also removed.", u.LiveOverrides, booking, wasWere(u.LiveOverrides))
+		if u.LiveOverrides == 1 {
+			out += "p.stonn also cancelled the current booking that used it."
+		} else {
+			out += fmt.Sprintf("p.stonn also cancelled the %d current %s that used it.", u.LiveOverrides, booking)
+		}
 	}
 	return out
 }
@@ -237,30 +241,23 @@ func usageSentence(u store.VehicleUsage) string {
 // through the URL to get here, and free text in the URL is free text in the banner.
 // The named detail is on Activity and in the notification.
 func deletedVehicleFlash(plate string, days, bookings int) string {
-	out := "Deleted " + plate + "."
+	out := "You deleted " + plate + "."
 	switch {
 	case days == 1:
-		out += " One roster day now has nothing scheduled. Activity shows which day. Until you set it again, the permit will keep its current registration."
+		out += " One roster day now has nothing scheduled. Activity shows which day. Until you set it again, the permit will keep its current rego."
 	case days > 1:
-		out += fmt.Sprintf(" %d roster days now have nothing scheduled. Activity shows which days. Until you set them again, the permit will keep its current registration.", days)
+		out += fmt.Sprintf(" %d roster days now have nothing scheduled. Activity shows which days. Until you set them again, the permit will keep its current rego.", days)
 	}
 	switch {
 	case bookings == 1:
-		out += " One current one-off booking using it was also removed."
+		out += " p.stonn also cancelled the current booking that used it."
 	case bookings > 1:
-		out += fmt.Sprintf(" %d current one-off bookings using it were also removed.", bookings)
+		out += fmt.Sprintf(" p.stonn also cancelled the %d current bookings that used it.", bookings)
 	}
 	if days == 0 && bookings == 0 {
 		out += " It was not on any roster day or booking, so nothing else has changed."
 	}
 	return out
-}
-
-func wasWere(n int) string {
-	if n == 1 {
-		return "was"
-	}
-	return "were"
 }
 
 // joinWords renders a list the way a person would say it.

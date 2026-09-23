@@ -96,7 +96,7 @@ func TestDecideLinkDecline(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("POST decline = %d, want 200", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "Declined") {
+	if !strings.Contains(w.Body.String(), "You declined this request") {
 		t.Error("decline outcome page missing confirmation")
 	}
 	after, err := s.store.GuestRequestByID(context.Background(), req.ID)
@@ -128,7 +128,7 @@ func TestDecideLinkAuthz(t *testing.T) {
 	}
 	for name, path := range cases {
 		w := s.decideDo("POST", path, url.Values{"decision": {"decline"}})
-		if w.Code != 200 || !strings.Contains(w.Body.String(), "isn&#39;t valid or has expired") {
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "is not valid or has expired") {
 			t.Errorf("%s: got %d, want the neutral page", name, w.Code)
 		}
 	}
@@ -144,7 +144,7 @@ func TestDecideLinkAuthz(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := s.decideDo("POST", decideLinkFor(t, req.ID, secondary), url.Values{"decision": {"decline"}})
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Declined") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "You declined this request") {
 		t.Fatalf("secondary member's link refused: %d", w.Code)
 	}
 	after, _ = s.store.GuestRequestByID(context.Background(), req.ID)

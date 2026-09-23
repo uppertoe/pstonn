@@ -103,8 +103,8 @@ func TestGuestsPageNamesDecideRefusals(t *testing.T) {
 		t.Fatalf("add permit = %d: %s", rr.Code, excerpt(rr.Body.String()))
 	}
 	for flag, want := range map[string]string{
-		"alreadydecided": "That request has already been answered, or it expired before anyone answered it.",
-		"revoked":        "its printed QR code may have been removed, or every link paused.",
+		"alreadydecided": "Someone has already answered that request, or it expired before anyone did.",
+		"revoked":        "Someone may have removed the printed QR or paused every link.",
 	} {
 		rr := r.get("/guests?"+flag+"=1", rigUser)
 		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), want) {

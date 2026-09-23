@@ -70,7 +70,7 @@
   <p class="empty-note">{{T "guest.own_household" .}}</p>
   <div class="grefrow">
     <button type="button" class="ghost sm" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
-    <a class="btnlike ghost sm" href="mailto:?subject=p.stonn%20%E2%80%94%20visitor%20permit%20scheduler&body=Free%20scheduler%20for%20{{.Tenant.Name}}%20visitor%20parking%20permits%3A%20https%3A%2F%2Fp.stonn.org" hx-boost="false">Email yourself the link</a>
+    <a class="btnlike ghost sm" href="mailto:?subject=p.stonn%20%E2%80%94%20visitor%20permit%20scheduler&body=p.stonn%20is%20a%20free%20scheduler%20for%20{{.Tenant.Name}}%20visitor%20parking%20permits%3A%20https%3A%2F%2Fp.stonn.org" hx-boost="false">Email yourself the link</a>
   </div>
 </div>
 {{end}}
@@ -97,7 +97,7 @@
        without a poll (the picker and a guest link only poll while a change is
        pending). The server renders the state that is true at render time. */}}
   <p class="gnow{{if .Guest.CheckedAgo}} stale{{end}}"{{if .Guest.CheckedAt}} data-checked-at="{{.Guest.CheckedAt}}"{{end}}><span class="gnow-stale">Last known on the permit:</span><span class="gnow-fresh">On the permit now:</span> {{if .Guest.MineReg}}<span class="plate"{{if .Guest.MineColor}} style="--plate:{{.Guest.MineColor}}"{{end}}>{{.Guest.MineReg}}</span>{{else if .Guest.MaskedReg}}<span class="plate masked" title="Someone else's rego">{{.Guest.MaskedReg}}</span>{{else}}<span class="noplate">no rego</span>{{end}}{{if .Guest.CheckedAt}} <span class="gnuntil gnow-stale">&middot; <span class="gchecked">{{with .Guest.CheckedAgo}}checked {{.}}{{end}}</span></span>{{end}}{{if and .Guest.UntilText (not .Guest.PendingReg)}} <span class="gnuntil">&middot; {{.Guest.UntilText}}</span>{{end}}</p>
-  <p class="gsub">{{if .Guest.PendingReg}}{{if .Guest.PendingOutage}}<span class="gstall">{{template "ic-alert"}} The council&rsquo;s system is down &mdash; <span class="plate">{{.Guest.PendingReg}}</span> may not be on the permit yet. p.stonn keeps trying.</span>{{else if .Guest.Stalled}}<span class="gstall">{{template "ic-alert"}} Changing to {{.Guest.PendingReg}} is taking longer than usual &mdash; check back shortly, or ask the account holder.</span>{{else}}<span class="gspin"></span> <span>Changing to <span class="plate">{{.Guest.PendingReg}}</span>{{if .Guest.UntilText}} ({{.Guest.UntilText}}){{end}}&hellip;</span>{{end}}{{else if .Flash}}<span class="gok">{{template "ic-check"}} {{.Flash}}</span>{{end}}</p>
+  <p class="gsub">{{if .Guest.PendingReg}}{{if .Guest.PendingOutage}}<span class="gstall">{{template "ic-alert"}} The council&rsquo;s system is not responding at the moment, so <span class="plate">{{.Guest.PendingReg}}</span> may not be on the permit yet. p.stonn will keep trying.</span>{{else if .Guest.Stalled}}<span class="gstall">{{template "ic-alert"}} Changing to {{.Guest.PendingReg}} is taking longer than usual. Check back shortly, or ask the resident.</span>{{else}}<span class="gspin"></span> <span>Changing to <span class="plate">{{.Guest.PendingReg}}</span>{{if .Guest.UntilText}} ({{.Guest.UntilText}}){{end}}&hellip;</span>{{end}}{{else if .Flash}}<span class="gok">{{template "ic-check"}} {{.Flash}}</span>{{end}}</p>
 </div>
 {{if .Guest.PendingReg}}{{/* Poll while ANYTHING is pending — a pending change can still land (or be superseded) whether it's mid-apply, "taking longer", or council-down, so the page must keep checking and flip to on-the-permit when it resolves. Stopping at the "stalled" edge froze the page exactly when a change was about to land, notably as an outage cleared. The spinner itself is still suppressed once stalled/outage (see the message line); this is a quiet poll. .hx-quiet + transition:false: the layout turns on globalViewTransitions, so this 2.5s poll cross-faded the visitor's whole page and flashed the loading bar every tick. */}}<div class="hx-quiet" hx-get="/g/live/{{.Guest.Token}}?fp={{.Guest.FP}}" hx-trigger="every 2500ms" hx-target="#gbody" hx-swap="innerHTML transition:false"></div>{{end}}
 {{end}}
@@ -110,7 +110,7 @@
 <p class="gnow" style="margin-top:14px;text-align:center">Your request to use <span class="plate">{{.Guest.Req.Plate}}</span>:</p>
 <div aria-live="polite" style="text-align:center">{{template "guest-req-status" .Guest.Req}}</div>
 {{end}}
-{{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">{{if .Guest.Req}}To ask for a different rego, enter it below.{{else}}Enter your rego to ask the resident to let you use their permit. They get a notification and decide; nothing goes on the permit until they say yes.{{end}}</p>{{end}}
+{{if .Guest.RequestOnly}}<p class="empty-note" style="margin-top:12px">{{if .Guest.Req}}To ask for a different rego, enter it below.{{else}}Enter your rego to ask the resident to let you use their permit. The resident receives a notification, and p.stonn will not change the permit until they approve.{{end}}</p>{{end}}
 <form method="post" action="/g/{{.Guest.Token}}" class="stack" style="margin-top:14px" data-plate-confirm="plate"{{if .Guest.Picker}} data-picker-confirm{{end}}{{if not .Guest.RequestOnly}} hx-post="/g/{{.Guest.Token}}" hx-target="#gbody" hx-swap="innerHTML"{{end}}>
   {{if .Guest.Cars}}
   <p class="sub">{{if .Guest.Picker}}Tap a rego to put it on the permit{{else}}Tap your rego to put it on the permit{{end}}</p>
@@ -139,7 +139,7 @@
   {{end}}
   {{end}}
   {{if .Guest.AllowOvernight}}
-  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" {{if .Guest.KeepForm}}hx-preserve {{end}}name="overnight" style="margin-top:2px"> <span>{{if .Guest.Picker}}Overnight<br><span class="muted" style="font-size:12px">Keeps it on until the end of tomorrow instead of today.</span>{{else}}I'm staying overnight<br><span class="muted" style="font-size:12px">Optional. Keeps your rego on until the end of tomorrow instead of the end of today.</span>{{end}}</span></label>
+  <label class="toggle" style="margin-top:8px;align-items:flex-start;gap:10px"><input type="checkbox" id="g-overnight" {{if .Guest.KeepForm}}hx-preserve {{end}}name="overnight" style="margin-top:2px"> <span>{{if .Guest.Picker}}Overnight<br><span class="muted" style="font-size:12px">This keeps it on until the end of tomorrow instead of today.</span>{{else}}I'm staying overnight<br><span class="muted" style="font-size:12px">This is optional. It keeps your rego on until the end of tomorrow instead of the end of today.</span>{{end}}</span></label>
   {{end}}
   {{if .Guest.AllowPlate}}
   <button type="submit" style="justify-content:center;margin-top:4px">{{if .Guest.RequestOnly}}{{template "ic-bell"}} Ask to use the permit{{else}}{{template "ic-check"}} Put my rego on the permit{{end}}</button>
@@ -156,10 +156,10 @@
      terms (see pickerCanClear): the permit is deliberately left with no rego,
      which the confirm spells out because a car in a permit zone loses cover
      the moment it happens. */}}
-<form method="post" action="/g/{{.Guest.Token}}/clear" hx-post="/g/{{.Guest.Token}}/clear" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px" data-confirm="Take {{.Guest.CurrentReg}} off the permit? The permit will then have no rego, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until a rego is put on or the roster puts one on." data-confirm-ok="Take it off"{{if .Guest.ClearAudience}} data-audience="{{.Guest.ClearAudience}}"{{end}}>
-  <button type="submit" class="ghost grevert">{{template "ic-x"}} Take <span class="plate" style="margin:0 4px">{{.Guest.CurrentReg}}</span> off the permit</button>
+<form method="post" action="/g/{{.Guest.Token}}/clear" hx-post="/g/{{.Guest.Token}}/clear" hx-target="#gbody" hx-swap="innerHTML" style="margin-top:12px" data-confirm="Remove {{.Guest.CurrentReg}} from the permit? The permit will then have no rego, so if that car is parked in a permit zone right now it loses cover the moment you do this. The permit stays empty until someone puts a rego on or the roster sets one." data-confirm-ok="Remove"{{if .Guest.ClearAudience}} data-audience="{{.Guest.ClearAudience}}"{{end}}>
+  <button type="submit" class="ghost grevert">{{template "ic-x"}} Remove <span class="plate" style="margin:0 4px">{{.Guest.CurrentReg}}</span></button>
 </form>
-<p class="empty-note" style="margin-top:8px">This leaves the permit with no rego on it until a rego is put on or the roster puts one on.</p>
+<p class="empty-note" style="margin-top:8px">This leaves the permit with no rego on it until someone puts a rego on or the roster sets one.</p>
 {{end}}
 {{if .Guest.Picker}}
 {{/* The household's own page: no "account holder is told", no referral (they
@@ -171,8 +171,8 @@
      browser; in a tab it is a new tab. */}}
 <a class="gtip" href="/schedule" target="_blank" rel="noopener" hx-boost="false">Open p.stonn in your browser &nearr;</a>
 {{else}}
-{{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your rego to put it on the permit until the end of the day.{{else}}Tap your rego. It stays on the permit until the end of the day.{{end}} The account holder is told when it changes. If they (or another guest) change the permit before then, yours comes off &mdash; this page will say so.</p>{{end}}
-{{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time &mdash; no need to find the email again.</p>{{end}}
+{{if not .Guest.RequestOnly}}<p class="empty-note" style="margin-top:16px">{{if .Guest.AllowPlate}}Enter your rego to put it on the permit until the end of the day.{{else}}Tap your rego. It stays on the permit until the end of the day.{{end}} Once you have applied your rego, you will be notified if someone else makes a change to the permit today.</p>{{end}}
+{{if and (not .Guest.RequestOnly) (not .Guest.AllowPlate)}}<p class="gtip">Keep this handy: <strong>bookmark this page or add it to your home screen</strong>. The same link works every time, so there’s no need to find the email again.</p>{{end}}
 {{if .Flash}}{{template "guest-referral" .}}{{end}}
 {{end}}
 {{end}}
@@ -196,7 +196,7 @@
      knocking or re-scanning is reasonable rather than unwelcome. Terminal. */}}
 <div id="reqstatus">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
-  <p class="gresult">The resident didn't respond in time, so this request lapsed. Try knocking, or scan the code again to re-send it.</p>
+  <p class="gresult">The resident didn't respond in time, so this request lapsed. Please contact the resident, or scan the code again to re-send it.</p>
 </div>
 {{else if eq .Status "stalled"}}
 {{/* approved, unconfirmed after a while — no spinner, but KEEP polling quietly so it
@@ -204,7 +204,7 @@
      rather than freezing on this note until a manual refresh. */}}
 <div id="reqstatus" class="hx-quiet" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML transition:false">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
-  <p class="gresult">This is taking longer than usual. Your request was approved, but it isn't confirmed on the permit yet &mdash; please check with the resident.</p>
+  <p class="gresult">The resident approved your request, but the council has not yet confirmed your rego on the permit. The change is taking longer than usual, so please check with the resident.</p>
 </div>
 {{else if eq .Status "superseded"}}
 {{/* approved, but the permit has since been steered to another plate. Terminal.
@@ -212,7 +212,7 @@
      permit's current plate is never disclosed to whoever scans it. */}}
 <div id="reqstatus">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
-  <p class="gresult">Your request was approved, but <span class="plate">{{.Plate}}</span> is no longer on the permit &mdash; it has since been changed. If you still need parking, send a new request.</p>
+  <p class="gresult">The resident approved your request, but <span class="plate">{{.Plate}}</span> is no longer on the permit because the permit has changed since. If you still need parking, you can send a new request.</p>
 </div>
 {{else if eq .Status "ended"}}
 {{/* approved, and the granted window has simply lapsed. Terminal. */}}
@@ -226,13 +226,13 @@
      once the council is back. */}}
 <div id="reqstatus" class="hx-quiet" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML transition:false">
   <div class="gring warn" style="margin:18px auto 12px">{{template "ic-alert"}}</div>
-  <p class="gresult">Approved &mdash; but the council&rsquo;s system is down right now, so <span class="plate">{{.Plate}}</span> may not be on the permit yet. p.stonn will put it on as soon as the council is back.</p>
+  <p class="gresult">The resident approved your request. The council&rsquo;s system is not responding at the moment, so <span class="plate">{{.Plate}}</span> may not be on the permit yet. p.stonn will put <span class="plate">{{.Plate}}</span> on as soon as the council&rsquo;s system is working again.</p>
 </div>
 {{else if eq .Status "approved"}}
 {{/* the resident said yes; keep polling until the council confirms the plate is on */}}
 <div id="reqstatus" class="hx-quiet" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML transition:false">
   <div class="gspin"></div>
-  <p class="gresult" style="font-weight:500;color:var(--muted)">Approved &mdash; putting <span class="plate">{{.Plate}}</span> on the permit&hellip;</p>
+  <p class="gresult" style="font-weight:500;color:var(--muted)">The resident approved your request. p.stonn is putting <span class="plate">{{.Plate}}</span> on the permit&hellip;</p>
 </div>
 {{else}}
 <div id="reqstatus" class="hx-quiet" hx-get="/g/req/{{.ReqID}}?n={{.Nonce}}&fp={{.FP}}" hx-trigger="every 3s" hx-swap="outerHTML transition:false">

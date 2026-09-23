@@ -26,7 +26,7 @@ import (
 // Deliberately vague and 200: this page is reachable by anyone holding a URL,
 // and distinguishing "bad signature" from "unknown request" from "not a member
 // any more" would leak which requests and addresses exist.
-const decideNeutral = "This link isn't valid or has expired. Open p.stonn and check Guest passes for anything still waiting on you."
+const decideNeutral = "This link is not valid or has expired. Open the Guests tab in p.stonn to see any requests still waiting for you."
 
 // guestDecidePage shows the request and its Approve/Decline buttons — or, once
 // it has been answered (by anyone, through any door), what happened to it.
@@ -69,7 +69,7 @@ func (s *Server) guestDecideApply(w http.ResponseWriter, r *http.Request) {
 		approve = true
 	case "decline":
 	default:
-		s.message(w, http.StatusBadRequest, "Missing decision.")
+		s.message(w, http.StatusBadRequest, "Please choose Approve or Decline.")
 		return
 	}
 	// A member deciding via the emailed one-tap link is household activity every
@@ -175,6 +175,6 @@ func (s *Server) decideThrottled(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	w.Header().Set("Retry-After", "60")
-	s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and try again.")
+	s.message(w, http.StatusTooManyRequests, "You have made too many requests. Please wait a moment, then try again.")
 	return true
 }

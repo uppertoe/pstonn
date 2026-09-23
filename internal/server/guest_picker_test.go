@@ -62,7 +62,7 @@ func TestQuickPickerManagement(t *testing.T) {
 
 	// Before: the card offers to create one, and the checklist line is open.
 	page := s.doReq("GET", "/guests", owner, "", nil).Body.String()
-	if !strings.Contains(page, "Your own quick picker") || !strings.Contains(page, "Create the picker") || strings.Contains(page, "Your quick picker") {
+	if !strings.Contains(page, "Your own quick picker") || !strings.Contains(page, "Create the quick picker") || strings.Contains(page, "Your quick picker") {
 		t.Fatalf("guests page before creating:\n%s", page)
 	}
 	if v := s.checklistFor(ctx, owner, owner, true, "guests"); v == nil || v.Items[3].Done {
@@ -87,7 +87,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	}
 	raw := rawLink(t)
 	page = s.doReq("GET", "/guests?picker=made", owner, "", nil).Body.String()
-	for _, want := range []string{"Your quick picker", "It offers every rego, including any you add later, with the overnight option on.", "/g/" + raw, "data:image/png;base64,", "Your quick picker is ready", "New link", "/guests/picker/edit"} {
+	for _, want := range []string{"Your quick picker", "The quick picker offers every rego, including any you add later, with the overnight option on.", "/g/" + raw, "data:image/png;base64,", "Your quick picker is ready", "New link", "/guests/picker/edit"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("guests page after creating lacks %q:\n%s", want, page)
 		}
@@ -121,13 +121,16 @@ func TestQuickPickerManagement(t *testing.T) {
 	menu = s.getGuest("/g/" + raw)
 	body := menu.Body.String()
 	for _, want := range []string{"<h1>Home permit</h1>", "Tap a rego to put it on the permit", "ABC123", "XYZ789", "NEW111", "Open p.stonn", "Overnight<br>",
-		`data-plate="XYZ789" data-label="Baba" data-color="`, `data-audience="The following people will be notified of the change:` + "\n" + owner + ` — by email"`} {
+		`data-plate="XYZ789" data-label="Baba" data-color="`, `data-audience="p.stonn will tell these people about the change:` + "\n" + owner + ` — by email"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("picker page lacks %q:\n%s", want, body)
 		}
 	}
+	// The <title> names the product ("p.stonn visitor permit scheduler"), so the
+	// leak check reads the page body only.
+	pageBody := body[strings.Index(body, "<body"):]
 	for _, leak := range []string{"visitor permit", "The account holder is told", "bookmark this page", "Share p.stonn"} {
-		if strings.Contains(body, leak) {
+		if strings.Contains(pageBody, leak) {
 			t.Fatalf("picker page carries visitor copy %q", leak)
 		}
 	}
@@ -143,7 +146,7 @@ func TestQuickPickerManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	body = s.getGuest("/g/" + raw).Body.String()
-	members := `data-audience="The following people will be notified of the change:` + "\n" + owner + ` — by email`
+	members := `data-audience="p.stonn will tell these people about the change:` + "\n" + owner + ` — by email`
 	if want := regexp.MustCompile(`data-label="Nana" data-color="#[0-9a-f]{6}" ` + regexp.QuoteMeta(members+"\n"+`nanny@example.com — by email, as the driver of ABC123"`)); !want.MatchString(body) {
 		t.Fatalf("Nana's tile lacks its driver %q:\n%s", want, body)
 	}
@@ -164,7 +167,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	if pg, _ := s.store.PickerGrant(ctx, owner); pg.AllowOvernight || pg.AllVehicles || len(pg.Vehicles) != 1 || pg.Vehicles[0].ID != baba {
 		t.Fatalf("after update = %+v", pg)
 	}
-	if page = s.doReq("GET", "/guests", owner, "", nil).Body.String(); !strings.Contains(page, "It offers Baba, with the overnight option off.") {
+	if page = s.doReq("GET", "/guests", owner, "", nil).Body.String(); !strings.Contains(page, "The quick picker offers Baba, with the overnight option off.") {
 		t.Fatalf("summary after update:\n%s", page)
 	}
 
@@ -236,7 +239,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	if w.Code != 200 || !strings.HasPrefix(strings.TrimSpace(frag), `<section class="card fold" id="picker"`) || strings.Contains(frag, "<html") {
 		t.Fatalf("htmx create = %d, not the card fragment:\n%s", w.Code, frag)
 	}
-	for _, want := range []string{"x-data=\"{open: true}\"", "Your quick picker is ready", "It offers Nana, with the overnight option off.", "New link"} {
+	for _, want := range []string{"x-data=\"{open: true}\"", "Your quick picker is ready", "The quick picker offers Nana, with the overnight option off.", "New link"} {
 		if !strings.Contains(frag, want) {
 			t.Fatalf("htmx create reply lacks %q:\n%s", want, frag)
 		}
@@ -247,7 +250,7 @@ func TestQuickPickerManagement(t *testing.T) {
 	if frag = hx("GET", "/guests/picker", nil).Body.String(); strings.Contains(frag, "Save changes") || !strings.Contains(frag, "New link") {
 		t.Fatalf("htmx cancel = not the card at rest:\n%s", frag)
 	}
-	if frag = hx("POST", "/guests/picker/delete", url.Values{}).Body.String(); !strings.Contains(frag, "Quick picker deleted") || !strings.Contains(frag, "Create the picker") {
+	if frag = hx("POST", "/guests/picker/delete", url.Values{}).Body.String(); !strings.Contains(frag, "You deleted the quick picker") || !strings.Contains(frag, "Create the quick picker") {
 		t.Fatalf("htmx delete = not the create card with its notice:\n%s", frag)
 	}
 	if w := hx("POST", "/guests/picker", url.Values{"permit_id": {itoa64(pid)}}); w.Code != http.StatusUnprocessableEntity || strings.Contains(w.Body.String(), "<") {
@@ -336,7 +339,7 @@ func TestQuickPickerActivation(t *testing.T) {
 	// before anything changes; with nothing scheduled, the picker's own booking
 	// is ended and the council's record cleared.
 	w = s.postGuest("/g/"+raw, "203.0.113.9", "", url.Values{"vehicle_id": {itoa64(baba)}})
-	if !strings.Contains(w.Body.String(), "off the permit</button>") {
+	if !strings.Contains(w.Body.String(), "/clear\" hx-post=") {
 		t.Fatalf("no take-off offer after the tap:\n%s", w.Body.String())
 	}
 	// Today in the permit's own zone: the rig's council is in Melbourne while
@@ -346,7 +349,7 @@ func TestQuickPickerActivation(t *testing.T) {
 	if err := s.store.SetRule(ctx, owner, pid, 0, today, baba); err != nil {
 		t.Fatal(err)
 	}
-	if body := s.getGuest("/g/" + raw).Body.String(); strings.Contains(body, "off the permit</button>") {
+	if body := s.getGuest("/g/" + raw).Body.String(); strings.Contains(body, "/clear\" hx-post=") {
 		t.Fatalf("take-off offered while the roster covers today:\n%s", body)
 	}
 	w = s.postGuest("/g/"+raw+"/clear", "203.0.113.9", "", url.Values{})
@@ -361,7 +364,7 @@ func TestQuickPickerActivation(t *testing.T) {
 	if err := s.store.SetEmptyRule(ctx, owner, pid, 0, today); err != nil {
 		t.Fatal(err)
 	}
-	if body := s.getGuest("/g/" + raw).Body.String(); !strings.Contains(body, "off the permit</button>") {
+	if body := s.getGuest("/g/" + raw).Body.String(); !strings.Contains(body, "/clear\" hx-post=") {
 		t.Fatalf("take-off withheld on a clear roster day:\n%s", body)
 	}
 	if err := s.store.ClearRule(ctx, owner, pid, 0, today); err != nil {
@@ -380,7 +383,7 @@ func TestQuickPickerActivation(t *testing.T) {
 	if ovs, _ := s.store.ListOverrides(ctx, pid, time.Now()); len(ovs) != 0 {
 		t.Fatalf("the picker's booking survived the clear: %+v", ovs)
 	}
-	if body := w.Body.String(); strings.Contains(body, "off the permit</button>") || strings.Contains(body, "back on the permit") {
+	if body := w.Body.String(); strings.Contains(body, "/clear\" hx-post=") || strings.Contains(body, "back on the permit") {
 		t.Fatalf("an empty permit still offers take-off or put-back:\n%s", body)
 	}
 	// A visitor's pass may never leave the permit empty.
@@ -400,7 +403,7 @@ func TestQuickPickerActivation(t *testing.T) {
 func TestAudienceLines(t *testing.T) {
 	loc, _ := time.LoadLocation("Australia/Melbourne")
 	six := time.Date(2026, 9, 18, 6, 0, 0, 0, loc)
-	const head = "The following people will be notified of the change:"
+	const head = "p.stonn will tell these people about the change:"
 	driver := audienceDriver{Email: "nanny@example.com", Reg: "NAN123"}
 	cases := []struct {
 		name   string
@@ -408,7 +411,7 @@ func TestAudienceLines(t *testing.T) {
 		driver audienceDriver
 		want   []string
 	}{
-		{"nobody", nil, audienceDriver{}, []string{"No one is notified of this change, the way notifications are set on the account."}},
+		{"nobody", nil, audienceDriver{}, []string{"With the account’s notification settings as they are, p.stonn will not tell anyone about this change."}},
 		{"one email", []notify.Recipient{{Email: "jo@example.com", ByEmail: true}}, audienceDriver{}, []string{head, "jo@example.com — by email"}},
 		{"email and push", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, ByPush: true}}, audienceDriver{}, []string{head, "sam@example.com — by email and push notification"}},
 		{"quiet hours", []notify.Recipient{{Email: "sam@example.com", ByEmail: true, NotBefore: six}}, audienceDriver{},

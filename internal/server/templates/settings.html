@@ -1,21 +1,21 @@
 {{define "page-settings"}}
   {{/* ---------- SETTINGS ---------- */}}
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Settings</div>
-  <p class="subtitle">Your council connection and account.</p>
+  <p class="subtitle">Here you can manage your council connection and account.</p>
   {{template "checklist" .}}
   <section class="card" style="--hue:var(--sec-settings)">
     <h2><span class="ic">{{template "ic-link"}}</span> Council connection</h2>
     {{if .IsPrimary}}
     {{if .Settings.RelinkBy}}
-    <p class="empty-note" style="margin-top:-8px">Renewed automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, it would stop around <strong>{{.Settings.RelinkBy}}</strong> &mdash; we'd email a one-click link first.</p>
+    <p class="empty-note" style="margin-top:-8px">p.stonn renews the connection automatically so the schedule keeps running. The connection lasts as long as the account is in use: opening p.stonn (by you or anyone you share with) pushes the deadline out. If nobody visits, the connection would stop around <strong>{{.Settings.RelinkBy}}</strong>, and we would email you a one-click link first.</p>
     {{end}}
     {{if .Settings.TenantLinked}}
     <div class="row" style="margin-top:14px;justify-content:space-between;align-items:flex-start;gap:12px">
       <div style="max-width:60ch">
-        <strong>Auto-reconnect</strong>
+        <strong>Save my password</strong>
         {{if .AutoReconnect}}<span class="pill ok">On</span>
         <p class="empty-note" style="margin-top:4px">{{T "settings.password_saved" .}}</p>
-        <p class="empty-note" style="margin-top:4px">{{if .Settings.LastReconnect}}Last used to sign back in: <strong>{{.Settings.LastReconnect}}</strong>. This updates every time p.stonn uses your saved password, so you can always see when it was needed.{{else}}Your saved password hasn't been needed yet &mdash; this line will show when it was last used to sign back in.{{end}}</p>
+        <p class="empty-note" style="margin-top:4px">{{if .Settings.LastReconnect}}p.stonn last used your saved password to sign back in on <strong>{{.Settings.LastReconnect}}</strong>.{{else}}p.stonn has not needed your saved password yet.{{end}}</p>
         {{else}}<span class="pill">Off</span>
         <p class="empty-note" style="margin-top:4px">{{T "settings.password_not_saved" .}}</p>
         {{end}}
@@ -29,7 +29,7 @@
     </div>
     {{end}}
     <div class="row" style="margin-top:14px" x-data="{del:false}">
-      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? Your schedule is kept and resumes when you re-link." data-confirm-ok="Unlink">
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink your council account? p.stonn keeps your schedule and resumes it when you link again." data-confirm-ok="Unlink">
         <button type="submit" class="ghost">{{template "ic-x"}} Unlink account</button>
       </form>
       <button type="button" class="danger" @click="del=!del">{{template "ic-trash"}} Delete all my data</button>
@@ -38,9 +38,9 @@
         <button type="submit" class="danger">Confirm</button>
       </form>
     </div>
-    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all</strong> removes everything from the live database straight away; backup copies age out afterwards.</p>
+    <p class="empty-note" style="margin-top:12px"><strong>Unlink</strong> stops the service but keeps your schedule. <strong>Delete all my data</strong> removes everything straight away, although copies stay in our encrypted backups for up to about three months.</p>
     {{else}}
-    <p class="empty-note" style="margin-top:-8px">This account is owned by <strong>{{.SharedWith}}</strong>. They manage the council connection; you help manage the schedule.</p>
+    <p class="empty-note" style="margin-top:-8px"><strong>{{.SharedWith}}</strong> owns this account and manages the council connection. You help manage the schedule.</p>
     {{end}}
   </section>
   {{- range .Settings.OtherConnections}}
@@ -48,12 +48,12 @@
     <h2><span class="ic">{{template "ic-link"}}</span> {{T "settings.area_connection" .}}</h2>
     {{if .RelinkBy}}<p class="empty-note" style="margin-top:-8px">If nobody visits, this connection would stop around <strong>{{.RelinkBy}}</strong>.</p>{{end}}
     <div class="row" style="margin-top:14px">
-      <strong>Auto-reconnect</strong> {{if .AutoReconnect}}<span class="pill ok">On</span>
+      <strong>Save my password</strong> {{if .AutoReconnect}}<span class="pill ok">On</span>
       <form method="post" action="/tenant/forget-password" data-confirm="Stop saving your password? p.stonn will no longer reconnect on its own if your council session expires." data-confirm-ok="Stop saving"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">Turn off</button></form>
       {{else}}<span class="pill">Off</span>{{end}}
     </div>
     <div class="row" style="margin-top:14px">
-      <form method="post" action="/tenant/unlink" data-confirm="Unlink this connection? Its schedule is kept and resumes when you re-link." data-confirm-ok="Unlink"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">{{template "ic-x"}} Unlink</button></form>
+      <form method="post" action="/tenant/unlink" data-confirm="Unlink this connection? p.stonn keeps its schedule and resumes it when you link again." data-confirm-ok="Unlink"><input type="hidden" name="tenant_id" value="{{.ID}}"><button type="submit" class="ghost">{{template "ic-x"}} Unlink</button></form>
     </div>
   </section>
   {{- end}}
@@ -67,7 +67,7 @@
       {{range .Members}}
       <li class="row" style="justify-content:space-between">
         <span>{{template "ic-user"}} <strong>{{.Email}}</strong>
-          {{if .Pending}}<span class="muted">invited {{.Added}} — waiting for them to accept</span>
+          {{if .Pending}}<span class="muted">you invited them on {{.Added}}, and they have not accepted yet</span>
           {{else}}<span class="muted">added {{.Added}}</span>{{end}}
         </span>
         <span class="row" style="gap:6px">
@@ -97,13 +97,13 @@
       <input name="email" type="email" placeholder="their@email.com" required style="flex:1">
       <button type="submit">{{template "ic-plus"}} Add person</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself — that person is asked to accept the next time they sign in, and gets access only if they do.{{if .Settings.Notify.EmailAvailable}} p.stonn emails them to let them know.{{end}} Once they accept they can set the schedule and manage regos, but they cannot disconnect the council account, delete the account, or change who has access. Someone who already uses p.stonn with their own permits will be told they need to decline, because joining would hide their own.</p>
+    <p class="empty-note" style="margin-top:10px">Inviting an email does not grant access by itself. p.stonn asks that person to accept the next time they sign in, and they get access only if they do.{{if .Settings.Notify.EmailAvailable}} p.stonn emails them to let them know.{{end}} Once they accept they can set the schedule and manage regos, but they cannot unlink the council account, delete the account, or change who has access. If someone already uses p.stonn with their own permits, p.stonn tells them they need to decline, because joining would hide their own.</p>
     {{else}}
     <p class="empty-note" style="margin-top:12px">You have shared access with the most people allowed. Remove someone to add another.</p>
     {{end}}
     {{else}}
     <p class="subtitle">You have shared access to <strong>{{.SharedWith}}</strong>'s account.</p>
-    <p class="empty-note">You can set the schedule and manage regos. Only the account owner can connect or disconnect the council account, or delete the account.</p>
+    <p class="empty-note">You can set the schedule and manage regos. Only the account owner can link or unlink the council account, or delete the account.</p>
     <form method="post" action="/account/leave" data-confirm="Leave this shared account? You go back to your own account." data-confirm-ok="Leave" style="margin-top:14px">
       <button type="submit" class="ghost">{{template "ic-x"}} Leave this account</button>
     </form>
@@ -112,12 +112,12 @@
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
     <h2 id="notifications"><span class="ic">{{template "ic-bell"}}</span> Notifications</h2>
-    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or can't. Delivery isn't guaranteed &mdash; you're still responsible for the permit. Changes save as you toggle them.</p>
+    <p class="subtitle">p.stonn tries to tell you when it changes your permit, or when it cannot. Delivery isn’t guaranteed, so you are still responsible for the permit. Your changes here save as you make them.</p>
     {{if or .Settings.Notify.EmailAvailable .Settings.Notify.NtfyAvailable}}
     <div id="notify-body">{{template "notify-body" .Settings.Notify}}</div>
     <form method="post" action="/notifications/test" hx-post="/notifications/test" hx-target="#notify-body" hx-swap="innerHTML" class="notify-test"><button type="submit" class="ghost">{{template "ic-bell"}} Send a test notification</button></form>
     {{else}}
-    <p class="empty-note">No notification channels are set up by the operator. Configure <code>SMTP_*</code> (email) or <code>NTFY_BASE_URL</code> (push) to enable this.</p>
+    <p class="empty-note">The person who runs this p.stonn server has not set up email or push notifications. If you need them, you can <a href="/contact">contact us</a> for assistance.</p>
     {{end}}
   </section>
   <section class="card" style="--hue:var(--sec-settings)">
@@ -134,9 +134,9 @@
       </label>
       <button type="submit" class="ghost">Save</button>
     </form>
-    <p class="empty-note" style="margin-top:6px">Shown to your visitors instead of your email, on guest links and QR pages. Leave it blank and they see only the permit.</p>
+    <p class="empty-note" style="margin-top:6px">Your visitors see this instead of your email on guest passes and QR pages. If you leave it blank, they see the council’s name instead.</p>
     {{end}}
-    {{if .Terms.Accepted}}<p class="empty-note" style="margin-top:8px">Terms accepted: {{.Terms.Accepted}}.</p>{{end}}
+    {{if .Terms.Accepted}}<p class="empty-note" style="margin-top:8px">You accepted the terms {{.Terms.Accepted}}.</p>{{end}}
     {{/* A signed-in person had no way to reach the contact form: it is linked from the
          public header and from the footer of outgoing mail, neither of which is in
          front of someone already inside the app. Shown only when contact is
@@ -157,24 +157,24 @@
 {{if and .EmailAvailable .Suppressed}}
   {{if eq .SuppressedWhy "unsubscribed"}}
   <div class="banner warn" role="alert" style="margin-bottom:14px;align-items:flex-start">{{template "ic-alert"}} <span>
-    <strong>Routine email to {{.UserEmail}} is paused.</strong>
-    This address unsubscribed via an email link &mdash; sometimes a mail scanner presses that button without you knowing.
-    Emergency alerts (a failure you must act on) still get through; everything else is being dropped.
+    <strong>p.stonn is not sending routine email to {{.UserEmail}}.</strong>
+    This address unsubscribed using a link in one of our emails. A mail scanner can sometimes do that without you knowing.
+    Emergency alerts (a failure you must act on) still get through, but p.stonn is not sending anything else.
     <form hx-post="/notifications/resume-email" hx-target="#notify-body" hx-swap="innerHTML" style="margin-top:8px">
       <button type="submit" class="sm">Resume email</button>
     </form>
   </span></div>
   {{else if eq .SuppressedWhy "bounce"}}
   <div class="banner warn" role="alert" style="margin-bottom:14px;align-items:flex-start">{{template "ic-alert"}} <span>
-    <strong>Email to {{.UserEmail}} is not being delivered.</strong>
-    Messages to it bounced, so p.stonn has stopped sending &mdash; nothing, including emergency alerts, reaches this address.
-    If the mailbox is working again, <a href="/contact">get in touch</a> and we'll clear it.
+    <strong>p.stonn cannot deliver email to {{.UserEmail}}.</strong>
+    Our emails to this address bounced, so p.stonn has stopped sending to it. Nothing reaches this address, including emergency alerts.
+    If the mailbox is working again, <a href="/contact">get in touch</a> and we will start sending to it again.
   </span></div>
   {{else}}
   <div class="banner warn" role="alert" style="margin-bottom:14px;align-items:flex-start">{{template "ic-alert"}} <span>
-    <strong>Email to {{.UserEmail}} is stopped.</strong>
-    This address reported p.stonn mail as spam, so nothing more will be sent to it.
-    If that wasn't you, <a href="/contact">get in touch</a>.
+    <strong>p.stonn is no longer emailing {{.UserEmail}}.</strong>
+    This address reported p.stonn mail as spam, so p.stonn will not send anything more to it.
+    If that wasn’t you, <a href="/contact">get in touch</a>.
   </span></div>
   {{end}}
 {{end}}
@@ -221,12 +221,12 @@
            server" with a "Service URL" field; a self-hosted server is not the
            default, and people who skip that toggle subscribe on ntfy.sh instead
            and never hear from us. */}}
-      <p class="steps-lead">Setting it up is free and takes about a minute.</p>
+      <p class="steps-lead">Setting up push notifications is free and takes about a minute.</p>
       <ol>
         <li>Install the <strong>ntfy</strong> app (App Store or Google Play).</li>
         <li>Open it and tap <strong>+</strong> (<em>Subscribe to topic</em> on Android, <em>Add subscription</em> on iPhone).</li>
         <li>Turn on <strong>Use another server</strong> and enter the Service URL: <code>{{.NtfyBase}}</code></li>
-        <li>Topic name: <code>{{.NtfyTopic}}</code> &mdash; then <strong>Subscribe</strong>.</li>
+        <li>Enter the topic name <code>{{.NtfyTopic}}</code>, then tap <strong>Subscribe</strong>.</li>
         <li>Tap <strong>Send a test to my phone</strong> below, then <strong>Confirm</strong> on the notification when it arrives.</li>
       </ol>
       {{/* The confirmation is what unlocks turning email off (saveNotify); say
@@ -235,13 +235,13 @@
            as "done", and the person leaves with a topic nobody is subscribed
            to. Pending must look like the step it is. */}}
       {{if .NtfyConfirmed}}
-      <div class="banner ok" style="margin:16px 0 16px">{{template "ic-check"}} <span><strong>Your phone is set up</strong> &mdash; confirmed on {{.NtfyConfirmedOn}}. Push notifications are getting through, so you can turn off email if you&rsquo;d rather.</span></div>
+      <div class="banner ok" style="margin:16px 0 16px">{{template "ic-check"}} <span><strong>Your phone is set up.</strong> You confirmed it on {{.NtfyConfirmedOn}}. Push notifications are getting through, so you can turn off email if you’d rather.</span></div>
       {{else if .PushSent}}
       {{/* Sent, tap awaited: the box says so and polls ntfyStatus (204 until the
            tap, then the confirmed fragment) so it turns green by itself. */}}
-      <div class="banner info hx-quiet" style="margin:16px 0 16px;align-items:flex-start" hx-get="/notifications/ntfy-status" hx-trigger="every 4s" hx-target="#notify-body" hx-swap="innerHTML transition:false">{{template "ic-bell"}} <span><strong>Sent to your phone.</strong> Now tap <strong>Confirm</strong> on the notification when it arrives &mdash; this page will update by itself once you have. Nothing arrived? Check the topic and Service URL in the ntfy app, then send again.</span></div>
+      <div class="banner info hx-quiet" style="margin:16px 0 16px;align-items:flex-start" hx-get="/notifications/ntfy-status" hx-trigger="every 4s" hx-target="#notify-body" hx-swap="innerHTML transition:false">{{template "ic-bell"}} <span><strong>p.stonn has sent a test to your phone.</strong> Now tap <strong>Confirm</strong> on the notification when it arrives. This page will update by itself once you have. If nothing arrives, check the topic and Service URL in the ntfy app, then send again.</span></div>
       {{else}}
-      <div class="banner warn" style="margin:16px 0 16px;align-items:flex-start">{{template "ic-alert"}} <span><strong>One more step: confirm your phone.</strong> Tap <strong>Send a test to my phone</strong>, then <strong>Confirm</strong> on the notification when it arrives. That tells p.stonn the notifications are getting through &mdash; you can turn off email once you have.</span></div>
+      <div class="banner warn" style="margin:16px 0 16px;align-items:flex-start">{{template "ic-alert"}} <span><strong>One more step: confirm your phone.</strong> Tap <strong>Send a test to my phone</strong>, then <strong>Confirm</strong> on the notification when it arrives. That tells p.stonn the notifications are getting through. Once you have, you can turn off email.</span></div>
       {{end}}
       <div class="row" style="gap:8px;flex-wrap:wrap">
         {{/* Push-only test (testPush): while someone is wiring up their phone,
@@ -261,11 +261,11 @@
   {{/* The tier the toggles above cannot switch off. Stated, not argued: the
        page says what happens, and the list is the actual set of forced-email
        notices (emailWanted / broadcastAccount / NotifyPermitExpiry / watchdog). */}}
-  <p class="empty-note">Whatever you choose here, safety alerts always come by email: a change p.stonn couldn&rsquo;t make, a council connection that needs re-linking, a permit about to expire, and outage notices.</p>
+  <p class="empty-note">Whatever you choose here, safety alerts always come by email: a change p.stonn couldn&rsquo;t make, a council connection that needs linking again, a permit about to expire, and outage notices.</p>
   {{end}}
-  <label class="toggle"><input type="checkbox" name="failures_only" {{if .FailuresOnly}}checked{{end}}> <span>Only tell me when something needs attention &mdash; skip the &ldquo;rego changed as scheduled&rdquo; confirmations</span></label>
+  <label class="toggle"><input type="checkbox" name="failures_only" {{if .FailuresOnly}}checked{{end}}> <span>Only tell me when something needs attention, and skip the “rego changed as scheduled” confirmations</span></label>
   <div class="quiet" x-data="{quiet: {{if .QuietEnabled}}true{{else}}false{{end}}}">
-    <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours &mdash; hold overnight notices until morning</span></label>
+    <label class="toggle"><input type="checkbox" name="quiet_enabled" x-model="quiet" {{if .QuietEnabled}}checked{{end}}> <span>Quiet hours: hold overnight notices until the morning</span></label>
     <div class="quiet-times" x-show="quiet" x-cloak>
       <span>Hold notices from</span>
       <select name="quiet_from" aria-label="Start holding notices at">
@@ -275,9 +275,9 @@
       <select name="quiet_until" aria-label="Deliver held notices at">
         {{$qu := .QuietUntil}}{{range hours}}<option value="{{.}}" {{if eq . $qu}}selected{{end}}>{{hourLabel .}}</option>{{end}}
       </select>
-      <span>&mdash; then they're delivered.</span>
+      <span>and then send them.</span>
     </div>
-    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them &mdash; only the notification waits, so a midnight roster change reaches you as a morning confirmation. Anything that needs your action is sent straight away.</p>
+    <p class="quiet-note" x-show="quiet" x-cloak>Changes still happen as soon as p.stonn can make them. Only the notification waits, so a midnight roster change reaches you as a morning confirmation. p.stonn sends anything that needs your action straight away.</p>
   </div>
 </form>
 {{end}}

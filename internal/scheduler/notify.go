@@ -346,9 +346,9 @@ func (s *Scheduler) alertReconnectStalled(owner, tenantID string) {
 // counted as a failure: hitting it means this person has already had six notices in a
 // day, so "we told them" remains true.)
 func (s *Scheduler) warnDisplaced(ctx context.Context, p model.Permit, d model.DisplacedBooking, prev, want string) bool {
-	how := "another car has been put on it"
+	how := "the permit holder’s schedule set a different rego"
 	if want == "" {
-		how = "the permit holder took it off"
+		how = "the permit holder removed your rego"
 	}
 	return s.warnDisplacedHow(ctx, p, d, prev, how)
 }
@@ -580,7 +580,7 @@ func (s *Scheduler) handleApplyFailure(ctx context.Context, p model.Permit, want
 	threshold := failNotifyThreshold
 	if kind == parking.FailRejected {
 		threshold = 1
-		action += " p.stonn will not retry this change until you edit the schedule or re-link."
+		action += " p.stonn will not retry this change until you edit the schedule or link your council account again."
 	}
 	n := s.escalateFailure(ctx, p, threshold, notify.ApplyOutcome{
 		Owner:       p.Owner,
@@ -613,13 +613,13 @@ func describeFailure(kind parking.FailureKind, op parking.Op) (reason, action st
 	switch kind {
 	case parking.FailRejected:
 		return fmt.Sprintf("The council would not let p.stonn %s.", what),
-			"Please check the permit on the council website, or change the vehicle there yourself. You may also need to re-link p.stonn from the app."
+			"Please check the permit on the council website, or change the rego there yourself. You may also need to link your council account again in p.stonn."
 	case parking.FailUnexpected:
 		return fmt.Sprintf("p.stonn got an unexpected response from the council while trying to %s.", what),
-			"p.stonn will keep trying. If your permit shows the wrong vehicle, change it on the council website in the meantime."
+			"p.stonn will keep trying. If your permit shows the wrong rego, change it on the council website in the meantime."
 	default: // FailTransient
 		return fmt.Sprintf("p.stonn is having trouble reaching the council to %s.", what),
-			"p.stonn will keep trying automatically. If it keeps happening, check your permit on the council website."
+			"p.stonn will keep trying. If the problem continues, please check your permit on the council website."
 	}
 }
 
@@ -630,10 +630,10 @@ var opWording = map[parking.Op]string{
 	provider.OpLogin:        "sign in to your council account",
 	provider.OpRefresh:      "keep your council sign-in active",
 	provider.OpListPermits:  "list your permits",
-	provider.OpReadVehicle:  "read the current vehicle on your permit",
-	provider.OpSetVehicle:   "change the vehicle on your permit",
-	provider.OpAddVehicle:   "add a vehicle to your permit",
-	provider.OpClearVehicle: "remove the vehicle from your permit",
+	provider.OpReadVehicle:  "read the rego on your permit",
+	provider.OpSetVehicle:   "change the rego on your permit",
+	provider.OpAddVehicle:   "put a rego on your permit",
+	provider.OpClearVehicle: "remove the rego from your permit",
 }
 
 func (s *Scheduler) bumpFailStreak(ctx context.Context, permitID int64) int {

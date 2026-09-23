@@ -109,7 +109,7 @@ func TestCycleWeekEndpoints(t *testing.T) {
 	// Up the ladder: from a fortnight one add makes four weeks (3 and 4 copied
 	// from 1 and 2, so the Monday is in all four), and the cap refuses more.
 	w = r.s.doHX(http.MethodPost, add, user, origin, nil)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Added weeks 3 and 4, copied from weeks 1 and 2.") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "You added weeks 3 and 4 as a copy of weeks 1 and 2.") {
 		t.Fatalf("grow to four = %d: %s", w.Code, excerpt(w.Body.String()))
 	}
 	if p, _ := r.st.GetPermit(ctx, id); p.CycleWeeks != 4 {
@@ -129,7 +129,7 @@ func TestCycleWeekEndpoints(t *testing.T) {
 		t.Fatalf("remove = %d: %s", w.Code, excerpt(w.Body.String()))
 	}
 	body = w.Body.String()
-	if !strings.Contains(body, "Removed weeks 3 and 4.") {
+	if !strings.Contains(body, "You removed weeks 3 and 4.") {
 		t.Fatalf("remove reply does not name the weeks: %s", excerpt(body))
 	}
 	m := regexp.MustCompile(`name="undo" value="([^"]+)"`).FindStringSubmatch(body)
@@ -142,7 +142,7 @@ func TestCycleWeekEndpoints(t *testing.T) {
 
 	// Undo restores both weeks and their Mondays.
 	w = r.s.doHX(http.MethodPost, "/permits/"+itoa64(id)+"/weeks/restore", user, origin, url.Values{"undo": {m[1]}})
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Weeks 3 and 4 are back.") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "You put weeks 3 and 4 back on the roster.") {
 		t.Fatalf("restore = %d: %s", w.Code, excerpt(w.Body.String()))
 	}
 	p, _ := r.st.GetPermit(ctx, id)

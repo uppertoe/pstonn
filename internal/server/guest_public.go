@@ -598,9 +598,9 @@ func audienceLines(rs []notify.Recipient, loc *time.Location, driver audienceDri
 		lines = append(lines, driver.Email+" — by email, as the driver of "+driver.Reg)
 	}
 	if len(lines) == 0 {
-		return []string{"No one is notified of this change, the way notifications are set on the account."}
+		return []string{"With the account’s notification settings as they are, p.stonn will not tell anyone about this change."}
 	}
-	return append([]string{"The following people will be notified of the change:"}, lines...)
+	return append([]string{"p.stonn will tell these people about the change:"}, lines...)
 }
 
 // guestFP fingerprints the state a poll could change. Everything else on the
@@ -711,11 +711,11 @@ func isBoosted(r *http.Request) bool { return r.Header.Get("HX-Boosted") == "tru
 func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if !sameOrigin(r) {
-		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
+		s.guestFail(w, r, "p.stonn could not verify this request. Please reopen your link and try again.")
 		return
 	}
 	if !s.guest.allow(rateLimitKey(r)) {
-		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
+		s.guestFail(w, r, "You have made too many attempts. Please wait a little while, then try again.")
 		return
 	}
 	limitBody(r)
@@ -769,7 +769,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		}
 		id, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, regState, now, &end, createdBy, gc.TokenID)
 		if err != nil {
-			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your plate. Please try again."))
+			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "p.stonn could not save your rego. Please try again."))
 			return
 		}
 		overrideID = id
@@ -789,7 +789,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		reg, name, color, createdBy, regState = chosen.Registration, chosen.Label, chosen.Color, gc.Recipient, chosen.State
 		id, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID)
 		if err != nil {
-			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "Something went wrong saving your choice. Please try again."))
+			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "p.stonn could not save your choice. Please try again."))
 			return
 		}
 		overrideID = id
@@ -857,7 +857,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 func guestRefusalMessage(err error, plate string, restoring bool) string {
 	kind, _ := parking.FailureOf(err)
 	if kind != parking.FailRejected {
-		return "p.stonn got an unexpected answer from the council and hasn't changed the permit. Please ask the resident to check it."
+		return "p.stonn got an unexpected answer from the council and hasn’t changed the permit. Please ask the resident to check the permit."
 	}
 	if restoring {
 		return "The council wouldn't accept putting " + plate + " back, so nothing has changed. Please ask the resident to check the permit."
@@ -875,11 +875,11 @@ func guestRefusalMessage(err error, plate string, restoring bool) string {
 func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if !sameOrigin(r) {
-		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
+		s.guestFail(w, r, "p.stonn could not verify this request. Please reopen your link and try again.")
 		return
 	}
 	if !s.guest.allow(rateLimitKey(r)) {
-		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
+		s.guestFail(w, r, "You have made too many attempts. Please wait a little while, then try again.")
 		return
 	}
 	limitBody(r)
@@ -905,7 +905,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 
 	// Sweep this link's overrides first.
 	if err := s.store.DeleteGuestOverrides(r.Context(), permit.ID, gc.TokenID); err != nil {
-		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "Something went wrong. Please try again.")
+		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "p.stonn could not make that change. Please try again.")
 		return
 	}
 	createdBy := gc.Recipient
@@ -939,7 +939,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 			alog.Errorf("guest: revert re-pin for permit %d failed after the sweep: %v", permit.ID, err)
 			s.kickScheduler()
 			s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "",
-				"Your rego was taken off the permit, but the previous one could not be put back automatically. It will be restored shortly.")
+				"p.stonn has removed your rego from the permit and will put the previous rego back shortly.")
 			return
 		}
 	}
@@ -992,11 +992,11 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	if !sameOrigin(r) {
-		s.guestFail(w, r, "This request could not be verified. Please reopen your link and try again.")
+		s.guestFail(w, r, "p.stonn could not verify this request. Please reopen your link and try again.")
 		return
 	}
 	if !s.guest.allow(rateLimitKey(r)) {
-		s.guestFail(w, r, "Too many attempts. Please wait a little while and try again.")
+		s.guestFail(w, r, "You have made too many attempts. Please wait a little while, then try again.")
 		return
 	}
 	limitBody(r)
@@ -1015,7 +1015,7 @@ func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.tenant == nil || !s.tenant.Capabilities(r.Context(), permit.Owner, permit.TenantID).CanClearVehicle {
-		s.renderGuestMenu(w, r, gc, permit, current, "", "This council's permit can't be left with no rego on it. Put a different rego on instead.")
+		s.renderGuestMenu(w, r, gc, permit, current, "", "The council does not allow this permit to have no rego, so put a different rego on instead.")
 		return
 	}
 	// Checked BEFORE the sweep: refusing after it would have ended the booking
@@ -1024,7 +1024,7 @@ func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	} else if res.Source != model.SourceNone && !res.Empty {
-		s.renderGuestMenu(w, r, gc, permit, current, "", "The roster has a rego scheduled for now, so the permit can't be left empty. Change today's roster in the app instead.")
+		s.renderGuestMenu(w, r, gc, permit, current, "", "The roster has a rego scheduled for now, so p.stonn cannot leave the permit empty. If you want to change that, edit today’s roster on the Schedule tab.")
 		return
 	}
 	// End this link's own booking, and forget the baseline: there is nothing to
@@ -1065,7 +1065,7 @@ func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 	if res := model.Resolve(time.Now().In(s.locForPermit(applyCtx, permit)), permit.Cycle(), rules, ovs); res.Source != model.SourceNone && !res.Empty {
 		release()
 		s.kickScheduler()
-		s.renderGuestMenu(w, r, gc, permit, current, "", "A rego was just scheduled for now, so the permit can't be left empty.")
+		s.renderGuestMenu(w, r, gc, permit, current, "", "Someone has just scheduled a rego for now, so p.stonn cannot leave the permit empty.")
 		return
 	}
 	err := s.tenant.ClearVehicle(applyCtx, permit.Owner, permit)
@@ -1081,17 +1081,17 @@ func (s *Server) guestClear(w http.ResponseWriter, r *http.Request) {
 		alog.Infof("guest clear on permit %d: %v", permit.ID, err)
 		_ = s.store.RecordApply(bg, permit.ID, "", "guest", "error", guestApplyDetail(err))
 		if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-			s.renderGuestMenu(w, r, gc, permit, current, "", "Couldn't reach the council just now, so "+current+" is still on the permit. Please try again shortly.")
+			s.renderGuestMenu(w, r, gc, permit, current, "", "p.stonn could not reach the council, so "+current+" is still on the permit. Please try again shortly.")
 			return
 		}
-		s.renderGuestMenu(w, r, gc, permit, current, "", "The council didn't accept taking "+current+" off, so it is still on the permit. Check the permit in the app.")
+		s.renderGuestMenu(w, r, gc, permit, current, "", "The council did not let p.stonn remove "+current+", so it is still on the permit. You can check the permit in p.stonn.")
 		return
 	}
 	label := permitLabel(permit)
 	_ = s.store.RecordApply(bg, permit.ID, "", "guest", "success", "rego removed from "+pickerActor)
 	s.logChange(bg, permit.Owner, pickerActor, store.ActionVehicleClear, label, "")
 	s.notifyDestructive(bg, permit.Owner, pickerActor,
-		"The rego was taken off the permit \""+label+"\" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.")
+		"Someone used the quick picker to remove the rego from the permit “"+label+"”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.")
 	s.renderGuestMenu(w, r, gc, permit, "", current+" is off the permit.", "")
 }
 
@@ -1157,17 +1157,17 @@ func (s *Server) resolveGuest(r *http.Request, raw string) (guestCtx, model.Perm
 func undeliverableText(reason string) string {
 	switch reason {
 	case store.SuppressBounce:
-		return "email bounced — check the address, or share the link another way"
+		return "The email bounced. Check the address, or share the link another way."
 	case store.SuppressComplaint:
-		return "they marked our email as spam, so we've stopped emailing them"
+		return "This person marked our email as spam, so we no longer email them."
 	case store.SuppressUnsubscribed:
 		// Added after this switch was written, and without a case here an
 		// unsubscribed recipient rendered as a normal "has a link" row — the silent
 		// suppression this page exists to expose. The owner needs to know the link
 		// never arrived and that re-sending will not help.
-		return "they unsubscribed, so we can't email them — share the link another way"
+		return "This person unsubscribed, so we can’t email them. Share the link another way."
 	case store.SuppressManual:
-		return "email disabled for this address"
+		return "Email is turned off for this address."
 	default:
 		return ""
 	}
@@ -1178,7 +1178,7 @@ func undeliverableText(reason string) string {
 // not a raw tenant error (which goes to the server log instead).
 func guestApplyDetail(err error) string {
 	if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-		return "Couldn't reach the council; p.stonn will keep trying."
+		return "p.stonn could not reach the council and will keep trying."
 	}
 	return "The council did not accept the change."
 }
@@ -1259,7 +1259,7 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 		}
 		return d, false // undeliverable (or unknown): ask the account to pass it on
 	}
-	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, "another rego has been put on it", time.Now()); err != nil {
+	if err := s.notify.NotifyDriverDisplaced(ctx, permit.Owner, d.Contact, permitLabel(permit), prev, "someone with a link to the permit set a different rego", time.Now()); err != nil {
 		alog.Infof("enqueue driver-displaced for %s: %v", notify.RedactEmail(d.Contact), err)
 		return d, false
 	}
@@ -1267,7 +1267,7 @@ func (s *Server) displacedDriver(ctx context.Context, permit model.Permit, prev,
 }
 
 func (s *Server) renderGuestGone(w http.ResponseWriter, r *http.Request) {
-	const msg = "This link is no longer active. Ask the account holder for a new one."
+	const msg = "This link no longer works. Please ask the resident for a new one."
 	if isHX(r) && !isBoosted(r) {
 		// The link died mid-session (revoked, disabled): swap the menu for the notice.
 		// A boosted link click, though, is a navigation and wants the whole page.
@@ -1291,7 +1291,7 @@ func (s *Server) renderStatus(w http.ResponseWriter, code int, data dashboardDat
 		// The bare page, as render() does: the styled notice shares the template
 		// set that just failed.
 		alog.Infof("render %s page: %v", data.State, err)
-		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "Something went wrong rendering this page. Please try again."})
+		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "p.stonn could not show this page. Please try again."})
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1305,10 +1305,10 @@ func (s *Server) renderStatus(w http.ResponseWriter, code int, data dashboardDat
 // that would be exactly as dead. What they need to hear is that the permit
 // itself is finished — parking on its say-so no longer protects anyone.
 func (s *Server) renderGuestInactive(w http.ResponseWriter, r *http.Request, picker bool) {
-	msg := "This permit is no longer active, so this code cannot put a rego on it right now. Please check with your host before parking."
+	msg := "This permit is no longer active, so this code cannot put a rego on it. Please check with the resident before you park."
 	if picker {
 		// The household's own page: say what to do, not who to ask.
-		msg = "This permit is no longer active. In p.stonn, add the new permit and copy the schedule across; the quick picker moves with it."
+		msg = "This permit is no longer active. If you add the new permit in p.stonn and copy the schedule across, the quick picker moves with it."
 	}
 	if isHX(r) && !isBoosted(r) {
 		// The permit died mid-session: swap the menu for the notice in place.

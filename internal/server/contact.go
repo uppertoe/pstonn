@@ -336,7 +336,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !sameOrigin(r) {
-		s.message(w, http.StatusForbidden, "This request could not be verified. Please reload the page and try again.")
+		s.message(w, http.StatusForbidden, "p.stonn could not verify this request. Please reload the page and try again.")
 		return
 	}
 	base := s.publicPage(r, "contact")
@@ -351,7 +351,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	}
 	limitBody(r)
 	if err := r.ParseForm(); err != nil {
-		base.Warn = "Could not read the form. Please try again."
+		base.Warn = "p.stonn could not read the form. Please try again."
 		s.render(w, base)
 		return
 	}
@@ -360,7 +360,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	// of whether the trap still works against whatever is posting this week.
 	if strings.TrimSpace(r.PostForm.Get("website")) != "" {
 		alog.Infof("contact form: honeypot hit, message dropped")
-		base.Flash = "Thanks. Your message has been sent."
+		base.Flash = "Thanks. p.stonn has sent your message."
 		s.render(w, base)
 		return
 	}
@@ -387,7 +387,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 	id, err := s.store.AddContactMessage(r.Context(), message, replyTo)
 	if err != nil {
 		alog.Errorf("contact form: store message: %v", err)
-		base.Warn = "Sorry, the message could not be sent right now. Please try again later."
+		base.Warn = "Sorry, p.stonn could not send the message right now. Please try again later."
 		s.render(w, base)
 		return
 	}
@@ -398,7 +398,7 @@ func (s *Server) submitContact(w http.ResponseWriter, r *http.Request) {
 		alog.Errorf("contact form: admin push for message %d failed: %v", id, err)
 	}
 	base.ContactVal, base.ContactFrom = "", "" // clear on success
-	base.Flash = "Thanks. Your message has been sent."
+	base.Flash = "Thanks. p.stonn has sent your message."
 	s.render(w, base)
 }
 

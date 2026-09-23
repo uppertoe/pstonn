@@ -33,7 +33,7 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	// Only the account owner links the tenant account; a secondary uses the
 	// primary's connection and cannot change it.
 	if !isPrimary {
-		s.message(w, http.StatusForbidden, "Only the account owner can connect the council account.")
+		s.message(w, http.StatusForbidden, "Only the account owner can link the council account.")
 		return
 	}
 	// The tenant username is FIXED to the owner's verified email (from the
@@ -101,14 +101,14 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 		known, kerr := s.store.HasOwnData(r.Context(), user)
 		if kerr != nil {
 			alog.Infof("capacity check for %s: %v", redact.Email(user), kerr)
-			s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
+			s.message(w, http.StatusServiceUnavailable, "p.stonn couldn’t check availability just now. Please try again in a moment.")
 			return
 		}
 		if !known {
 			n, cerr := s.store.CountLinkedAccounts(r.Context())
 			if cerr != nil {
 				alog.Infof("capacity check for %s: %v", redact.Email(user), cerr)
-				s.message(w, http.StatusServiceUnavailable, "We couldn't check availability just now. Please try again in a moment.")
+				s.message(w, http.StatusServiceUnavailable, "p.stonn couldn’t check availability just now. Please try again in a moment.")
 				return
 			} else if n >= s.cfg.MaxAccounts {
 				alog.Warnf("capacity: refused a new link for %s (%d/%d accounts)", redact.Email(user), n, s.cfg.MaxAccounts)
@@ -132,7 +132,7 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 		// could not make at all. Best-effort: the person is answered either way.
 		s.noteLinkFailure(r.Context(), user, err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
-			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
+			s.message(w, http.StatusBadGateway, "The council’s site is not accepting sign-ins right now, and your password was not the problem. Please try again in a little while.")
 			return
 		}
 		if errors.Is(err, parking.ErrLoginRejected) {
@@ -154,11 +154,11 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 			// "a problem at our end" here would be a lie about their password and leave
 			// them retrying something that can never work.
 			s.message(w, http.StatusConflict,
-				"You've joined another p.stonn household, so this address now shares that household's permits instead of holding its own council link. "+
-					"Your council password was accepted — there is nothing wrong with it. If you meant to manage your own permits, leave the shared household from Settings first, then link again.")
+				"You’ve joined another p.stonn account, so this address now shares that account’s permits instead of holding its own council link. "+
+					"The council accepted your password, so there is nothing wrong with it. If you meant to manage your own permits, leave the shared account from Settings first, then link again.")
 			return
 		}
-		s.message(w, http.StatusBadGateway, "Could not link your council account. This appears to be a problem at our end or on the council's site rather than your password. Please try again shortly.")
+		s.message(w, http.StatusBadGateway, "p.stonn could not link your council account. This appears to be a problem at our end or on the council's site rather than your password. Please try again shortly.")
 		return
 	}
 	if tenantID != "" {
@@ -284,7 +284,7 @@ func (s *Server) tenantUnlink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !isPrimary {
-		s.message(w, http.StatusForbidden, "Only the account owner can disconnect the council account.")
+		s.message(w, http.StatusForbidden, "Only the account owner can unlink the council account.")
 		return
 	}
 	tenant, err := s.tenantArg(r, user)
@@ -506,7 +506,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	isP, err := s.store.IsPrimary(ctx, u.Email)
 	if err != nil {
 		alog.Errorf("acceptInvite: cannot check primary status for %s: %v", redact.Email(u.Email), err)
-		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
+		s.message(w, http.StatusServiceUnavailable, "p.stonn couldn’t check your account just now. Please try again in a moment.")
 		return
 	}
 	if isP {
@@ -516,7 +516,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	has, err := s.store.HasOwnData(ctx, u.Email)
 	if err != nil {
 		alog.Errorf("acceptInvite: cannot check own data for %s: %v", redact.Email(u.Email), err)
-		s.message(w, http.StatusServiceUnavailable, "We couldn't check your account just now. Please try again in a moment.")
+		s.message(w, http.StatusServiceUnavailable, "p.stonn couldn’t check your account just now. Please try again in a moment.")
 		return
 	}
 	if has {
@@ -598,12 +598,12 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
 	s.revokeSessions(r.Context(), email)
 	detail := ""
 	if revoked > 0 {
-		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
+		detail = revokedPassesDetail(revoked)
 		// Their visitors' links died with their access; the rest of the household
 		// hears about it as it does for any revoked pass, and the permit is
 		// corrected now rather than on the next tick.
 		s.notifyDestructive(r.Context(), owner, user, fmt.Sprintf(
-			"%s removed %s from your p.stonn account. %d guest pass(es) or printed QR(s) they created have stopped working, and p.stonn is taking any rego they put on the permit back off now.", user, email, revoked))
+			"%s removed %s from your p.stonn account. %s, and p.stonn is removing any rego they put on the permit.", user, email, revokedPassesSentence(revoked)))
 		s.kickScheduler()
 	}
 	s.logChange(r.Context(), owner, user, store.ActionMemberRemove, email, detail)
@@ -648,9 +648,9 @@ func (s *Server) leaveAccount(w http.ResponseWriter, r *http.Request) {
 	// anywhere to explain why.
 	detail := ""
 	if revoked > 0 {
-		detail = fmt.Sprintf("%d guest pass(es) they created were revoked", revoked)
+		detail = revokedPassesDetail(revoked)
 		s.notifyDestructive(r.Context(), leftOwner, user, fmt.Sprintf(
-			"%s left the account. %d guest pass(es) or printed QR(s) they created have stopped working.", user, revoked))
+			"%s left the account. %s.", user, revokedPassesSentence(revoked)))
 		s.kickScheduler()
 	}
 	s.logChange(r.Context(), leftOwner, user, store.ActionMemberLeave, "", detail)
@@ -686,7 +686,7 @@ func (s *Server) tenantConfirmApply(w http.ResponseWriter, r *http.Request) {
 	limitBody(r)
 	if !s.confirmLimit.allow(rateLimitKey(r)) {
 		w.Header().Set("Retry-After", "60")
-		s.message(w, http.StatusTooManyRequests, "Too many attempts. Please wait a moment and try the link in your email again.")
+		s.message(w, http.StatusTooManyRequests, "You have made too many attempts. Please wait a moment and try the link in your email again.")
 		return
 	}
 	token := strings.TrimSpace(r.FormValue("token"))
@@ -803,4 +803,22 @@ func (s *Server) resendInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logChange(r.Context(), owner, user, store.ActionMemberAdd, email, "invitation sent again")
 	http.Redirect(w, r, "/settings?"+q.Encode(), http.StatusSeeOther)
+}
+
+// revokedPassesDetail is the Activity note for a member's guest passes that died
+// with their access.
+func revokedPassesDetail(n int64) string {
+	if n == 1 {
+		return "the guest pass they created no longer works"
+	}
+	return fmt.Sprintf("the %d guest passes they created no longer work", n)
+}
+
+// revokedPassesSentence opens the account notice for the same event. The count
+// covers guest passes and printed QRs together.
+func revokedPassesSentence(n int64) string {
+	if n == 1 {
+		return "The guest pass or printed QR they created no longer works"
+	}
+	return fmt.Sprintf("The %d guest passes and printed QRs they created no longer work", n)
 }

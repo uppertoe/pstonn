@@ -29,7 +29,7 @@ func (s *Server) sharePage(w http.ResponseWriter, r *http.Request) {
 	base := s.shareShell(r.Context(), u)
 	switch r.URL.Query().Get("sent") {
 	case "1":
-		base.Flash = "Invitation sent."
+		base.Flash = "You sent the invitation."
 	}
 	base.Share = &shareData{ShareEmailAvailable: s.notify != nil && s.notify.EmailAvailable()}
 	// The card preview: same QR the printable page renders.
@@ -94,7 +94,7 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.notify == nil || !s.notify.EmailAvailable() {
-		s.message(w, http.StatusConflict, "Email isn't set up on this p.stonn, so invitations can't be sent from here.")
+		s.message(w, http.StatusConflict, "Email isn’t set up on this p.stonn, so you cannot send invitations from here.")
 		return
 	}
 	// Resolved BEFORE the send and the write, and fail-closed: the lenient
@@ -112,7 +112,7 @@ func (s *Server) sendReferral(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n >= referralDailyCap {
-		s.message(w, http.StatusTooManyRequests, "That's the limit for today — you can send more tomorrow.")
+		s.message(w, http.StatusTooManyRequests, "That’s the limit for today. You can send more tomorrow.")
 		return
 	}
 	if err := s.store.RecordReferralInvite(ctx, u.Email, to); err != nil {

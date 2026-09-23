@@ -8,19 +8,19 @@
   <section class="guestcard">
     {{if .Unsub.Done}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
-    <h1>Emails stopped</h1>
+    <h1>You have unsubscribed</h1>
     <p class="gresult">We've stopped emailing <strong>{{.Unsub.Address}}</strong>.</p>
     <p class="empty-note" style="margin-top:14px">
-      If this address belongs to a p.stonn account, your permit schedule keeps running as normal &mdash; you just won't get routine email about it.
-      One exception: if something goes wrong that could get someone fined &mdash; a permit change that needs you to act, or p.stonn losing its council connection &mdash; you'll still get that one email, because staying silent there isn't safe.
+      If this address belongs to a p.stonn account, your permit schedule keeps running as normal, but you won’t get routine email about it.
+      One exception: if something goes wrong that could get someone fined, such as a permit change that needs you to act or p.stonn losing its council connection, you’ll still get that one email.
       Sign in and turn email back on in Settings whenever you like.
     </p>
     {{else}}
-    <h1>Stop emails to this address?</h1>
+    <h1>Stop emails to this address</h1>
     <p class="gresult">We'll stop sending anything to <strong>{{.Unsub.Address}}</strong>.</p>
     <p class="empty-note" style="margin-top:12px">
-      Worth knowing first: if this address manages a visitor parking permit through p.stonn, this stops the routine emails &mdash; confirmations, reminders, minor hiccups.
-      Emergencies still get through: a failure that needs you to act right now to avoid a fine will still be emailed, because staying silent there isn't safe.
+      If this address manages a visitor parking permit through p.stonn, this stops the routine emails: confirmations, reminders and minor problems.
+      Emergencies still get through: if a failure needs you to act right now to avoid a fine, p.stonn will still email you.
       You can turn email back on in Settings after signing in.
     </p>
     <form method="post" action="{{.Unsub.Path}}" style="margin-top:18px">
@@ -43,20 +43,20 @@
   <section class="guestcard">
     {{if .Confirm.Done}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
-    <h1>Thanks &mdash; it'll keep running</h1>
+    <h1>Thanks. p.stonn will keep running.</h1>
     <p class="gresult">Your visitor-permit scheduler will carry on as normal.{{if .Confirm.Until}} We'll check in again around {{.Confirm.Until}}.{{end}}</p>
     {{else if .Confirm.Stale}}
     {{/* This state also covers an EXPIRED or unknown link, not just a used one —
          and an expired link means the deadline passed and the session really did
          stop. Promising "it will keep running" would be a flat untruth in exactly
          the case where the user needs to act. */}}
-    <h1>Nothing to do here</h1>
+    <h1>You don’t need to do anything here</h1>
     <p class="gresult">This link has already been used, or it has expired.</p>
-    <p class="empty-note" style="margin-top:12px">Open p.stonn to see where your permit scheduler stands. If it has stopped, you can reconnect your council account there and it will pick up your existing schedule.</p>
+    <p class="empty-note" style="margin-top:12px">Open p.stonn to see where your permit scheduler stands. If the scheduler has stopped, you can reconnect your council account there and it will pick up your existing schedule.</p>
     {{else}}
-    <h1>Keep your permit scheduler running?</h1>
+    <h1>Keep your permit scheduler running</h1>
     <p class="gresult">Confirm you'd still like p.stonn to keep updating your visitor permit.</p>
-    <p class="empty-note" style="margin-top:12px">This is a periodic check that someone is still using the service. If you do nothing, it stops on its own and you'd need to reconnect your council account.</p>
+    <p class="empty-note" style="margin-top:12px">This is a periodic check that someone is still using the service. If you do nothing, the service stops on its own and you’d need to reconnect your council account.</p>
     <form method="post" action="/tenant/confirm" style="margin-top:18px">
       <input type="hidden" name="token" value="{{.Confirm.Token}}">
       <button type="submit">Yes, keep it running</button>
@@ -78,39 +78,39 @@
   <section class="guestcard">
     {{if eq .Decide.Outcome "applied"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
-    <h1>Approved &mdash; it&rsquo;s on the permit</h1>
-    <p class="gresult"><span class="reg">{{.Decide.Plate}}</span> is on your {{if .Decide.PermitLabel}}{{.Decide.PermitLabel}}{{else}}visitor permit{{end}} now{{if .Decide.Until}}, {{.Decide.Until}}{{end}}.</p>
-    <p class="empty-note" style="margin-top:14px">Your visitor is covered. The rest of the household has been notified, and the change is on the Activity page.</p>
+    <h1>Approved</h1>
+    <p class="gresult"><span class="reg">{{.Decide.Plate}}</span> is on your {{if .Decide.PermitLabel}}permit “{{.Decide.PermitLabel}}”{{else}}visitor permit{{end}} now{{if .Decide.Until}}, {{.Decide.Until}}{{end}}.</p>
+    <p class="empty-note" style="margin-top:14px">Your visitor is covered. p.stonn has told the rest of the household. The change is on the Activity page.</p>
     {{else if eq .Decide.Outcome "approving"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
     <h1>Approved</h1>
-    <p class="gresult">p.stonn is putting <span class="reg">{{.Decide.Plate}}</span> on your {{if .Decide.PermitLabel}}{{.Decide.PermitLabel}}{{else}}visitor permit{{end}} now &mdash; it usually lands within a minute or two.</p>
-    <p class="empty-note" style="margin-top:14px">You don&rsquo;t need to wait here. If anything stops it going on, you&rsquo;ll be notified.</p>
+    <p class="gresult">p.stonn is putting <span class="reg">{{.Decide.Plate}}</span> on your {{if .Decide.PermitLabel}}permit “{{.Decide.PermitLabel}}”{{else}}visitor permit{{end}} now, which usually takes a minute or two.</p>
+    <p class="empty-note" style="margin-top:14px">You don’t need to wait here. If p.stonn cannot put the rego on, it will tell you.</p>
     {{else if eq .Decide.Outcome "declined"}}
-    <h1>Declined</h1>
-    <p class="gresult">Nothing goes on the permit. The visitor&rsquo;s page will tell them it wasn&rsquo;t approved.</p>
+    <h1>You declined this request</h1>
+    <p class="gresult">p.stonn will not change the permit, and the visitor’s page will tell them that you declined.</p>
     {{else if eq .Decide.Outcome "revoked"}}
-    <h1>That printed code was removed</h1>
-    <p class="gresult">Someone in your household removed the printed QR code between this request arriving and your answer, so nothing was applied.</p>
+    <h1>Someone removed the printed QR</h1>
+    <p class="gresult">Someone in your household removed the printed QR after this request arrived, so p.stonn has not put anything on the permit.</p>
     {{else if eq .Decide.Status "pending"}}
-    <h1>Approve <span class="reg">{{.Decide.Plate}}</span>?</h1>
-    <p class="gresult">Someone scanned your printed QR code at {{.Decide.Requested}} and is asking to put <span class="reg">{{.Decide.Plate}}</span> on your {{if .Decide.PermitLabel}}{{.Decide.PermitLabel}}{{else}}visitor permit{{end}}.</p>
-    <p class="empty-note" style="margin-top:12px">Approving puts their rego on until the end of today. Nothing is on the permit until you approve, and the request expires on its own within an hour of the scan.</p>
+    <h1>Approve or decline <span class="reg">{{.Decide.Plate}}</span></h1>
+    <p class="gresult">Someone scanned your printed QR at {{.Decide.Requested}} and is asking to put <span class="reg">{{.Decide.Plate}}</span> on your {{if .Decide.PermitLabel}}permit “{{.Decide.PermitLabel}}”{{else}}visitor permit{{end}}.</p>
+    <p class="empty-note" style="margin-top:12px">If you approve, p.stonn puts their rego on the permit until the end of today. If nobody answers, the request expires an hour after the scan.</p>
     <form method="post" action="{{.Decide.Path}}" style="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
       <button type="submit" name="decision" value="approve">{{template "ic-check"}} Approve until end of today</button>
       <button type="submit" name="decision" value="decline" class="ghost">Decline</button>
     </form>
-    <p class="empty-note" style="margin-top:14px">Answering as {{.Decide.Viewer}}. Not sure whose rego this is? This can only come from a scan of your printed code &mdash; check with whoever you expected to be using it.</p>
+    <p class="empty-note" style="margin-top:14px">You are answering as {{.Decide.Viewer}}. A request can only come from someone who has scanned your printed QR, so if you do not recognise the rego, check with whoever you expected to use it.</p>
     {{else if eq .Decide.Status "approved"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
     <h1>Already approved</h1>
-    <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> approved{{else}}This request was approved:{{end}} <span class="reg">{{.Decide.Plate}}</span>{{if .Decide.Until}}, {{.Decide.Until}}{{end}}. Nothing more to do.</p>
+    <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> approved{{else}}Someone in your household approved{{end}} <span class="reg">{{.Decide.Plate}}</span>{{if .Decide.Until}}, {{.Decide.Until}}{{end}}. You do not need to do anything more.</p>
     {{else if eq .Decide.Status "denied"}}
     <h1>Already declined</h1>
-    <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> declined this request{{else}}This request was declined{{end}}, so <span class="reg">{{.Decide.Plate}}</span> did not go on the permit.</p>
+    <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> declined this request{{else}}Someone in your household declined this request{{end}}, so p.stonn did not put <span class="reg">{{.Decide.Plate}}</span> on the permit.</p>
     {{else}}
     <h1>This request has expired</h1>
-    <p class="gresult">Nobody answered within the hour, so nothing went on the permit. If your visitor is still waiting, they can simply scan the code again.</p>
+    <p class="gresult">Nobody answered within the hour, so p.stonn did not change the permit. If your visitor is still waiting, they can scan the printed QR again.</p>
     {{end}}
   </section>
 </main>
@@ -129,7 +129,7 @@
     <div class="brand"><span class="mark">{{template "ic-monogram"}}</span> <span class="word">p<span class="dot">.</span>stonn</span></div>
     <div class="ring ring-off">{{template "ic-offline"}}</div>
     <h2>You&rsquo;re offline</h2>
-    <p>p.stonn needs a connection to reach the council and its own records, so nothing has been changed. Check your phone&rsquo;s connection and try again.</p>
+    <p>p.stonn needs a connection to reach the council and its own records, so it has not changed anything. Check your connection and try again.</p>
     <a class="btnlike" href="" hx-boost="false">Try again</a>
   </section>
 </main>

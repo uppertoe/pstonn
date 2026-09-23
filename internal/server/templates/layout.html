@@ -171,7 +171,7 @@
     // while the browser says it is offline used to do nothing at all: say so.
     // The boosted case below turns into a real navigation, which the service
     // worker answers with the offline page.
-    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('Your phone is offline, so nothing was changed. Check the connection and try again.'); return; }
+    if (cfg && !cfg.boosted && navigator.onLine === false) { showToast('You are offline, so p.stonn has not made that change. Check your connection and try again.'); return; }
     if (!cfg || !cfg.boosted) return;
     if (cfg.verb === 'get' && cfg.path) { window.location.href = cfg.path; }
     else { window.location.reload(); }
@@ -258,7 +258,7 @@
       showToast((x.responseText || 'Something needs your attention.').trim());
       return;
     }
-    var msg = 'Something went wrong. Please try again.';
+    var msg = 'p.stonn could not finish that request. Please try again.';
     var body = x.responseText || '';
     if (body.lastIndexOf('<!doctype html><meta charset="utf-8"><body', 0) === 0) {
       try {
@@ -403,9 +403,9 @@ window.popClamp = window.popClamp || function (el, tries) {
          out of play; a confirm the form put there itself (the booking form's
          "no rego" mode) stands. */}}
     if (!inp || inp.offsetParent === null || !v) { if (f.__plateConfirm) { delete f.dataset.confirm; f.__plateConfirm = false; } return; }
-    f.dataset.confirm = 'You typed ' + v + ' — check it against the car’s actual number plate. ' +
-      'Letter O vs zero 0 and letter I vs one 1 are easy to mix up, and a wrong plate means the car is not covered.';
-    f.dataset.confirmOk = 'It matches — continue';
+    f.dataset.confirm = 'You typed ' + v + '. Check it against the car’s actual number plate: ' +
+      'letter O and zero 0, and letter I and one 1, are easy to mix up, and a wrong plate means the car is not covered.';
+    f.dataset.confirmOk = 'It matches';
     f.__plateConfirm = true;
   }, true);
   {{/* The quick picker's "are you sure": one tap on a rego tile used to change

@@ -132,6 +132,18 @@ var templateFuncs = template.FuncMap{
 	"possessive": possessive,
 	"maskRego":   maskRego,
 	"sentence":   sentenceCase,
+	// statusLabel words an apply-log status for the Activity table; the stored
+	// codes stay as they are (the CSS keys off them).
+	"statusLabel": func(st string) string {
+		switch st {
+		case "success":
+			return "done"
+		case "error":
+			return "not made"
+		default:
+			return st
+		}
+	},
 	"sourceLabel": func(src string) string {
 		switch src {
 		case "roster":
@@ -139,11 +151,11 @@ var templateFuncs = template.FuncMap{
 		case "override":
 			return "one-off booking"
 		case "guest":
-			return "guest link"
+			return "guest pass"
 		case "doorqr":
 			return "printed QR"
 		case "manual":
-			return "rego removed"
+			return "removed by hand"
 		case "external":
 			return "at the council"
 		default:

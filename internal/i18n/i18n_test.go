@@ -66,7 +66,7 @@ func TestNestedInclude(t *testing.T) {
 	data := map[string]any{"Tenant": map[string]any{"Name": "N", "Links": map[string]string{"ApplyVisitor": "https://a", "FAQ": "https://f"}, "Terms": c.Terms(nil)}}
 	slots := Slots{"apply": Link("https://a"), "faq": Link("https://f"), "how": Link("/how"), "faq_page": Link("/faq")}
 	out, err := c.HTML("public.faq_more", data, slots)
-	if err != nil || !strings.Contains(string(out), `href="https://a"`) || !strings.Contains(string(out), `<a href="/how">how p.stonn works</a>`) {
+	if err != nil || !strings.Contains(string(out), `href="https://a"`) || !strings.Contains(string(out), `<a href="/how">what p.stonn can do</a>`) {
 		t.Fatalf("nested include with slots: %q %v", out, err)
 	}
 	// A slot the message names but the caller forgot is an error, never a

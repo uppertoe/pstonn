@@ -4,7 +4,7 @@
 <main id="main" tabindex="-1" class="landing">
   <section class="lhero">
     <h1>{{T "public.hero" .}}</h1>
-    <p class="lead">p.stonn sets your visitor permit to the rego you choose, on a weekly schedule and for one-off bookings, instead of changing it in the council portal each time.</p>
+    <p class="lead">p.stonn puts the rego you choose on your visitor permit, on a weekly schedule and for one-off bookings, instead of you changing it in the council portal each time.</p>
     <a href="{{if .SignedIn}}/schedule{{else}}/signin{{end}}" hx-boost="false" class="btnlike cta">{{if .SignedIn}}Open the app{{else}}Sign in{{end}} {{template "ic-link"}}</a>
     <p class="lnote">{{T "public.hero_note" .}}</p>
     {{/* The prerequisite belongs next to the button, not only on /how: signing up
@@ -29,7 +29,7 @@
         </div>
         <div class="dm-push dm-over" data-guest>
           <div class="badge" style="background:var(--v2)">{{template "ic-link"}}</div>
-          <div class="bd"><div class="ttl">Guest link shared</div><div class="msg">A visitor puts <b>their own rego</b> on. No account needed.</div></div>
+          <div class="bd"><div class="ttl">Guest pass shared</div><div class="msg">A visitor puts <b>their own rego</b> on, with no account needed.</div></div>
         </div>
       </div>
       <div class="dm-caption" data-cap><span></span></div>
@@ -39,20 +39,20 @@
   <section class="lsteps">
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-schedule)">1</div><h3>Link your council account</h3><p>{{T "public.step_link" .}}</p></div>
     <div class="lstep"><div class="lnum" style="--hue:var(--sec-vehicles)">2</div><h3>Set a schedule</h3><p>Choose which rego is on the permit each day of the week, and add one-off bookings.</p></div>
-    <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change. You get notified by email or push.</p></div>
+    <div class="lstep"><div class="lnum" style="--hue:var(--sec-activity)">3</div><h3>Stay in sync</h3><p>p.stonn updates your permit to match and records each change, and tells you by email or push.</p></div>
   </section>
   <section class="paper" style="max-width:640px;margin:44px auto 0;padding:26px 32px">
     <h2 class="about-h2" style="margin-top:0">Guides</h2>
     {{template "guide-links" (guidesFor .Tenant)}}
   </section>
   <section class="paper" style="max-width:640px;margin:20px auto 0;padding:26px 32px">
-    <h2 class="about-h2" style="margin-top:0">In another council area?</h2>
+    <h2 class="about-h2" style="margin-top:0">Other council areas</h2>
     <p style="color:var(--muted);font-size:14.5px;margin:0;line-height:1.55">{{T "public.other_area" . (slots "contact" (link "/contact"))}}</p>
   </section>
   {{if .Contact}}
   <section class="paper" style="max-width:640px;margin:20px auto 0;padding:30px 34px">
     <h2 class="about-h2" style="margin-top:0">Get in touch</h2>
-    <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">Questions, problems, or feedback? Send me a message. Your email is optional, but it's the only way to get a reply.</p>
+    <p style="color:var(--muted);font-size:14.5px;margin:0 0 18px;line-height:1.5">If you have questions, problems or feedback, send us a message. Your email is optional, but it’s the only way to get a reply.</p>
     <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:0">
       <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
       <label class="fld"><span>Your email (optional, for a reply)</span><input type="email" name="email" placeholder="you@example.com" autocomplete="email"></label>
@@ -80,53 +80,52 @@
     <p>{{T "public.about_unofficial" . (slots "how" (link "/features" (noboost)))}}</p>
 
     <h2 class="about-h2">The short version</h2>
-    <p>p.stonn signs in to your council account and changes which rego is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. That connection &mdash; and your council password, if you choose to save it &mdash; is encrypted on the server.</p>
-    <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and you can delete everything you&rsquo;ve stored on request. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
-    <p class="sec-more">The detail is below &mdash; open any section that matters to you.</p>
+    <p>p.stonn signs in to your council account and changes which rego is on your visitor permit, following the schedule you set. To do that it keeps a live connection to your account. p.stonn encrypts that connection on the server, and your council password too if you choose to save it.</p>
+    <p>You stay in control: disconnect any time in Settings and it takes effect immediately, and “Delete all my data” in Settings removes everything you’ve stored. The one thing to do at your end is use a council password you don&rsquo;t use anywhere else, so nothing else of yours is exposed in the unlikely event this server is ever broken into.</p>
 
     <details class="sec"><summary>What&rsquo;s encrypted, and what isn&rsquo;t</summary>
-      <p>Encrypted with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your printed and visitor QR links.</p>
-      <p>Stored as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it. It is kept readable because that is what running the service reliably needs.</p>
+      <p>p.stonn encrypts these with AES-256-GCM: your council session, its access token, your saved password, and the codes behind your printed and visitor QR links.</p>
+      <p>p.stonn stores these as plain text: your number plates, your schedule, your permit details, email addresses, and the activity and change logs. None of that is a login to your council account, but anyone with access to this server or its database could read it.</p>
     </details>
 
     <details class="sec"><summary>How the connection ends</summary>
-      <p>It lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). About a week before, p.stonn emails a one-click link to keep it going. This is deliberate: it should not hold access to the council account of someone who has moved away or stopped using it.</p>
-      <p>You can also end it yourself any time &mdash; disconnect in Settings (immediate), or change your council password, which ends the stored session (an access token already issued may keep working for up to about an hour).</p>
+      <p>The connection lasts while the account is in use and stops after <strong>90 days with nobody signing in</strong> (anyone you share the account with counts). About a week before, p.stonn emails a one-click link to keep it going. This is deliberate: p.stonn should not hold access to the council account of someone who has moved away or stopped using it.</p>
+      <p>You can also end the connection yourself any time. Disconnecting in Settings ends it immediately. Changing your council password ends the stored session (an access token already issued may keep working for up to about an hour).</p>
     </details>
 
     <details class="sec"><summary>Your council password, and signing in</summary>
-      <p>Saved by default, encrypted, so p.stonn can sign back in on its own when the council ends a session &mdash; without it, a lapsed session stops your schedule until you reconnect by hand. Untick &ldquo;Save my password&rdquo; when you link, or turn it off later in Settings, and it is erased and never stored again.</p>
-      <p>Your p.stonn sign-in is separate: a one-time code to your verified email. You can only ever link the council account whose email matches it. (Self-hosters: the app trusts whatever verified email its sign-in layer supplies.)</p>
+      <p>p.stonn saves your password by default, encrypted, so it can sign back in on its own when the council ends a session. Without it, a lapsed session stops your schedule until you reconnect by hand. Untick “Save my password” when you link, or turn it off later in Settings, and p.stonn erases it and never stores it again.</p>
+      <p>Your p.stonn sign-in is separate: p.stonn sends a one-time code to your verified email. You can only ever link the council account whose email matches it.</p>
     </details>
 
     <details class="sec"><summary>What data p.stonn holds</summary>
-      <p><strong>About you:</strong> your email, your regos and their labels, your schedule, your permit details, a log of the changes it made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
-      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest link to, any email you attached to a rego, and the number plates visitors typed at a printed QR code. An address that bounces or reports spam goes on a do-not-email list so p.stonn stops trying it.</p>
+      <p><strong>About you:</strong> your email, your regos and their labels, your schedule, your permit details, a log of the changes p.stonn has made, a log of who on the account changed what, your notification settings, and the encrypted council session (plus your password, unless you turned that off).</p>
+      <p><strong>About other people</strong>, only where you have used those features: the email addresses of anyone you gave shared access to or sent a guest pass to, any email you attached to a rego, and the number plates visitors typed at a printed QR. If an address bounces or its owner reports our email as spam, p.stonn adds it to a do-not-email list and stops trying it.</p>
     </details>
 
     <details class="sec"><summary>How long it is kept</summary>
-      <p>Activity and change logs: 90 days. A visitor&rsquo;s number plate from a printed QR: 7 days from the scan. A revoked guest link stops naming its recipient after 30 days. Sent notifications keep no message content &mdash; it is stripped the moment they go out. The server&rsquo;s own operational logs hold plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (first letter and domain, not the whole address). They are size- and age-capped, so they hold about the last couple of weeks of activity rather than a permanent history. On the do-not-email list, a bounce or unsubscribe ages out after two years; a spam complaint is kept, so a request to stop never quietly expires.</p>
+      <p>p.stonn keeps activity and change logs for 90 days, and a visitor’s number plate from a printed QR for 7 days after the scan. A revoked guest pass stops naming its recipient after 30 days. p.stonn deletes the content of each notification as soon as it has gone out. The server’s own operational logs hold number plates and permit IDs, plus a <strong>redacted</strong> form of email addresses (the first letter and the domain). Those logs are limited in size and age, so they cover about the last couple of weeks. On the do-not-email list, p.stonn removes a bounce or an unsubscribe after two years, but keeps a spam complaint so that a request to stop never quietly lapses.</p>
     </details>
 
     <details class="sec"><summary>How your data is used</summary>
-      <p>Only to run this service for you. It is never sold and never used for advertising. There are no trackers or analytics &mdash; the app makes no requests to any third party from your browser. It is shared only where a feature needs it: with the email provider that delivers your notifications, the push server if you turn push on, and the council itself when it changes your permit.</p>
-      <p>The server administrator can technically see what is stored on the server &mdash; that is true of any self-hosted tool. p.stonn is small and personal, and your data is used only to run the service for you: never sold, never shared beyond what a feature needs, and never looked at for anything else.</p>
+      <p>p.stonn uses your data only to run the service for you. We never sell it or use it for advertising. The app has no trackers or analytics, and your browser makes no requests to any third party. p.stonn shares data only where a feature needs it: with the email provider that delivers your notifications, with the push service if you turn push notifications on, and with the council when p.stonn changes your permit.</p>
+      <p>The server administrator can technically see what is stored on the server, as with any self-hosted tool. p.stonn is small and personal, and we use your data only to run the service for you. We never sell it, never share it beyond what a feature needs, and never look at it for anything else.</p>
     </details>
 
     <details class="sec"><summary>Deleting your data</summary>
       <p>&ldquo;Delete all my data&rdquo; in Settings clears everything from the live database straight away: your session, saved password, schedule, regos, guest passes, logs, and anything queued to be emailed to you. It also removes your traces from any account you were a member of, including guest passes you created there.</p>
-      <p>Backups are the exception: encrypted backups run daily and thin out over time (roughly the last week daily, the last month weekly, then monthly for about three months), so deleted data can linger in a backup for up to about three months before it is gone for good. Backups are not reachable through the app and are encrypted with a key held separately from the server.</p>
+      <p>Backups are the exception. p.stonn takes an encrypted backup daily and thins them out over time (roughly the last week daily, the last month weekly, then monthly for about three months), so deleted data can linger in a backup for up to about three months before it is gone for good. Backups are not reachable through the app. We hold the key that encrypts them separately from the server.</p>
     </details>
 
     <details class="sec"><summary>If the server were compromised</summary>
-      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can &mdash; to view what is held in your {{.Tenant.Terms.portal}} account and manage the permits in it. Changing your {{.Tenant.Terms.portal}} password shuts the session out immediately. Encryption makes that exposure unlikely, using a password that is unique to your council account keeps any fallout contained there, and &mdash; as with any online service &mdash; none of this is an absolute guarantee.</p>
+      <p>If this server or its encryption key were ever exposed, someone could use your saved council session the way you can, to view what is held in your {{.Tenant.Terms.portal}} account and manage the permits in it. Changing your {{.Tenant.Terms.portal}} password shuts the session out immediately. Encryption makes that exposure unlikely. Using a password that is unique to your council account keeps any fallout contained there. As with any online service, none of this is an absolute guarantee.</p>
     </details>
 
     <h2 class="about-h2">Notifications</h2>
-    <p>p.stonn tries to tell you, by email and/or push, each time it changes your permit or can&rsquo;t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. Treat it as a convenience, not a guarantee &mdash; you remain responsible for your permit and for any fines.</p>
+    <p>p.stonn tries to tell you, by email or push, each time it changes your permit or can’t. This is best-effort: messages can be delayed, filtered, or lost, and the service can be down. You remain responsible for your permit and for any fines.</p>
 
     <h2 class="about-h2">{{T "public.for_council_heading" .}}</h2>
-    <p>If you work for the council and have questions about this service, please get in touch{{if .Contact}} via the <a href="/contact">contact form</a>{{end}} &mdash; happy to talk. p.stonn acts only with each resident&rsquo;s own login, on their own permit, and only when that resident&rsquo;s schedule needs a change. It signs in the same way the {{.Tenant.Terms.portal}} website does, then uses the council&rsquo;s own permit API to change the vehicle &mdash; and on those API requests it identifies itself as p.stonn, with a link back to this site. It keeps its load light: a single plate change is three requests (read the current vehicle, change it, read back to confirm), fewer than a resident doing the same by hand in a browser; between changes it touches the council only a handful of times a day &mdash; one request roughly every eight hours to keep the session from lapsing, and a permit read twice a day to stay in sync. All told that is on the order of a dozen requests across a whole day for one household, spaced out and backing off if the portal is busy. If the council offers permit scheduling natively, or an official way for residents to delegate access, this app will adopt it or retire.</p>
+    <p>If you work for the council and have questions about this service, please get in touch{{if .Contact}} through the <a href="/contact">contact form</a>{{end}}. We would be glad to talk. p.stonn acts only with each resident’s own login, on their own permit, and only when that resident’s schedule needs a change. It signs in the same way the {{.Tenant.Terms.portal}} website does, then uses the council’s own permit API to change the rego, and it identifies itself on those requests as p.stonn, with a link back to this site. p.stonn keeps its load light. A single change of rego takes three requests (reading the current rego, changing it and reading it back to confirm), which is fewer than a resident makes doing the same by hand in a browser. Between changes, p.stonn contacts the council only a handful of times a day: one request roughly every eight hours to keep the session open, and a permit read twice a day to stay in step. That comes to about a dozen requests across a whole day for one household, spaced out and slowing down if the portal is busy. If the council offers permit scheduling itself, or an official way for residents to delegate access, p.stonn will either adopt it or close.</p>
 
     <h2 class="about-h2">No promises</h2>
     <p>p.stonn is provided as-is, with no warranty of any kind. It may stop working, make mistakes, or lose data. Use it at your own risk.</p>
@@ -150,15 +149,15 @@
   {{if .SignedIn}}
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
-    <p>Everything p.stonn can do, in five short animations &mdash; sample regos and names throughout. The visitor features further down are the ones most households haven&rsquo;t tried.</p>
+    <p>These six short animations show everything p.stonn can do, using sample regos and names. The visitor features further down are the ones most households have not tried yet.</p>
   </section>
   {{else}}
   <section class="paper">
     <h1 class="about-h1">What p.stonn can do</h1>
     <p>{{T "public.history" .}}</p>
-    <p>The old paper permits could be moved between cars as needed. The digital permit holds one rego at a time, so a household that relies on regular help &mdash; grandparents doing childcare pickup, a nanny, a carer &mdash; has to log in and change the registration whenever the car changes. That quickly becomes a recurring chore.</p>
+    <p>The old paper permits could be moved between cars as needed. The digital permit holds one rego at a time, so a household that relies on regular help, such as grandparents doing the childcare pickup, a nanny or a carer, has to sign in and change the rego each time a different person visits. That quickly becomes a recurring chore.</p>
     <p>{{T "public.attempt" .}}</p>
-    <p>I got tired of logging in to swap the rego every time my parents came to help with the kids, so I built this. You're welcome to it.</p>
+    <p>We built p.stonn because we got tired of signing in to swap the rego every time our parents came to help with the kids. You’re welcome to use it, too.</p>
   </section>
   {{end}}
 
@@ -168,7 +167,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>Connect once</h2>
-        <p>Sign in to p.stonn with <strong>the same email address your {{.Tenant.Terms.portal}} account uses</strong> &mdash; it can only connect to the council account that matches. Then link once with your council password: p.stonn keeps an encrypted connection so it can update your permit on your schedule, and you don&rsquo;t sign in again each time.</p>
+        <p>Sign in to p.stonn with <strong>the same email address your {{.Tenant.Terms.portal}} account uses</strong>, because p.stonn can only connect to the council account that matches. Then link once with your council password: p.stonn keeps an encrypted connection so it can update your permit on your schedule, and you don&rsquo;t sign in again each time.</p>
       </div>
       <div class="feature-demo">
         <figure class="dm" data-demo="connect">
@@ -177,7 +176,7 @@
           <div class="dm-fld dm-disabled"><div class="k">Council email</div><div class="val">you@example.com</div></div>
           <div class="dm-fld"><div class="k">Council password</div><div class="val"><span class="dm-pw" data-pw></span></div></div>
           <div class="dm-btn">{{template "ic-link"}} Link account</div>
-          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>Connected.</b> p.stonn keeps an encrypted session so it can update your permit for you.</div></div>
+          <div class="dm-result"><span class="chk">{{template "ic-check"}}</span><div class="msg"><b>You linked your council account.</b> p.stonn keeps an encrypted session so it can update your permit for you.</div></div>
         </div>
         </figure>
       </div>
@@ -187,7 +186,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>A rego for each day</h2>
-        <p>Set which rego is on the permit for each day of the week &mdash; the nanny on weekdays, grandparents on the weekend. If the help alternates, the roster can run over a fortnight or four weeks and rotates through them. p.stonn keeps the council permit in sync, so you&rsquo;re not logging in every time the car changes.</p>
+        <p>Set which rego is on the permit for each day of the week, such as the nanny on weekdays and grandparents on the weekend. If your helpers alternate, the roster can run over a fortnight or four weeks and rotate through them. p.stonn keeps the council permit in sync, so you’re not signing in every time a different person visits.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-roster" .}}
@@ -197,7 +196,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>One-off bookings</h2>
-        <p>When something breaks the routine &mdash; a weekend visitor, an overnight stay, a holiday &mdash; make a booking for a set window. Your roster takes back over the moment it ends.</p>
+        <p>When something breaks the routine, such as a weekend visitor, an overnight stay or a holiday, make a booking for a set window. Your roster takes back over the moment it ends.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-oneoff" .}}
@@ -207,7 +206,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>Add a visitor with a QR</h2>
-        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it, types their number plate, and it is on the permit until the end of the day &mdash; no account, nothing to install.</p>
+        <p>Tap <strong>Show visitor QR</strong> and hold up your phone. Your visitor scans it and types their number plate, and p.stonn puts it on the permit until the end of the day. They don’t need an account or anything installed.</p>
         <p>The code stops working after 15 minutes, so it only ever works for the person standing in front of you.</p>
       </div>
       <div class="feature-demo">
@@ -218,7 +217,7 @@
     <section class="feature">
       <div class="feature-text">
         <h2>A printed QR you confirm on your phone</h2>
-        <p>Print a QR code once and stick it on the fridge or by the hallway door &mdash; wherever your visitors will see it. It keeps working indefinitely, and each scan asks you to confirm on your phone: you get a notification with the visitor&rsquo;s rego, and nothing goes on the permit until you say yes.</p>
+        <p>Print a QR code once and stick it on the fridge or by the front door, wherever your visitors will see it. It keeps working until you remove it, and you confirm each scan on your phone: you get a notification with the visitor’s rego, and p.stonn changes nothing until you say yes.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-doorqr" .}}
@@ -228,8 +227,8 @@
     <section class="feature">
       <div class="feature-text">
         <h2>A pass for regular visitors</h2>
-        <p>For the people who come every week &mdash; the nanny, your parents &mdash; send a guest pass. They keep the link; when they arrive they tap their rego and it is on the permit until the end of the day, and you&rsquo;re told each time.</p>
-        <p>A pass is standing access &mdash; it works whenever they choose, until you delete it &mdash; so only send it to people you trust.</p>
+        <p>For the people who come every week, such as the nanny or your parents, send a guest pass. They keep the link; when they arrive they tap their rego and it is on the permit until the end of the day. p.stonn tells you each time.</p>
+        <p>A pass works whenever they choose, until you delete it, so only send it to people you trust.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-guestpass" .}}
@@ -240,7 +239,7 @@
       <div class="feature-text">
         <h2>One tap from your own home screen</h2>
         <p>Save the quick picker to your phone and every rego in the household becomes a button. Tap one and it is on the permit until the end of the day, with no sign-in, exactly as a booking made in the app would be.</p>
-        <p>It offers every rego you have, so one you add later appears on it by itself. If the phone is lost, a new link stops the old one working.</p>
+        <p>The quick picker offers every rego you have, so one you add later appears on it by itself. If the phone is lost, a new link stops the old one working.</p>
       </div>
       <div class="feature-demo">
         {{template "demo-picker" .}}
@@ -250,8 +249,8 @@
     {{if not .SignedIn}}
     <section class="feature">
       <div class="feature-text">
-        <h2>Know it happened</h2>
-        <p>p.stonn emails or pushes you whenever it changes your permit, or when it can&rsquo;t. Delivery is best-effort, not a guarantee, so you stay responsible for your permit &mdash; but you&rsquo;ll usually know the moment anything changes.</p>
+        <h2>Know when your permit changes</h2>
+        <p>p.stonn emails or notifies you whenever it changes your permit, or when it can’t. Delivery isn’t guaranteed, so you stay responsible for your permit, but you’ll usually know the moment anything changes.</p>
       </div>
       <div class="feature-demo">
         <figure class="dm" data-demo="notify">
@@ -261,8 +260,8 @@
             <div class="dm-toggle">Email <span class="dm-swi"></span></div>
             <div class="dm-toggle">Phone <span class="dm-swi"></span></div>
           </div>
-          <div class="dm-push"><span class="badge" style="background:var(--ok)">{{template "ic-check"}}</span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg">Your visitor permit is now <b>ABC123</b> (Nan's car).</div></div></div>
-          <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Still trying <span class="ago">2m</span></div><div class="msg">Having trouble reaching the council. <b>Still trying</b> &mdash; you'll hear when it's done.</div></div></div>
+          <div class="dm-push"><span class="badge" style="background:var(--ok)">{{template "ic-check"}}</span><div class="bd"><div class="ttl">Permit updated <span class="ago">now</span></div><div class="msg"><b>ABC123</b> (Nan’s car) is now on your visitor permit.</div></div></div>
+          <div class="dm-push"><span class="badge" style="background:var(--accent)">{{template "ic-alert"}}</span><div class="bd"><div class="ttl">Not updated yet <span class="ago">2m</span></div><div class="msg">p.stonn has not been able to reach the council yet. It will keep trying and let you know once your permit is updated.</div></div></div>
         </div>
         </figure>
       </div>
@@ -279,9 +278,9 @@
     <ul>
       <li><strong>Check you are eligible.</strong> Permits are for residents in permit areas, and eligibility depends on your property (generally limited or no off-street parking).</li>
       <li><strong>Apply through the council.</strong> You can apply online, by email, by post, or in person at a customer service centre. You will usually need proof you live at the address and your vehicle details.</li>
-      <li><strong>Set up your online account.</strong> The council's digital system is where permits are managed and vehicle registrations are entered.</li>
+      <li><strong>Set up your online account.</strong> You manage your permits and enter regos in the council’s online system.</li>
       <li><strong>Add a visitor permit.</strong> Once your account exists, apply for a visitor permit if you do not already have one. Fees apply, with a discount for concession cardholders.</li>
-      <li><strong>Note the email address your {{.Tenant.Terms.portal}} account uses.</strong> You&rsquo;ll sign in to p.stonn with that same address &mdash; it&rsquo;s how p.stonn knows which council account is yours.</li>
+      <li><strong>Note the email address your {{.Tenant.Terms.portal}} account uses.</strong> You’ll sign in to p.stonn with that same address, which is how p.stonn knows which council account is yours.</li>
     </ul>
     <p>The council's own pages have the current fees, forms and details:</p>
     <ul>
@@ -402,7 +401,7 @@
         </div>
       </div>
     </div>
-    <figcaption class="dm-static-cap">The council’s sign-in screen. Tap it to open the real one in a new tab.</figcaption>
+    <figcaption class="dm-static-cap">This is the council’s sign-in screen. Tap it to open the real one in a new tab.</figcaption>
   </figure>
 </a>
 {{end}}
@@ -413,7 +412,7 @@
 <main id="main" tabindex="-1" class="landing about">
   {{template "topback" .}}
   <h1 class="about-h1">Contact</h1>
-  <p>Questions, problems, or feedback about p.stonn? Send a message and it reaches the person running this server. Leaving your email is optional, but it's the only way to get a reply.</p>
+  <p>If you have questions, problems or feedback about p.stonn, send a message and it reaches the person running this server. Leaving your email is optional, but it’s the only way to get a reply.</p>
   {{if .Flash}}<div class="banner ok" style="margin:16px 0">{{template "ic-check"}} <span>{{.Flash}}</span></div>{{end}}
   {{if .Warn}}<div class="banner warn" style="margin:16px 0">{{template "ic-alert"}} <span>{{.Warn}}</span></div>{{end}}
   <form method="post" action="/contact" class="stack contactform" style="max-width:none;margin:14px 0 0">
@@ -440,7 +439,7 @@
           <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-calendar"}}</span> This week</div><span class="dm-sample">Sample data</span></div>
           <div class="dm-week" data-week></div>
           <div class="dm-picker">
-            <div class="ph">Which rego?</div>
+            <div class="ph">Choose a rego</div>
             <div class="dm-opt" data-v="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="txt"><span class="dm-rego">ABC123</span><span class="dm-cname">Nan's car</span></span></div>
             <div class="dm-opt" data-v="2"><span class="dm-dot" style="background:var(--v2)"></span><span class="txt"><span class="dm-rego">XYZ789</span><span class="dm-cname">Nanny</span></span></div>
             <div class="dm-opt" data-v="3"><span class="dm-dot" style="background:var(--v3)"></span><span class="txt"><span class="dm-rego">1QW4RT</span><span class="dm-cname">Babysitter</span></span></div>
@@ -474,7 +473,7 @@
         <figure class="dm" data-demo="guestpass">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-users"}}</span> Your guest&rsquo;s phone</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to put a rego on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your rego. <b>Bookmark it</b> &mdash; the same link works every time.</div></div></div>
+          <div class="dm-push" data-gpmail><span class="badge" style="background:var(--primary)">{{template "ic-mail"}}</span><div class="bd"><div class="ttl">Your link to put a rego on the permit <span class="ago">once</span></div><div class="msg">When you arrive, open the link and choose your rego. <b>Bookmark it</b>, because the same link works every time.</div></div></div>
           {{/* One pass, one household: these are the grandparents' two cars, not
                a mix of unrelated helpers — a pass goes to one person, who taps
                whichever car they came in. */}}
@@ -499,7 +498,7 @@
         <figure class="dm" data-demo="picker">
         <div class="dm-phone">
           <div class="dm-head"><div class="dm-title"><span class="dm-ic">{{template "ic-phone"}}</span> Your own phone</div><span class="dm-sample">Sample data</span></div>
-          <div class="dm-push" data-pkhome><span class="badge" style="background:var(--primary)">{{template "ic-monogram"}}</span><div class="bd"><div class="ttl">p.stonn <span class="ago">home screen</span></div><div class="msg">Home permit &mdash; <b>one tap</b> opens the picker, no sign-in.</div></div></div>
+          <div class="dm-push" data-pkhome><span class="badge" style="background:var(--primary)">{{template "ic-monogram"}}</span><div class="bd"><div class="ttl">p.stonn <span class="ago">home screen</span></div><div class="msg"><b>One tap</b> on your home screen opens the quick picker without signing in.</div></div></div>
           <div class="dm-gsub">Tap a rego to put it on the permit.</div>
           <div class="dm-gcars">
             <div class="dm-gcar" data-g="1"><span class="dm-dot" style="background:var(--v1)"></span><span class="dm-rego">ABC123</span><span class="dm-cname">Nan&rsquo;s car</span><span class="dm-tick">{{template "ic-check"}}</span></div>
@@ -532,7 +531,7 @@
           <div class="dm-qrstage">
             <div class="dm-fade" data-vqqr>
               <img class="dm-qr dm-qr-lg" src="/static/demo-qr.svg" alt="" width="128" height="128">
-              <div class="dm-qrline">Stops working in 15 minutes &mdash; your permit itself is unchanged.</div>
+              <div class="dm-qrline">This QR stops working in 15 minutes. Showing it does not change your permit.</div>
             </div>
           </div>
           <div class="dm-screen dm-over" data-vqguest>
@@ -563,7 +562,7 @@
                 <div class="dm-tape"></div>
                 <div class="dm-paper-kicker">Visitor parking</div>
                 <img class="dm-qr" src="/static/demo-qr.svg" alt="" width="56" height="56" style="width:64px;height:64px;margin:6px auto 5px;display:block">
-                <div class="dm-paper-lead">Scan to use this permit. The household confirms on their phone.</div>
+                <div class="dm-paper-lead">Scan the code to ask to use this permit. The resident confirms each request on their phone.</div>
               </div>
             </div>
             <div class="dm-mobile">
@@ -571,7 +570,7 @@
               <div class="dm-mobile-screen">
                 <div class="dm-mscene dm-fade" data-dqpush>
                   <div class="dm-mpush"><span class="dm-mbadge">{{template "ic-bell"}}</span>
-                    <div class="dm-mtxt"><b>Approve <span class="dm-rego">1QW4RT</span>?</b><br>Someone scanned your printed QR.</div>
+                    <div class="dm-mtxt"><b>A visitor is asking to put <span class="dm-rego">1QW4RT</span> on your permit “Visitor”</b><br>Someone scanned your printed QR.</div>
                   </div>
                   <div class="dm-actions">
                     <div class="dm-btn dm-btn-sm" data-dqok>{{template "ic-check"}} Approve</div>

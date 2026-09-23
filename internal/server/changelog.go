@@ -148,7 +148,7 @@ func changeText(c store.Change) string {
 	case store.ActionRosterSet:
 		return "set " + c.Target + " to " + c.Detail
 	case store.ActionRosterClear:
-		return "cleared the roster for " + c.Target
+		return "set " + c.Target + " to None: p.stonn leaves the permit as it is that day"
 	case store.ActionRosterEmpty:
 		return "set " + c.Target + " to clear: regos are removed that day"
 	case store.ActionCycleAdd:
@@ -168,10 +168,10 @@ func changeText(c store.Change) string {
 		return "added the rego " + c.Target
 	case store.ActionVehicleDelete:
 		// Target can be empty when the plate could not be read at delete time; the
-		// row is still worth writing, so degrade to "a car" rather than a gap.
-		named := "a car"
+		// row is still worth writing, so degrade to "a rego" rather than a gap.
+		named := "a rego"
 		if c.Target != "" {
-			named = "the car " + c.Target
+			named = "the rego " + c.Target
 		}
 		// Detail carries which roster days were emptied, captured before the delete
 		// cascaded them away. This row is the ONLY durable record of that — the flash
@@ -180,9 +180,9 @@ func changeText(c store.Change) string {
 		if c.Detail != "" {
 			return "deleted " + named + ". " + c.Detail
 		}
-		return "deleted " + named + " (any roster days and bookings using it went too)"
+		return "deleted " + named + ", along with any roster days and bookings that used it"
 	case store.ActionVehicleEmail:
-		return "changed the driver email for " + c.Target
+		return "changed the email address for " + c.Target
 	case store.ActionReferralSend:
 		return "sent a p.stonn invitation to " + c.Target
 	case store.ActionVehicleClear:
@@ -192,32 +192,32 @@ func changeText(c store.Change) string {
 	case store.ActionGuestUpdate:
 		return "changed a guest pass" + optional(c.Target, " (") + closeParen(c.Target)
 	case store.ActionGuestDelete:
-		return "deleted a guest pass" + optional(c.Target, " (") + closeParen(c.Target) + " — its links stopped working"
+		return "deleted a guest pass" + optional(c.Target, " (") + closeParen(c.Target) + ", and the link stopped working"
 	case store.ActionGuestRevoke:
-		return "revoked a guest link" + optional(c.Target, " for ")
+		return "revoked the guest pass link" + optional(c.Target, " for ")
 	case store.ActionGuestResend:
 		// Re-sending ROTATES the token: the recipient's previous link dies. That is
 		// a silent change to someone else's access, so it belongs in the log.
-		return "re-sent a guest link" + optional(c.Target, " to ") + " — the previous link stopped working"
+		return "sent a new guest pass link" + optional(c.Target, " to ") + ", and the previous link no longer works"
 	case store.ActionDoorQRShow:
 		return "showed the on-screen visitor QR" + optional(c.Target, " for ")
 	case store.ActionGuestToggle:
 		if c.Detail == "off" {
 			return "paused every link: guest passes, QR codes and the quick picker"
 		}
-		return "resumed the links"
+		return "resumed every guest pass and QR, and the quick picker"
 	case store.ActionDoorQRCreate:
-		return "created a printed QR code for " + c.Target
+		return "created a printed QR for " + c.Target
 	case store.ActionDoorQRRevoke:
-		return "removed a printed QR code" + optional(c.Target, " for ") + " — any printed copy stopped working"
+		return "removed a printed QR" + optional(c.Target, " for ") + ", and any printed copy stopped working"
 	case store.ActionPickerCreate:
-		return "made a quick picker" + optional(c.Target, " for ")
+		return "created a quick picker" + optional(c.Target, " for ")
 	case store.ActionPickerUpdate:
 		return "changed the quick picker"
 	case store.ActionPickerRotate:
-		return "gave the quick picker a new link — the previous link stopped working"
+		return "gave the quick picker a new link, and the previous link stopped working"
 	case store.ActionPickerDelete:
-		return "deleted the quick picker — its link stopped working"
+		return "deleted the quick picker, and its link stopped working"
 	case store.ActionRequestOK:
 		return "approved a visitor's request for " + c.Target
 	case store.ActionRequestNo:
@@ -238,13 +238,13 @@ func changeText(c store.Change) string {
 	case store.ActionMemberLeave:
 		return "left this shared account"
 	case store.ActionCouncilLink:
-		return "connected the council account"
+		return "linked the council account"
 	case store.ActionCouncilUnlink:
-		return "disconnected the council account"
+		return "unlinked the council account"
 	case store.ActionCouncilSelect:
 		return "switched the account to " + c.Target
 	case store.ActionCouncilForget:
-		return "turned off automatic reconnection"
+		return "turned off “Save my password”"
 	default:
 		// Unknown slug (an older row, a newer binary): show something rather than
 		// dropping the entry, since the point of the log is completeness.

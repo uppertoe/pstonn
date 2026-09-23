@@ -365,7 +365,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 				// activity log and /admin read fail→resolved instead of a permanent error.
 				// Audit only: a resolved blip needs no notification.
 				s.logApply(ctx, p.ID, last.Registration, last.Source, "success",
-					"recovered after a transient failure — the permit is confirmed on this vehicle")
+					"went through on a later attempt, and the council confirms this rego is on the permit")
 			} else {
 				// The failing target went AWAY without ever landing. A 9am–5pm booking the
 				// tenant blocked all day used to end exactly here at 5pm: want reverted to
@@ -373,7 +373,7 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 				// sent — so the household's last word was the reassuring "still updating,
 				// p.stonn will keep trying", about a visitor uncovered the whole day. Tell
 				// them it never applied.
-				reason := fmt.Sprintf("That change is no longer scheduled — the booking ended or the schedule moved on — and it was never applied: the permit showed %s the whole time.", p.ActiveRegistration)
+				reason := fmt.Sprintf("Your schedule no longer asks for that change, because the booking ended or the schedule moved on. p.stonn never made it, and %s stayed on the permit throughout.", p.ActiveRegistration)
 				s.logApply(ctx, p.ID, last.Registration, last.Source, "error", reason)
 				// "This corrects the earlier notice" is only true if a notice went out.
 				// The streak gate above is failNotifyThreshold, but the council-busy
@@ -382,10 +382,10 @@ func (s *Scheduler) settle(ctx context.Context, p model.Permit) {
 				// the household to a notice they never got. The durable notified key
 				// records what was actually DELIVERED, so it decides the wording; the
 				// fact itself — the car was never covered — is worth telling either way.
-				action := "Nothing to apply now. If " + last.Registration + " parked there during the booking, it was not covered."
+				action := "You don’t need to do anything now. If the car with rego " + last.Registration + " was parked there during the booking, it was not covered."
 				if s.failureNoticeSent(ctx, p.ID, last.Registration) {
-					action = "Nothing to apply now — this corrects the earlier notice that p.stonn was still trying. " +
-						"If " + last.Registration + " parked there during the booking, it was not covered."
+					action = "You don’t need to do anything now. This corrects our earlier message that p.stonn was still trying. " +
+						"If the car with rego " + last.Registration + " was parked there during the booking, it was not covered."
 				}
 				// Deliberately notifyUser, NOT the episode model: this is the episode's
 				// one CLOSE-OUT — "the change you were waiting on went away and never
@@ -454,8 +454,8 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 	}
 	alog.Infof("permit %s: the %s points at vehicle %d, which is not one of %s's saved cars; permit still shows %q",
 		p.CouncilPermitID, res.Source, res.VehicleID, redact.Email(p.Owner), p.ActiveRegistration)
-	const reason = "The car this permit is scheduled to use is no longer saved, so p.stonn has not changed the permit."
-	const action = "Open p.stonn and choose a car for today, or add the car back."
+	const reason = "The rego this permit is scheduled to use is no longer saved, so p.stonn has not changed the permit."
+	const action = "Open p.stonn and choose a rego for today, or add the rego back."
 	s.logApply(ctx, p.ID, p.ActiveRegistration, string(res.Source), "error", reason)
 	s.notifyUser(ctx, p, notify.ApplyOutcome{
 		Owner:       p.Owner,
@@ -481,8 +481,8 @@ func (s *Scheduler) reportUnresolvable(ctx context.Context, p model.Permit, res 
 func (s *Scheduler) reportTenantUnavailable(ctx context.Context, p model.Permit, want, wantName string, res model.Resolution) {
 	s.deferRetry(p.ID, 5)
 	alog.Warnf("permit %s: its council %q is not served by this process; the change to %s cannot be applied", p.CouncilPermitID, p.TenantID, want)
-	const reason = "This permit's council is not currently available in p.stonn, so the change could not be applied."
-	const action = "Change the vehicle on your permit at the council yourself. p.stonn will resume automatically once the council is available again."
+	const reason = "p.stonn is not working with this permit’s council at the moment, so it has not made the change."
+	const action = "Change the rego on your permit at the council yourself. p.stonn will resume automatically once the council is available again."
 	s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 	s.notifyFailure(ctx, p, notify.ApplyOutcome{
 		Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName,
@@ -754,13 +754,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		switch {
 		case confirmed:
 			threshold = blockNotifyThreshold
-			reason = "The council is refusing p.stonn's connection right now, so your permit cannot be updated."
-			action = "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn will resume automatically once the block clears."
+			reason = "The council is refusing p.stonn’s connection at the moment, so your permit has not changed."
+			action = "If a different car is parked there, change the rego on your permit yourself at the council now to avoid a fine. p.stonn will resume automatically once the block clears."
 		case councilDown:
 			// Neutral "the council" (not a hard-coded council name) to satisfy the
 			// multi-council guard, matching the confirmed-block copy above.
 			reason = "The council's parking system is down right now, so p.stonn couldn't update your permit."
-			action = "Nothing you need to do — p.stonn keeps trying and will apply your change automatically as soon as the council's system is back."
+			action = "You don’t need to do anything. p.stonn will keep trying and will make the change once the council’s system is back."
 		}
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		// A confirmed block is the urgent tier ("act now to avoid a fine"); the rest
@@ -812,13 +812,13 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 		// says recovery has stalled. Not fed into passStats: a mass expiry is
 		// routine and already has its own systemic alert (session-churn), so it
 		// must not trip the multi-user-fail alarm.
-		reason := "p.stonn's sign-in to the council expired and signing back in hasn't succeeded yet, so your permit could not be updated."
+		reason := "p.stonn’s sign-in to the council has expired, and it has not yet been able to sign in again, so your permit has not changed."
 		s.logApply(ctx, p.ID, want, string(res.Source), "error", reason)
 		s.escalateFailure(ctx, p, sessionNotifyThreshold, notify.ApplyOutcome{
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Empty: res.Empty,
 			OK: false, CurrentReg: p.ActiveRegistration,
 			Reason:    reason,
-			Action:    "If a different car is parked there, change the vehicle on your permit yourself at the council now to avoid a fine — p.stonn keeps trying to reconnect, and will email you if you need to re-link.",
+			Action:    "If a different car is parked there, change the rego on your permit yourself at the council now to avoid a fine. p.stonn keeps trying to reconnect, and will email you if you need to link your account again.",
 			Transient: true, Urgent: true,
 		}, tierUrgent)
 		s.deferRetry(p.ID, 3)

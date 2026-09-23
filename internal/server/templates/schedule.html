@@ -37,7 +37,7 @@
   {{/* Sustained council-side problem (connector degraded+): say so plainly. Not a
        thing the user can fix (unlike the re-link prompt), so it reassures rather
        than asks for action. */}}
-  <div class="banner warn council-down">{{template "ic-alert"}} <span><strong>{{.CouncilName}}&rsquo;s parking system is having problems right now.</strong> Changes might be delayed &mdash; p.stonn keeps trying and will catch up as soon as the council is back.</span></div>
+  <div class="banner warn council-down">{{template "ic-alert"}} <span><strong>The {{.CouncilName}}&rsquo;s parking system is having problems at the moment.</strong> p.stonn may be slow to put your changes on the permit, and will keep trying until the council&rsquo;s system is working again.</span></div>
   {{end}}
   {{/* ---------- SCHEDULE ---------- */}}
   {{/* The same heading row as the other tabs, then the "still to try" strip,
@@ -69,21 +69,21 @@
   </section>
   {{else}}
   {{if not .App.ExpiredPermits}}
-  <section class="card"><p class="empty-note">No permits managed yet. <a href="/permits/new">Choose a permit →</a></p></section>
+  <section class="card"><p class="empty-note">You are not managing any permits yet. <a href="/permits/new">Choose a permit →</a></p></section>
   {{end}}
   {{end}}
 
   {{if .App.ExpiredPermits}}
   <section class="card expired-permits">
     <h2 class="exp-h2">{{template "ic-clock"}} Permits no longer active</h2>
-    <p class="empty-note" style="margin:2px 0 12px">These permits are no longer being updated, and their guest passes and QR codes are paused. If you have a new permit, <a href="/permits/new">add it</a>, then choose the old one under &ldquo;Copy schedule from another permit&rdquo;: the schedule and guest passes move across, and links that people have saved keep working.</p>
+    <p class="empty-note" style="margin:2px 0 12px">p.stonn no longer updates these permits. Their guest passes and QR codes are paused. If you have a new permit, <a href="/permits/new">add it</a>, then choose the old one under &ldquo;Copy schedule from another permit&rdquo;: the schedule and guest passes move across, and links that people have saved keep working.</p>
     <ul class="explist">
       {{range .App.ExpiredPermits}}
       <li class="exprow">
         <div class="expmain"><span class="expname">{{.Label}}</span><span class="expstatus">{{.StatusText}}{{if .Detail}} · {{.Detail}}{{end}}</span></div>
         {{if $.IsPrimary}}
         <form method="post" action="/permits/{{.ID}}/delete"
-              data-confirm="Remove this permit, its saved schedule and its guest passes? Copy it onto your new permit first if you still need them." data-confirm-ok="Remove">
+              data-confirm="Remove this permit, its saved schedule and its guest passes? If you still need them, copy the schedule onto your new permit first." data-confirm-ok="Remove">
           <button type="submit" class="ghost sm">{{template "ic-x"}} Remove</button>
         </form>
         {{end}}
@@ -112,7 +112,7 @@
        demo assets are head-only (see publicheader). */}}
   <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-how-hint')==='1'}" x-show="!hide" x-cloak>
     {{template "ic-qr"}}
-    <span>There&rsquo;s more than the roster: visitor QRs, a printed QR you confirm on your phone, guest passes. <a href="/features" hx-boost="false">See how they work</a>.</span>
+    <span>There&rsquo;s more than the roster: visitor QRs, a printed QR you confirm on your phone, and guest passes. <a href="/features" hx-boost="false">See how they work</a>.</span>
     <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
             @click="hide=true; localStorage.setItem('pstonn-how-hint','1')">{{template "ic-x"}}</button>
   </p>
@@ -124,8 +124,8 @@
   <p class="share-hint" x-data="{hide: localStorage.getItem('pstonn-install-hint')==='1' || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
                                   ios: /iPhone|iPad|iPod/.test(navigator.userAgent)}" x-show="!hide" x-cloak>
     {{template "ic-ticket"}}
-    <span x-show="ios">Tip: add p.stonn to your home screen for one-tap access &mdash; <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>
-    <span x-show="!ios">Tip: add p.stonn to your home screen for one-tap access &mdash; the browser menu, then <strong>Add to Home screen</strong> (or <strong>Install app</strong>).</span>
+    <span x-show="ios">You can add p.stonn to your home screen for one-tap access. Tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</span>
+    <span x-show="!ios">You can add p.stonn to your home screen for one-tap access. Open the browser menu, then choose <strong>Add to Home screen</strong> or <strong>Install app</strong>.</span>
     <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
             @click="hide=true; localStorage.setItem('pstonn-install-hint','1')">{{template "ic-x"}}</button>
   </p>
@@ -147,7 +147,7 @@
        neighbour waits until the tool has plainly earned it. */}}
   <p class="share-hint" style="--hue:var(--sec-activity)" x-data="{hide: localStorage.getItem('pstonn-passiton-hint')==='1'}" x-show="!hide" x-cloak>
     {{template "ic-link"}}
-    <span>Has p.stonn spared you a parking fine? Neighbours can use it too &mdash; <a href="/share">pass it on</a>.</span>
+    <span>If p.stonn has spared you a parking fine, your neighbours can use it too. <a href="/share">Pass it on</a>.</span>
     <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
             @click="hide=true; localStorage.setItem('pstonn-passiton-hint','1')">{{template "ic-x"}}</button>
   </p>
@@ -169,7 +169,7 @@
         <div class="modal-head"><strong>Make a booking</strong>
           <button type="button" class="icon-btn" @click="pickOpen=false" aria-label="Close">{{template "ic-x"}}</button>
         </div>
-        <p class="empty-note" style="margin:-6px 0 12px">You manage more than one permit &mdash; which one is the booking for? Next to each is the rego on it right now.</p>
+        <p class="empty-note" style="margin:-6px 0 12px">You manage more than one permit, so choose the one this booking is for. Beside each permit is the rego on it now.</p>
         <div class="pick">
           {{range .App.Permits}}
           <button type="button" class="pick-item" data-dispatch="open-oneoff" data-dispatch-permit="{{.Permit.ID}}">
@@ -253,7 +253,7 @@
       {{if .CanClear}}
       <form method="post" action="/permits/{{.Permit.ID}}/clear"
             hx-post="/permits/{{.Permit.ID}}/clear" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
-            data-confirm="Take {{.Permit.ActiveRegistration}} off this permit? The permit will then have no rego, so if that car is parked in a permit zone right now it loses cover the moment you do this. It stays off until you set or schedule a rego." data-confirm-ok="Take it off">
+            data-confirm="Remove {{.Permit.ActiveRegistration}} from this permit? The permit will then have no rego, so if that car is parked in a permit zone now, it will no longer be covered. The permit will stay empty until you set or schedule a rego." data-confirm-ok="Remove">
         <button type="submit" class="ghost sm">{{template "ic-x"}} Remove {{.Permit.ActiveRegistration}}</button>
       </form>
       {{end}}
@@ -284,7 +284,7 @@
          it draws its own unfilled outline, echoing the plate badge above, so
          the second row reads as one labelled unit rather than a stray tick. */}}
     <span class="pcheck">
-    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="Not confirmed on the permit yet — p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="Couldn't check with the council — showing the last rego it confirmed, which may be out of date. p.stonn keeps trying." aria-label="Couldn't confirm with the council; showing the last known rego">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if and .PlateRefreshing (not .PlateRecent)}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else if .PlateRecent}}{{/* Last known, NOT verified this visit: the spinner (a read is in flight), never the green tick — green means "the council answered just now" and nothing else. The hint beside it carries the age. */}}<span class="pchk" role="status" title="Last confirmed by the council ({{.PlateCheckedAgo}}); checking again now" aria-label="Checking the council record; last confirmed {{.PlateCheckedAgo}}"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
+    <span class="pslot">{{if .PlateUnconfirmed}}{{if .Applying}}<span class="pwarn" role="img" title="The council has not confirmed this change yet. p.stonn is still trying and will let you know." aria-label="Change not confirmed yet; still trying">{{template "ic-x"}}</span>{{else}}<span class="pwarn" role="img" title="p.stonn couldn’t check with the council, so this is the last rego the council confirmed, which may be out of date. p.stonn keeps trying." aria-label="Couldn't confirm with the council; showing the last known rego">{{template "ic-x"}}</span>{{end}}{{else if .Applying}}<span class="pchk" role="status" title="Applying your change&hellip;" aria-label="Applying your change"></span>{{else if and .PlateRefreshing (not .PlateRecent)}}<span class="pchk" role="status" title="Checking the council record&hellip;" aria-label="Checking the council record"></span>{{else if .PlateRecent}}{{/* Last known, NOT verified this visit: the spinner (a read is in flight), never the green tick — green means "the council answered just now" and nothing else. The hint beside it carries the age. */}}<span class="pchk" role="status" title="Last confirmed by the council ({{.PlateCheckedAgo}}); checking again now" aria-label="Checking the council record; last confirmed {{.PlateCheckedAgo}}"></span>{{else}}<span class="pok" title="Checked against the council record">{{template "ic-check"}}</span>{{end}}</span>
     {{/* The pill's failure states used to live entirely in title= — hover-only,
          which does not exist on the phone this page is checked from. The one
          state that means "do not trust the plate above" gets visible words. */}}
@@ -314,7 +314,7 @@
 {{if .ExpiryLabel}}
 <p class="permit-expiry{{if .Expired}} bad{{else if .ExpiresSoon}} warn{{end}}">
   {{if .Expired}}{{template "ic-alert"}} This permit expired {{.ExpiryIn}} (on {{.ExpiryLabel}}). Renew it with the council, then copy your schedule onto the new permit.
-  {{else if .ExpiresSoon}}{{template "ic-alert"}} Expires {{.ExpiryLabel}} ({{.ExpiryIn}}) &mdash; renew it with the council to keep it valid.
+  {{else if .ExpiresSoon}}{{template "ic-alert"}} This permit expires on {{.ExpiryLabel}} ({{.ExpiryIn}}). Renew it with the council to keep it valid.
   {{else}}{{template "ic-check"}} Valid until {{.ExpiryLabel}} ({{.ExpiryIn}}).{{end}}
 </p>
 {{end}}
@@ -326,7 +326,7 @@
 <div class="copysched{{if .CopyPitch}} lead{{end}}" x-data="{open:{{if .CopyPitch}}true{{else}}false{{end}}}">
   {{if .CopyPitch}}
   <div class="cs-head">
-    <p class="cs-note">{{template "ic-copy"}} Is this a new permit replacing an old one? Copy the roster, upcoming bookings, guest passes and printed QR across from the old one &mdash; links that people have saved keep working.</p>
+    <p class="cs-note">{{template "ic-copy"}} If this permit replaces an old one, you can copy the roster, upcoming bookings, guest passes and printed QR across from the old permit. Links that people have saved will keep working.</p>
     <button type="button" class="ghost icon sm" title="Dismiss" aria-label="Dismiss"
             hx-post="/permits/{{.Permit.ID}}/copy-offer/dismiss" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML">{{template "ic-x"}}</button>
   </div>
@@ -360,7 +360,7 @@
 {{if not .Vehicles}}
 <div class="regos-empty">
   <p class="regos-empty-lead">Add the regos of the people who visit you.</p>
-  <p class="empty-note">The roster and bookings choose from these.</p>
+  <p class="empty-note">You choose from these regos when you set the roster or make a booking.</p>
   <a class="btnlike ghost sm" href="/regos">{{template "ic-plus"}} Add a rego</a>
 </div>
 {{else}}
@@ -368,7 +368,7 @@
 {{$cycling := gt .CycleWeeks 1}}
 {{if $cycling}}
 <p class="sub">Roster &mdash; repeats every {{.CycleWeeks}} weeks</p>
-<p class="empty-note rostercap">Which rego is on the permit each day of the week.</p>
+<p class="empty-note rostercap">Create a roster for the regos applied to the permit on each day of the week.</p>
 {{/* Week tabs: fixed positions and numbers for the life of the roster (weeks
      are only ever added or removed at the END). The tab for the week the cycle
      is currently in carries the "now" mark and is the server-rendered default;
@@ -387,7 +387,7 @@
   {{range .Weeks}}
   <button type="button" role="tab"
           class="{{if .IsCurrent}}on{{end}}" :class="{on: wk==={{.Index}}}" :aria-selected="wk==={{.Index}}" :tabindex="wk==={{.Index}} ? 0 : -1"
-          @click="wk={{.Index}}">Week {{.Num}}{{if .IsCurrent}} <span class="wknow" title="The cycle is in this week">now</span>{{end}}</button>
+          @click="wk={{.Index}}">Week {{.Num}}{{if .IsCurrent}} <span class="wknow" title="This is the current week of the roster.">now</span>{{end}}</button>
   {{end}}
   {{if .CanAddWeek}}
   {{/* The ladder is a week, a fortnight, four weeks: from a fortnight this adds
@@ -399,7 +399,7 @@
 </div>
 {{else}}
 <p class="sub" id="roster">Weekly roster</p>
-<p class="empty-note rostercap">Which rego is on the permit each day of the week.</p>
+<p class="empty-note rostercap">Create a roster for the regos applied to the permit on each day of the week.</p>
 {{end}}
 <div class="segpanes">
   {{$vehicles := .Vehicles}}{{$pv := .}}
@@ -508,7 +508,7 @@
   {{end}}
 </div>
 {{else}}
-<p class="empty-note">No bookings yet.</p>
+<p class="empty-note">You have no bookings yet.</p>
 {{end}}
 
 {{end}}{{/* end of the has-regos branch */}}
@@ -519,7 +519,7 @@
 {{if .IsPrimary}}
 <div class="permit-foot">
   <form method="post" action="/permits/{{.Permit.ID}}/delete"
-        hx-confirm="Stop managing this permit? Its weekly schedule and one-off bookings will be deleted. The council permit itself is not changed." data-confirm-ok="Stop managing">
+        hx-confirm="Stop managing this permit? p.stonn will delete its roster, bookings and change history. p.stonn will not change the permit at the council, so the rego on it now stays on it." data-confirm-ok="Stop managing">
     <button type="submit">{{template "ic-x"}} Stop managing this permit</button>
   </form>
 </div>
@@ -624,7 +624,7 @@
             </div>
           </div>
         </label>
-        <p class="empty-note" style="margin-top:6px">One of the regos saved on your Regos page.</p>
+        <p class="empty-note" style="margin-top:6px">Choose one of the regos saved on your Regos page.</p>
       </div>
       <div class="segpane" :class="{hide: mode!='plate'}">
         <label class="fld">Number plate
@@ -636,9 +636,9 @@
         </label>
         {{end}}
         {{if .Vehicles}}
-        <p class="empty-note" style="margin-top:6px">For a rego that is not one of your saved regos, such as a friend, a hire car or a tradie. It is used for this booking only and not saved.</p>
+        <p class="empty-note" style="margin-top:6px">Use this for a rego you have not saved, such as a friend&rsquo;s car, a hire car or a tradie&rsquo;s ute. p.stonn uses it for this booking only and does not save it.</p>
         {{else}}
-        <p class="empty-note" style="margin-top:6px">Used for this booking only and not saved. If you book the same regos often, <a href="/regos">save them</a> for one-tap booking and the weekly roster.</p>
+        <p class="empty-note" style="margin-top:6px">p.stonn uses this rego for this booking only and does not save it. If you book the same regos often, you can <a href="/regos">save them</a> for one-tap booking and the weekly roster.</p>
         {{end}}
       </div>
     </div>
@@ -691,7 +691,7 @@
 {{define "cal-day"}}
   <div class="cday {{if .IsToday}}today{{end}}{{if .Past}} past{{end}}" x-data="{open:false}"
        role="button" tabindex="0" :aria-expanded="open"
-       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{template "cal-what-text" .}} {{template "cal-why" .}}{{if .Unconfirmed}} Not confirmed with the council: the permit may still show a different rego.{{else if .Applying}} Still applying, not on the permit yet.{{end}}"
+       aria-label="{{.DayLabel}}{{if .IsToday}}, today{{end}}. {{template "cal-what-text" .}} {{template "cal-why" .}}{{if .Unconfirmed}} Not confirmed with the council: the permit may still show a different rego.{{else if .Applying}} p.stonn is still putting this rego on the permit.{{end}}"
        @click="open=!open" @keydown.enter.prevent="open=!open" @keydown.space.prevent="open=!open" @keydown.escape="open=false">
     <div class="cd" aria-hidden="true">{{.DayLabel}}</div>
     <div class="omk" aria-hidden="true">{{if .HasOneoff}}<span class="oneoff"></span>{{end}}</div>
@@ -703,7 +703,7 @@
            only) whether the council shows it yet. */}}
       <div class="cal-what">{{if .Reg}}<span class="reg">{{.Reg}}</span>{{else if .Empty}}<span class="clearmark">{{template "ic-empty"}}clear</span>{{else}}<span class="muted">Nothing scheduled</span>{{end}}</div>
       {{if or .Reg .Empty}}<div class="cal-why">{{template "cal-why" .}}</div>{{end}}
-      {{if .Unconfirmed}}<div class="cal-st calwarn">Not confirmed with the council.</div>{{else if .Applying}}<div class="cal-st">Still applying &mdash; not on the permit yet.</div>{{end}}
+      {{if .Unconfirmed}}<div class="cal-st calwarn">The council has not confirmed this yet.</div>{{else if .Applying}}<div class="cal-st">p.stonn is still putting this rego on the permit.</div>{{end}}
     </div>
   </div>
 {{end}}

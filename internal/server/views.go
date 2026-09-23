@@ -952,7 +952,7 @@ func (s *Server) render(w http.ResponseWriter, data dashboardData) {
 		// The BARE page, deliberately: the styled message page renders through
 		// this same template set, so a broken template must land somewhere that
 		// depends on nothing.
-		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "Something went wrong rendering this page. Please try again."})
+		s.bareMessage(w, http.StatusInternalServerError, messageView{Text: "p.stonn could not show this page. Please try again."})
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1010,7 +1010,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		base.SharedWith = owner
 	}
 	if r.URL.Query().Get("linked") == "1" {
-		base.Flash = "Council account linked."
+		base.Flash = "You linked your council account."
 	}
 	// Terms gate: before anything else (and before we ever store a tenant login),
 	// each user must accept the current terms individually, and re-accept if they
@@ -1070,7 +1070,7 @@ func (s *Server) appShell(w http.ResponseWriter, r *http.Request, page string) (
 		// the plain signup rendering: wrongly quiet beats wrongly alarming.
 		if known, err := s.store.HasOwnData(ctx, owner); err == nil && known {
 			base.Relink = true
-			base.Warn = "Your permit schedule is paused: p.stonn is not connected to the council, so no changes are being made to the permit. Reconnect below to resume it."
+			base.Warn = "p.stonn is not connected to your council account, so it is not changing the rego on your permit. Once you link your account again below, your schedule will run again."
 		} else if err == nil && s.cfg.MaxAccounts > 0 {
 			// A genuinely new household gets the capacity refusal HERE, before
 			// terms and a typed password — tenantLink re-checks under the

@@ -45,28 +45,28 @@ func (s *Server) guestsPage(w http.ResponseWriter, r *http.Request) {
 	case validRego(normalizeReg(q.Get("applied"))):
 		base.Flash = normalizeReg(q.Get("applied")) + " is now on the permit."
 	case validRego(normalizeReg(q.Get("approving"))):
-		base.Flash = "Approved — " + normalizeReg(q.Get("approving")) + " is being put on the permit."
+		base.Flash = "You approved the request, and p.stonn is putting " + normalizeReg(q.Get("approving")) + " on the permit."
 	case q.Get("declined") != "":
-		base.Flash = "Request declined."
+		base.Flash = "You declined the request."
 	// The two refusals decideRequest lands here with. They arrive as bare flags
 	// (nothing to validate) and used to be dropped on the floor, so a member who
 	// pressed Approve was shown the guests page with no word on what happened.
 	case q.Get("alreadydecided") != "":
-		base.Flash = "That request has already been answered, or it expired before anyone answered it."
+		base.Flash = "Someone has already answered that request, or it expired before anyone did."
 	case q.Get("revoked") != "":
-		base.Warn = "That request couldn't be put on the permit: its printed QR code may have been removed, or every link paused."
+		base.Warn = "p.stonn could not put that rego on the permit. Someone may have removed the printed QR or paused every link."
 	case looksLikeEmail(q.Get("resent")):
-		base.Flash = "A fresh link has been sent to " + q.Get("resent") + ". Their previous link has been replaced."
+		base.Flash = "You sent a new link to " + q.Get("resent") + ". Their previous link no longer works."
 	// The quick picker's own outcomes, all bare flags. Each also opens the
 	// picker card (closed by default) so the result is in view.
 	case q.Get("picker") == "made":
 		base.Flash = "Your quick picker is ready. Open it on your phone and add it to the home screen."
 	case q.Get("picker") == "updated":
-		base.Flash = "Quick picker updated."
+		base.Flash = "You updated the quick picker."
 	case q.Get("picker") == "newlink":
 		base.Flash = "The quick picker has a new link. The one on your phone has stopped working, so open this one and save it again."
 	case q.Get("picker") == "deleted":
-		base.Flash = "Quick picker deleted. Its link has stopped working."
+		base.Flash = "You deleted the quick picker, and its link no longer works."
 	}
 	if err := s.loadGuests(r.Context(), &base, 0); err != nil {
 		s.serverError(w, err)
@@ -104,7 +104,7 @@ func (s *Server) editGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	// Validated on the read path like every other flag (see guestsPage).
 	if who := r.URL.Query().Get("revoked"); looksLikeEmail(who) {
-		base.Flash = "The link for " + who + " has been revoked. It no longer works, and any rego it put on the permit is coming off now."
+		base.Flash = "You revoked the link for " + who + ". The link no longer works, and p.stonn is removing any rego it set on the permit."
 	}
 	s.render(w, base)
 }
@@ -217,18 +217,18 @@ func (s *Server) loadGuests(ctx context.Context, base *dashboardData, editID int
 					case "applied":
 						v.Live = "On the permit until " + rq.Until + "."
 					case "approved":
-						v.Live = "Being put on the permit…"
+						v.Live = "p.stonn is putting this rego on the permit…"
 					case "stalled":
-						v.Live, v.Warn = "Not yet confirmed on the permit — check the permit's schedule.", true
+						v.Live, v.Warn = "The council has not yet confirmed this rego on the permit. You can check the permit on the Schedule tab.", true
 					case "superseded":
 						// Members may see the superseding plate (unlike the public door-QR
 						// pages, which never disclose the permit's current plate).
-						v.Live, v.Warn = "No longer on the permit — since replaced.", true
+						v.Live, v.Warn = "This rego is no longer on the permit, because the permit has changed since.", true
 						if replacedBy != "" {
-							v.Live = "No longer on the permit — since replaced by " + replacedBy + "."
+							v.Live = "This rego is no longer on the permit, because " + replacedBy + " has replaced it."
 						}
 					case "ended":
-						v.Live = "The pass has ended."
+						v.Live = "This rego’s time on the permit has ended."
 					}
 				}
 			case "denied":
@@ -284,7 +284,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		s.formError(w, r, "Could not read the form. Please try again.")
+		s.formError(w, r, "p.stonn could not read the form. Please try again.")
 		return
 	}
 	permitID := atoi64(r.FormValue("permit_id"))
@@ -298,15 +298,15 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	recipients, droppedEmails := parseEmails(r.FormValue("recipients"))
 	if len(vehicleIDs) == 0 {
-		s.formError(w, r, "Choose at least one rego this link may put on the permit.")
+		s.formError(w, r, "Choose at least one rego this pass may put on the permit.")
 		return
 	}
 	if len(recipients) == 0 {
 		if len(droppedEmails) > 0 {
-			s.formError(w, r, "None of those recipient emails look valid. Check them and try again.")
+			s.formError(w, r, "None of those email addresses looks valid. Please check them and try again.")
 			return
 		}
-		s.formError(w, r, "Add at least one recipient email.")
+		s.formError(w, r, "Add at least one email address.")
 		return
 	}
 	if len(recipients) > maxGuestRecipients {
@@ -351,11 +351,11 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 	base.GuestMgmt.NewGuestLinks = links
 	switch {
 	case sent == len(links):
-		base.Flash = "Guest pass created and links emailed."
+		base.Flash = "You created a guest pass, and p.stonn has emailed each person their link. They open it when they arrive to put their rego on the permit."
 	case sent > 0:
-		base.Flash = "Guest pass created. Some links couldn't be emailed — copy the links below to be sure everyone gets theirs."
+		base.Flash = "You created a guest pass, but p.stonn could not email some of the links. Copy the links below so that everyone receives theirs."
 	default:
-		base.Flash = "Guest pass created. Copy the links below to share them."
+		base.Flash = "You created a guest pass. Copy the links below to share them."
 	}
 	base.Flash += skippedNote(droppedEmails)
 	s.logChange(r.Context(), owner, user, store.ActionGuestCreate, strings.Join(recipients, ", "), label)
@@ -418,7 +418,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 	}
 	recipient := strings.TrimSpace(r.FormValue("recipient"))
 	if recipient == "" {
-		s.formError(w, r, "No recipient to re-send to.")
+		s.formError(w, r, "There is no one to send the link to.")
 		return
 	}
 	// Don't rotate the token when the permit is dead: the guest's link 410ing is
@@ -431,7 +431,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 	// Nor when we can't deliver the replacement — that would break the
 	// recipient's current link with nothing to replace it.
 	if !s.notify.EmailAvailable() {
-		s.message(w, http.StatusConflict, "Email isn't set up, so links can't be re-sent.")
+		s.message(w, http.StatusConflict, "Email isn’t set up on this p.stonn, so it cannot send the link again.")
 		return
 	}
 	raw, hash := newGuestToken()
@@ -464,7 +464,7 @@ func (s *Server) resendGuestLink(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		base.GuestMgmt.NewGuestLinks = links
-		base.Flash = "The email could not be sent. Copy the fresh link below and share it yourself — the old link no longer works."
+		base.Flash = "p.stonn could not send the email. The old link no longer works, so copy the new link below and share it yourself."
 		s.render(w, base)
 		return
 	}
@@ -485,7 +485,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		s.formError(w, r, "Could not read the form. Please try again.")
+		s.formError(w, r, "p.stonn could not read the form. Please try again.")
 		return
 	}
 	label := guestGrantLabel(r.FormValue("label"))
@@ -588,14 +588,14 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 		base.GuestMgmt.NewGuestLinks = newLinks
 		switch {
 		case sent == len(newLinks):
-			base.Flash = "Guest pass updated and new links emailed."
+			base.Flash = "You updated the guest pass, and p.stonn has emailed each new person their link."
 		case sent > 0:
-			base.Flash = "Guest pass updated. Some links couldn't be emailed — copy the links below to be sure everyone gets theirs."
+			base.Flash = "You updated the guest pass, but p.stonn could not email some of the new links. Copy the links below so that everyone receives theirs."
 		default:
-			base.Flash = "Guest pass updated. Copy the new links below to share them."
+			base.Flash = "You updated the guest pass. Copy the new links below to share them."
 		}
 	} else {
-		base.Flash = "Guest pass updated."
+		base.Flash = "You updated the guest pass."
 	}
 	base.Flash += skippedNote(droppedEmails)
 	s.logChange(r.Context(), owner, user, store.ActionGuestUpdate, label, "")
@@ -610,7 +610,7 @@ func (s *Server) updateGuestGrant(w http.ResponseWriter, r *http.Request) {
 // one form post into a bulk mailer.
 const maxGuestRecipients = 20
 
-const tooManyRecipients = "That's too many recipients for one pass. Add up to 20 at a time."
+const tooManyRecipients = "That is too many people for one pass. You can add up to 20 at a time."
 
 // maxGuestGrantLabel matches the permit-label cap, for the same reasons: the label
 // headlines the guest's page and rides into the email that carries their link, so
@@ -812,7 +812,7 @@ func (s *Server) deleteGuestGrant(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.logChange(r.Context(), owner, user, store.ActionGuestDelete, label, "")
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding those links can no longer use your permit, and p.stonn is taking any car they had put on it back off now — check the permit directly if this is urgent.")
+			user+" deleted a guest pass"+optional(label, " (")+closeParen(label)+" on your p.stonn account. Anyone holding the link can no longer use your permit, and p.stonn is removing any rego they put on it.")
 		// The sweep changed what the schedule resolves to, so the permit is now out of
 		// date. Without a kick it stays that way until the next pass — and the point of
 		// revoking was that the guest's plate comes off NOW.
@@ -844,7 +844,7 @@ func (s *Server) revokeGuestToken(w http.ResponseWriter, r *http.Request) {
 		// removing a door QR): one member cutting off a person the others invited is
 		// exactly the change silence hides.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" revoked a guest link"+optional(recipient, " (")+closeParen(recipient)+" on your p.stonn account. That link no longer works, and p.stonn is taking any car it had put on your permit back off now — check the permit directly if this is urgent.")
+			user+" revoked a guest pass link"+optional(recipient, " (")+closeParen(recipient)+" on your p.stonn account. That link no longer works, and p.stonn is removing any rego it set on your permit.")
 		s.kickScheduler()
 	}
 	// From the pass's edit card, land back on it with the outcome; the form
@@ -906,7 +906,7 @@ func (s *Server) toggleGuests(w http.ResponseWriter, r *http.Request) {
 		// Pausing kills every guest link at once — a visitor at the kerb just sees
 		// "no longer active", so the household should know it was deliberate.
 		s.notifyDestructive(r.Context(), owner, user,
-			user+" paused every link on your p.stonn account: guest passes, QR codes and the quick picker will not work until they are resumed, and p.stonn is taking any rego they had put on a permit back off now — check the permit directly if this is urgent.")
+			user+" paused every link on your p.stonn account. Guest passes, QRs and the quick picker will not work until someone resumes them, and p.stonn is removing any rego they set on a permit.")
 		s.kickScheduler()
 	}
 	http.Redirect(w, r, "/guests", http.StatusSeeOther)

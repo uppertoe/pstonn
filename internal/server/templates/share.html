@@ -16,13 +16,13 @@
     <div class="share-opts">
       <div class="qropt">
         <div class="share-ic" style="--hue:var(--sec-schedule)">{{template "ic-link"}}</div>
-        <div class="qropt-txt"><strong>Send the link</strong><span class="empty-note">In a text, WhatsApp or Messenger &mdash; your phone&rsquo;s share sheet opens with the link ready. On a computer it copies the link instead.</span></div>
+        <div class="qropt-txt"><strong>Send the link</strong><span class="empty-note">Your phone’s share sheet opens with the link ready for a text, WhatsApp or Messenger. On a computer, p.stonn copies the link instead.</span></div>
         <button type="button" data-share-pstonn>{{template "ic-link"}} Share p.stonn</button>
       </div>
       {{if .Share.ShareEmailAvailable}}
       <div class="qropt">
         <div class="share-ic" style="--hue:var(--sec-vehicles)">{{template "ic-mail"}}</div>
-        <div class="qropt-txt"><strong>Email an invite</strong><span class="empty-note">p.stonn sends them a short note saying you use it and what it does, from your name. Nothing else follows.</span></div>
+        <div class="qropt-txt"><strong>Email an invite</strong><span class="empty-note">p.stonn sends them a short note saying you use it and what it does, from your name. p.stonn sends nothing else after that.</span></div>
         <form method="post" action="/share/invite" class="stack" style="max-width:none;gap:8px" x-data="{sent:false}" @submit="if (sent) { $event.preventDefault(); return } sent = true">
           <input type="email" name="email" required autocomplete="off" placeholder="their@email.com" aria-label="Their email">
           <button type="submit" :disabled="sent">{{template "ic-mail"}} Send invitation</button>
@@ -31,7 +31,7 @@
       {{end}}
       <div class="qropt" id="card">
         <div class="share-ic" style="--hue:var(--sec-activity)">{{template "ic-qr"}}</div>
-        <div class="qropt-txt"><strong>Print a card</strong><span class="empty-note">A card with a QR code straight to p.stonn.org &mdash; for handing over the fence or leaving with a neighbour.</span></div>
+        <div class="qropt-txt"><strong>Print a card</strong><span class="empty-note">This card has a QR code that opens p.stonn.org. You can hand it over the fence or leave it with a neighbour.</span></div>
         {{if .Share.ShareQR}}<div class="share-preview"><img src="{{.Share.ShareQR}}" alt="" width="72" height="72"><span>p.stonn.org</span></div>{{end}}
         <a href="/share/card" hx-boost="false" class="btnlike ghost" style="width:100%;justify-content:center">{{template "ic-qr"}} Open the printable card</a>
       </div>

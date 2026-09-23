@@ -19,17 +19,17 @@ func TestOnboardNudgeMessage(t *testing.T) {
 		t.Fatalf("subject unusable: %q", subject)
 	}
 	for _, want := range []string{
-		testResetURL,                      // remedy 1: reset, deep-linked
-		"never set one",                   // …including the paper-signup resident
-		"resident@example.com",            // remedy 2: the same-email rule names THEIR address
-		"different email address",         //
-		"built-in browser",                // remedy 3: the webview trap
-		"https://p.stonn.example",         // …with the escape hatch to the real browser
-		"VISITOR permits only",            // honest scope: never a resident permit…
-		"can't apply for one",             // …and never an application, only a permit already held
-		testRegisterURL,                   // the no-account-at-all reader gets the sign-up door
-		"guest QR codes",                  // what's waiting is the whole permit toolkit, not just a roster
-		"the only reminder p.stonn sends", // the once-ever promise the sweep enforces
+		testResetURL,              // remedy 1: reset, deep-linked
+		"never set one",           // …including the paper-signup resident
+		"resident@example.com",    // remedy 2: the same-email rule names THEIR address
+		"uses a different email",  //
+		"built-in browser",        // remedy 3: the webview trap
+		"https://p.stonn.example", // …with the escape hatch to the real browser
+		"only manage a visitor permit you already hold", // honest scope: never a resident permit…
+		"applies for a new one",                         // …and never an application, only a permit already held
+		testRegisterURL,                                 // the no-account-at-all reader gets the sign-up door
+		"guest passes and visitor QR",                   // what's waiting is the whole permit toolkit, not just a roster
+		"the only reminder p.stonn sends",               // the once-ever promise the sweep enforces
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("nudge body is missing %q", want)

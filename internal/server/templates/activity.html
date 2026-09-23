@@ -1,7 +1,7 @@
 {{define "page-activity"}}
   {{/* ---------- ACTIVITY ---------- */}}
   <div class="sectitle" id="plates" style="--hue:var(--sec-activity)"><span class="ic">{{template "ic-activity"}}</span> Permit changes</div>
-  <p class="subtitle">Every change to the rego on your permit, whether p.stonn made it or it was made on the council's website.</p>
+  <p class="subtitle">This list shows every change to the rego on your permit, whether p.stonn made it or someone made it on the council&rsquo;s website.</p>
   <section class="card" style="--hue:var(--sec-activity)">
     <table class="mtable">
       <tbody>
@@ -14,10 +14,10 @@
                when it isn't, so error and changed carry colour and weight while a
                success stays quiet. Rendering all three identically made a failed
                apply look exactly like a working one. */}}
-          <td class="logst"><span class="s-{{.Status}}">{{.Status}}</span>{{if .Detail}} <span class="muted">· {{.Detail}}</span>{{end}}</td>
+          <td class="logst"><span class="s-{{.Status}}">{{statusLabel .Status}}</span>{{if .Detail}} <span class="muted">· {{.Detail}}</span>{{end}}</td>
         </tr>
       {{else}}
-        <tr><td colspan="3" class="empty-note">No changes applied yet.</td></tr>
+        <tr><td colspan="3" class="empty-note">p.stonn has not changed the permit yet.</td></tr>
       {{end}}
       </tbody>
     </table>
@@ -26,7 +26,7 @@
          people check to confirm something happened. */}}
     {{if .App.Log}}
     <p class="empty-note" style="margin-top:12px">
-      {{if .App.LogMore}}Showing the most recent {{len .App.Log}}. <a href="/activity?all=1#plates">Show more</a> &middot; {{end}}Kept for 90 days.
+      {{if .App.LogMore}}Showing the most recent {{len .App.Log}}. <a href="/activity?all=1#plates">Show more</a> &middot; {{end}}p.stonn keeps this history for 90 days.
     </p>
     {{end}}
   </section>
@@ -37,7 +37,7 @@
        or revoked a pass. Those changes produce no council apply, so they appear
        nowhere above. */}}
   <div class="sectitle" id="changes" style="--hue:var(--sec-settings);margin-top:26px"><span class="ic">{{template "ic-activity"}}</span> Account changes</div>
-  <p class="subtitle">Who changed the schedule, regos, guest passes or shared access, including you.</p>
+  <p class="subtitle">This list shows who changed the schedule, regos, guest passes or shared access, including you.</p>
   <section class="card" style="--hue:var(--sec-settings)">
     <table class="mtable">
       <tbody>
@@ -48,13 +48,13 @@
           <td>{{.Text}}</td>
         </tr>
       {{else}}
-        <tr><td colspan="3" class="empty-note">No changes recorded yet.</td></tr>
+        <tr><td colspan="3" class="empty-note">No one has changed the account yet.</td></tr>
       {{end}}
       </tbody>
     </table>
     {{if .App.Changes}}
     <p class="empty-note" style="margin-top:12px">
-      {{if .App.ChangesMore}}Showing the most recent {{len .App.Changes}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}Kept for 90 days.
+      {{if .App.ChangesMore}}Showing the most recent {{len .App.Changes}}. <a href="/activity?all=1#changes">Show more</a> &middot; {{end}}p.stonn keeps this history for 90 days.
     </p>
     {{end}}
   </section>

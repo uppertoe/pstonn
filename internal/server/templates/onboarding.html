@@ -20,12 +20,12 @@
     <span style="display:block;margin-top:12px">{{T "onboarding.rejected_reset" . (slots "reset" (link .Tenant.Links.ResetPassword (noboost) (newtab)) "b" (strong))}}</span>
     {{if .LogoutURL}}
     <span style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-      <span>&bull; <strong>Council account under a different email?</strong></span>
+      <span>If your {{.Tenant.Terms.portal}} account uses a different email,</span>
       <a href="{{.LogoutURL}}" hx-boost="false" class="btnlike sm">Sign out</a>
       <span>then sign back in here with that address.</span>
     </span>
     {{else}}
-    <span style="display:block;margin-top:10px">&bull; <strong>Council account under a different email?</strong> Sign out, then sign back in here with that address.</span>
+    <span style="display:block;margin-top:10px">If your {{.Tenant.Terms.portal}} account uses a different email, sign out, then sign back in here with that address.</span>
     {{end}}
     <span style="display:block;margin-top:10px;font-size:13px">{{T "onboarding.rejected_try_portal" . (slots "portal" (link .Tenant.Links.Portal (noboost) (newtab)))}}</span>
   </span></div>
@@ -47,12 +47,12 @@
          admission lock; this is the honest front door. */}}
     <h2>p.stonn is full at the moment</h2>
     <p>
-      It&rsquo;s run by one person for a small number of {{.Tenant.Short}} households, and taking on more right now
+      One person runs p.stonn for a small number of {{.Tenant.Short}} households, and taking on more now
       would make it slower and less reliable for everyone already using it.
     </p>
     <p class="empty-note" style="margin-top:10px">
-      Please try again in a while{{if .Contact}}, or <a href="/contact">get in touch</a> and you&rsquo;ll hear when there&rsquo;s room{{end}}.
-      Nothing to undo &mdash; no details were taken.
+      Please try again in a while{{if .Contact}}, or <a href="/contact">get in touch</a> and we&rsquo;ll let you know when there&rsquo;s room{{end}}.
+      There&rsquo;s nothing to undo, because p.stonn has not kept any of your details.
     </p>
     {{else}}
     {{if .Onboard.LinkThrottled}}
@@ -86,7 +86,7 @@
     {{else}}
     <h2>{{if .Relink}}Reconnect your council account{{else}}Link your council account{{end}}</h2>
     <p>
-      {{if .Relink}}p.stonn isn&rsquo;t connected to your council account right now &mdash; the sign-in expired or was disconnected. Enter your password to reconnect; your permits, regos and schedule are all still here.
+      {{if .Relink}}Enter your password to link your account again. Your permits, regos and schedule are all still here.
       {{else}}{{T "onboarding.intro" .}}{{end}}
     </p>
     {{if .Onboard.InAppBrowser}}
@@ -97,8 +97,8 @@
          entirely through this webview, and a third never attempted the form.
          Plain text URL, not a link: a tap would open it in the SAME webview. */}}
     <p class="empty-note" style="margin-top:2px">
-      <strong>In the Facebook, Instagram or Google app right now?</strong> Its built-in browser can&rsquo;t auto-fill saved passwords.
-      If yours lives in a password manager, open <strong>p.stonn.org</strong> in Safari or Chrome and link from there &mdash; everything here will be waiting.
+      If you opened this page from the Facebook, Instagram or Google app, that app&rsquo;s built-in browser cannot fill in saved passwords.
+      If your council password is in a password manager, open <strong>p.stonn.org</strong> in Safari or Chrome and link your account from there. You will find everything as you left it.
     </p>
     {{end}}
     {{/* One tap = one council login with the user's REAL credentials, so the
@@ -118,7 +118,7 @@
       <p class="empty-note" style="margin-top:-4px">
         {{T "onboarding.email_pinned" .}}
         If your council account uses a different address, {{if .LogoutURL}}<a href="{{.LogoutURL}}" hx-boost="false">sign out</a>{{else}}sign out{{end}} and sign back in with that one.
-        And if someone else in your household manages the permit, there&rsquo;s nothing to link here &mdash; they can
+        If someone else in your household manages the permit, there&rsquo;s nothing to link here. They can
         invite you from <strong>Settings &rarr; Shared access</strong> on their account, so you never need their council password.
       </p>
       {{- if .Onboard.TenantOptions}}
@@ -165,12 +165,12 @@
     {{/* This field asks for their EXISTING council password — they can't choose
          it here, so "use a password you haven't used elsewhere" read as
          nonsense. The real advice is about reuse of that council password. */}}
-    <p class="empty-note" style="margin-top:12px">This is your existing council password &mdash; p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password revokes access immediately. <a href="/security">Security &amp; data</a></p>
+    <p class="empty-note" style="margin-top:12px">This is your existing council password. p.stonn never creates one of its own. If you also use it for anything important, consider changing it at the council first. You can disconnect at any time in Settings, and changing your council password ends p.stonn&rsquo;s access. <a href="/security">Security &amp; data</a></p>
     {{end}}
     {{end}}
     {{else}}
     <h2>Waiting for the account owner</h2>
-    <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not connected their council account yet. Once they do, the visitor permit schedule appears here.</p>
+    <p>You have shared access to <strong>{{.SharedWith}}</strong>'s account, but they have not linked their council account yet. Once they do, the visitor permit schedule appears here.</p>
     {{/* The Settings page is gated on the owner being linked, so in exactly this
          state it renders this very page — pointing there was a loop. Offer the
          leave action inline instead: it is the one escape a mis-invited person
@@ -180,7 +180,7 @@
           data-confirm="Leave {{.SharedWith}}'s account? You'll get your own empty p.stonn account back." data-confirm-ok="Leave">
       <button type="submit" class="ghost sm">Leave this shared account</button>
     </form>
-    <p class="empty-note" style="margin-top:8px">Not what you expected? Leaving gives you back your own account, and you can link your own council login.</p>
+    <p class="empty-note" style="margin-top:8px">If this is not what you expected, leaving gives you back your own account, and you can link your own council login.</p>
     {{end}}
   </section>
 </main>
@@ -205,7 +205,7 @@
          would contradict the two-or-more shown — an unanswerable choice — so lead
          with a "set up both" line instead. */}}
     {{if gt .Picker.OfferedCount 1}}
-    <p class="subtitle">You have more than one visitor permit. Each one holds a rego. You can set up both; pick either to start, and add the other whenever you like.</p>
+    <p class="subtitle">You have more than one visitor permit. Each one holds a rego. You can set up all of them; pick one to start, and add the others whenever you like.</p>
     {{else}}
     <p class="subtitle">Pick the permit you want to schedule. This is usually your visitor permit.</p>
     {{end}}
@@ -225,7 +225,7 @@
          that says what adding it is for. */}}
     {{$live := 0}}{{range .Picker.Pick}}{{if not .Dead}}{{$live = 1}}{{end}}{{end}}
     {{if not $live}}
-    <p class="empty-note" style="margin-bottom:12px">All your permits are managed or no longer active.</p>
+    <p class="empty-note" style="margin-bottom:12px">p.stonn already manages all your permits, or they are no longer active.</p>
     {{end}}
     <div class="pick">
       {{range .Picker.Pick}}{{if not .Dead}}
@@ -278,13 +278,13 @@
          with nothing managed, /schedule renders this very page, which read as a
          broken loop. */}}
     {{if .Picker.PermitsUnknown}}
-    <p class="empty-note">We couldn't load your permit list from the council just now, so we can't tell what's on your account. Nothing has changed &mdash; please try again in a few minutes.</p>
+    <p class="empty-note">p.stonn couldn&rsquo;t load your permit list from the council just now, so it can&rsquo;t tell what&rsquo;s on your account. Nothing has changed, so please try again in a few minutes.</p>
     <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_error" .}} <a href="/features" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{else if .Picker.HasPermits}}
-    <p class="empty-note">None of the permits on your council account can be scheduled here. p.stonn manages <strong>visitor</strong> permits whose rego your account is allowed to change &mdash; the reason for each is shown above.</p>
-    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} &mdash; <a href="/contact">tell us</a> and we'll look{{end}}. <a href="/features" hx-boost="false">What p.stonn can and cannot do</a></p>
+    <p class="empty-note">p.stonn can&rsquo;t schedule any of the permits on your council account. It manages <strong>visitor</strong> permits whose rego your account is allowed to change. Each permit above shows the reason.</p>
+    <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_none" .}}{{if .Contact}} If so, <a href="/contact">tell us</a> and we&rsquo;ll look into it.{{end}} <a href="/features" hx-boost="false">What p.stonn can and cannot do</a></p>
     {{else}}
-    <p class="empty-note">Your council account doesn't have any permits on it yet. p.stonn schedules a visitor permit you already hold &mdash; it can't apply for one.</p>
+    <p class="empty-note">Your council account doesn&rsquo;t have any permits on it yet. p.stonn schedules a visitor permit you already hold. It can&rsquo;t apply for one.</p>
     <p class="empty-note" style="margin-top:8px">{{T "onboarding.picker_apply" .}} <a href="/features" hx-boost="false">What p.stonn can do</a>{{if .Contact}} &middot; <a href="/contact">Ask us</a>{{end}}</p>
     {{end}}
     {{end}}

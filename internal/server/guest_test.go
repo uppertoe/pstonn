@@ -855,7 +855,7 @@ func TestGuestRefusalMessage(t *testing.T) {
 		{"refused, no reason", provider.Fail(provider.FailRejected, provider.OpSetVehicle, errors.New("400")), false,
 			[]string{"wouldn't accept ABC123 on this permit", "the rego against the car"}, []string{"reconnect"}},
 		{"unexpected shape", provider.Fail(provider.FailUnexpected, provider.OpSetVehicle, errors.New("?")), false,
-			[]string{"unexpected answer from the council", "hasn't changed the permit"}, []string{"reconnect", "wouldn't accept"}},
+			[]string{"unexpected answer from the council", "hasn’t changed the permit"}, []string{"reconnect", "wouldn't accept"}},
 		{"refused while restoring", provider.Fail(provider.FailRejected, provider.OpSetVehicle, errors.New("400")), true,
 			[]string{"wouldn't accept putting ABC123 back"}, []string{"reconnect"}},
 	}

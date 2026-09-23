@@ -256,11 +256,11 @@ func TestGoldenEmails(t *testing.T) {
 	})
 	run("apply-failure-empty", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Source: "roster", OK: false, Empty: true, CurrentReg: "XYZ789",
-			Reason: "The council was temporarily unavailable.", Action: "Nothing to do yet — p.stonn keeps trying.", Transient: true})
+			Reason: "The council was temporarily unavailable.", Action: "You don’t need to do anything yet. p.stonn will keep trying.", Transient: true})
 	})
 	run("apply-failure-transient", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "roster", OK: false, CurrentReg: "XYZ789",
-			Reason: "The council was temporarily unavailable.", Action: "Nothing to do yet — p.stonn keeps trying.", Transient: true})
+			Reason: "The council was temporarily unavailable.", Action: "You don’t need to do anything yet. p.stonn will keep trying.", Transient: true})
 	})
 	run("apply-failure-urgent", func() {
 		_, _ = svc.NotifyApply(ctx, ApplyOutcome{Owner: owner, PermitLabel: "Visitor", Reg: "ABC123", Name: "Van", Source: "override", OK: false, CurrentReg: "XYZ789",
@@ -316,9 +316,9 @@ func TestGoldenEmails(t *testing.T) {
 		_ = svc.NotifyDriverAdded(ctx, owner, "", stranger, "AAA111", "#3b82f6")
 	})
 	run("guest-request", func() { _ = svc.NotifyGuestRequest(ctx, owner, "Visitor", "GUEST1", appURL+"/g/req/4", 4) })
-	run("account-change", func() { _ = svc.NotifyAccountChange(ctx, owner, member, "added the car ABC123 (Van)") })
+	run("account-change", func() { _ = svc.NotifyAccountChange(ctx, owner, member, "added the rego ABC123 (Van)") })
 	run("account-change-picker", func() {
-		_ = svc.NotifyAccountChange(ctx, owner, "the quick picker", "The rego was taken off the permit \"Visitor\" from the quick picker. It now has no rego; nothing is covered on that permit until a rego is set or scheduled.")
+		_ = svc.NotifyAccountChange(ctx, owner, "the quick picker", "Someone used the quick picker to remove the rego from the permit “Visitor”. The permit has no rego now, so no car is covered by it until someone puts a rego on or the roster sets one.")
 	})
 	run("fortnight-nudge", func() { _ = svc.SendFortnightNudge(ctx, owner) })
 	run("referral-invite", func() { _ = svc.SendReferralInvite(ctx, stranger, owner) })

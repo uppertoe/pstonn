@@ -56,7 +56,7 @@ func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
 	case "1":
 		// addPermit lands here only when a rego is already saved (otherwise on
 		// the Regos page), so the next step is the schedule itself.
-		base.Flash = "Permit added. Tap a day in the roster to give it a rego, or make a booking."
+		base.Flash = "You added the permit. Tap a day in the roster to give it a rego, or make a booking."
 	case "expired":
 		base.Warn = s.say(r.Context(), base.Owner, "schedule.added_expired")
 	}
@@ -732,7 +732,7 @@ func (s *Server) setRule(w http.ResponseWriter, r *http.Request) {
 	// The permit's portal may not allow an empty permit at all; the cell never
 	// offers the option then, and this is the authoritative refusal.
 	if empty && !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
-		s.formError(w, r, "This council's permit can't be left with no rego on it. Choose a rego for that day instead.")
+		s.formError(w, r, "The council does not allow this permit to have no rego, so choose a rego for that day instead.")
 		return
 	}
 	var err error
@@ -879,9 +879,9 @@ func (s *Server) addCycleWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	p.CycleWeeks, p.CycleAnchor = n, next.Anchor
 	s.logChange(r.Context(), owner, user, store.ActionCycleAdd, permitLabel(p), weeksLabel(cyc.Weeks, n))
-	notice := "Added week 2, copied from week 1. The roster now alternates between the two weeks."
+	notice := "You added week 2 as a copy of week 1. The roster now alternates between the two weeks."
 	if n > 2 {
-		notice = fmt.Sprintf("Added %s, copied from %s. The roster now repeats every %d weeks.", weeksLabel(cyc.Weeks, n), weeksLabel(0, cyc.Weeks), n)
+		notice = fmt.Sprintf("You added %s as a copy of %s. The roster now repeats every %d weeks.", weeksLabel(cyc.Weeks, n), weeksLabel(0, cyc.Weeks), n)
 	}
 	s.respondPermitNotice(w, r, owner, p, notice)
 }
@@ -905,7 +905,7 @@ func (s *Server) removeCycleWeek(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(s.locForPermit(ctx, p))
 	cyc := p.Cycle()
 	if cyc.Weeks <= 1 {
-		s.formError(w, r, "This roster is a single repeating week — there is no extra week to remove.")
+		s.formError(w, r, "This roster has a single repeating week, so there is no extra week to remove.")
 		return
 	}
 	// Back down the ladder: four weeks to a fortnight (both extra weeks go,
@@ -916,7 +916,7 @@ func (s *Server) removeCycleWeek(w http.ResponseWriter, r *http.Request) {
 	removed, n, err := s.store.ShrinkCycle(ctx, owner, p.ID, next.Anchor, to)
 	if err != nil {
 		if errors.Is(err, store.ErrCycleWeek) {
-			s.formError(w, r, "This roster is a single repeating week — there is no extra week to remove.")
+			s.formError(w, r, "This roster has a single repeating week, so there is no extra week to remove.")
 			return
 		}
 		s.serverError(w, err)
@@ -931,12 +931,12 @@ func (s *Server) removeCycleWeek(w http.ResponseWriter, r *http.Request) {
 		detail += " — " + days
 	}
 	s.logChange(ctx, owner, user, store.ActionCycleRemove, permitLabel(p), detail)
-	notice := fmt.Sprintf("Removed %s.", gone)
+	notice := fmt.Sprintf("You removed %s.", gone)
 	if n == 1 {
-		notice = fmt.Sprintf("Removed %s. The roster is back to a single repeating week.", gone)
+		notice = fmt.Sprintf("You removed %s. The roster is back to a single repeating week.", gone)
 	}
 	if inRemoved {
-		notice += fmt.Sprintf(" The cycle was in a removed week, so this week now runs week %d's roster.", next.WeekAt(now)+1)
+		notice += fmt.Sprintf(" This week was one of the weeks you removed, so it now follows week %d of the roster.", next.WeekAt(now)+1)
 		s.sched.KickPermit(p.ID)
 	}
 	// The payload carries the old length (the days alone may be none), the
@@ -1011,11 +1011,7 @@ func (s *Server) restoreCycleWeek(w http.ResponseWriter, r *http.Request) {
 	p.CycleWeeks, p.CycleAnchor = n, anchor
 	s.logChange(ctx, owner, user, store.ActionCycleRestore, permitLabel(p), back)
 	s.sched.KickPermit(p.ID)
-	verb := "is"
-	if n-cyc.Weeks > 1 {
-		verb = "are"
-	}
-	s.respondPermitNotice(w, r, owner, p, strings.ToUpper(back[:1])+back[1:]+" "+verb+" back.")
+	s.respondPermitNotice(w, r, owner, p, "You put "+back+" back on the roster.")
 }
 
 // describeWeekRules names a removed week's days for the activity log
@@ -1078,7 +1074,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	if raw := combineDateTime(r.FormValue("from_date"), r.FormValue("from_time"), "00:00"); raw != "" {
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locForPermit(r.Context(), p))
 		if err != nil {
-			s.formError(w, r, "Couldn't read the start time.")
+			s.formError(w, r, "p.stonn could not read the start time. Please enter it again.")
 			return
 		}
 		startsAt = t
@@ -1107,7 +1103,7 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		}
 		t, err := time.ParseInLocation("2006-01-02T15:04", raw, s.locForPermit(r.Context(), p))
 		if err != nil {
-			s.formError(w, r, "Couldn't read the end time.")
+			s.formError(w, r, "p.stonn could not read the end time. Please enter it again.")
 			return
 		}
 		// A chosen date with no time means the whole of that day, so it closes at the
@@ -1234,7 +1230,7 @@ func (s *Server) deleteOverride(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ownedPermit(w http.ResponseWriter, r *http.Request, owner string) (model.Permit, bool) {
 	p, err := s.store.GetPermit(r.Context(), pathInt(r, "id"))
 	if err != nil || p.Owner != owner {
-		s.message(w, http.StatusNotFound, "Permit not found.")
+		s.message(w, http.StatusNotFound, "p.stonn could not find that permit.")
 		return model.Permit{}, false
 	}
 	return p, true
@@ -1251,7 +1247,7 @@ func (s *Server) ownsVehicle(w http.ResponseWriter, r *http.Request, owner strin
 		return false
 	}
 	if !ok {
-		s.message(w, http.StatusNotFound, "Rego not found.")
+		s.message(w, http.StatusNotFound, "p.stonn could not find that rego.")
 		return false
 	}
 	return true

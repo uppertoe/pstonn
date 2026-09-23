@@ -78,7 +78,7 @@ func (s *Server) ntfyConfirm(w http.ResponseWriter, r *http.Request) {
 	// The ntfy app opens this in a browser, so every answer is the branded page.
 	if !s.confirmLimit.allow(rateLimitKey(r)) {
 		w.Header().Set("Retry-After", "60")
-		s.message(w, http.StatusTooManyRequests, "Too many attempts. Please wait a moment.")
+		s.message(w, http.StatusTooManyRequests, "You have made too many attempts. Please wait a moment.")
 		return
 	}
 	owner, topic, err := s.openNtfyConfirm(r.PathValue("token"), time.Now())
@@ -102,9 +102,9 @@ func (s *Server) ntfyConfirm(w http.ResponseWriter, r *http.Request) {
 			s.message(w, http.StatusGone, "This test was for an older topic. Subscribe to your new topic, send a fresh test, and tap Confirm on that.")
 			return
 		}
-		s.message(w, http.StatusOK, "Already confirmed. Push notifications are on for this phone.")
+		s.message(w, http.StatusOK, "You have already confirmed this phone. Push notifications are on.")
 		return
 	}
 	alog.Infof("ntfy confirmed for %s", redact.Email(owner))
-	s.message(w, http.StatusOK, "Confirmed — push notifications are getting through to this phone. You can now turn off email in p.stonn Settings if you'd rather.")
+	s.message(w, http.StatusOK, "p.stonn has confirmed that push notifications are getting through to this phone. You can now turn off email in p.stonn Settings if you’d rather.")
 }

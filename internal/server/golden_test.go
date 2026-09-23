@@ -266,7 +266,7 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 				{PermitID: 7, Registration: "ABC123", Source: "roster", Status: "success", At: now.Add(-2 * time.Hour)},
 				{PermitID: 7, Registration: "XYZ789", Source: "override", Status: "error", Detail: "council temporarily unavailable", At: now.Add(-26 * time.Hour)},
 			}
-			d.App.Changes = []changeView{{Actor: "a@b.com", Text: "added the car ABC123 (Van)", At: now.Add(-3 * 24 * time.Hour)}, {Text: "reconnected automatically", At: now.Add(-5 * 24 * time.Hour)}}
+			d.App.Changes = []changeView{{Actor: "a@b.com", Text: "added the rego ABC123 (Van)", At: now.Add(-3 * 24 * time.Hour)}, {Text: "reconnected automatically", At: now.Add(-5 * 24 * time.Hour)}}
 			d.App.LogMore, d.App.ChangesMore = true, true
 		}), ""},
 		{"activity showing all", app("activity", func(d *dashboardData) { d.App.ShowingAll = true }), ""},

@@ -14,7 +14,7 @@
     </form>
     {{if .Terms.Updated}}
     <form method="post" action="/terms/decline" style="text-align:center;margin-top:16px"
-          data-confirm="Decline the updated terms? This disconnects your council account and stops p.stonn managing your permit. You will be notified." data-confirm-ok="Decline &amp; disconnect">
+          data-confirm="Decline the updated terms? This disconnects your council account and stops p.stonn managing your permit, and we will email you to confirm." data-confirm-ok="Decline &amp; disconnect">
       <button type="submit" class="danger">Decline &amp; disconnect my account</button>
     </form>
     <p class="empty-note" style="text-align:center;margin-top:12px">Terms version {{.Terms.Version}}.</p>
@@ -27,7 +27,7 @@
          deeper and mid-form. */}}
     <p class="empty-note" style="text-align:center;margin-top:16px">{{T "terms.next_step" . (slots "b" (strong) "reset" (link .Tenant.Links.ResetPassword (newtab)))}}</p>
     {{end}}
-    <p class="empty-note" style="text-align:center;margin-top:16px">Terms version {{.Terms.Version}}.{{if .LogoutURL}} Prefer not to? <a href="{{.LogoutURL}}">Sign out</a>.{{end}}</p>
+    <p class="empty-note" style="text-align:center;margin-top:16px">Terms version {{.Terms.Version}}.{{if .LogoutURL}} If you would rather not, you can <a href="{{.LogoutURL}}">sign out</a>.{{end}}</p>
     {{end}}
   </section>
 </main>

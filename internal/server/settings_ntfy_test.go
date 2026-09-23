@@ -149,7 +149,7 @@ func TestEmailOffRequiresConfirmedPush(t *testing.T) {
 	}
 
 	// 3. The phone taps Confirm: stamped, once.
-	if w := s.postConfirm(t, confirmURL); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Confirmed") {
+	if w := s.postConfirm(t, confirmURL); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "p.stonn has confirmed that push notifications") {
 		t.Fatalf("confirm: code=%d body=%q", w.Code, w.Body.String())
 	}
 	p := s.prefOf(t, user)
@@ -157,7 +157,7 @@ func TestEmailOffRequiresConfirmedPush(t *testing.T) {
 		t.Fatalf("not stamped: %+v", p)
 	}
 	first := p.NtfyConfirmedAt
-	if w := s.postConfirm(t, confirmURL); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Already") {
+	if w := s.postConfirm(t, confirmURL); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "already confirmed this phone") {
 		t.Fatalf("second tap: code=%d body=%q", w.Code, w.Body.String())
 	}
 	if s.prefOf(t, user).NtfyConfirmedAt != first {
@@ -210,7 +210,7 @@ func TestNewTopicResetsConfirmation(t *testing.T) {
 	s.doHX("POST", "/notifications", user, origin, url.Values{"ntfy_enabled": {"1"}}) // push-only, allowed
 
 	w := s.doHX("POST", "/notifications/regen-topic", user, origin, url.Values{})
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Email is back on") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "p.stonn has turned email back on until you do") {
 		t.Fatalf("regen: code=%d body=%q", w.Code, w.Body.String())
 	}
 	p := s.prefOf(t, user)
@@ -283,11 +283,11 @@ func TestPushOnlyTestButton(t *testing.T) {
 		t.Fatal(err)
 	}
 	w = s.doHX("POST", "/notifications/test-push", user, origin, url.Values{})
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "✓ Test sent to your phone — tap Confirm") || f.n != 1 {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "p.stonn sent a test to your phone. Tap Confirm") || f.n != 1 {
 		t.Fatalf("push on: code=%d publishes=%d", w.Code, f.n)
 	}
 	// The box shows the send where the finger is, and starts polling for the tap.
-	if b := w.Body.String(); !strings.Contains(b, "<strong>Sent to your phone.</strong>") || !strings.Contains(b, `hx-get="/notifications/ntfy-status"`) || strings.Count(b, "Send a test to my phone</button>") != 1 {
+	if b := w.Body.String(); !strings.Contains(b, "<strong>p.stonn has sent a test to your phone.</strong>") || !strings.Contains(b, `hx-get="/notifications/ntfy-status"`) || strings.Count(b, "Send a test to my phone</button>") != 1 {
 		t.Fatalf("sent state not rendered in the box: %q", b[:400])
 	}
 	// Until the tap, the poll must leave the page alone (204, no body).
@@ -306,7 +306,7 @@ func TestPushOnlyTestButton(t *testing.T) {
 	}
 	// Confirmed: plain push, no button.
 	w = s.doHX("POST", "/notifications/test-push", user, origin, url.Values{})
-	if !strings.Contains(w.Body.String(), "✓ Test sent to your phone.") || f.n != 2 || f.confirmURL(t) != "" {
+	if !strings.Contains(w.Body.String(), "✓ p.stonn sent a test to your phone.") || f.n != 2 || f.confirmURL(t) != "" {
 		t.Fatalf("confirmed push: publishes=%d actions=%q", f.n, f.confirmURL(t))
 	}
 }

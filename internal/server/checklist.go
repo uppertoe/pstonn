@@ -89,7 +89,7 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 		}
 		items = []checkItem{
 			{Milestone: store.MilestoneRego, Label: "Save the rego of someone who visits you", Href: "#add", Done: len(vs) > 0},
-			{Milestone: store.MilestoneRegoEmail, Label: "Add an email, so they are told when their rego goes on the permit", Href: "#add", Done: email},
+			{Milestone: store.MilestoneRegoEmail, Label: "Add an email, so p.stonn can tell them when their rego is on the permit", Href: "#add", Done: email},
 		}
 	case "guests":
 		passes, printed, shown, err := s.store.GuestGrantKinds(ctx, owner)
@@ -101,7 +101,7 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 		items = []checkItem{
 			{Milestone: store.MilestoneVisitorQR, Label: "Show a visitor QR to someone at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
 			{Milestone: store.MilestoneGuestPass, Label: "Send a guest pass to a household that visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
-			{Milestone: store.MilestonePrintedQR, Label: "Print a QR that pings your phone when it is used", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
+			{Milestone: store.MilestonePrintedQR, Label: "Put up a printed QR that you confirm on your phone", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
 			{Milestone: store.MilestonePicker, Label: "Save a quick picker to your own phone", Href: "#picker", Done: perr == nil || did(store.ActionPickerCreate)},
 		}
 	case "settings":
@@ -127,7 +127,7 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 				checkItem{Milestone: store.MilestoneHouseholdName, Label: "Name the household, so visitors see it instead of your email", Href: "#household", Done: household != ""},
 				checkItem{Milestone: store.MilestoneShared, Label: "Give someone else in the house access", Href: "#shared", Done: members > 0})
 		}
-		items = append(items, checkItem{Milestone: store.MilestoneNotify(user), Label: "Set how you want to be told about changes", Href: "#notifications", Done: prefs})
+		items = append(items, checkItem{Milestone: store.MilestoneNotify(user), Label: "Choose how p.stonn tells you about changes", Href: "#notifications", Done: prefs})
 	default:
 		return nil
 	}

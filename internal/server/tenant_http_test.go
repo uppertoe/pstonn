@@ -119,7 +119,7 @@ func TestTenantLinkOverHTTP(t *testing.T) {
 		defer func() { r.fake.LoginErr = nil }()
 		r.consent(t, "busy@example.com")
 		rr := r.post("/tenant/link", "busy@example.com", url.Values{"portal_password": {"ok"}})
-		if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), "Your password was not the problem") {
+		if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), "your password was not the problem") {
 			t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 		}
 	})
@@ -143,7 +143,7 @@ func TestTenantLinkOverHTTP(t *testing.T) {
 		}
 		// The landing page after ?linked=1 is the picker with the account's permits.
 		page := r.get("/schedule?linked=1", rigUser)
-		if page.Code != 200 || !strings.Contains(page.Body.String(), "VPP-104233") || !strings.Contains(page.Body.String(), "Council account linked.") {
+		if page.Code != 200 || !strings.Contains(page.Body.String(), "VPP-104233") || !strings.Contains(page.Body.String(), "You linked your council account.") {
 			t.Fatalf("picker after link: code=%d body=%s", page.Code, excerpt(page.Body.String()))
 		}
 	})
@@ -158,7 +158,7 @@ func TestPickerOverHTTP(t *testing.T) {
 		r.fake.Extra = []provider.Permit{{CouncilPermitID: "77", PermitTypeID: "1", PermitNumber: "RPP77", PermitType: "(A) 1st Resident Permit", Status: "Granted", CanChangeVehicle: true}}
 		defer func() { r.fake.Extra = nil }()
 		body := r.get("/schedule", rigUser).Body.String()
-		for _, want := range []string{`name="council_permit_id" value="90001"`, `name="council_permit_id" value="90002"`, "RPP77", "Only visitor permits can be scheduled."} {
+		for _, want := range []string{`name="council_permit_id" value="90001"`, `name="council_permit_id" value="90002"`, "RPP77", "p.stonn can only schedule visitor permits."} {
 			if !strings.Contains(body, want) {
 				t.Errorf("picker missing %q:\n%s", want, excerpt(body))
 			}
@@ -171,7 +171,7 @@ func TestPickerOverHTTP(t *testing.T) {
 		r.fake.Partial = true
 		defer func() { r.fake.Partial = false }()
 		body := r.get("/schedule", rigUser).Body.String()
-		if !strings.Contains(body, "We could only load part of your permit list") {
+		if !strings.Contains(body, "p.stonn could only load part of your permit list") {
 			t.Fatalf("partial list not disclosed:\n%s", excerpt(body))
 		}
 	})
@@ -231,7 +231,7 @@ func TestAddPermitOverHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		rr := add("90002")
-		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "another p.stonn account") {
+		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "Another p.stonn account") {
 			t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 		}
 	})
@@ -239,7 +239,7 @@ func TestAddPermitOverHTTP(t *testing.T) {
 		r.fake.ListErr = provider.ErrSessionExpired
 		defer func() { r.fake.ListErr = nil }()
 		rr := add("90001")
-		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "re-link") {
+		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "link your council account again") {
 			t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 		}
 	})
@@ -265,7 +265,7 @@ func TestClearPermitOverHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		rr := r.post(path, rigUser, nil)
-		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "has a rego scheduled right now") {
+		if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "Something is scheduled on this permit now") {
 			t.Fatalf("code=%d body=%s", rr.Code, excerpt(rr.Body.String()))
 		}
 		if reg, _ := r.fake.Current("90001"); reg != "SBX1AB" {

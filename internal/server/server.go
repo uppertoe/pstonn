@@ -280,7 +280,7 @@ func (s *Server) publicGuest(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.guestRead.allow(rateLimitKey(r)) {
 			w.Header().Set("Retry-After", "60")
-			s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and reload.")
+			s.message(w, http.StatusTooManyRequests, "You have made too many requests. Please wait a moment and reload.")
 			return
 		}
 		if s.guestSlots != nil {
@@ -304,7 +304,7 @@ func (s *Server) throttlePerIP(rl *rateLimiter, h http.HandlerFunc) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !rl.allow(rateLimitKey(r)) {
 			w.Header().Set("Retry-After", "60")
-			s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and try again.")
+			s.message(w, http.StatusTooManyRequests, "You have made too many requests. Please wait a moment and try again.")
 			return
 		}
 		h(w, r)

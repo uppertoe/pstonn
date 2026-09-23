@@ -83,7 +83,7 @@ func TestComposeApplyCopy(t *testing.T) {
 	subj, body, _, _ := composeApply(ApplyOutcome{
 		PermitLabel: "VPP24714", Reg: "1OF7MC", Name: "Anita's Car (Nanny)", Source: "roster", OK: true,
 	}, testPortal)
-	for _, want := range []string{"VPP24714 now shows 1OF7MC", "Anita's Car (Nanny) — 1OF7MC", "as scheduled by your roster", "confirmation it went through"} {
+	for _, want := range []string{"1OF7MC is now on your permit “VPP24714”", "Anita's Car (Nanny) — 1OF7MC", "as scheduled by your roster", "simply to confirm the change"} {
 		if !strings.Contains(subj+body, want) {
 			t.Fatalf("roster copy missing %q; got subj=%q body=%q", want, subj, body)
 		}
@@ -94,7 +94,7 @@ func TestComposeApplyCopy(t *testing.T) {
 
 	// Guest activation names the activator + guest-link behaviour.
 	_, gb, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "guest", By: "dad@example.com", OK: true}, testPortal)
-	if !strings.Contains(gb, "dad@example.com") || !strings.Contains(gb, "guest link") {
+	if !strings.Contains(gb, "dad@example.com") || !strings.Contains(gb, "guest pass") {
 		t.Fatalf("guest copy missing activator/guest-link: %q", gb)
 	}
 
@@ -102,21 +102,21 @@ func TestComposeApplyCopy(t *testing.T) {
 	// account that is the only thing distinguishing "the schedule ran" from
 	// "someone booked over it". It must NOT be described as a guest link.
 	_, ob, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "override", By: "partner@example.com", OK: true}, testPortal)
-	if !strings.Contains(ob, "partner@example.com") || !strings.Contains(ob, "one-off booking") {
+	if !strings.Contains(ob, "partner@example.com") || !strings.Contains(ob, "a booking partner@example.com made") {
 		t.Fatalf("override copy should name the booker: %q", ob)
 	}
-	if strings.Contains(ob, "guest link") {
+	if strings.Contains(ob, "guest pass") {
 		t.Fatalf("a member's one-off must not be described as a guest link: %q", ob)
 	}
 	// An unattributed one-off keeps the original second-person wording.
 	_, ub, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "override", OK: true}, testPortal)
-	if !strings.Contains(ub, "the one-off booking you made") {
+	if !strings.Contains(ub, "the booking you made") {
 		t.Fatalf("unattributed one-off copy changed: %q", ub)
 	}
 
 	// A printed-QR approval is attributed to the approving member, not to a link.
 	_, db, _, _ := composeApply(ApplyOutcome{PermitLabel: "P", Reg: "X", Source: "doorqr", By: "mum@example.com", OK: true}, testPortal)
-	if !strings.Contains(db, "mum@example.com") || !strings.Contains(db, "printed QR code") {
+	if !strings.Contains(db, "mum@example.com") || !strings.Contains(db, "printed QR") {
 		t.Fatalf("door-QR copy missing approver/context: %q", db)
 	}
 
@@ -132,7 +132,7 @@ func TestComposeApplyCopy(t *testing.T) {
 	// A plain transient hiccup softens: reassuring "still updating" subject, default
 	// push priority (don't cry wolf on a blip that self-heals).
 	ts, _, tp, _ := composeApply(ApplyOutcome{PermitLabel: "VPP1", CurrentReg: "OLD", OK: false, Transient: true, Reason: "trouble reaching the council", Action: "it will keep trying"}, testPortal)
-	if !strings.Contains(ts, "Still updating") || strings.Contains(ts, "Action needed") {
+	if !strings.Contains(ts, "while p.stonn keeps trying") || strings.Contains(ts, "Action needed") {
 		t.Fatalf("a transient blip should soften the subject, got %q", ts)
 	}
 	if tp != "default" {

@@ -196,7 +196,7 @@ func TestDriftNoticeIsSoft(t *testing.T) {
 	var to []string
 	for _, r := range rows {
 		to = append(to, r.Recipients...)
-		if !strings.Contains(r.Body, "ABC123 was put on your Visitor Permit on the council's website, not through p.stonn") || !strings.Contains(r.Body, "putting that back on now") {
+		if !strings.Contains(r.Body, "Someone put ABC123 on your permit “Visitor Permit” on the council’s website") || !strings.Contains(r.Body, "putting that back on now") {
 			t.Fatalf("unexpected body: %q", r.Body)
 		}
 	}
@@ -219,7 +219,7 @@ func TestDriftNoticeIsSoft(t *testing.T) {
 	rows, _ = st.DueOutbox(ctx, time.Now().Add(48*time.Hour), 50)
 	found := false
 	for _, r := range rows {
-		if strings.Contains(r.Body, "was taken off your Visitor Permit on the council's website") {
+		if strings.Contains(r.Body, "Someone removed the rego from your permit “Visitor Permit” on the council’s website") {
 			found = true
 		}
 	}
@@ -253,7 +253,7 @@ func TestDriverFailedNoticeCopy(t *testing.T) {
 		t.Fatalf("queued = %d, want 2", len(rows))
 	}
 	bodies := rows[0].Body + "\n" + rows[1].Body
-	for _, want := range []string{"Your rego AAA111 could not be put on the", "the council's system is down right now", "Your rego BBB222 could not be put on the", "p.stonn couldn't update the permit", "It may not be covered right now"} {
+	for _, want := range []string{"put your rego AAA111 on the", "because the council’s system is not responding", "put your rego BBB222 on the City of Stonnington visitor parking permit. Until", "your car may not be covered"} {
 		if !strings.Contains(bodies, want) {
 			t.Fatalf("driver notice missing %q in:\n%s", want, bodies)
 		}

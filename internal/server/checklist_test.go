@@ -105,7 +105,7 @@ func TestChecklistRendersOnTheTab(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := s.doReq("GET", "/regos", owner, "", nil).Body.String()
-	for _, want := range []string{"Still to try", "1 of 2", "Add an email, so they are told when their rego goes on the permit"} {
+	for _, want := range []string{"Still to try", "1 of 2", "Add an email, so p.stonn can tell them when their rego is on the permit"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("regos page lacks %q:\n%s", want, page)
 		}

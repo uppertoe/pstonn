@@ -429,7 +429,7 @@ func TestClearButtonGating(t *testing.T) {
 	if !strings.Contains(b.String(), "permit-actions") {
 		t.Fatal("clear button not in the shared action row beside the QR button")
 	}
-	if !strings.Contains(b.String(), "loses cover the moment you do this") {
+	if !strings.Contains(b.String(), "it will no longer be covered") {
 		t.Fatal("clear confirm does not name the fine risk")
 	}
 
@@ -481,7 +481,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		// A partial permit read holding ZERO rows must not be reported as an empty
 		// account. Saying "your council account doesn't have any permits on it yet" to
 		// someone who holds several is a flat falsehood they cannot act on.
-		{"picker-partial-empty", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{PermitsUnknown: true}}, "couldn't load your permit list"},
+		{"picker-partial-empty", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{PermitsUnknown: true}}, "load your permit list from the council"},
 		{"onboarding-savepw", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc, Onboard: &onboardData{}}, "Save my password"},
 		// On a FIRST link the box is TICKED. Without a saved password the schedule
 		// stops the first time the tenant ends the session — which happens whenever
@@ -498,7 +498,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			LogoutURL: "https://auth.example.com/logout", Loc: loc},
 			"then sign back in here with that address"},
 		{"link-rejected without a logout URL still names the fix", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkHelp: true}, Loc: loc},
-			"Sign out, then sign back in here with that address."},
+			"sign out, then sign back in here with that address."},
 		// The reset deep link LEADS the rejected banner: the tenant can't tell a
 		// wrong password from an account that never had a working one, and the
 		// 2026-08 access logs showed rejected signups giving up without ever
@@ -506,7 +506,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"link-rejected leads with the council reset link", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkHelp: true}, Loc: loc},
 			"idm/account/ForgotPassword"},
 		{"link-rejected names the never-set-one case", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{LinkHelp: true}, Loc: loc},
-			"or never set one?"},
+			"or have never set one,"},
 		// The reset offer also sits NEXT TO the password ask itself, before the
 		// first failed attempt burns tenant lockout budget.
 		{"link-form offers reset beside the password field", dashboardData{User: user, State: "onboarding", IsPrimary: true, Loc: loc, Onboard: &onboardData{}},
@@ -517,7 +517,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		// the advice must appear BEFORE the field defeats them, and only there —
 		// in a real browser it would be wrong and worrying.
 		{"onboarding warns inside the Facebook webview", dashboardData{User: user, State: "onboarding", IsPrimary: true, Onboard: &onboardData{InAppBrowser: true}, Loc: loc},
-			"In the Facebook, Instagram or Google app right now?"},
+			"If you opened this page from the Facebook, Instagram or Google app"},
 		// The terms page names the NEXT step's prerequisite (the ePermits
 		// password) while there is still time to fix it — first acceptance only:
 		// a re-accept returns to a working app, and a secondary links nothing.
@@ -567,7 +567,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		}}}, "Add to copy its old schedule"},
 		{"picker with only dead permits says so", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{Pick: []pickView{
 			{CouncilPermitID: "2", PermitNumber: "VPP2", PermitType: "(A) 1st Visitor Permit", Addable: true, Dead: true, Status: "Cancelled"},
-		}}}, "All your permits are managed or no longer active."},
+		}}}, "p.stonn already manages all your permits, or they are no longer active."},
 		// The copy outcome is shown to the person who ran it, on the card itself.
 		{"permit card shows a copy outcome", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
@@ -620,7 +620,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"schedule-passiton-hint", dashboardData{User: user, State: "app", Page: "schedule", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb"}},
 			App:      &appData{ShowPassItOnHint: true, Permits: []permitView{samplePermitViewAt(loc, now)}},
-		}, "pass it on"},
+		}, "Pass it on"},
 		{"vehicles", dashboardData{User: user, State: "app", Page: "vehicles", Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Van", Registration: "ABC123", Color: "#2f6feb", State: "NSW"}},
 			Regions:  []provider.Region{{Code: "VIC", Label: "VIC"}, {Code: "NSW", Label: "NSW"}, {Code: "SA", Label: "SA"}},
@@ -639,15 +639,15 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		// A removal has no plate: it reads "rego removed", not "manual" with an empty pill.
 		{"activity-removal", dashboardData{User: user, State: "app", Page: "activity", Loc: loc,
 			App: &appData{Log: []store.ApplyRecord{{PermitID: 7, Registration: "", Source: "manual", Status: "success", Detail: "vehicle removed by a@b.com", At: now}}},
-		}, "rego removed"},
+		}, "removed by hand"},
 		{"settings", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{RelinkBy: "15 Oct 2026"}}, "Council connection"},
 		{"settings-quiet-hours", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc,
 			Settings: &settingsData{Notify: notifyView{EmailAvailable: true, EmailEnabled: true, QuietEnabled: true, QuietFrom: 22, QuietUntil: 6}}}, "hold overnight notices"},
 		{"settings-autoreconnect-on", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, AutoReconnect: true, Settings: &settingsData{TenantLinked: true}}, "Turn off"},
-		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, AutoReconnect: false, Settings: &settingsData{TenantLinked: true}}, "Your password isn't saved"},
+		{"settings-autoreconnect-off", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, AutoReconnect: false, Settings: &settingsData{TenantLinked: true}}, "Your password isn’t saved"},
 		{"settings-last-reconnect", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, AutoReconnect: true, Settings: &settingsData{TenantLinked: true, LastReconnect: "14 Jul 2026, 3:04pm"}}, "14 Jul 2026, 3:04pm"},
-		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, AutoReconnect: true, Settings: &settingsData{TenantLinked: true}}, "hasn't been needed yet"},
-		{"security-data-promise", dashboardData{State: "security", Loc: loc}, "never sold"},
+		{"settings-no-reconnect-yet", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, AutoReconnect: true, Settings: &settingsData{TenantLinked: true}}, "has not needed your saved password yet"},
+		{"security-data-promise", dashboardData{State: "security", Loc: loc}, "We never sell it"},
 		{"security-council-note", dashboardData{State: "security", Contact: true, Loc: loc}, "For the City of Stonnington"},
 		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{}}, "Add person"},
 		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{},
@@ -689,7 +689,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 					Recipients: []guestRecipientView{{TokenID: 9, Email: "dad@example.com"}}}}}}, "Copy the schedule to your new permit and this pass moves with it."},
 		{"guests-trust-warning", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
 			Vehicles:  []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
-			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}}}, "send it to people you trust"},
+			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}}}, "Send it only to people you trust."},
 		{"guests-qr-contrast", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
 			Vehicles:  []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
 			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}}}, "neither code gives lasting access"},
@@ -715,7 +715,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
 				PickerCard: &pickerCardView{PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}}, Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}},
 					Picker: &pickerView{GrantID: 3, PermitLabel: "Visitor Permit", ImageURI: "data:image/png;base64,AAAA", URL: "https://p.stonn.org/g/tok",
-						Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}}}, "It offers Mum, with the overnight option on."},
+						Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, Names: "Mum", AllowOvernight: true}}}}, "The quick picker offers Mum, with the overnight option on."},
 		{"guests-picker-edit", dashboardData{User: user, State: "app", Page: "guests", IsPrimary: true, Loc: loc,
 			Vehicles: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}, {ID: 2, Label: "Dad", Registration: "AAA222", Color: "#222"}},
 			GuestMgmt: &guestMgmt{GuestsEnabled: true, PermitOpts: []permitOpt{{ID: 1, Label: "Visitor Permit"}},
@@ -738,7 +738,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"guest-picker-menu-takeoff", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Picker: true, Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Home permit", CurrentReg: "ABC123", MineReg: "ABC123", CanClear: true,
 			Cars: []vehicleView{{ID: 1, Label: "Nana", Registration: "ABC123", Color: "#111"}}, AllowOvernight: true,
-			ClearAudience: "The following people will be notified of the change:\njo@example.com — by email\nsam@example.com — by email"}}, "off the permit"},
+			ClearAudience: "The following people will be notified of the change:\njo@example.com — by email\nsam@example.com — by email"}}, "from the permit"},
 		{"guest-menu", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", Household: "the Helds", Council: "City of Stonnington", PermitLabel: "Visitor Permit", CurrentReg: "ABC123", MaskedReg: "••••23",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}, AllowOvernight: true}}, "The Helds’ visitor permit"},
@@ -758,7 +758,7 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"guest-rescan-superseded", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
 			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "superseded"}}},
-			"it has since been changed"},
+			"the permit has changed since"},
 		{"guest-rescan-ended", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
 			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "ended"}}},
@@ -797,7 +797,7 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p.ExpiryIn = "in 12 days"
 			p.ExpiresSoon = true
 			return p
-		}, "renew it with the council"},
+		}, "Renew it with the council to keep it valid"},
 		{"expired", func() permitView {
 			p := samplePermitViewAt(loc, now)
 			p.ExpiryLabel = "1 Jul 2026"
@@ -817,7 +817,7 @@ func permitBodyCases(loc *time.Location, now time.Time) []fragmentCase {
 			p.CopyPitch = true
 			p.CopyFrom = []permitOpt{{ID: 9, Label: "Old Visitor"}}
 			return p
-		}, "Is this a new permit replacing an old one?"},
+		}, "If this permit replaces an old one"},
 		{"copy-pitch-dismissed", func() permitView {
 			// Pitch answered (dismissed/copied/roster set): the quiet button
 			// remains even while the roster is still empty.

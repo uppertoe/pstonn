@@ -19,7 +19,7 @@ func TestComposeApplyCouncilDown(t *testing.T) {
 	}
 	subject, body, priority, _ := composeApply(o, "https://council.example/portal")
 
-	if want := "The council's system is down — your VPP1 change is waiting"; subject != want {
+	if want := "Your permit “VPP1” will change once the council’s system is back"; subject != want {
 		t.Fatalf("subject = %q, want %q", subject, want)
 	}
 	if priority != "default" {

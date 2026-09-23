@@ -33,7 +33,7 @@ func seoFor(state string, c tenantView) (title, desc, canonPath string) {
 		return "FAQ — p.stonn visitor parking permit scheduler", trText(c, "seo.faq_desc"), "/faq"
 	default:
 		// App, guest, confirm and token pages: a stable generic title, never indexed.
-		return "p.stonn Visitor Permit Scheduler", "", ""
+		return "p.stonn visitor permit scheduler", "", ""
 	}
 }
 
@@ -47,7 +47,7 @@ func faqFor(c tenantView) []faqItem {
 	return []faqItem{
 		{
 			"Can I set up recurring visitor parking for a carer or family member?",
-			"Yes. Set a weekly roster — say a carer's rego every Tuesday and Thursday, or share a permanent guest link so a trusted person can put their own rego on the permit when they arrive, with no account needed on their end.",
+			"Yes. Set a weekly roster, for example a carer’s rego every Tuesday and Thursday, or send a guest pass so a trusted person can put their own rego on the permit when they arrive, with no account needed on their end.",
 		},
 		{
 			trText(c, "faq.affiliated_q"),
@@ -55,15 +55,15 @@ func faqFor(c tenantView) []faqItem {
 		},
 		{
 			trText(c, "faq.safe_q"),
-			"Your login is encrypted, used only to manage your own permit, and you can disconnect or delete everything at any time. It is a council parking account, not a bank login. If you would rather not share it at all, p.stonn is open source and you can run your own copy — the Security & data page has the full detail.",
+			"p.stonn encrypts your login, uses it only to manage your own permit, and lets you disconnect or delete everything at any time. If you would rather not share your login at all, p.stonn is open source and you can run your own copy. The Security & data page has the full detail.",
 		},
 		{
-			"My partner set up the permit — can I manage the schedule too?",
-			"Yes. Whoever set it up can invite up to two other people from Settings → Shared access. You sign in with your own email and manage the same schedule — no council password changes hands.",
+			"My partner set up the permit. Can I manage the schedule too?",
+			"Yes. Whoever set it up can invite up to two other people from Settings → Shared access. You sign in with your own email and manage the same schedule. No council password changes hands.",
 		},
 		{
 			"What does p.stonn cost?",
-			"Nothing. It is free.",
+			"Nothing. p.stonn is free to use.",
 		},
 		{
 			"Which council does p.stonn work with?",
@@ -156,10 +156,10 @@ func (s *Server) llmsTxt(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(&b, "# p.stonn\n\n> %s\n\n", trText(c, "seo.landing_desc"))
 	fmt.Fprintf(&b, "p.stonn is a free, unofficial tool for residents of the %s who hold a "+
 		"visitor parking permit on the council's %s site. The resident signs in to the council "+
-		"once; from then on p.stonn puts the right number plate on the permit for them — "+
-		"a weekly roster for regular visitors, one-off bookings, an on-screen QR code a "+
-		"visitor scans at the door, a printable QR code that asks the resident to approve "+
-		"each visitor, and standing guest links for family and carers. It changes only "+
+		"once, and from then on p.stonn puts the right number plate on the permit for them. "+
+		"It offers a weekly roster for regular visitors, bookings, a visitor QR shown on "+
+		"screen, a printed QR that the resident confirms on their phone, guest passes for "+
+		"family and carers, and a quick picker on the resident’s home screen. It changes only "+
 		"which rego is on the permit, exactly as the resident could by hand on the council's "+
 		"site. It is not run by or affiliated with the council.\n\n", c.Name, c.Terms["portal"])
 	b.WriteString("## Pages\n\n")
@@ -167,7 +167,7 @@ func (s *Server) llmsTxt(w http.ResponseWriter, r *http.Request) {
 		{"/", trText(c, "seo.landing_title"), trText(c, "seo.landing_desc")},
 		{"/features", trText(c, "seo.how_title"), trText(c, "seo.how_desc")},
 		{"/faq", "Frequently asked questions", trText(c, "seo.faq_desc")},
-		{"/security", "Security and privacy", trText(c, "seo.security_desc")},
+		{"/security", "Security & data", trText(c, "seo.security_desc")},
 		{"/contact", "Contact", trText(c, "seo.contact_desc")},
 	} {
 		fmt.Fprintf(&b, "- [%s](%s%s): %s\n", p.title, base, p.path, p.desc)
@@ -296,7 +296,7 @@ func tenantSignInSteps(c tenantView) []template.HTML {
 			"reset":    i18n.Link(c.Links.ResetPassword, i18n.NewTab()),
 		}),
 		template.HTML(`In your Current Permit list, choose <strong>Update Vehicle</strong> on the visitor permit.`),
-		template.HTML(`Enter the new registration and the state it&rsquo;s registered in, and save.`),
+		template.HTML(`Enter the new rego and the state it&rsquo;s registered in, and save.`),
 	}
 }
 
@@ -315,7 +315,7 @@ func guidesFor(c tenantView) []guidePage {
 			Steps: append(append([]template.HTML{}, steps...),
 				template.HTML(`Repeat for each new visitor, before they park.`)),
 			TenantNote: tr(c, "guide.change_note", nil, nil),
-			Pstonn:     "Set it once. A weekly roster puts the right rego on for each day, a one-off booking covers everyone else, and a link lets a regular visitor put their own rego on when they arrive.",
+			Pstonn:     "Set it up once. A weekly roster puts the right rego on for each day, a one-off booking covers everyone else, and a guest pass lets a regular visitor put their own rego on when they arrive.",
 			Demo:       "roster",
 		},
 		{
@@ -324,12 +324,12 @@ func guidesFor(c tenantView) []guidePage {
 			Desc:  trText(c, "guide.carer_desc"),
 			H1:    trText(c, "guide.carer_h1"),
 			Paras: []string{
-				"A visitor permit covers one rego at a time, so for someone who comes every week the rego has to be updated before each visit. If it isn't, they will not be covered by the permit.",
+				"A visitor permit covers one rego at a time, so for someone who comes every week you have to update the rego before each visit. If you don’t, the permit will not cover them.",
 			},
 			TenantHeading: "At the council, each visit",
 			Steps:         steps,
 			TenantNote:    tr(c, "guide.carer_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
-			Pstonn:        "Put their day on the weekly roster and the permit switches to their rego that morning. Or send them a link, and they put their rego on themselves when they pull up — no account, nothing for them to set up.",
+			Pstonn:        "Put their day on the weekly roster and the permit switches to their rego that morning. Or send them a guest pass, and they put their rego on themselves when they pull up, with no account and nothing for them to set up.",
 			Demo:          "guest",
 		},
 		{
@@ -338,16 +338,16 @@ func guidesFor(c tenantView) []guidePage {
 			Desc:  trText(c, "guide.paper_desc"),
 			H1:    trText(c, "guide.paper_h1"),
 			Paras: []string{
-				"Not usually. Permits are digital by default: there's nothing to display, and parking officers check your rego against the permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances — disability, carer arrangements, or limited online access.",
+				"Not usually. Permits are digital by default, so there is nothing to display. Parking officers check your rego against the permit. Physical permits you already hold stay valid until they expire, and the council will issue one on application in exceptional circumstances, such as disability, carer arrangements or limited online access.",
 			},
 			TenantHeading: "To see which rego is on your permit now",
 			Steps: []template.HTML{
 				steps[0],
-				template.HTML(`Find the visitor permit in your Current Permit list &mdash; the vehicle shown is the one that&rsquo;s covered right now.`),
-				template.HTML(`If it&rsquo;s the wrong car, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
+				template.HTML(`Find the visitor permit in your Current Permit list. The rego shown there is the one covered right now.`),
+				template.HTML(`If it&rsquo;s the wrong rego, choose <strong>Update Vehicle</strong> and enter the visitor&rsquo;s registration before they park.`),
 			},
 			TenantNote: tr(c, "guide.paper_note", nil, i18n.Slots{"apply": i18n.Link(c.Links.ApplyVisitor, i18n.NewTab())}),
-			Pstonn:     "A weekly roster for regulars, one-off bookings for everyone else, a link or QR your visitors use themselves — and a notification each time the rego changes, so you know who's covered.",
+			Pstonn:     "p.stonn gives you a weekly roster for regular visitors, bookings for anyone else, and a guest pass or QR that your visitors use themselves. It also tells you each time the rego changes, so you always know who is covered.",
 			Demo:       "oneoff",
 		},
 		{
@@ -370,7 +370,7 @@ func guidesFor(c tenantView) []guidePage {
 				tr(c, "guide.login_step_permits", nil, i18n.Slots{"b": i18n.Strong()}),
 			},
 			TenantNote: tr(c, "guide.login_note", nil, nil),
-			Pstonn:     "p.stonn is for the people who log in most. Sign in to the council once, and from then on the permit follows your weekly roster, one-off bookings and guest links without you opening the site again.",
+			Pstonn:     "p.stonn is for the people who sign in most. Link your council account once, and from then on the permit follows your weekly roster, one-off bookings and guest passes without you opening the site again.",
 			Demo:       "roster",
 			Figure:     "council-login",
 		},

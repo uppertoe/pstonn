@@ -55,7 +55,7 @@ func postContact(s *Server, form url.Values) *httptest.ResponseRecorder {
 func TestContactStoresAndPushesNeverMails(t *testing.T) {
 	s, f, mailed := newContactServer(t)
 	w := postContact(s, url.Values{"message": {"Hello there, my permit shows the wrong car."}, "email": {"someone@mail.example"}})
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Your message has been sent") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "p.stonn has sent your message") {
 		t.Fatalf("status %d, body %q", w.Code, w.Body.String())
 	}
 	msgs, err := s.store.ListContactMessages(context.Background(), 10)
@@ -86,7 +86,7 @@ func TestContactStoresAndPushesNeverMails(t *testing.T) {
 func TestContactHoneypotStoresNothing(t *testing.T) {
 	s, f, mailed := newContactServer(t)
 	w := postContact(s, url.Values{"message": {"buy cheap things online today"}, "website": {"http://spam.example"}})
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Your message has been sent") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "p.stonn has sent your message") {
 		t.Fatalf("status %d, body %q", w.Code, w.Body.String())
 	}
 	if msgs, _ := s.store.ListContactMessages(context.Background(), 10); len(msgs) != 0 {
@@ -107,7 +107,7 @@ func TestContactPushFailureStillStores(t *testing.T) {
 	s.notify = notify.New(s.store, nil, "http://127.0.0.1:1", "", "https://app.example.com", "", "admin-topic", time.UTC, nil,
 		notify.DeriveDecideKey(bytes.Repeat([]byte{7}, 32)))
 	w := postContact(s, url.Values{"message": {"The schedule page will not load for me."}})
-	if !strings.Contains(w.Body.String(), "Your message has been sent") {
+	if !strings.Contains(w.Body.String(), "p.stonn has sent your message") {
 		t.Fatalf("body %q", w.Body.String())
 	}
 	if msgs, _ := s.store.ListContactMessages(context.Background(), 10); len(msgs) != 1 {

@@ -75,7 +75,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	// the scarcest resource the app has.
 	if !s.tenantRead.allow("cr:" + owner) {
 		s.message(w, http.StatusTooManyRequests,
-			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again. p.stonn deliberately limits how often it contacts the council.")
+			"You have refreshed the permit list several times in the last few minutes. Please wait a minute before trying again.")
 		return
 	}
 	// The picker lists the CURRENT tenant's permits; an account linked elsewhere
@@ -161,7 +161,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		base.Onboard = &onboardData{}
 		base.AutoReconnect = s.hasSavedPassword(ctx, owner)
 		alog.Infof("list council permits for %s: %v", redact.Email(owner), err)
-		base.Warn = "Couldn't reach the council to load your permits. Try re-linking."
+		base.Warn = "p.stonn couldn’t reach the council to load your permits. Try linking your account again."
 		s.render(w, base)
 		return
 	}
@@ -174,8 +174,8 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	if !complete {
 		// Say so rather than presenting a page as the whole account. Without this the
 		// household simply cannot see a permit they hold and has no way to know why.
-		base.Warn = "We could only load part of your permit list from the council just now, " +
-			"so a permit you hold may be missing below. Try again in a few minutes."
+		base.Warn = "p.stonn could only load part of your permit list from the council just now, " +
+			"so a permit you hold may be missing below. Please try again in a few minutes."
 		base.Picker.PermitsUnknown = true
 	}
 	base.Picker.HasPermits = len(permits) > 0
@@ -258,7 +258,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		reason := ""
 		switch {
 		case !visitor:
-			reason = "Only visitor permits can be scheduled."
+			reason = "p.stonn can only schedule visitor permits."
 		case !p.CanChangeVehicle:
 			reason = "Your council account can't change the rego on this permit."
 		}
@@ -289,9 +289,9 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 				if status == "" || status == "Granted" {
 					status = "Expired"
 				}
-				warn = "This permit is no longer active, so nothing will be applied to it."
+				warn = "This permit is no longer active, so p.stonn will not apply anything to it."
 				if !p.EndDate.IsZero() {
-					warn = "This permit expired on " + p.EndDate.In(s.locFor(ctx, owner)).Format("2 Jan 2006") + ", so nothing will be applied to it."
+					warn = "This permit expired on " + p.EndDate.In(s.locFor(ctx, owner)).Format("2 Jan 2006") + ", so p.stonn will not apply anything to it."
 				}
 			}
 		}
@@ -353,9 +353,9 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 // ex-housemate, a previous tenant, a partner), so "already managed" needs to say
 // who can release it and how — otherwise the button just keeps failing with no
 // route forward.
-const claimedByAnotherAccount = "That permit is already being scheduled through another p.stonn account — usually someone else at your address who set it up first. " +
-	"Only one account can manage a permit, so ask them to open p.stonn and choose \"Stop managing\" on it (or to share access with you from their Settings), and then you can add it here. " +
-	"If you think nobody else should have it, get in touch and we'll sort it out."
+const claimedByAnotherAccount = "Another p.stonn account is already scheduling that permit, usually someone else at your address who set it up first. " +
+	"Only one account can manage a permit, so ask them to open p.stonn and choose “Stop managing” on it (or to share access with you from their Settings), and then you can add it here. " +
+	"If you think nobody else should have it, get in touch and we’ll look into it."
 
 // Which permit types may be scheduled is the COUNCIL's policy, not the server's:
 // see tenant.PermitPolicy (the visitor-name match, the resident exclusion, and the
@@ -444,7 +444,7 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	cpid := strings.TrimSpace(r.FormValue("council_permit_id"))
 	if cpid == "" {
-		s.formError(w, r, "Council permit ID is required.")
+		s.formError(w, r, "Choose a permit to set up.")
 		return
 	}
 
@@ -455,17 +455,17 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 	// from the authoritative tenant record, never from the form.
 	if !s.tenantRead.allow("cr:" + owner) {
 		s.message(w, http.StatusTooManyRequests,
-			"Too many council lookups in a short time. Please wait a moment and try again.")
+			"You have made too many council lookups in a short time. Please wait a moment and try again.")
 		return
 	}
 	permits, complete, err := s.tenant.ListPermitsComplete(ctx, owner, "")
 	if err != nil {
 		if errors.Is(err, parking.ErrSessionExpired) || errors.Is(err, parking.ErrNotLinked) {
-			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please re-link and try again.")
+			s.message(w, http.StatusConflict, "Your council sign-in has expired. Please link your council account again, then try once more.")
 			return
 		}
 		alog.Infof("addPermit list council permits for %s: %v", redact.Email(owner), err)
-		s.message(w, http.StatusBadGateway, "Couldn't reach the council to confirm the permit. Try again shortly.")
+		s.message(w, http.StatusBadGateway, "p.stonn couldn’t reach the council to confirm the permit. Try again shortly.")
 		return
 	}
 	var match *parking.PermitInfo
@@ -481,8 +481,8 @@ func (s *Server) addPermit(w http.ResponseWriter, r *http.Request) {
 			// household "that permit isn't yours" would be a flat falsehood about a permit
 			// they hold, and one they cannot act on. Fail retryable instead.
 			s.message(w, http.StatusBadGateway,
-				"We could only load part of your permit list from the council just now, so we can't yet "+
-					"confirm this permit is on your account. Nothing has changed — please try again in a few minutes.")
+				"p.stonn could only load part of your permit list from the council just now, so it can’t yet "+
+					"confirm this permit is on your account. Nothing has changed, so please try again in a few minutes.")
 			return
 		}
 		s.message(w, http.StatusForbidden, "That permit isn't one your council account can manage.")
@@ -653,7 +653,7 @@ func (s *Server) deletePermit(w http.ResponseWriter, r *http.Request) {
 	label := permitLabel(p)
 	s.logChange(r.Context(), owner, user, store.ActionPermitRemove, label, "")
 	s.notifyDestructive(r.Context(), owner, user,
-		user+" stopped managing the permit \""+label+"\". Its weekly roster, one-off bookings and change history were deleted, and p.stonn will no longer update that permit.")
+		user+" stopped managing the permit “"+label+"”. p.stonn has deleted its roster, bookings and change history, and will no longer update that permit.")
 	// Re-evaluate so the scheduler drops the now-removed permit promptly, and drop
 	// its backoff entry with it — nothing else ever removes one, so a deployment
 	// that churns permits leaks a map entry per deleted permit until restart.
@@ -749,11 +749,11 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 				user+" copied another permit's schedule onto \""+label+"\". That replaced its weekly roster and any upcoming one-off bookings.")
 			s.sched.KickPermit(dst.ID)
 			s.message(w, http.StatusInternalServerError,
-				"The schedule was copied, but the old permit's guest passes couldn't be moved across. Run “Copy schedule from another permit” again to move them.")
+				"p.stonn copied the schedule but could not move the old permit’s guest passes across. Choose “Copy schedule from another permit” again to move them.")
 			return
 		}
 		s.message(w, http.StatusInternalServerError,
-			"The old permit's guest passes couldn't be moved across just now. Nothing was changed — please try again.")
+			"p.stonn couldn’t move the old permit’s guest passes across just now. Nothing has changed, so please try again.")
 		return
 	}
 	if n == 0 && moved == 0 {
@@ -762,35 +762,35 @@ func (s *Server) copySchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := user + " copied another permit's schedule onto \"" + label + "\". That replaced its weekly roster and any upcoming one-off bookings."
 	if moved > 0 {
-		msg += " Guest passes and QR codes moved across with it — links that people have saved keep working."
+		msg += " Guest passes and QR codes moved across with it. Links that people have saved keep working."
 	}
 	if n == 0 {
-		msg = user + " moved guest passes and QR codes from an old permit onto \"" + label + "\" — links that people have saved keep working."
+		msg = user + " moved guest passes and QR codes from an old permit onto “" + label + "”. Links that people have saved keep working."
 	}
 	if stranded {
-		msg += " The old permit's printed door QR wasn't moved (this permit already has its own) — that old poster no longer works, so take it down."
+		msg += " The old permit’s printed QR has not moved across, because this permit already has its own. The old printed QR no longer works, so take it down."
 	} else if moved > 0 {
-		msg += " Printed posters keep working too."
+		msg += " Printed QRs keep working too."
 	}
 	if retired {
-		msg += " The old permit's quick picker was not moved (this permit already has its own); the old link no longer works."
+		msg += " The old permit’s quick picker was not transferred, because this permit already has its own. The old link no longer works."
 	}
 	s.notifyDestructive(r.Context(), owner, user, msg)
 	// The same facts for the person who did it, in their own frame: the change
 	// notice above goes to everyone else on the account.
-	notice := "Schedule copied. This permit's weekly roster and upcoming bookings were replaced."
+	notice := "You copied the schedule, which replaced this permit’s roster and upcoming bookings."
 	if n == 0 {
-		notice = "Guest passes and QR codes moved onto this permit — links that people have saved keep working."
+		notice = "Guest passes and QR codes moved onto this permit. Links that people have saved keep working."
 	} else if moved > 0 {
-		notice += " Guest passes and QR codes moved across with it — links that people have saved keep working."
+		notice += " Guest passes and QR codes moved across with it. Links that people have saved keep working."
 	}
 	if stranded {
-		notice += " The old permit's printed door QR wasn't moved (this permit already has its own) — that old poster no longer works, so take it down."
+		notice += " The old permit’s printed QR has not moved across, because this permit already has its own. The old printed QR no longer works, so take it down."
 	} else if moved > 0 {
-		notice += " Printed posters keep working too."
+		notice += " Printed QRs keep working too."
 	}
 	if retired {
-		notice += " The old permit's quick picker was not moved (this permit already has its own); the old link no longer works."
+		notice += " The old permit’s quick picker was not transferred, because this permit already has its own. The old link no longer works."
 	}
 	s.sched.KickPermit(dst.ID)
 	// Running a copy answers the "renewed this permit?" pitch for good — matters
@@ -827,7 +827,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	// offers the action then, and this is the authoritative refusal (a stale tab,
 	// a hand-built request). Checked before any claim or tenant call.
 	if !s.tenant.Capabilities(r.Context(), owner, p.TenantID).CanClearVehicle {
-		s.message(w, http.StatusConflict, "This council's permit can't be left with no rego on it. Put a different rego on instead.")
+		s.message(w, http.StatusConflict, "The council does not allow this permit to have no rego, so put a different rego on instead.")
 		return
 	}
 	now := time.Now().In(s.locForPermit(r.Context(), p))
@@ -854,7 +854,7 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	}
 	if res := model.Resolve(now, p.Cycle(), rules, ovs); res.Source != model.SourceNone {
 		release()
-		s.message(w, http.StatusConflict, "This permit has a rego scheduled right now, so it can't be left empty — change or clear that day's schedule instead.")
+		s.message(w, http.StatusConflict, "Something is scheduled on this permit now, so p.stonn cannot leave it empty. If you want the permit empty, change that day on the roster or cancel the booking first.")
 		return
 	}
 	err := s.tenant.ClearVehicle(applyCtx, owner, p)
@@ -875,16 +875,16 @@ func (s *Server) clearPermit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		alog.Infof("clearPermit %d for %s: %v", p.ID, redact.Email(owner), err)
 		if kind, _ := parking.FailureOf(err); kind == parking.FailTransient {
-			s.message(w, http.StatusBadGateway, "Couldn't reach the council just now — nothing was changed. Please try again shortly.")
+			s.message(w, http.StatusBadGateway, "p.stonn could not reach the council just now and has not changed anything. Please try again shortly.")
 			return
 		}
-		s.message(w, http.StatusConflict, "The council didn't accept removing the rego. The account holder may need to reconnect their council login.")
+		s.message(w, http.StatusConflict, "The council did not let p.stonn remove the rego. The account owner may need to link their council account again.")
 		return
 	}
-	_ = s.store.RecordApply(bg, p.ID, "", "manual", "success", "rego removed by "+user)
+	_ = s.store.RecordApply(bg, p.ID, "", "manual", "success", "removed by "+user)
 	s.logChange(bg, owner, user, store.ActionVehicleClear, label, "")
 	s.notifyDestructive(bg, owner, user,
-		user+" removed the rego from the permit \""+label+"\". It now has no rego; nothing is covered on that permit until a rego is set or scheduled.")
+		user+" removed the rego from the permit “"+label+"”. The permit now has no rego, so no car is covered by it until someone sets or schedules a rego.")
 	s.respondPermit(w, r, owner, p)
 }
 
@@ -925,5 +925,5 @@ func (s *Server) renamePermit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logChange(r.Context(), owner, user, store.ActionPermitRename, label, "")
 	p.Label = label
-	s.respondPermitNotice(w, r, owner, p, "Permit renamed.")
+	s.respondPermitNotice(w, r, owner, p, "You renamed the permit.")
 }

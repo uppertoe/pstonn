@@ -45,9 +45,9 @@ func seedConfirmToken(t *testing.T, s *Server, owner, token string) {
 
 func TestTenantConfirmOverHTTP(t *testing.T) {
 	const owner = "quiet@example.com"
-	const askCopy = "Keep your permit scheduler running?"
+	const askCopy = "Keep your permit scheduler running"
 	const doneCopy = "keep running"
-	const staleCopy = "Nothing to do here"
+	const staleCopy = "You don’t need to do anything here"
 
 	for _, path := range []string{"/tenant/confirm", "/council/confirm"} {
 		t.Run(path, func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestTenantConfirmOverHTTP(t *testing.T) {
 func TestTenantConfirmUnknownTokenIsStale(t *testing.T) {
 	s := newAuthzServer(t)
 	w := s.confirmDo(http.MethodPost, "/tenant/confirm", "203.0.113.2", url.Values{"token": {"never-issued"}}.Encode())
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Nothing to do here") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "You don’t need to do anything here") {
 		t.Fatalf("unknown token = %d %s", w.Code, excerpt(w.Body.String()))
 	}
 }
@@ -120,7 +120,7 @@ func TestTenantConfirmTTL(t *testing.T) {
 		t.Fatalf("sweep cleared %d (%v), want 1", n, err)
 	}
 	w := s.confirmDo(http.MethodPost, "/tenant/confirm", "203.0.113.3", url.Values{"token": {"tok-old"}}.Encode())
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Nothing to do here") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "You don’t need to do anything here") {
 		t.Fatalf("aged-out token = %d %s", w.Code, excerpt(w.Body.String()))
 	}
 	cs, err := s.store.GetTenantSession(context.Background(), owner)
@@ -168,7 +168,7 @@ func TestTenantConfirmLimitsBody(t *testing.T) {
 	pad := strings.Repeat("a", maxFormBytes+1024)
 	body := url.Values{"filler": {pad}, "token": {"tok-big"}}.Encode()
 	w := s.confirmDo(http.MethodPost, "/tenant/confirm", "203.0.113.5", body)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Nothing to do here") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "You don’t need to do anything here") {
 		t.Fatalf("oversized POST = %d %s, want the stale page (form not parsed)", w.Code, excerpt(w.Body.String()))
 	}
 	if cs, err := s.store.GetTenantSession(context.Background(), "big@example.com"); err != nil || cs.ConfirmToken == "" {

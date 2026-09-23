@@ -28,7 +28,7 @@ func (s *Server) unsubscribePage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		// Deliberately vague and 200: this page is reachable by anyone, and
 		// confirming whether an address is known to us would leak membership.
-		s.message(w, http.StatusOK, "This unsubscribe link is no longer valid. If you are still receiving email you do not want, reply to any of it and it will be stopped.")
+		s.message(w, http.StatusOK, "This unsubscribe link is no longer valid. If you are still receiving email you do not want, reply to any of our emails and we will stop them.")
 		return
 	}
 	noStore(w)
@@ -47,7 +47,7 @@ func (s *Server) unsubscribeApply(w http.ResponseWriter, r *http.Request) {
 	}
 	addr, ok := s.resolveUnsub(r)
 	if !ok {
-		s.message(w, http.StatusOK, "This unsubscribe link is no longer valid. If you are still receiving email you do not want, reply to any of it and it will be stopped.")
+		s.message(w, http.StatusOK, "This unsubscribe link is no longer valid. If you are still receiving email you do not want, reply to any of our emails and we will stop them.")
 		return
 	}
 	if err := s.store.SuppressAddress(r.Context(), addr, store.SuppressUnsubscribed, "unsubscribed via email link"); err != nil {
@@ -75,7 +75,7 @@ func (s *Server) unsubThrottled(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	w.Header().Set("Retry-After", "60")
-	s.message(w, http.StatusTooManyRequests, "Too many requests. Please wait a moment and try again.")
+	s.message(w, http.StatusTooManyRequests, "You have made too many requests. Please wait a moment and try again.")
 	return true
 }
 
