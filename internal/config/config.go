@@ -548,6 +548,29 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// In forward-auth mode the Remote-* headers ARE the authentication: whoever
+	// sets Remote-Email is that user, and Remote-Groups: admin makes them an admin.
+	// identity.fromTrustedProxy narrows who may set them to a loopback or private
+	// peer, which answers "did this arrive over a container network?" but not "did
+	// it come from OUR proxy" — anything else on that network passes it. The shared
+	// secret is what answers the second question, and an empty one is waved through
+	// (proxyPresentsSecret returns true on ""), so a deployment that loses the value
+	// from its env keeps serving and says nothing: the one failure that has to be
+	// loud is the one that is silent by construction. Require it on a real
+	// deployment; a local run has no production signal and is unaffected.
+	if !cfg.AppOIDC.Enabled() && cfg.ProxySecret == "" {
+		if sig := productionSignal(cfg); sig != "" {
+			return nil, fmt.Errorf("PROXY_SECRET must be set alongside %s when the app runs behind the forward-auth layer (APP_OIDC_ISSUER is unset): without it any peer on a private network can present Remote-Email and Remote-Groups: admin and be believed. Generate one with openssl rand -hex 32, set it here, and set the same value as PSTONN_PROXY_SECRET on the reverse proxy", sig)
+		}
+	}
+	// A guessable secret is no secret: it is compared against a header an attacker
+	// can retry without limit. The error does not echo the length that was
+	// rejected — startup errors are logged, and the size of a live credential is
+	// not something to write down.
+	if cfg.ProxySecret != "" && len(cfg.ProxySecret) < 24 {
+		return nil, fmt.Errorf("PROXY_SECRET is too short: use at least 24 random characters, e.g. openssl rand -hex 32")
+	}
+
 	// Address and token sanity. These are all operator-supplied and every one of
 	// them fails SILENTLY when mistyped: a bad SMTP_FROM makes every send bounce
 	// somewhere nobody reads, a bad ADMIN_EMAIL means systemic alerts vanish, and a

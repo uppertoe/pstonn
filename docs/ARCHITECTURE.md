@@ -144,6 +144,21 @@ into a fully-open, every-request-is-admin app by commenting out the key. A missi
 `DATA_ENCRYPTION_KEY` is fatal in production (stored council sessions could not survive
 a restart) but falls back to an ephemeral key in dev. See `buildSecretBox` in `main`.
 
+## Invariant: the forward-auth trust boundary
+
+In the recommended posture the app runs no login of its own and the gateway's `Remote-*`
+headers **are** the authentication: whoever sets `Remote-Email` is that user, and
+`Remote-Groups: admin` makes them an admin. `identity.fromTrustedProxy` narrows who may
+set them to a loopback or private peer, which answers "did this arrive over a container
+network?" but not "did it come from *our* proxy". `PROXY_SECRET` answers the second
+question, and because `identity.proxyPresentsSecret` waves an empty secret through, a
+deployment that lost the value from its env would keep serving and say nothing. So a
+production signal in forward-auth mode makes the secret mandatory and a short one fatal,
+pinned by **`TestProxySecretRequiredInProduction`**. Under the app's own OIDC login the
+headers are ignored entirely (`server.go` passes `trustForwardAuth=false`), so no secret
+is required there. The proxy side sets the same value as `PSTONN_PROXY_SECRET`; setting
+one side only refuses every sign-in, loudly, in the app log.
+
 ## Invariant: the shared SQLite connection
 
 The store runs on effectively one connection, shared between the HTTP handlers and the

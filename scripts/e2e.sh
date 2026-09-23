@@ -40,7 +40,7 @@ PY
 }
 
 KEY=$(openssl rand -hex 32); RKEY=$(openssl rand -hex 32)
-SEC=$(openssl rand -hex 32); TOK=$(openssl rand -hex 24)
+SEC=$(openssl rand -hex 32); TOK=$(openssl rand -hex 24); PSEC=$(openssl rand -hex 32)
 rm -f "$S"/e2e*.db* "$S"/e2e*.log "$S"/g?.db*
 
 ############################  STARTUP GUARDS  ############################
@@ -51,13 +51,17 @@ has "refuses DEV_IDENTITY_EMAIL beside a production key (A4)" \
 has "refuses COUNCIL_SANDBOX beside a production key (A4)" \
     "$(guard COUNCIL_SANDBOX=1 DATA_ENCRYPTION_KEY=$KEY DOMAIN=x.com SQLITE_PATH=$S/g2.db)" "council_sandbox"
 has "refuses STATUS_TOKEN without ROSTER_KEY (A3)" \
-    "$(guard DATA_ENCRYPTION_KEY=$KEY STATUS_TOKEN=$TOK DOMAIN=x.com SQLITE_PATH=$S/g3.db)" "roster"
+    "$(guard DATA_ENCRYPTION_KEY=$KEY STATUS_TOKEN=$TOK DOMAIN=x.com PROXY_SECRET=$PSEC SQLITE_PATH=$S/g3.db)" "roster"
 has "refuses a missing PUBLIC_BASE_URL in production (A5)" \
     "$(guard DATA_ENCRYPTION_KEY=$KEY SQLITE_PATH=$S/g4.db)" "public_base_url\|domain"
 has "refuses a missing DATA_ENCRYPTION_KEY" \
-    "$(guard DOMAIN=x.com SQLITE_PATH=$S/g5.db)" "data_encryption_key"
+    "$(guard DOMAIN=x.com PROXY_SECRET=$PSEC SQLITE_PATH=$S/g5.db)" "data_encryption_key"
 has "refuses a short DATA_ENCRYPTION_KEY" \
     "$(guard DATA_ENCRYPTION_KEY=abcd DOMAIN=x.com SQLITE_PATH=$S/g6.db)" "data_encryption_key"
+has "refuses forward-auth production without PROXY_SECRET" \
+    "$(guard DATA_ENCRYPTION_KEY=$KEY DOMAIN=x.com SQLITE_PATH=$S/g7.db)" "proxy_secret"
+has "refuses a short PROXY_SECRET" \
+    "$(guard DATA_ENCRYPTION_KEY=$KEY DOMAIN=x.com PROXY_SECRET=short SQLITE_PATH=$S/g8.db)" "proxy_secret"
 rm -f "$S"/g?.db*
 
 ############################  RUN A — dev-shaped  ############################
@@ -151,7 +155,11 @@ hasnt "RUN A: no panics" "$(cat "$S/e2ea.log")" "panic"
 ############################  RUN B — production-shaped  ############################
 BB=http://127.0.0.1:8252
 OB="Origin: $BB"; ID='Remote-Email: owner@example.com'; IDG='Remote-Groups: user,admin'
+# The proxy presents the shared secret alongside the identity headers; without it
+# the app must not believe them, however private the peer looks.
+PS="X-Proxy-Secret: $PSEC"
 DATA_ENCRYPTION_KEY=$KEY ROSTER_KEY=$RKEY STATUS_TOKEN=$TOK SESSION_SECRET=$SEC \
+  PROXY_SECRET=$PSEC \
   PUBLIC_BASE_URL=$BB LISTEN_ADDR=127.0.0.1:8252 DISPLAY_TIMEZONE=Australia/Melbourne \
   SQLITE_PATH="$S/e2eb.db" "$S/pstonn" > "$S/e2eb.log" 2>&1 &
 APPB=$!
@@ -162,15 +170,16 @@ eq "app is up" "$(curl -s -o /dev/null -w '%{http_code}' $BB/healthz)" "200"
 hasnt "no at-rest-key warning" "$(cat "$S/e2eb.log")" "DATA_ENCRYPTION_KEY is unset"
 hasnt "no sandbox warning"     "$(cat "$S/e2eb.log")" "COUNCIL_SANDBOX is on"
 
-a(){ curl -s -H "$ID" -H "$IDG" "$@"; }
+a(){ curl -s -H "$ID" -H "$IDG" -H "$PS" "$@"; }
 sec "7. RUN B — identity and authorization"
 eq "anonymous cannot reach the app"     "$(curl -s -o /dev/null -w '%{http_code}' $BB/vehicles)" "401"
-eq "the proxy's identity is accepted"   "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H "$IDG" $BB/schedule)" "200"
+eq "the proxy's identity is accepted"   "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H "$IDG" -H "$PS" $BB/schedule)" "200"
+eq "identity headers without the shared secret are not believed" "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H "$IDG" $BB/schedule)" "401"
 eq "the public landing needs no identity" "$(curl -s -o /dev/null -w '%{http_code}' $BB/)" "200"
-eq "a non-admin cannot reach /admin"    "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H 'Remote-Groups: user' $BB/admin)" "403"
-eq "an admin can"                       "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H "$IDG" $BB/admin)" "200"
-eq "a cross-site POST is refused"       "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$ID" -H "$H" -H 'Origin: https://evil.example' -d 'x=1' $BB/vehicles)" "403"
-eq "a POST with no Origin is refused"   "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$ID" -H "$H" -d 'x=1' $BB/vehicles)" "403"
+eq "a non-admin cannot reach /admin"    "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H 'Remote-Groups: user' -H "$PS" $BB/admin)" "403"
+eq "an admin can"                       "$(curl -s -o /dev/null -w '%{http_code}' -H "$ID" -H "$IDG" -H "$PS" $BB/admin)" "200"
+eq "a cross-site POST is refused"       "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$ID" -H "$PS" -H "$H" -H 'Origin: https://evil.example' -d 'x=1' $BB/vehicles)" "403"
+eq "a POST with no Origin is refused"   "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$ID" -H "$PS" -H "$H" -d 'x=1' $BB/vehicles)" "403"
 
 sec "8. RUN B — response headers and CSP"
 hdr=$(a -D - -o /dev/null $BB/schedule)

@@ -41,7 +41,7 @@ func TestDevIdentityProductionGuard(t *testing.T) {
 	// PUBLIC_BASE_URL exist only on a real deployment, so they must refuse too.
 	t.Run("dev email with DOMAIN is refused", func(t *testing.T) {
 		t.Setenv("DEV_IDENTITY_EMAIL", "dev@example.com")
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		_, err := Load()
 		if err == nil || !strings.Contains(err.Error(), "DOMAIN") {
 			t.Fatalf("want a DOMAIN guard error, got %v", err)
@@ -79,7 +79,7 @@ func TestDevIdentityProductionGuard(t *testing.T) {
 
 	t.Run("production config without dev email is allowed", func(t *testing.T) {
 		t.Setenv("DATA_ENCRYPTION_KEY", key64)
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		if _, err := Load(); err != nil {
 			t.Fatalf("prod config should load, got %v", err)
 		}
@@ -111,7 +111,7 @@ func TestPublicBaseURL(t *testing.T) {
 	})
 
 	t.Run("derived from DOMAIN", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		cfg, err := Load()
 		if err != nil {
 			t.Fatal(err)
@@ -132,6 +132,7 @@ func TestPublicBaseURL(t *testing.T) {
 	})
 
 	t.Run("a trailing slash is trimmed, not rejected", func(t *testing.T) {
+		prodDeployment(t)
 		t.Setenv("PUBLIC_BASE_URL", "https://p.example.com/")
 		cfg, err := Load()
 		if err != nil {
@@ -152,7 +153,7 @@ func TestStatusTokenRequiresRosterKey(t *testing.T) {
 	const token = "a-long-enough-status-token-value"
 
 	t.Run("status token without a roster key is refused", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		t.Setenv("STATUS_TOKEN", token)
 		_, err := Load()
 		if err == nil || !strings.Contains(err.Error(), "ROSTER_KEY") {
@@ -161,7 +162,7 @@ func TestStatusTokenRequiresRosterKey(t *testing.T) {
 	})
 
 	t.Run("both set is allowed", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		t.Setenv("STATUS_TOKEN", token)
 		t.Setenv("ROSTER_KEY", key64)
 		cfg, err := Load()
@@ -174,7 +175,7 @@ func TestStatusTokenRequiresRosterKey(t *testing.T) {
 	})
 
 	t.Run("neither set is allowed (endpoint disabled)", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		if _, err := Load(); err != nil {
 			t.Fatalf("no status endpoint should load, got %v", err)
 		}
@@ -193,7 +194,7 @@ func TestStartupErrorsKeepSecretsOut(t *testing.T) {
 			"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefab", // too long
 		} {
 			for _, name := range []string{"DATA_ENCRYPTION_KEY", "ROSTER_KEY"} {
-				t.Setenv("DOMAIN", "example.com")
+				prodDeployment(t)
 				t.Setenv("DATA_ENCRYPTION_KEY", "")
 				t.Setenv("ROSTER_KEY", "")
 				t.Setenv(name, bad)
@@ -220,7 +221,7 @@ func TestStartupErrorsKeepSecretsOut(t *testing.T) {
 	// forward-auth builds a session manager from any non-empty value and consults
 	// its cookie for requests the proxy did not identify.
 	t.Run("a short session secret is refused without OIDC too", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		t.Setenv("APP_OIDC_ISSUER", "")
 		t.Setenv("SESSION_SECRET", "short")
 		_, err := Load()
@@ -237,7 +238,7 @@ func TestStartupErrorsKeepSecretsOut(t *testing.T) {
 	})
 
 	t.Run("a short status token error does not report its length", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		t.Setenv("STATUS_TOKEN", "short")
 		_, err := Load()
 		if err == nil || !strings.Contains(err.Error(), "STATUS_TOKEN") {
@@ -281,6 +282,89 @@ func TestSandboxProductionGuard(t *testing.T) {
 	})
 }
 
+// TestProxySecretRequiredInProduction locks in the forward-auth trust boundary.
+// With APP_OIDC_ISSUER unset the Remote-* headers are the authentication, and the
+// only other thing standing between a private-network peer and an admin session
+// is the shared secret — which identity.proxyPresentsSecret waves through when it
+// is empty. A deployment that loses the value from its env would therefore keep
+// serving, silently, so Load must refuse to start instead.
+func TestProxySecretRequiredInProduction(t *testing.T) {
+	const key64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	const secret = "0123456789abcdef0123456789abcdef"
+
+	t.Run("forward-auth production without the secret is refused", func(t *testing.T) {
+		for _, signal := range []struct{ name, value string }{
+			{"DATA_ENCRYPTION_KEY", key64},
+			{"DOMAIN", "example.com"},
+		} {
+			t.Run(signal.name, func(t *testing.T) {
+				t.Setenv(signal.name, signal.value)
+				if signal.name != "DOMAIN" {
+					t.Setenv("PUBLIC_BASE_URL", "https://p.example.com")
+				}
+				_, err := Load()
+				if err == nil || !strings.Contains(err.Error(), "PROXY_SECRET") {
+					t.Fatalf("want a PROXY_SECRET guard error for %s, got %v", signal.name, err)
+				}
+			})
+		}
+	})
+
+	t.Run("forward-auth production with the secret loads", func(t *testing.T) {
+		prodDeployment(t)
+		t.Setenv("DATA_ENCRYPTION_KEY", key64)
+		if _, err := Load(); err != nil {
+			t.Fatalf("a production config carrying PROXY_SECRET should load, got %v", err)
+		}
+	})
+
+	// Under the app's own OIDC login the headers are ignored entirely
+	// (server.go passes trustForwardAuth=false), so there is no boundary for the
+	// secret to guard and requiring one would be theatre.
+	t.Run("OIDC login does not need the secret", func(t *testing.T) {
+		t.Setenv("DOMAIN", "example.com")
+		t.Setenv("APP_OIDC_ISSUER", "https://id.example.com")
+		t.Setenv("SESSION_SECRET", "a-sufficiently-long-session-secret")
+		if _, err := Load(); err != nil {
+			t.Fatalf("an OIDC config should load without PROXY_SECRET, got %v", err)
+		}
+	})
+
+	t.Run("a local run does not need the secret", func(t *testing.T) {
+		t.Setenv("DEV_IDENTITY_EMAIL", "dev@example.com")
+		if _, err := Load(); err != nil {
+			t.Fatalf("a local run should load without PROXY_SECRET, got %v", err)
+		}
+	})
+
+	// The secret is compared against a header an attacker can retry without
+	// limit, so a short one is worse than none: it looks like a defence.
+	t.Run("a short secret is refused without reporting its length", func(t *testing.T) {
+		t.Setenv("DOMAIN", "example.com")
+		t.Setenv("PROXY_SECRET", "short-but-present")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "PROXY_SECRET") {
+			t.Fatalf("want a PROXY_SECRET length error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "17") {
+			t.Fatalf("the error must not report the rejected length: %v", err)
+		}
+	})
+
+	// A short secret must be refused whichever login mode is on: it is still
+	// consulted for every forward-auth request an OIDC deployment might also see.
+	t.Run("a short secret is refused under OIDC too", func(t *testing.T) {
+		t.Setenv("DOMAIN", "example.com")
+		t.Setenv("APP_OIDC_ISSUER", "https://id.example.com")
+		t.Setenv("SESSION_SECRET", "a-sufficiently-long-session-secret")
+		t.Setenv("PROXY_SECRET", "short-but-present")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "PROXY_SECRET") {
+			t.Fatalf("want a PROXY_SECRET length error, got %v", err)
+		}
+	})
+}
+
 // A set-but-invalid tuning value must fail startup, not silently run with the
 // default (COUNCIL_WARM_INTERVAL=75 missing its unit is the canonical typo).
 func TestInvalidEnvValuesFailFast(t *testing.T) {
@@ -299,7 +383,7 @@ func TestInvalidEnvValuesFailFast(t *testing.T) {
 		}
 	})
 	t.Run("valid values load", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		t.Setenv("COUNCIL_WARM_INTERVAL", "45m")
 		t.Setenv("COUNCIL_SESSION_MAX_AGE_DAYS", "30")
 		cfg, err := Load()
@@ -311,7 +395,7 @@ func TestInvalidEnvValuesFailFast(t *testing.T) {
 		}
 	})
 	t.Run("warm safety margin at or above idle window is refused", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		t.Setenv("COUNCIL_IDLE_WINDOW", "30m")
 		t.Setenv("COUNCIL_WARM_SAFETY_MARGIN", "1h") // clamp ceiling would be negative
 		_, err := Load()
@@ -320,7 +404,7 @@ func TestInvalidEnvValuesFailFast(t *testing.T) {
 		}
 	})
 	t.Run("governor defaults and override", func(t *testing.T) {
-		t.Setenv("DOMAIN", "example.com")
+		prodDeployment(t)
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("load: %v", err)
@@ -388,7 +472,7 @@ func TestCouncilWarnings(t *testing.T) {
 // bound") but it silently breaks the promise that a departed household's session
 // is not held forever, so it must be shouted about at startup.
 func TestSessionMaxAgeZeroWarnsLoudly(t *testing.T) {
-	t.Setenv("DOMAIN", "example.com")
+	prodDeployment(t)
 	t.Setenv("COUNCIL_SESSION_MAX_AGE_DAYS", "0")
 	cfg, err := Load()
 	if err != nil {
@@ -414,7 +498,7 @@ func TestSessionMaxAgeZeroWarnsLoudly(t *testing.T) {
 // The settings documented as "0 disables" must actually accept 0; the shared parser
 // used to reject every duration <= 0, so the documented off-switch did not work.
 func TestZeroDisablesDurationsAreAccepted(t *testing.T) {
-	t.Setenv("DOMAIN", "example.com")
+	prodDeployment(t)
 	t.Setenv("COUNCIL_DRIFT_INTERVAL", "0")
 	t.Setenv("COUNCIL_ROLLOVER_WINDOW", "0")
 	cfg, err := Load()
@@ -429,4 +513,13 @@ func TestZeroDisablesDurationsAreAccepted(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Fatal("a negative duration should still be refused")
 	}
+}
+
+// prodDeployment makes a config look like a real deployment: DOMAIN, from which
+// the public base URL is derived, and the forward-auth shared secret that every
+// production deployment must now carry (see TestProxySecretRequiredInProduction).
+func prodDeployment(t *testing.T) {
+	t.Helper()
+	t.Setenv("DOMAIN", "example.com")
+	t.Setenv("PROXY_SECRET", "0123456789abcdef0123456789abcdef")
 }

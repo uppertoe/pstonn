@@ -105,6 +105,7 @@ jobs:
           docker run -d --name pstonn-smoke -p 8899:8080 \
             -e DATA_ENCRYPTION_KEY=$(openssl rand -hex 32) \
             -e DOMAIN=example.com \
+            -e PROXY_SECRET=$(openssl rand -hex 32) \
             pstonn:ci
           code=000
           for i in $(seq 1 40); do
