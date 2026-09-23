@@ -44,6 +44,17 @@ func (s *Scheduler) warmRetryInterval() time.Duration {
 	return d
 }
 
+// sessionAge is how long a session had gone since its last successful renew, for
+// the expiry logs. updated_at is keep-warm's freshness clock, so this reads as
+// "it was this old when we found it dead". A session that predates the clock has
+// no age to report rather than an absurd one measured from the zero time.
+func sessionAge(now, updatedAt time.Time) string {
+	if updatedAt.IsZero() {
+		return "an unknown time"
+	}
+	return now.Sub(updatedAt).Round(time.Minute).String()
+}
+
 // noteWarmFailure backs a session's silent-renew off after an unexpected transient
 // (e.g. a council-side 5xx), so a fixed 3-minute pass does not keep knocking on a
 // failing upstream. Cleared by noteWarmSuccess on the next good renew.
@@ -305,6 +316,14 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 			s.noteWarmSuccess(cs.Owner, cs.TenantID)
 			alog.Infof("kept session for %s warm", redact.Email(cs.Owner))
 		case errors.Is(err, parking.ErrSessionExpired):
+			// Say so, with the session's age. The enqueue used to be silent, so the
+			// journal showed only the eventual reconnect and the one question worth
+			// asking of an expiry — was this the idle window running out, or was the
+			// cookie killed tenant-side? — could not be answered from it. An age well
+			// under the warm interval means something ended the session early (most
+			// often someone signing in to the portal themselves), not a timeout.
+			alog.Infof("session for %s expired %s after its last renew; queued for reconnect",
+				redact.Email(cs.Owner), sessionAge(now, cs.UpdatedAt))
 			// Hand recovery to the reconnect worker and move on — never reconnect inline
 			// in the warm pass. alive stays false; the worker re-warms via a kick on a
 			// successful reconnect. Bind to the generation the failure carries, falling
@@ -361,6 +380,8 @@ func (s *Scheduler) warmOne(ctx context.Context, cs store.TenantSession) {
 			// expiry was only logged: updated_at is fresh so keep-warm won't re-probe for
 			// a whole warm interval, leaving a dead session unqueued for hours.
 			if g, ok := parking.SessionGenOf(derr); ok {
+				alog.Infof("session for %s expired %s after its last renew (found by the drift read); queued for reconnect",
+					redact.Email(cs.Owner), sessionAge(now, cs.UpdatedAt))
 				s.enqueueReconnect(ctx, cs.Owner, cs.TenantID, g)
 			}
 		} else {

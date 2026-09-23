@@ -285,6 +285,43 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 	return
 }
 
+// portalNudgeMessage is the once-ever note to a household that changes the rego
+// on the council's own website while p.stonn quietly follows along.
+//
+// The drift pass says nothing on this path on purpose (scheduler.holdExternalChange:
+// a permit with nothing scheduled simply adopts the plate, and telling a household
+// every time that we noticed them managing their own permit is a nag). This message
+// is the single exception, sent once and never again, because the September 2026
+// cohort review found accounts doing exactly that for a month — plainly active
+// permit-holders — who had connected p.stonn and never once used it to make a change.
+// Nothing here asks them to stop using the council's site; it offers the three
+// things p.stonn does that the portal does not.
+//
+// contactURL may be empty, in which case the offer of help is dropped rather than
+// pointed at a dead link.
+func portalNudgeMessage(plate, appURL, contactURL string, c mailTenant) (subject, body string) {
+	subject = "p.stonn has synced with your council account"
+	lines := []string{
+		say(c, "mail.portal_nudge_lead", map[string]any{"Plate": plate}),
+		"",
+		say(c, "mail.portal_nudge_fine", nil),
+		"",
+		"If you would like, we can help you set up a guest pass link for your visitors, a quick picker for regos on your phone, or put number plate changes on a schedule.",
+		"",
+	}
+	// A SHORT "do this:" line directly above a URL becomes that button's label in
+	// the HTML alternative (mailer/html.go), so the invitation and the address are
+	// two lines, not one sentence wrapped around a link.
+	if appURL != "" {
+		lines = append(lines, "Give it a try:", appURL, "")
+	}
+	if contactURL != "" {
+		lines = append(lines, "Or let us know if you need a hand:", contactURL, "")
+	}
+	lines = append(lines, "This is the only time p.stonn will raise it.")
+	return subject, strings.Join(lines, "\n")
+}
+
 // onboardNudgeMessage composes the recovery email. Split from the send so its
 // content — each line answers a distinct observed drop-off cause — is testable
 // without an SMTP conversation.

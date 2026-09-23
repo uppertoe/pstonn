@@ -125,6 +125,12 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := s.tenant.Link(linkCtx, user, tenantID, user, password, savePassword, true, 0); err != nil {
 		alog.Infof("council link for %s: %v", redact.Email(user), err)
+		// Record the attempt durably before answering. The log line above says the
+		// same thing, but journald on the box keeps only days, and this is the one
+		// fact that separates a signup with no council account from one who tried
+		// and could not get in — a distinction the September 2026 cohort review
+		// could not make at all. Best-effort: the person is answered either way.
+		s.noteLinkFailure(r.Context(), user, err)
 		if errors.Is(err, parking.ErrCouncilBusy) {
 			s.message(w, http.StatusBadGateway, "The council portal is not accepting sign-ins right now. Your password was not the problem — please try again in a little while.")
 			return
@@ -166,6 +172,12 @@ func (s *Server) tenantLink(w http.ResponseWriter, r *http.Request) {
 	linkedTenant := tenantID
 	if linkedTenant == "" {
 		linkedTenant = s.store.DefaultTenant
+	}
+	// The tally counts attempts since this account last got in, so a success
+	// retires it: a household that struggled for a week and then linked is not
+	// the same as one still locked out.
+	if cerr := s.store.ClearLinkFailures(r.Context(), user); cerr != nil {
+		alog.Infof("clear link failures for %s: %v", redact.Email(user), cerr)
 	}
 	s.logChange(r.Context(), user, user, store.ActionCouncilLink, "", "")
 	// Operator milestone: the success counterpart to the "council link for …:
@@ -716,4 +728,79 @@ func (s *Server) revokeSessions(ctx context.Context, email string) {
 	if s.sessions != nil {
 		s.sessions.RevokeTo(email, epoch)
 	}
+}
+
+// noteLinkFailure files one unsuccessful link attempt against the account, in
+// the coarse classes store.LinkFailureReason defines. ErrSecondaryAccount is
+// deliberately absent: the council ACCEPTED that password and we refused the
+// session for a reason of our own, so counting it as a link failure would
+// describe the person's credentials falsely.
+func (s *Server) noteLinkFailure(ctx context.Context, owner string, err error) {
+	var reason store.LinkFailureReason
+	switch {
+	case errors.Is(err, store.ErrSecondaryAccount):
+		return
+	case errors.Is(err, parking.ErrLoginRejected):
+		reason = store.LinkFailRejected
+	case errors.Is(err, parking.ErrCouncilBusy):
+		reason = store.LinkFailBusy
+	case errors.Is(err, parking.ErrLoginFormUnrecognised):
+		reason = store.LinkFailShape
+	default:
+		reason = store.LinkFailOther
+	}
+	if nerr := s.store.NoteLinkFailure(ctx, owner, reason); nerr != nil {
+		alog.Infof("record link failure for %s: %v", redact.Email(owner), nerr)
+	}
+}
+
+// resendInvite sends the courtesy heads-up again for an invitation that is still
+// unanswered. The invited person may never have seen the first one — it is
+// best-effort mail, throttled, and sometimes skipped entirely — and until this
+// existed the only remedy the owner had was to withdraw the invitation and make
+// it again, which reads like a mistake and loses the original date.
+//
+// The same two throttles as the original send apply, for the same reason: this
+// is a control that mails an address of the owner's choosing, so it must not
+// become a way to send that address anything on demand. When the throttle
+// refuses, the owner is told plainly rather than shown a success they did not get.
+func (s *Server) resendInvite(w http.ResponseWriter, r *http.Request) {
+	user, owner, isPrimary, ok := s.accountForWrite(w, r) // mutating: fail closed
+	if !ok {
+		return
+	}
+	if !isPrimary {
+		s.message(w, http.StatusForbidden, "Only the account owner can change shared access.")
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	// Re-check against the store rather than trusting the posted address: a stale
+	// page could otherwise be used to mail someone whose invitation has since been
+	// withdrawn or accepted.
+	pending, err := s.store.PendingInviteFor(r.Context(), owner, email)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if !pending {
+		// Not a failure worth a message page: the row is simply not in the state the
+		// page showed. Land back on Settings, which now renders the truth.
+		http.Redirect(w, r, "/settings#shared", http.StatusSeeOther)
+		return
+	}
+	q := url.Values{"resent": {email}}
+	if s.notify.EmailAvailable() && s.inviteFanout.allow("o:"+owner) && s.inviteTarget.allow("t:"+email) {
+		q.Set("mailed", "1")
+		go func(to, from string) {
+			nctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if e := s.notify.SendInvite(nctx, to, from); e != nil {
+				alog.Infof("resent invite email to %s: %v", notify.RedactEmail(to), e)
+			}
+		}(email, owner)
+	} else {
+		alog.Infof("resent invite email to %s skipped (throttled or email not configured)", notify.RedactEmail(email))
+	}
+	s.logChange(r.Context(), owner, user, store.ActionMemberAdd, email, "invitation sent again")
+	http.Redirect(w, r, "/settings?"+q.Encode(), http.StatusSeeOther)
 }

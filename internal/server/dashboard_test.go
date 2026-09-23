@@ -652,6 +652,16 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"settings-share", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{}}, "Add person"},
 		{"settings-members", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{},
 			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026"}}}, "nanny@example.com"},
+		// A PENDING invitation is its own state: it says who is being waited on and
+		// offers Send again beside Withdraw. The members case above covers only an
+		// accepted member, so without this the resend control had no golden at all.
+		{"settings-members-pending", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{},
+			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026", Pending: true}}}, "Send again"},
+		// An invitation whose heads-up did NOT go out is a warn, not the green tick:
+		// the invitation stands but nobody has been told, and the owner has to act.
+		{"settings-invite-not-mailed", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: true, Loc: loc, Settings: &settingsData{},
+			Warn:    "Invitation recorded for nanny@example.com. No email was sent, so you will need to tell them to sign in and accept it.",
+			Members: []memberView{{Email: "nanny@example.com", Added: "1 Jul 2026", Pending: true}}}, "No email was sent"},
 		{"settings-secondary", dashboardData{User: user, State: "app", Page: "settings", IsPrimary: false, SharedWith: "primary@example.com", Loc: loc, Settings: &settingsData{}}, "Leave this account"},
 		// An invitee who already runs their own permits gets the blocked variant: the
 		// rule stated, Decline offered, and NO Accept form that could only fail.

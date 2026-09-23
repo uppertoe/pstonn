@@ -70,10 +70,22 @@
           {{if .Pending}}<span class="muted">invited {{.Added}} — waiting for them to accept</span>
           {{else}}<span class="muted">added {{.Added}}</span>{{end}}
         </span>
+        <span class="row" style="gap:6px">
+        {{/* Resend is offered only while the invitation is pending. Before it
+             existed, an owner whose invitee never got the best-effort heads-up
+             (throttled, or SMTP off that day) could only withdraw and re-invite,
+             which reads as a mistake and loses the original date. */}}
+        {{if .Pending}}
+        <form method="post" action="/account/members/resend">
+          <input type="hidden" name="email" value="{{.Email}}">
+          <button type="submit" class="ghost sm">{{template "ic-mail"}} Send again</button>
+        </form>
+        {{end}}
         <form method="post" action="/account/members/remove" data-confirm="{{if .Pending}}Withdraw the invitation to {{.Email}}?{{else}}Remove {{.Email}}? They lose access to this account.{{end}}" data-confirm-ok="{{if .Pending}}Withdraw{{else}}Remove{{end}}">
           <input type="hidden" name="email" value="{{.Email}}">
           <button type="submit" class="ghost sm">{{template "ic-x"}} {{if .Pending}}Withdraw{{else}}Remove{{end}}</button>
         </form>
+        </span>
       </li>
       {{end}}
     </ul>

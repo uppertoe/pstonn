@@ -311,6 +311,13 @@ type fakeNotifier struct {
 	expiryDeliver int      // channels to report delivered (0 => 1)
 	nudged        []string // stalled signups sent the onboarding recovery email
 	nudgeErr      error    // when set, SendOnboardNudge records the attempt but returns this
+	portalNudged  []string // "owner|plate" per once-ever portal note
+	portalErr     error    // when set, SendPortalNudge records the attempt but returns this
+
+	inviteReminded      []string // "owner|member" per reminder to the invited person
+	inviteUnaccepted    []string // "owner|member" per note to the account holder
+	inviteRemindErr     error    // when set, SendInviteReminder records then returns this
+	inviteUnacceptedErr error    // when set, SendInviteUnaccepted records then returns this
 }
 
 func (f *fakeNotifier) Enabled() bool { return f.on }
@@ -419,6 +426,49 @@ func (f *fakeNotifier) NotifyDriverAdded(_ context.Context, owner, tenantID, to,
 }
 
 func (f *fakeNotifier) SendFortnightNudge(_ context.Context, to string) error { return nil }
+
+// SendPortalNudge records "owner|plate" so a test can assert both who was told
+// and which plate the note named.
+func (f *fakeNotifier) SendPortalNudge(_ context.Context, to, tenantID, plate string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.portalNudged = append(f.portalNudged, to+"|"+plate)
+	return f.portalErr
+}
+
+// SendInviteReminder / SendInviteUnaccepted record "owner|member" so a test can
+// assert that both sides of one invitation were told, and exactly once.
+func (f *fakeNotifier) SendInviteReminder(_ context.Context, to, ownerEmail string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inviteReminded = append(f.inviteReminded, ownerEmail+"|"+to)
+	return f.inviteRemindErr
+}
+
+func (f *fakeNotifier) SendInviteUnaccepted(_ context.Context, to, memberEmail string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inviteUnaccepted = append(f.inviteUnaccepted, to+"|"+memberEmail)
+	return f.inviteUnacceptedErr
+}
+
+func (f *fakeNotifier) inviteRemindedSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.inviteReminded...)
+}
+
+func (f *fakeNotifier) inviteUnacceptedSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.inviteUnaccepted...)
+}
+
+func (f *fakeNotifier) portalNudgedSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.portalNudged...)
+}
 
 func (f *fakeNotifier) SendOnboardNudge(_ context.Context, to string) error {
 	f.mu.Lock()

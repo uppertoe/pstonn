@@ -697,10 +697,14 @@ func (s *Scheduler) reconcilePermit(ctx context.Context, p model.Permit, vehByOw
 			Owner: p.Owner, PermitLabel: permitLabel(p), Reg: want, Name: wantName, Color: wantColor, Source: string(res.Source), By: res.By, OK: true, Empty: res.Empty,
 			DisplacedReg: d.Reg, DisplacedTold: told, DriverTold: driverTold, ResolvesFailure: resolves,
 		}, "success|"+prev+">"+want)
+		// The owner is named (redacted) so an apply can be tied to the household in
+		// the journal: without it, correlating a change with a session that died
+		// minutes later — the signature of someone signing in to the portal to check
+		// our work — meant guessing which permit belonged to whom.
 		if res.Empty {
-			alog.Infof("permit %s -> no rego (%s)", p.CouncilPermitID, res.Source)
+			alog.Infof("permit %s -> no rego (%s) for %s", p.CouncilPermitID, res.Source, redact.Email(p.Owner))
 		} else {
-			alog.Infof("permit %s -> %s (%s)", p.CouncilPermitID, want, res.Source)
+			alog.Infof("permit %s -> %s (%s) for %s", p.CouncilPermitID, want, res.Source, redact.Email(p.Owner))
 		}
 		return true
 	case errors.Is(err, parking.ErrTenantUnavailable):

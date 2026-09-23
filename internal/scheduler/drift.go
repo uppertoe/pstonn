@@ -234,6 +234,7 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 	permits = slices.DeleteFunc(permits, func(p model.Permit) bool { return p.TenantID != tenantID })
 	drifted := false
 	var changes []notify.DriftChange // what the household is told, one message per round
+	adopted := ""                    // a plate taken silently from the portal, for the once-ever note
 	now := s.now()
 	for i := range permits {
 		p := permits[i]
@@ -317,6 +318,12 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		s.logApply(ctx, p.ID, actual, "external", "changed", detail)
 		if hold {
 			changes = append(changes, change)
+		} else if actual != "" {
+			// Adopted silently. Remember the plate: a household that has never used
+			// p.stonn to change anything is told ONCE that it could have (see
+			// maybePortalNudge). A cleared plate is not worth a note — there is
+			// nothing to show them — so only a real rego qualifies.
+			adopted = actual
 		}
 	}
 	if drifted {
@@ -332,6 +339,13 @@ func (s *Scheduler) checkDrift(ctx context.Context, owner, tenantID string) erro
 		if e := s.notifier.NotifyDriftChanged(ctx, owner, tenantID, changes); e != nil {
 			alog.Infof("enqueue drift notice for %s: %v", redact.Email(owner), e)
 		}
+	}
+	// The silent path's one exception, and only when nothing was announced above:
+	// a household getting a drift notice is already being spoken to about this
+	// permit, and stacking a second message on the same event would read as two
+	// apps talking at once.
+	if adopted != "" && len(changes) == 0 {
+		s.maybePortalNudge(ctx, owner, tenantID, adopted)
 	}
 	s.warnExpiring(ctx, owner)
 	if !complete {
@@ -540,5 +554,43 @@ func (s *Scheduler) warnExternallyDisplaced(ctx context.Context, p model.Permit,
 	}
 	if d.Contact != "" {
 		s.warnDisplacedHow(ctx, p, d, prev, "it was changed at the council")
+	}
+}
+
+// maybePortalNudge sends the once-ever note to a household that has changed the
+// rego on the council's website while p.stonn silently adopted it. The guard
+// lives in the store (PortalNudgeDue: not sent before, and no successful apply
+// ever made through the app), and the mark is written only once the send has
+// settled — the same send-then-mark discipline as the other one-shot emails, so
+// a transient SMTP failure retries on the next drift round rather than burning
+// the single shot. A suppressed address marks as done: that never improves by
+// retrying, and the promise in the message is that it is said once.
+func (s *Scheduler) maybePortalNudge(ctx context.Context, owner, tenantID, plate string) {
+	if s.notifier == nil || !s.notifier.Enabled() {
+		return
+	}
+	due, err := s.store.PortalNudgeDue(ctx, owner)
+	if err != nil {
+		alog.Infof("portal nudge check for %s: %v", redact.Email(owner), err)
+		return
+	}
+	if !due {
+		return
+	}
+	err = s.notifier.SendPortalNudge(ctx, owner, tenantID, plate)
+	if err != nil && !errors.Is(err, notify.ErrSuppressed) {
+		alog.Infof("portal nudge to %s: %v (will retry on a later drift round)", redact.Email(owner), err)
+		return
+	}
+	if merr := s.store.MarkPortalNudgeSent(ctx, owner); merr != nil {
+		// Sent but not recorded: say so rather than let a later round contradict
+		// "this is the only time p.stonn will raise it".
+		alog.Infof("portal nudge to %s sent but not recorded: %v", redact.Email(owner), merr)
+		return
+	}
+	if err != nil {
+		alog.Infof("portal nudge to %s skipped (suppressed address); marked done", redact.Email(owner))
+	} else {
+		alog.Infof("portal nudge emailed to %s", redact.Email(owner))
 	}
 }

@@ -108,7 +108,20 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("mailed") == "1" {
 			base.Flash = "Invitation sent to " + invited + ". They will be asked to accept it the next time they sign in, and will have access only once they do."
 		} else {
-			base.Flash = "Invitation recorded for " + invited + ". No email was sent, so you will need to tell them to sign in and accept it."
+			// A warn, not the green tick: the invitation exists but the person has not
+			// been told, and the owner has to act. Reporting that under a tick read as
+			// "done" and left the invitee waiting for an email nobody sent.
+			base.Warn = "Invitation recorded for " + invited + ". No email was sent, so you will need to tell them to sign in and accept it."
+		}
+	}
+	// Resending says nothing new about the invited person's state, so it reuses the
+	// same careful wording: an offer was sent, not access granted. When the throttle
+	// refused, say so plainly rather than report a send that did not happen.
+	if resent := r.URL.Query().Get("resent"); looksLikeEmail(resent) {
+		if r.URL.Query().Get("mailed") == "1" {
+			base.Flash = "Invitation sent to " + resent + " again. They will be asked to accept it the next time they sign in, and will have access only once they do."
+		} else {
+			base.Warn = "p.stonn has emailed " + resent + " recently, so nothing was sent just now. The invitation still stands, and you can try again later."
 		}
 	}
 	if wd := r.URL.Query().Get("withdrawn"); looksLikeEmail(wd) {

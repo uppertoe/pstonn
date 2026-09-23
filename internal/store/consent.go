@@ -142,3 +142,36 @@ ON CONFLICT(owner) DO UPDATE SET fortnight_nudge_sent = excluded.fortnight_nudge
 		owner, nowUTC())
 	return err
 }
+
+// PortalNudgeDue reports whether owner should get the once-ever note that
+// p.stonn can make the change they just made on the council's website.
+//
+// Two conditions, both necessary. The note has not been sent before, because it
+// is a courtesy exactly once — drift is otherwise deliberately silent on this
+// path (scheduler.holdExternalChange), and a household that runs its permit at
+// the council must not be told repeatedly that we noticed. And the account has
+// never successfully applied a change through p.stonn, because the note's whole
+// premise is that they have not tried it.
+//
+// The apply log is pruned at 90 days, so a household whose only success is older
+// than that reads as "never applied" here. The consequence is one stray email to
+// someone who did use p.stonn once last quarter, which the once-ever flag then
+// closes for good; the alternative — never asking — leaves the real audience
+// unreached. Accepted deliberately.
+func (s *Store) PortalNudgeDue(ctx context.Context, owner string) (bool, error) {
+	var due bool
+	err := s.db.QueryRowContext(ctx, `
+SELECT COALESCE((SELECT f.portal_nudge_sent FROM account_flags f WHERE f.owner = ?), '') = ''
+   AND NOT EXISTS (SELECT 1 FROM apply_log a JOIN permit p ON p.id = a.permit_id
+                   WHERE p.owner = ? AND a.status = 'success')`, owner, owner).Scan(&due)
+	return due, err
+}
+
+// MarkPortalNudgeSent closes the once-ever note for owner.
+func (s *Store) MarkPortalNudgeSent(ctx context.Context, owner string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO account_flags (owner, portal_nudge_sent) VALUES (?, ?)
+ON CONFLICT(owner) DO UPDATE SET portal_nudge_sent = excluded.portal_nudge_sent`,
+		owner, nowUTC())
+	return err
+}

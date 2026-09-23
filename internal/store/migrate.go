@@ -641,6 +641,29 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// one needs a caption above it or the chip reads as "you are covered"
 		// (2026-09-18).
 		`ALTER TABLE outbox ADD COLUMN hero_caption TEXT NOT NULL DEFAULT ''`,
+		// A durable tally of link attempts that did NOT succeed, so a stalled signup
+		// can be told apart from one that never tried. The journal carried this and
+		// nothing else, and journald on the box holds only days: by the time the
+		// 2026-09 cohort was reviewed, every August attempt was unrecoverable, and
+		// "has no council account" could not be distinguished from "could not get in"
+		// — opposite problems with opposite fixes. Counts and a reason class only;
+		// never the password, never the council's own message (2026-09-23).
+		`ALTER TABLE account_flags ADD COLUMN link_fail_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE account_flags ADD COLUMN link_fail_last TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE account_flags ADD COLUMN link_fail_reason TEXT NOT NULL DEFAULT ''`,
+		// When the once-ever "p.stonn has synced with your council account" note went
+		// out (RFC3339; '' = never). It reaches a household that manages its permit at
+		// the council while p.stonn silently follows along, which drift deliberately
+		// says nothing about — see holdExternalChange. Once is a courtesy; repeating
+		// it is the nag that comment refuses (2026-09-23).
+		`ALTER TABLE account_flags ADD COLUMN portal_nudge_sent TEXT NOT NULL DEFAULT ''`,
+		// When the pair of once-ever reminders about a still-unanswered invitation
+		// went out (RFC3339; '' = never). One column, because both are sent in the
+		// same sweep: the invited person is reminded to accept, and the primary is
+		// told it has not been accepted and offered a resend. On the row rather than
+		// in account_flags because the subject is one invitation, not the account —
+		// a second invitation to someone else gets its own reminder (2026-09-23).
+		`ALTER TABLE account_member ADD COLUMN reminded_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

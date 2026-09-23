@@ -634,6 +634,52 @@ func (s *Service) SendInvite(ctx context.Context, to, ownerEmail string) error {
 	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonInvite)
 }
 
+// SendInviteReminder is the once-ever nudge to someone whose shared-access
+// invitation is still unanswered. Deliberately the same shape as SendInvite (they
+// may never have seen that one), and like it, it is not an access grant: access
+// still begins only when they sign in and accept.
+func (s *Service) SendInviteReminder(ctx context.Context, to, ownerEmail string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := "A reminder that shared access is waiting for you"
+	lines := []string{
+		say(s.tenantOf(ctx, ownerEmail, ""), "mail.invite_reminder_lead", map[string]any{"Owner": ownerEmail}),
+		"",
+		"Sign in with this email address, where you will get a one-time code to confirm it is you, then tap Accept on the page you land on.",
+	}
+	if s.appURL != "" {
+		lines = append(lines, "", "Sign in to p.stonn:", s.appURL)
+	}
+	lines = append(lines,
+		"",
+		"If you would rather not, you can ignore this email and the invitation will sit there harmlessly. This is the only reminder p.stonn sends.")
+	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonInvite)
+}
+
+// SendInviteUnaccepted tells the account holder that an invitation they made has
+// not been accepted. It says nothing the Settings page does not already show
+// ("invited … — waiting for them to accept"), which is what keeps it clear of the
+// rule that the invite flow tells the inviter nothing about the invited person.
+func (s *Service) SendInviteUnaccepted(ctx context.Context, to, memberEmail string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject := "Your invitation has not been accepted yet"
+	lines := []string{
+		say(s.tenantOf(ctx, to, ""), "mail.invite_unaccepted_lead", map[string]any{"Member": memberEmail}),
+		"",
+		"They need to sign in to p.stonn with that email address and tap Accept. p.stonn let them know when you invited them, and has now sent them one reminder.",
+		"",
+		"If the address was wrong, or they would rather not, you can withdraw the invitation under Settings, where you can also send it again.",
+	}
+	if s.appURL != "" {
+		lines = append(lines, "", "Open Settings:", s.appURL+"/settings#shared")
+	}
+	lines = append(lines, "", "This is the only reminder p.stonn sends.")
+	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonAccount)
+}
+
 // SendOnboardNudge emails a stalled signup — someone who accepted the terms but
 // never connected a tenant account — the once-ever recovery note. Email is the
 // only channel that can reach them: they never got far enough to configure
@@ -654,6 +700,23 @@ func (s *Service) SendOnboardNudge(ctx context.Context, to string) error {
 	}
 	subject, body := onboardNudgeMessage(to, s.appURL, s.tenantOf(ctx, to, ""))
 	return s.sendEmail(ctx, to, subject, body, reasonOnboard)
+}
+
+// SendPortalNudge emails the once-ever note to a household that changed the rego
+// on the council's website while p.stonn followed along silently. Email only (the
+// audience by definition has not set up anything else) and a no-op without SMTP.
+// The caller owns the once-ever bookkeeping; this reports the send outcome,
+// ErrSuppressed included.
+func (s *Service) SendPortalNudge(ctx context.Context, to, tenantID, plate string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	contact := ""
+	if s.appURL != "" {
+		contact = s.appURL + "/contact"
+	}
+	subject, body := portalNudgeMessage(plate, s.appURL, contact, s.tenantOf(ctx, to, tenantID))
+	return s.sendEmail(ctx, to, subject, body, reasonAccount)
 }
 
 // SendGuestLink emails a recipient their personal guest-pass link (email only,

@@ -68,6 +68,10 @@ func newTenantRig(t *testing.T) *tenantRig {
 		tenant:   mux,
 		registry: reg,
 		sched:    sched,
+		// A real Service with no mailer: EmailAvailable() answers false without a
+		// nil dereference, which is what the member routes ask it before sending a
+		// courtesy email. A nil *Service panicked there instead.
+		notify: notify.New(st, nil, "", "", "https://p.example", "", "", time.UTC, nil, nil),
 	}
 	return &tenantRig{s: s, st: st, fake: f, ctx: context.Background()}
 }

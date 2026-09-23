@@ -873,3 +873,61 @@ func (s *Store) PruneReferralInvites(ctx context.Context, cutoff time.Time) (int
 	}
 	return res.RowsAffected()
 }
+
+// PendingInvitation is one unanswered invitation: who offered it and to whom.
+type PendingInvitation struct {
+	Owner  string
+	Member string
+}
+
+// InviteReminderCandidates lists invitations still pending, offered before
+// `before`, that have not yet been reminded about.
+//
+// There is deliberately NO lower bound on age. The other one-shot emails carry a
+// lookback so a first deploy cannot mail people who signed up months ago and
+// moved on, but an invitation is different: it is still live, it still appears in
+// the inviter's Settings as "waiting for them to accept", and the invited person
+// has never been told anything since the day it was made. The one invitation
+// outstanding when this shipped was a month old and is exactly the case worth
+// chasing. The reminded_at mark keeps it to once either way.
+func (s *Store) InviteReminderCandidates(ctx context.Context, before time.Time) ([]PendingInvitation, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT owner, member_email FROM account_member
+WHERE invite_pending = 1 AND reminded_at = '' AND added_at <= ?
+ORDER BY added_at`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PendingInvitation
+	for rows.Next() {
+		var p PendingInvitation
+		if err := rows.Scan(&p.Owner, &p.Member); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkInviteReminded closes the once-ever reminder for one invitation. Scoped to
+// both sides of the row so a withdrawn-and-reissued invitation to the same
+// address cannot be marked by a stale sweep.
+func (s *Store) MarkInviteReminded(ctx context.Context, owner, memberEmail string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE account_member SET reminded_at = ? WHERE owner = ? AND member_email = ? AND invite_pending = 1`,
+		nowUTC(), owner, memberEmail)
+	return err
+}
+
+// PendingInviteFor reports whether owner has a still-unanswered invitation out to
+// memberEmail. The resend control checks it before mailing again, so a stale form
+// cannot be used to mail an address whose invitation has since been withdrawn or
+// accepted.
+func (s *Store) PendingInviteFor(ctx context.Context, owner, memberEmail string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM account_member WHERE owner = ? AND member_email = ? AND invite_pending = 1`,
+		owner, memberEmail).Scan(&n)
+	return n > 0, err
+}

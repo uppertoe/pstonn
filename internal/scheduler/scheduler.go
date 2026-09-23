@@ -119,6 +119,16 @@ type Notifier interface {
 	// SendFortnightNudge is the once-ever tell-a-neighbour note, a fortnight after
 	// the household's first successful tenant write.
 	SendFortnightNudge(ctx context.Context, to string) error
+	// SendPortalNudge is the once-ever note to a household that changes the rego
+	// on the council's own website while p.stonn follows along silently. Drift is
+	// otherwise deliberately quiet on that path (holdExternalChange), so this is
+	// the single exception and the store flag makes it unrepeatable.
+	SendPortalNudge(ctx context.Context, to, tenantID, plate string) error
+	// SendInviteReminder nudges someone whose shared-access invitation is still
+	// unanswered; SendInviteUnaccepted tells the account holder the same thing and
+	// points them at the resend control. Both are once ever per invitation.
+	SendInviteReminder(ctx context.Context, to, ownerEmail string) error
+	SendInviteUnaccepted(ctx context.Context, to, memberEmail string) error
 	EmailAvailable() bool
 }
 

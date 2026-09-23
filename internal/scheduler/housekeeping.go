@@ -118,6 +118,7 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	}
 	s.sweepOnboardNudges(ctx)
 	s.sweepFortnightNudges(ctx)
+	s.sweepInviteReminders(ctx)
 	s.maybeSnapshot(ctx)
 }
 
@@ -238,5 +239,53 @@ func (s *Scheduler) sweepFortnightNudges(ctx context.Context) {
 		} else {
 			alog.Infof("fortnight nudge emailed to %s", redact.Email(owner))
 		}
+	}
+}
+
+// inviteReminderAfter is how long an invitation may sit unanswered before both
+// sides are reminded once. Long enough that someone who simply had not opened
+// their email yet is not chased, short enough that the invitation is still a
+// thing the inviter remembers doing.
+const inviteReminderAfter = 3 * 24 * time.Hour
+
+// sweepInviteReminders reminds both sides of each still-unanswered invitation,
+// once ever. The invited person is told there is access waiting; the account
+// holder is told it has not been accepted and pointed at the resend control.
+//
+// Both sends are attempted before the mark is written, and the mark is written
+// even if only one of them landed. The alternative — retrying until both succeed
+// — would re-mail whichever side already heard, and of the two errors that is the
+// worse one: a duplicate contradicts "this is the only reminder p.stonn sends",
+// while a missing second copy costs the household nothing they cannot see in
+// Settings. A suppressed address is not a failure at all.
+func (s *Scheduler) sweepInviteReminders(ctx context.Context) {
+	if s.notifier == nil || !s.notifier.EmailAvailable() {
+		return
+	}
+	pending, err := s.store.InviteReminderCandidates(ctx, s.now().Add(-inviteReminderAfter))
+	if err != nil {
+		alog.Infof("invite reminder candidates: %v", err)
+		return
+	}
+	for _, p := range pending {
+		sent := false
+		if err := s.notifier.SendInviteReminder(ctx, p.Member, p.Owner); err != nil && !errors.Is(err, notify.ErrSuppressed) {
+			alog.Infof("invite reminder to %s: %v (will retry next sweep)", redact.Email(p.Member), err)
+		} else {
+			sent = true
+		}
+		if err := s.notifier.SendInviteUnaccepted(ctx, p.Owner, p.Member); err != nil && !errors.Is(err, notify.ErrSuppressed) {
+			alog.Infof("unaccepted-invite note to %s: %v (will retry next sweep)", redact.Email(p.Owner), err)
+		} else {
+			sent = true
+		}
+		if !sent {
+			continue // neither side could be told; leave the row for the next sweep
+		}
+		if merr := s.store.MarkInviteReminded(ctx, p.Owner, p.Member); merr != nil {
+			alog.Infof("invite reminder for %s sent but not recorded: %v", redact.Email(p.Member), merr)
+			continue
+		}
+		alog.Infof("invite reminder emailed for %s -> %s", redact.Email(p.Owner), redact.Email(p.Member))
 	}
 }
