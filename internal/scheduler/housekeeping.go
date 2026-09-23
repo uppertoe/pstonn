@@ -119,6 +119,7 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	s.sweepOnboardNudges(ctx)
 	s.sweepFortnightNudges(ctx)
 	s.sweepInviteReminders(ctx)
+	s.sweepUnusedPassNudges(ctx)
 	s.maybeSnapshot(ctx)
 }
 
@@ -268,16 +269,29 @@ func (s *Scheduler) sweepInviteReminders(ctx context.Context) {
 		return
 	}
 	for _, p := range pending {
+		// The invited person is always asked — that reminder is about THEM and is
+		// once ever per invitation. The account holder's copy shares a gap with the
+		// unused-pass note (see store.InactionNudgeAllowed), so an account with both
+		// outstanding hears about one of them now and the other after the gap rather
+		// than twice in a day about the same person.
+		tellOwner, aerr := s.store.InactionNudgeAllowed(ctx, p.Owner, s.now().Add(-inactionNudgeGap))
+		if aerr != nil {
+			alog.Infof("inaction-nudge check for %s: %v", redact.Email(p.Owner), aerr)
+			continue
+		}
 		sent := false
 		if err := s.notifier.SendInviteReminder(ctx, p.Member, p.Owner); err != nil && !errors.Is(err, notify.ErrSuppressed) {
 			alog.Infof("invite reminder to %s: %v (will retry next sweep)", redact.Email(p.Member), err)
 		} else {
 			sent = true
 		}
-		if err := s.notifier.SendInviteUnaccepted(ctx, p.Owner, p.Member); err != nil && !errors.Is(err, notify.ErrSuppressed) {
+		if !tellOwner {
+			alog.Infof("unaccepted-invite note to %s held: another note about someone not acting went recently", redact.Email(p.Owner))
+		} else if err := s.notifier.SendInviteUnaccepted(ctx, p.Owner, p.Member); err != nil && !errors.Is(err, notify.ErrSuppressed) {
 			alog.Infof("unaccepted-invite note to %s: %v (will retry next sweep)", redact.Email(p.Owner), err)
 		} else {
 			sent = true
+			s.noteInactionNudged(ctx, p.Owner)
 		}
 		if !sent {
 			continue // neither side could be told; leave the row for the next sweep
@@ -287,5 +301,108 @@ func (s *Scheduler) sweepInviteReminders(ctx context.Context) {
 			continue
 		}
 		alog.Infof("invite reminder emailed for %s -> %s", redact.Email(p.Owner), redact.Email(p.Member))
+	}
+}
+
+// unusedPassAfter is how long an emailed guest pass may sit unused before the
+// holder is told once. A week: long enough that a pass sent for next weekend's
+// visitor has had its occasion, short enough that the household still remembers
+// sending it.
+const unusedPassAfter = 7 * 24 * time.Hour
+
+// inactionNudgeGap is the minimum spacing between the two notes that tell an
+// account somebody has not acted (an invitation unaccepted, a guest pass unused).
+// See store.InactionNudgeAllowed for why only those two share it.
+const inactionNudgeGap = 7 * 24 * time.Hour
+
+// noteInactionNudged records that one of the two "someone has not acted" notes
+// just went to this account. Best-effort: failing to record it only risks the
+// other note following sooner than the gap, which is a smaller fault than
+// holding a note the household is owed.
+func (s *Scheduler) noteInactionNudged(ctx context.Context, owner string) {
+	if err := s.store.MarkInactionNudged(ctx, owner, s.now()); err != nil {
+		alog.Infof("record inaction nudge for %s: %v", redact.Email(owner), err)
+	}
+}
+
+// sweepUnusedPassNudges tells a household, once per pass, that a guest pass they
+// emailed has never been used by anyone it was sent to.
+//
+// The audience is deliberately small (see store.UnusedPassCandidates): emailed
+// passes only, none of whose recipients has ever activated it, on a live permit.
+// It exists because a household that sets up fully and hears nothing is the shape
+// of every stalled account on the fleet — one such household configured two
+// permits, two named regos, two passes and an invitation in seventeen minutes on
+// 22 August, and by 23 September had heard nothing at all from p.stonn, because
+// the only other note that could have reached them is gated behind a successful
+// apply they never made.
+func (s *Scheduler) sweepUnusedPassNudges(ctx context.Context) {
+	if s.notifier == nil || !s.notifier.EmailAvailable() {
+		return
+	}
+	now := s.now()
+	passes, err := s.store.UnusedPassCandidates(ctx, now.Add(-unusedPassAfter))
+	if err != nil {
+		alog.Infof("unused-pass candidates: %v", err)
+		return
+	}
+	// One note per HOUSEHOLD, not per pass. Two passes made seconds apart to the
+	// same people (seen live) are one thing that did not happen; every eligible
+	// pass is marked when the note goes, so nobody hears about the same silence
+	// twice. Grouped in the order the query returned, so the oldest leads.
+	byOwner := map[string][]store.UnusedPass{}
+	var order []string
+	for _, u := range passes {
+		if _, seen := byOwner[u.Owner]; !seen {
+			order = append(order, u.Owner)
+		}
+		byOwner[u.Owner] = append(byOwner[u.Owner], u)
+	}
+	for _, owner := range order {
+		group := byOwner[owner]
+		allowed, aerr := s.store.InactionNudgeAllowed(ctx, owner, now.Add(-inactionNudgeGap))
+		if aerr != nil {
+			alog.Infof("inaction-nudge check for %s: %v", redact.Email(owner), aerr)
+			continue
+		}
+		if !allowed {
+			// Held, not dropped: every grant keeps its empty pass_nudge_sent, so a
+			// later sweep sends it once the gap has passed.
+			alog.Infof("unused-pass note to %s held: another note about someone not acting went recently", redact.Email(owner))
+			continue
+		}
+		// The union across the group, in first-seen order: two passes to the same
+		// pair name that pair once, not twice.
+		seen := map[string]bool{}
+		var to []string
+		for _, u := range group {
+			for _, addr := range u.To {
+				if !seen[addr] {
+					seen[addr] = true
+					to = append(to, addr)
+				}
+			}
+		}
+		err := s.notifier.SendUnusedPassNudge(ctx, owner, to)
+		if err != nil && !errors.Is(err, notify.ErrSuppressed) {
+			alog.Infof("unused-pass note to %s: %v (will retry next sweep)", redact.Email(owner), err)
+			continue
+		}
+		marked := true
+		for _, u := range group {
+			if merr := s.store.MarkPassNudgeSent(ctx, u.GrantID); merr != nil {
+				alog.Infof("unused-pass note to %s sent but pass %d not recorded: %v", redact.Email(owner), u.GrantID, merr)
+				marked = false
+			}
+		}
+		if !marked {
+			continue // a later sweep re-sends; better a repeat than a silence we promised to break
+		}
+		s.noteInactionNudged(ctx, owner)
+		if err != nil {
+			alog.Infof("unused-pass note to %s skipped (suppressed address); marked done", redact.Email(owner))
+		} else {
+			alog.Infof("unused-pass note emailed to %s (%d pass(es), %d recipient(s))", redact.Email(owner), len(group), len(to))
+		}
 	}
 }

@@ -129,6 +129,10 @@ type Notifier interface {
 	// points them at the resend control. Both are once ever per invitation.
 	SendInviteReminder(ctx context.Context, to, ownerEmail string) error
 	SendInviteUnaccepted(ctx context.Context, to, memberEmail string) error
+	// SendUnusedPassNudge tells the holder, once ever, that an emailed guest pass
+	// they sent has never been used. To the holder, not the guest: the guest has
+	// already had one cold email and cannot be chased again politely.
+	SendUnusedPassNudge(ctx context.Context, to string, recipients []string) error
 	EmailAvailable() bool
 }
 

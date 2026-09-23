@@ -285,6 +285,62 @@ func composeApply(o ApplyOutcome, portalURL string) (subject, body, priority, ta
 	return
 }
 
+// unusedPassMessage is the once-ever note telling a household that a guest pass
+// they sent has never been used.
+//
+// It goes to the HOLDER, not to the guest. The guest has already had one cold
+// email from a service they had not heard of; a second would be nagging a
+// stranger, and the person who can actually do something — ask them to look for
+// it, send it again, or remove it — is the one who sent it. Scoped to emailed
+// passes: an on-screen QR is consumed at the door and an unused one is its normal
+// end state (see store.UnusedPassCandidates).
+// andList writes a list the way it is read aloud: "a", "a and b", "a, b and c".
+func andList(xs []string) string {
+	switch len(xs) {
+	case 0:
+		return ""
+	case 1:
+		return xs[0]
+	case 2:
+		return xs[0] + " and " + xs[1]
+	default:
+		return strings.Join(xs[:len(xs)-1], ", ") + " and " + xs[len(xs)-1]
+	}
+}
+
+func unusedPassMessage(to []string, appURL string) (subject, body string) {
+	// Keyed on the RECIPIENTS, not on how many grants the household made: each
+	// person gets their own link, so "the guest passes you created for A and B"
+	// is the true sentence whether that came from one pass form or two. The
+	// household's grants are grouped by the caller and named here once.
+	many := len(to) != 1
+	pass, guest, link, have := "pass", "guest", "The link", "has"
+	if many {
+		pass, guest, link, have = "passes", "guests", "The links", "have"
+	}
+	subject = fmt.Sprintf("The guest %s you sent have not been accessed yet", pass)
+	if !many {
+		subject = "The guest pass you sent has not been accessed yet"
+	}
+	// A grant whose recipients have all been revoked still deserves a readable
+	// sentence, so the list is simply left out rather than printed empty.
+	forWhom := ""
+	if who := andList(to); who != "" {
+		forWhom = " for " + who
+	}
+	lines := []string{
+		fmt.Sprintf("We're checking in because the guest %s you created%s %s not been accessed or used yet.", pass, forWhom, have),
+		"",
+		fmt.Sprintf("It may be worth checking with your %s to see whether they received the email containing their pass. Or, you can re-send the pass by opening the guests tab:", guest),
+		"",
+	}
+	if appURL != "" {
+		lines = append(lines, appURL+"/guests", "")
+	}
+	lines = append(lines, fmt.Sprintf("%s will still work, so if they've received the pass there's nothing else you need to do.", link))
+	return subject, strings.Join(lines, "\n")
+}
+
 // portalNudgeMessage is the once-ever note to a household that changes the rego
 // on the council's own website while p.stonn quietly follows along.
 //

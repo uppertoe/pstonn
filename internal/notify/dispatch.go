@@ -680,6 +680,17 @@ func (s *Service) SendInviteUnaccepted(ctx context.Context, to, memberEmail stri
 	return s.sendEmail(ctx, to, subject, strings.Join(lines, "\n"), reasonAccount)
 }
 
+// SendUnusedPassNudge emails the account holder the once-ever note that a guest
+// pass they sent has never been used. Email only and a no-op without SMTP; the
+// caller owns the once-ever bookkeeping.
+func (s *Service) SendUnusedPassNudge(ctx context.Context, to string, recipients []string) error {
+	if !s.mail.Enabled() {
+		return nil
+	}
+	subject, body := unusedPassMessage(recipients, s.appURL)
+	return s.sendEmail(ctx, to, subject, body, reasonAccount)
+}
+
 // SendOnboardNudge emails a stalled signup — someone who accepted the terms but
 // never connected a tenant account — the once-ever recovery note. Email is the
 // only channel that can reach them: they never got far enough to configure

@@ -664,6 +664,24 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		// in account_flags because the subject is one invitation, not the account —
 		// a second invitation to someone else gets its own reminder (2026-09-23).
 		`ALTER TABLE account_member ADD COLUMN reminded_at TEXT NOT NULL DEFAULT ''`,
+		// When a guest link was first ACTIVATED (RFC3339; '' = never used). Neither
+		// existing signal answers that on its own: baseline_until records only the
+		// CURRENT run of activations and is re-captured once a window lapses, and the
+		// bookings a link created are pruned when they end (PruneOverrides). A token
+		// used months ago therefore looks untouched by both. The backfill below seeds
+		// it from the union of the two while that evidence still exists (2026-09-23).
+		`ALTER TABLE guest_token ADD COLUMN used_at TEXT NOT NULL DEFAULT ''`,
+		// When the holder was told, once ever, that nobody has used this pass. On the
+		// GRANT, not the token: the question is "did this pass do anything for the
+		// household", and a pass emailed to two people is one question, not two.
+		`ALTER TABLE guest_grant ADD COLUMN pass_nudge_sent TEXT NOT NULL DEFAULT ''`,
+		// The last time this account was told that SOMEONE HAS NOT ACTED — an
+		// invitation unaccepted, a guest pass unused. Shared by exactly those two so
+		// they cannot land a day apart about the same person (observed: one household
+		// had both outstanding for the same invitee). Deliberately NOT shared with the
+		// onboard, portal and fortnight notes: those are different concerns and are
+		// mutually exclusive by construction anyway (2026-09-23).
+		`ALTER TABLE account_flags ADD COLUMN last_nudge_at TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.
@@ -671,6 +689,20 @@ CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at)
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate %q: %w", stmt, err)
 		}
+	}
+	// Seed guest_token.used_at from the evidence that still exists: a live revert
+	// baseline, or a booking this token created. Both decay (see the column's note),
+	// so this runs once on the rows that have neither — after which activation
+	// maintains it. Idempotent: only used_at = '' rows are touched, and a token with
+	// no evidence stays '' and is simply eligible to be re-seeded harmlessly later.
+	if _, err := s.db.Exec(`
+UPDATE guest_token SET used_at = COALESCE(
+        NULLIF(baseline_until, ''),
+        (SELECT MIN(o.created_at) FROM override o WHERE o.guest_token_id = guest_token.id))
+WHERE used_at = ''
+  AND (baseline_until <> ''
+       OR EXISTS (SELECT 1 FROM override o WHERE o.guest_token_id = guest_token.id))`); err != nil {
+		return fmt.Errorf("migrate backfill guest_token.used_at: %w", err)
 	}
 	// Backfill council_id (the column carrying the tenant scope) on rows that
 	// predate multi-tenant support: they are all the legacy single tenant's.

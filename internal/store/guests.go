@@ -596,7 +596,12 @@ UPDATE guest_token SET
   baseline_until = CASE
       WHEN baseline_until = '' OR baseline_until < ?3 THEN ?2
       WHEN ?2 > baseline_until THEN ?2
-      ELSE baseline_until END
+      ELSE baseline_until END,
+  -- FIRST use only, never overwritten: "has this link ever done anything" is the
+  -- question the unused-pass note asks, and a later activation must not make an
+  -- old link look new. Set here because this statement is the one thing every
+  -- activation runs exactly once, whatever the link type.
+  used_at = CASE WHEN used_at = '' THEN ?3 ELSE used_at END
 WHERE id = ?4
 RETURNING baseline_plate, baseline_until`,
 		plate, until.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339), tokenID).
@@ -758,4 +763,107 @@ func (s *Store) MoveGuestGrants(ctx context.Context, owner string, srcID, dstID 
 	}
 	n, _ := res.RowsAffected()
 	return int(n), strandedPoster, retiredPicker, nil
+}
+
+// UnusedPass is one emailed guest pass that nobody has ever used, with the
+// permit it belongs to and how many people hold a link to it.
+type UnusedPass struct {
+	GrantID     int64
+	Owner       string
+	PermitID    int64
+	PermitLabel string
+	Label       string
+	Recipients  int
+	// To are the addresses the pass was emailed to, in the order they were added.
+	// The note names them: "nobody has used it" is not actionable until the holder
+	// knows which pass and which person. They are the holder's own data — they
+	// typed these addresses and the Guests tab already lists them.
+	To        []string
+	CreatedAt time.Time // when the pass was sent, for the note's "On <date> you sent…"
+}
+
+// UnusedPassCandidates lists emailed guest passes created before `before` that
+// no recipient has ever activated, on a permit that is still worth using.
+//
+// Deliberately narrow. Only EMAIL passes qualify: an on-screen QR is shown to a
+// visitor standing there and consumed in the moment, so an unused one is its
+// normal end state (10 of the 13 never-used grants on the fleet in September
+// 2026 were exactly that, and nudging about them would be nonsense); a printed
+// QR waits on the fridge for whoever turns up; the household's own picker is not
+// a pass at all. A disabled grant, a revoked token and an inactive permit are all
+// excluded — there is nothing the holder could usefully do about any of them.
+func (s *Store) UnusedPassCandidates(ctx context.Context, before time.Time) ([]UnusedPass, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT g.id, g.owner, p.id, p.label, p.permit_type, g.label, g.created_at,
+       (SELECT COUNT(*) FROM guest_token t WHERE t.grant_id = g.id AND t.revoked_at = '')
+FROM guest_grant g
+JOIN permit p ON p.id = g.permit_id
+WHERE g.enabled = 1 AND g.picker = 0 AND g.on_screen = 0 AND g.request_only = 0
+  AND g.pass_nudge_sent = ''
+  AND g.created_at <= ?
+  AND EXISTS (SELECT 1 FROM guest_token t WHERE t.grant_id = g.id AND t.revoked_at = '')
+  AND NOT EXISTS (SELECT 1 FROM guest_token t WHERE t.grant_id = g.id AND t.used_at <> '')
+ORDER BY g.created_at`, before.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UnusedPass
+	for rows.Next() {
+		var u UnusedPass
+		var label, ptype, created string
+		if err := rows.Scan(&u.GrantID, &u.Owner, &u.PermitID, &label, &ptype, &u.Label, &created, &u.Recipients); err != nil {
+			return nil, err
+		}
+		u.CreatedAt, _ = time.Parse(time.RFC3339, created) // zero on a malformed row; the note falls back
+
+		u.PermitLabel = label
+		if u.PermitLabel == "" {
+			u.PermitLabel = ptype
+		}
+		if u.PermitLabel == "" {
+			u.PermitLabel = "visitor permit"
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Recipients are read AFTER the cursor is drained: the store runs one pooled
+	// connection, so a query issued inside an open rows cursor blocks forever
+	// (see the note on ListGuestGrants).
+	for i := range out {
+		to, err := s.passRecipients(ctx, out[i].GrantID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].To = to
+	}
+	return out, nil
+}
+
+// passRecipients lists the live recipients of one grant, oldest first.
+func (s *Store) passRecipients(ctx context.Context, grantID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT recipient_email FROM guest_token WHERE grant_id = ? AND revoked_at = '' AND recipient_email <> '' ORDER BY id`, grantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// MarkPassNudgeSent closes the once-ever unused-pass note for one grant.
+func (s *Store) MarkPassNudgeSent(ctx context.Context, grantID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE guest_grant SET pass_nudge_sent = ? WHERE id = ?`, nowUTC(), grantID)
+	return err
 }

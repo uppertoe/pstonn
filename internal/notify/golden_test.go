@@ -304,6 +304,10 @@ func TestGoldenEmails(t *testing.T) {
 	run("invite-reminder", func() { _ = svc.SendInviteReminder(ctx, stranger, owner) })
 	run("invite-unaccepted", func() { _ = svc.SendInviteUnaccepted(ctx, owner, stranger) })
 	run("portal-nudge", func() { _ = svc.SendPortalNudge(ctx, owner, "", "AAA111") })
+	run("unused-pass", func() {
+		_ = svc.SendUnusedPassNudge(ctx, owner, []string{"nanny@example.com", "gran@example.com"})
+	})
+	run("unused-pass-one-recipient", func() { _ = svc.SendUnusedPassNudge(ctx, owner, []string{"nanny@example.com"}) })
 	run("guest-link", func() { _ = svc.SendGuestLink(ctx, stranger, owner, "", "", "Visitor", appURL+"/g/tok") })
 	run("driver-displaced", func() {
 		_ = svc.NotifyDriverDisplaced(ctx, owner, stranger, "Visitor", "AAA111", "a one-off booking started", at)

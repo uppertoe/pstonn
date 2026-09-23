@@ -317,6 +317,8 @@ type fakeNotifier struct {
 	inviteReminded      []string // "owner|member" per reminder to the invited person
 	inviteUnaccepted    []string // "owner|member" per note to the account holder
 	inviteRemindErr     error    // when set, SendInviteReminder records then returns this
+	passNudged          []string // "owner|recipients" per unused-pass note
+	passErr             error    // when set, SendUnusedPassNudge records then returns this
 	inviteUnacceptedErr error    // when set, SendInviteUnaccepted records then returns this
 }
 
@@ -450,6 +452,21 @@ func (f *fakeNotifier) SendInviteUnaccepted(_ context.Context, to, memberEmail s
 	defer f.mu.Unlock()
 	f.inviteUnaccepted = append(f.inviteUnaccepted, to+"|"+memberEmail)
 	return f.inviteUnacceptedErr
+}
+
+// SendUnusedPassNudge records "owner|permit|recipients" so a test can assert who
+// was told, about which permit, and that it happened once.
+func (f *fakeNotifier) SendUnusedPassNudge(_ context.Context, to string, recipients []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.passNudged = append(f.passNudged, to+"|"+strings.Join(recipients, ","))
+	return f.passErr
+}
+
+func (f *fakeNotifier) passNudgedSnap() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.passNudged...)
 }
 
 func (f *fakeNotifier) inviteRemindedSnap() []string {
