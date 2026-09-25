@@ -66,6 +66,25 @@ type guestActView struct {
 	Audience       string            // quick picker only: who on the account is told about a change made here, for the confirm dialog: a heading line then one line per person, newline-joined ("" = don't say). The revert form's list; each rego tile carries its own (vehicleView.Audience), which adds the rego's driver.
 }
 
+// HomeName is what this page is called when it is added to a home screen: the
+// quick picker by its own name, a guest pass by the household it belongs to, so
+// neither is mistaken for the main app or for another household's pass.
+func (g guestActView) HomeName() string {
+	if g.Picker {
+		return "Quick picker"
+	}
+	return homeScreenName(g.Household)
+}
+
+// IconSet picks the home-screen icon's colour: slate for the quick picker,
+// amber for a guest pass (the main app keeps the teal one).
+func (g guestActView) IconSet() string {
+	if g.Picker {
+		return "picker"
+	}
+	return "guest"
+}
+
 // guestWaitView drives the visitor's "waiting for approval" page (State
 // "guest-wait"), which polls the status endpoint.
 type guestWaitView struct {

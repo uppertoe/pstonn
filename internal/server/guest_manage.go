@@ -374,6 +374,11 @@ var tokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 // icons are the app's static PNGs. Existence is deliberately not checked: a
 // manifest for a dead link is harmless (the page it points to just shows "no
 // longer active"), and checking would put a DB query on an anonymous route.
+// For the same reason the page tells the manifest what it is naming, in the
+// query: k=picker for the household's quick picker, or h=<household name> for a
+// guest pass. Only this app's own pages link a manifest, so a hand-made query
+// can name nothing but the installer's own shortcut; a name that would not pass
+// as a household name is ignored.
 func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
 	// The shape gate keeps anything that isn't a token out of the document, and
 	// json.Marshal — not %q, which is Go quoting and emits \x01 for a decoded
@@ -390,20 +395,30 @@ func (s *Server) guestManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	startURL := string(start)
+	name, short, icons := "Quick picker", "Quick picker", "picker"
+	if r.URL.Query().Get("k") != "picker" {
+		household := r.URL.Query().Get("h")
+		if !validHouseholdName(household) {
+			household = ""
+		}
+		name, short, icons = manifestName(household), homeScreenName(household), "guest"
+	}
+	nameJSON, _ := json.Marshal(name)
+	shortJSON, _ := json.Marshal(short)
 	w.Header().Set("Content-Type", "application/manifest+json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprint(w, `{
   "id": `+startURL+`,
-  "name": "p.stonn parking permit",
-  "short_name": "p.stonn",
+  "name": `+string(nameJSON)+`,
+  "short_name": `+string(shortJSON)+`,
   "start_url": `+startURL+`,
   "scope": "/g/",
   "display": "standalone",
   "theme_color": "#0d9488",
   "background_color": "#eceff5",
   "icons": [
-    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+    {"src": "/static/icon-`+icons+`-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/static/icon-`+icons+`-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
   ]
 }`)
 }

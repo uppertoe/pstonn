@@ -90,3 +90,27 @@ func (s *Server) setHouseholdName(w http.ResponseWriter, r *http.Request) {
 	s.logChange(r.Context(), owner, user, store.ActionHouseholdName, name, "")
 	http.Redirect(w, r, "/settings?named=1", http.StatusSeeOther)
 }
+
+// homeScreenName is what a guest pass is called on a visitor's home screen: the
+// household's name without a leading "the" ("the Nguyens" becomes "Nguyens"), so
+// that passes from two households can be told apart. A long name is left for the
+// phone to cut off, since its start is usually the part that differs.
+func homeScreenName(household string) string {
+	name := strings.TrimSpace(household)
+	if len(name) > 4 && strings.EqualFold(name[:4], "the ") {
+		name = strings.TrimSpace(name[4:])
+	}
+	if name == "" {
+		return "Parking pass"
+	}
+	return name
+}
+
+// manifestName is a guest pass's full name where Android shows one (the app
+// list, the install prompt): "p.stonn: the Nguyens’ permit".
+func manifestName(household string) string {
+	if household == "" {
+		return "p.stonn parking permit"
+	}
+	return "p.stonn: " + possessive(household) + " permit"
+}

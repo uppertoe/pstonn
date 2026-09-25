@@ -822,6 +822,52 @@ func TestGuestManifestJSONAndShape(t *testing.T) {
 	}
 }
 
+// TestGuestManifestNames: the quick picker, a named household's pass and an
+// unnamed pass each install under their own name and icon, so the same person can
+// tell them apart from the main app and from each other on a home screen.
+func TestGuestManifestNames(t *testing.T) {
+	s := newGuestTestServer(t)
+	tok := "abcDEF0123456789_-xyz"
+	cases := []struct{ query, name, short, icons string }{
+		{"?k=picker", "Quick picker", "Quick picker", "picker"},
+		{"?h=" + url.QueryEscape("the Nguyens"), "p.stonn: the Nguyens\u2019 permit", "Nguyens", "guest"},
+		{"?h=Nana", "p.stonn: Nana\u2019s permit", "Nana", "guest"},
+		{"", "p.stonn parking permit", "Parking pass", "guest"},
+		// A name the Settings form would refuse is ignored, not echoed.
+		{"?h=" + url.QueryEscape("<b>x</b>"), "p.stonn parking permit", "Parking pass", "guest"},
+		{"?h=" + strings.Repeat("a", householdNameMax+1), "p.stonn parking permit", "Parking pass", "guest"},
+	}
+	for _, c := range cases {
+		w := s.getGuest("/g/manifest/" + tok + c.query)
+		var doc struct{ Icons []struct{ Src string } }
+		var raw map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+			t.Fatalf("%q: manifest is not valid JSON: %v", c.query, err)
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &doc)
+		name, _ := strconv.Unquote(`"` + c.name + `"`)
+		if raw["name"] != name || raw["short_name"] != c.short {
+			t.Fatalf("%q: named %q / %q, want %q / %q", c.query, raw["name"], raw["short_name"], name, c.short)
+		}
+		for _, ic := range doc.Icons {
+			if !strings.Contains(ic.Src, "icon-"+c.icons+"-") {
+				t.Fatalf("%q: icon %q, want the %s set", c.query, ic.Src, c.icons)
+			}
+		}
+	}
+}
+
+func TestHomeScreenName(t *testing.T) {
+	for in, want := range map[string]string{
+		"the Nguyens": "Nguyens", "The Nguyens": "Nguyens", "Nana": "Nana", "": "Parking pass",
+		"the ": "the", "Theo and Sam": "Theo and Sam", "Sam and Alex Fitzgerald": "Sam and Alex Fitzgerald",
+	} {
+		if got := homeScreenName(in); got != want {
+			t.Errorf("homeScreenName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestGuestGrantLabelCap (E6): the label headlines the guest's page and rides
 // into the email carrying their link, so it is capped like a permit's — and
 // truncated by runes, so a multi-byte name is never cut in half.

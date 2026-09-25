@@ -751,6 +751,21 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"guest-manifest-link", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "toktok", PermitLabel: "Visitor Permit",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok"},
+		{"guest-home-name", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", Household: "the Helds", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, `apple-mobile-web-app-title" content="Helds"`},
+		{"guest-manifest-names-household", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", Household: "the Helds", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok?h=the%20Helds"},
+		{"guest-amber-icon", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "icon-guest-180"},
+		{"picker-home-name", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", Picker: true, Household: "the Helds", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, `apple-mobile-web-app-title" content="Quick picker"`},
+		{"picker-manifest-and-icon", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", Picker: true, PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "/g/manifest/toktok?k=picker"},
 		{"guest-rescan-applied", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "tok", PermitLabel: "Visitor Permit", AllowPlate: true, RequestOnly: true,
 			Req: &guestWaitView{Plate: "GUEST1", ReqID: 4, Nonce: "n", Status: "applied", Until: "the end of today"}}},
