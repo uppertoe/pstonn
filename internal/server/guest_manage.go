@@ -349,6 +349,7 @@ func (s *Server) createGuestGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base.GuestMgmt.NewGuestLinks = links
+	base.GuestMgmt.NameHousehold = base.IsPrimary && s.householdOrEmpty(r.Context(), owner) == ""
 	switch {
 	case sent == len(links):
 		base.Flash = "You created a guest pass, and p.stonn has emailed each person their link. They open it when they arrive to put their rego on the permit."

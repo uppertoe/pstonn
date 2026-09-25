@@ -78,6 +78,7 @@
     {{range .GuestMgmt.NewGuestLinks}}
     <div class="glink"><span class="muted">{{.Email}}</span><code>{{.URL}}</code></div>
     {{end}}
+    {{if .GuestMgmt.NameHousehold}}<p class="empty-note" style="margin-top:10px">Your household does not have a name yet, so each visitor’s pass will be called “Parking pass” on their home screen. If you set a household name in <a href="/settings#household">Settings</a>, your visitors can tell your pass apart from any others they have.</p>{{end}}
   </section>
   {{end}}
 

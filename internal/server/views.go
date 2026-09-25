@@ -255,6 +255,7 @@ type guestMgmt struct {
 	GuestsEnabled   bool               // kill-switch state (default on)
 	PermitOpts      []permitOpt        // create-grant permit choices
 	NewGuestLinks   []guestLinkView    // links shown once, right after a grant is created
+	NameHousehold   bool               // with NewGuestLinks: the primary holder has not set a household name, so the passes will install as "Parking pass"
 	DoorGrants      []doorGrantView    // durable door QRs in the management list
 	PendingRequests []guestReqView     // printed-QR requests awaiting the holder's decision
 	RecentRequests  []guestDecidedView // recently decided printed-QR requests, so every member sees how they were resolved

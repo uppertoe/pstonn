@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uppertoe/pstonn/internal/notify"
 	"github.com/uppertoe/pstonn/internal/scheduler"
 	"github.com/uppertoe/pstonn/internal/store"
 )
@@ -333,5 +334,48 @@ func TestDeadToDeadCopyDoesNotMoveGuests(t *testing.T) {
 	}
 	if gc, err := s.store.GuestContextByTokenHash(ctx, "hash-deadpair"); err != nil || gc.Grant.PermitID != src {
 		t.Fatalf("grant moved to %d (%v); guests must not be re-targeted onto a dead permit", gc.Grant.PermitID, err)
+	}
+}
+
+// After a pass is created, a primary holder with no household name is told that
+// the pass will install as "Parking pass", and pointed at the setting; once the
+// household has a name, the line goes.
+func TestNewPassSuggestsAHouseholdName(t *testing.T) {
+	s := newAuthzServer(t)
+	s.notify = notify.New(s.store, nil, "https://push.example", "", "http://app.example.com", "", "", time.UTC, nil, nil)
+	ctx := context.Background()
+	const owner, origin = "owner@example.com", "http://app.example.com"
+	if err := s.store.RecordConsent(ctx, owner, s.terms.Version, s.terms.Hash()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SaveTenantSession(ctx, store.TenantSession{Owner: owner, Cookie: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := s.store.UpsertPermit(ctx, owner, "CP-LIVE", "14", "Visitor permit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehID, err := s.store.CreateVehicle(ctx, owner, "AAA111", "Car", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(who string) string {
+		w := s.doReq("POST", "/guests", owner, origin, url.Values{
+			"permit_id": {itoa64(pid)}, "label": {"Nanny"}, "vehicle_id": {itoa64(vehID)}, "recipients": {who},
+		})
+		if w.Code != 200 {
+			t.Fatalf("create pass = %d %q", w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	const line = "Your household does not have a name yet"
+	if body := create("nanny@example.com"); !strings.Contains(body, line) || !strings.Contains(body, `href="/settings#household"`) {
+		t.Fatalf("an unnamed household was not offered a name after creating a pass")
+	}
+	if err := s.store.SetHouseholdName(ctx, owner, "the Nguyens"); err != nil {
+		t.Fatal(err)
+	}
+	if body := create("cleaner@example.com"); strings.Contains(body, line) {
+		t.Fatalf("a named household was still asked to name itself")
 	}
 }
