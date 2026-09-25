@@ -760,6 +760,12 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 		{"guest-amber-icon", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "toktok", PermitLabel: "Visitor Permit",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "icon-guest-180"},
+		{"guest-amber-favicon", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "fill='%23d97706'"},
+		{"picker-slate-favicon", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
+			Token: "toktok", Picker: true, PermitLabel: "Visitor Permit",
+			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, "fill='%23334155'"},
 		{"picker-home-name", dashboardData{State: "guest", Loc: loc, Guest: guestActView{
 			Token: "toktok", Picker: true, Household: "the Helds", PermitLabel: "Visitor Permit",
 			Cars: []vehicleView{{ID: 1, Label: "Mum", Registration: "AAA111", Color: "#111"}}}}, `apple-mobile-web-app-title" content="Quick picker"`},
