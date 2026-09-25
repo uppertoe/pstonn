@@ -1083,7 +1083,9 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	// starts. It used to be "blank means run forever", which made the open-ended
 	// booking the thing you got by not deciding — the opposite of what it should
 	// be. An indefinite booking quietly holds the permit against the household's
-	// own roster until somebody notices, so it now takes a deliberate selection.
+	// own roster until somebody notices. It was kept for a while as a deliberate
+	// choice, but even chosen deliberately it switched a roster off for weeks, so
+	// every booking now has an end and "open" is refused.
 	//
 	// Measured from the START day rather than literally "today", so booking a car
 	// for next Tuesday ends at the end of next Tuesday rather than in the past.
@@ -1094,7 +1096,11 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 	var endsAt *time.Time
 	switch r.FormValue("ends") {
 	case "open":
-		endsAt = nil // deliberate: runs until someone changes it
+		// Open-ended bookings are gone: one switched a household's whole roster off
+		// for weeks without anyone noticing. A page cached from before still offers
+		// the choice, so say so rather than quietly booking something else.
+		s.formError(w, r, "p.stonn no longer makes bookings without an end. Please choose when this booking ends.")
+		return
 	case "custom":
 		raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "00:00")
 		if raw == "" {

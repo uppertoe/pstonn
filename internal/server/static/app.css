@@ -246,7 +246,7 @@ main { max-width:960px; margin:22px auto 90px; padding:0 16px; display:grid; gap
 input,select,textarea { font:inherit; padding:9px 11px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); transition:border-color .15s,box-shadow .15s; }
 textarea { resize:vertical; min-height:96px; width:100%; }
 input:focus,select:focus,textarea:focus { outline:0; border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 22%,transparent); }
-label.fld { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); }
+label.fld, div.fld { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--muted); }
 /* Opt-in checkbox row (e.g. save-password) */
 label.optin { display:flex; gap:10px; align-items:flex-start; font-size:12.5px; color:var(--muted); line-height:1.45; text-align:left; cursor:pointer; }
 label.optin input { margin-top:3px; flex:0 0 auto; width:16px; height:16px; accent-color:var(--primary); }
@@ -435,6 +435,15 @@ tr:last-child td { border-bottom:0; }
 .segpanes { display:grid; }
 .segpanes > .segpane { grid-area:1 / 1; }
 .segpane.hide { visibility:hidden; pointer-events:none; }
+/* A pane under a control inside a field (the booking modal's start and end) sits clear of the control above it; the field's own 5px gap is sized for a label. */
+/* Booking modal: the rego on the permit now, an arrow, and the rego the booking puts on.
+   The slot is the same box as a .reg chip (an outline, not a border, so it adds no
+   height), which keeps the line still as it fills. */
+.swapline { display:flex; align-items:center; gap:8px; min-height:26px; }
+.swap-arrow { color:var(--muted); font-size:15px; line-height:1; }
+.reg.reg-was { opacity:.5; text-decoration:line-through; }
+.reg.reg-slot { background:transparent; outline:1px dashed var(--line); outline-offset:-1px; min-width:72px; }
+.fld > .segpanes { margin-top:7px; align-items:start; } /* start: the date boxes keep their own height instead of stretching to the taller note beside them */
 /* Roster week tabs: the .seg control, sized for its place above the roster grid.
    The + tab stays narrow (it adds a week, it isn't one), and the "now" mark
    names the week the cycle is actually in — a fact, so it keeps its contrast on
