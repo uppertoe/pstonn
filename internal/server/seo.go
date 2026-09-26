@@ -195,6 +195,22 @@ func (s *Server) faviconICO(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
+// appleTouchIcon answers the two fixed paths iOS asks for when it draws a link
+// preview in Messages or adds a page to the home screen without reading the
+// page's own <link rel="apple-touch-icon">. They must be public (Caddy lists
+// them in @public): otherwise the forward-auth catch-all sends the preview
+// fetcher to the sign-in page for an icon.
+func (s *Server) appleTouchIcon(w http.ResponseWriter, r *http.Request) {
+	b, err := fs.ReadFile(staticSub, "icon-180.png")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	_, _ = w.Write(b)
+}
+
 // siteManifest is the site-wide web app manifest (the guest links have their own,
 // scoped to /g/). It names the app and points at the 192/512 icons so Android's
 // "Add to home screen" and general PWA metadata are complete.

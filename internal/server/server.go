@@ -434,14 +434,16 @@ func (s *Server) Handler() http.Handler {
 	// the twin forwards home; it stays only for the app header and schedule
 	// links people have in their history.
 	s.handle(mux, "GET /features/app", guardPublic, s.featuresAppRedirect)
-	s.handle(mux, "GET /how", guardPublic, s.howRedirect)               // public; the page's old address
-	s.handle(mux, "GET /faq", guardPublic, s.faq)                       // public
-	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)            // public question pages
-	s.handle(mux, "GET /robots.txt", guardPublic, s.robotsTxt)          // public (SEO)
-	s.handle(mux, "GET /sitemap.xml", guardPublic, s.sitemapXML)        // public (SEO)
-	s.handle(mux, "GET /llms.txt", guardPublic, s.llmsTxt)              // public (SEO)
-	s.handle(mux, "GET /favicon.ico", guardPublic, s.faviconICO)        // public
-	s.handle(mux, "GET /site.webmanifest", guardPublic, s.siteManifest) // public
+	s.handle(mux, "GET /how", guardPublic, s.howRedirect)                                 // public; the page's old address
+	s.handle(mux, "GET /faq", guardPublic, s.faq)                                         // public
+	s.handle(mux, "GET /guide/{slug}", guardPublic, s.guide)                              // public question pages
+	s.handle(mux, "GET /robots.txt", guardPublic, s.robotsTxt)                            // public (SEO)
+	s.handle(mux, "GET /sitemap.xml", guardPublic, s.sitemapXML)                          // public (SEO)
+	s.handle(mux, "GET /llms.txt", guardPublic, s.llmsTxt)                                // public (SEO)
+	s.handle(mux, "GET /favicon.ico", guardPublic, s.faviconICO)                          // public
+	s.handle(mux, "GET /apple-touch-icon.png", guardPublic, s.appleTouchIcon)             // public: iOS link previews
+	s.handle(mux, "GET /apple-touch-icon-precomposed.png", guardPublic, s.appleTouchIcon) // public: iOS link previews
+	s.handle(mux, "GET /site.webmanifest", guardPublic, s.siteManifest)                   // public
 	// The offline page and the worker that serves it (offline.go). Public at the
 	// proxy too, or the worker never registers.
 	s.handle(mux, "GET /offline", guardPublic, s.offline)

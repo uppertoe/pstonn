@@ -27,6 +27,16 @@ func TestFaviconAndManifest(t *testing.T) {
 		t.Errorf("favicon.ico body is %d bytes, expected a real PNG", rr.Body.Len())
 	}
 
+	// iOS asks for these fixed paths when it draws a Messages link preview; Caddy
+	// lists them in @public, so the app must answer them with the icon.
+	for _, path := range []string{"/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"} {
+		rr = httptest.NewRecorder()
+		s.appleTouchIcon(rr, httptest.NewRequest("GET", path, nil))
+		if rr.Code != 200 || !strings.HasPrefix(rr.Header().Get("Content-Type"), "image/png") || rr.Body.Len() < 100 {
+			t.Errorf("%s: code=%d type=%q bytes=%d, want a PNG", path, rr.Code, rr.Header().Get("Content-Type"), rr.Body.Len())
+		}
+	}
+
 	rr = httptest.NewRecorder()
 	s.siteManifest(rr, httptest.NewRequest("GET", "/site.webmanifest", nil))
 	var m map[string]any
