@@ -32,14 +32,63 @@ func (s *Server) guestPage(w http.ResponseWriter, r *http.Request) {
 	noStore(w)
 	gc, permit, ok := s.resolveGuest(r, r.PathValue("token"))
 	if !ok {
+		alog.Infof("guest page opened for a link that is no longer active (%s)", guestViewer(r))
 		s.renderGuestGone(w, r)
 		return
 	}
+	// One line per page view, naming the pass by grant and token number (never the
+	// token, which Caddy redacts too, and never the label, which households fill
+	// with people's names), so "which pass was that?" has an answer. The viewer
+	// class separates people from the mail scanners and preview bots that fetch
+	// emailed links.
+	alog.Infof("guest page viewed: %s grant %d token %d on permit %s for %s (%s)",
+		guestKind(gc.Grant), gc.Grant.ID, gc.TokenID, permit.CouncilPermitID, redact.Email(gc.Grant.Owner), guestViewer(r))
 	if permit.Inactive(time.Now(), s.locForPermit(r.Context(), permit)) {
 		s.renderGuestInactive(w, r, gc.Grant.Picker)
 		return
 	}
 	s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(r.Context(), gc, permit), "", "")
+}
+
+// guestKind names a grant for the log: the household's own quick picker, a
+// printed QR (request-only), or a pass sent to a visitor.
+func guestKind(g store.GuestGrant) string {
+	switch {
+	case g.Picker:
+		return "quick picker"
+	case g.RequestOnly:
+		return "printed QR"
+	default:
+		return "pass"
+	}
+}
+
+// guestViewer is a coarse class of whoever fetched a guest page, from the
+// User-Agent: enough to tell a person's phone from a link-preview or mail
+// scanner, and nothing more.
+func guestViewer(r *http.Request) string {
+	ua := r.UserAgent()
+	low := strings.ToLower(ua)
+	switch {
+	case ua == "":
+		return "no user agent"
+	case strings.Contains(low, "bot"), strings.Contains(low, "preview"), strings.Contains(low, "facebookexternalhit"),
+		strings.Contains(low, "whatsapp"), strings.Contains(ua, "10_11_1"), strings.Contains(low, "networkingextension"),
+		strings.Contains(low, "curl"), strings.Contains(low, "python"), strings.Contains(low, "go-http"):
+		return "bot or link preview"
+	case strings.Contains(ua, "iPhone"):
+		return "iPhone"
+	case strings.Contains(ua, "iPad"):
+		return "iPad"
+	case strings.Contains(ua, "Android"):
+		return "Android"
+	case strings.Contains(ua, "Macintosh"):
+		return "Mac"
+	case strings.Contains(ua, "Windows"):
+		return "Windows"
+	default:
+		return "other browser"
+	}
 }
 
 // guestCurrentPlate is the plate to show as "on the permit now": the tenant's
