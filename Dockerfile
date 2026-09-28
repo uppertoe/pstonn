@@ -20,7 +20,7 @@ RUN mkdir -p /data && chown 65532:65532 /data
 # --- runtime stage ---
 # distroless/static: no shell, includes CA certs for the council and SMTP TLS
 # calls, runs as nonroot. The binary self-probes via `-healthcheck`, no curl.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/pstonn /app
 COPY --from=build --chown=65532:65532 /data /data
 USER nonroot:nonroot
