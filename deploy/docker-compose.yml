@@ -9,7 +9,7 @@
 # reached over the generated proxy network, so it declares no `ports:`.
 services:
   pstonn:
-    image: ghcr.io/uppertoe/pstonn:latest # pin by @sha256 in the server repo (CI image-pins job enforces this)
+    image: ghcr.io/uppertoe/pstonn:latest@sha256:06261d23fb328ab7690fe556c39885d000c2f04a72a7328066a73c3a2e897ad6 # pin by @sha256 in the server repo (CI image-pins job enforces this)
     env_file:
       - path: ./.env
         required: false # keeps `docker compose config` valid in CI without a real .env
