@@ -165,6 +165,7 @@ type mailThreadView struct {
 	// when the thread holds only what the operator sent.
 	ReplyTo      int64
 	ReplySubject string
+	ReplyFlagged bool // SES flagged the message an answer would reply to, so the form is folded away
 	Waiting      bool // the latest message is inbound and unflagged
 }
 
@@ -225,7 +226,7 @@ func mailThread(t []store.MailMessage, now time.Time, loc *time.Location) mailTh
 				row.S3Key = mailS3Prefix + m.SESMessageID
 			}
 			tv.With = m.FromAddr
-			tv.ReplyTo, tv.ReplySubject = m.ID, replySubject(m.Subject)
+			tv.ReplyTo, tv.ReplySubject, tv.ReplyFlagged = m.ID, replySubject(m.Subject), m.Flagged
 		} else {
 			row.Who = "To " + m.ToAddr
 			row.Reply = m.Body

@@ -265,7 +265,7 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 						{Inbound: true, Who: "Resident <resident@example.com>", When: "Sun 18 Oct, 11:00 am (1 hour ago)", Reply: "Thank you, I just forgot.",
 							Quoted: "On 18 Oct 2026, p.stonn wrote:\n> Hello,", Verdict: "spam PASS · virus PASS · SPF PASS · DKIM PASS · DMARC PASS"},
 					}},
-				{ID: 2, Subject: "Cheap offers", With: "bot@example.net", ReplyTo: 2, ReplySubject: "Re: Cheap offers",
+				{ID: 2, Subject: "Cheap offers", With: "bot@example.net", ReplyTo: 2, ReplySubject: "Re: Cheap offers", ReplyFlagged: true,
 					Messages: []mailRowView{
 						{Inbound: true, Who: "bot@example.net", When: "Sat 17 Oct, 2:00 am (1 day ago)", Reply: "<script>alert(1)</script>", Flagged: true,
 							Verdict: "spam FAIL · virus PASS · SPF FAIL · DKIM GRAY · DMARC FAIL", Truncated: true, S3Key: "hello/abc123"},
