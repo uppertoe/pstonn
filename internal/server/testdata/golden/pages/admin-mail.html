@@ -447,10 +447,10 @@ window.popClamp = window.popClamp || function (el, tries) {
   
   <section class="card" style="margin-bottom:14px">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span> Re: p.stonn and your visitor permit</h2>
-    <p class="sub" style="margin-top:-8px">The conversation is with resident@example.com. <strong>This message is waiting for an answer.</strong></p>
+    <p class="muted" style="margin:-8px 0 0;font-size:13px">The conversation is with resident@example.com. <strong>This message is waiting for an answer.</strong></p>
     
     <div style="border-top:1px solid var(--line);padding:12px 0">
-      <div class="sub"><strong>To resident@example.com, sent from p.stonn</strong> &middot; Sun 18 Oct, 9:00 am (3 hours ago)</div>
+      <div class="muted" style="font-size:13px"><strong>To resident@example.com, sent from p.stonn</strong> &middot; Sun 18 Oct, 9:00 am (3 hours ago)</div>
       
       <div style="white-space:pre-wrap;margin-top:8px">Hello,
 
@@ -461,14 +461,15 @@ We noticed that you connected your visitor permit.</div>
     </div>
     
     <div style="border-top:1px solid var(--line);padding:12px 0">
-      <div class="sub"><strong>From Resident &lt;resident@example.com&gt;</strong> &middot; Sun 18 Oct, 11:00 am (1 hour ago)</div>
+      <div class="muted" style="font-size:13px"><strong>From Resident &lt;resident@example.com&gt;</strong> &middot; Sun 18 Oct, 11:00 am (1 hour ago)</div>
       
       <div style="white-space:pre-wrap;margin-top:8px">Thank you, I just forgot.</div>
-      <details style="margin-top:8px"><summary class="sub">Show the quoted message</summary><div class="sub" style="white-space:pre-wrap;margin-top:6px">On 18 Oct 2026, p.stonn wrote:
+      <details style="margin-top:8px"><summary class="muted" style="font-size:13px">Show the quoted message</summary><div class="muted" style="white-space:pre-wrap;margin-top:6px">On 18 Oct 2026, p.stonn wrote:
 &gt; Hello,</div></details>
       
-      <p class="sub" style="margin-top:6px">SES checks: spam PASS · virus PASS · SPF PASS · DKIM PASS · DMARC PASS.</p>
+      <p class="muted" style="margin-top:6px;font-size:13px">SES checks: spam PASS · virus PASS · SPF PASS · DKIM PASS · DMARC PASS.</p>
     </div>
+    
     
     
     <form method="post" action="/admin/mail/send" style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:12px"
@@ -479,22 +480,27 @@ We noticed that you connected your visitor permit.</div>
       <div><button type="submit"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg> Send reply</button></div>
     </form>
     
+    
   </section>
   
   <section class="card" style="margin-bottom:14px">
     <h2><span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg></span> Cheap offers</h2>
-    <p class="sub" style="margin-top:-8px">The conversation is with bot@example.net.</p>
+    <p class="muted" style="margin:-8px 0 0;font-size:13px">The conversation is with bot@example.net.</p>
     
     <div style="border-top:1px solid var(--line);padding:12px 0">
-      <div class="sub"><strong>From bot@example.net</strong> &middot; Sat 17 Oct, 2:00 am (1 day ago)</div>
+      <div class="muted" style="font-size:13px"><strong>From bot@example.net</strong> &middot; Sat 17 Oct, 2:00 am (1 day ago)</div>
       <div class="banner warn" style="margin:8px 0">SES flagged this message (spam FAIL · virus PASS · SPF FAIL · DKIM GRAY · DMARC FAIL). Check it before answering.</div>
       <div style="white-space:pre-wrap;margin-top:8px">&lt;script&gt;alert(1)&lt;/script&gt;</div>
       
-      <p class="sub" style="margin-top:8px">p.stonn can show only part of this message. The full message is saved in S3 as hello/abc123.</p>
+      <p class="muted" style="margin-top:8px;font-size:13px">p.stonn can show only part of this message. The full message is saved in S3 as hello/abc123.</p>
       
     </div>
     
     
+    
+    <details style="border-top:1px solid var(--line);padding-top:12px">
+      <summary class="muted" style="font-size:13px">Reply anyway</summary>
+      <div style="margin-top:10px">
     <form method="post" action="/admin/mail/send" style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:12px"
           data-confirm="Send this reply to bot@example.net?" data-confirm-ok="Send reply" data-confirm-tone="primary">
       <input type="hidden" name="reply" value="2">
@@ -502,6 +508,9 @@ We noticed that you connected your visitor permit.</div>
       <label class="fld"><span>Reply to bot@example.net</span><textarea name="body" rows="6" required maxlength="20000"></textarea></label>
       <div><button type="submit"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg> Send reply</button></div>
     </form>
+      </div>
+    </details>
+    
     
   </section>
   
