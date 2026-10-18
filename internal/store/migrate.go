@@ -514,6 +514,32 @@ CREATE TABLE IF NOT EXISTS referral_invite (
 );
 CREATE INDEX IF NOT EXISTS idx_referral_owner ON referral_invite(owner, sent_at);
 
+-- Mail to and from hello@stonn.org, read and answered on /admin/mail. Inbound
+-- rows arrive from SES through the signed SNS hook; outbound rows are what the
+-- operator sent from the page. thread_id is the id of the thread's first row, so
+-- a reply to a note lands under that note. Pruned at 180 days like the contact
+-- form (store.MailRetention): a message names a third party.
+CREATE TABLE IF NOT EXISTS mail_message (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id      INTEGER NOT NULL DEFAULT 0,
+    direction      TEXT NOT NULL,              -- 'in' | 'out'
+    ses_message_id TEXT NOT NULL DEFAULT '',   -- inbound: SES's id, the S3 object key and the SNS redelivery dedup key
+    from_addr      TEXT NOT NULL DEFAULT '',
+    from_name      TEXT NOT NULL DEFAULT '',
+    to_addr        TEXT NOT NULL DEFAULT '',
+    subject        TEXT NOT NULL DEFAULT '',
+    body           TEXT NOT NULL DEFAULT '',
+    header_msgid   TEXT NOT NULL DEFAULT '',   -- the Message-ID header, angle brackets kept
+    refs           TEXT NOT NULL DEFAULT '',   -- the References chain, space-separated
+    verdict        TEXT NOT NULL DEFAULT '',   -- inbound: SES's spam/virus/SPF/DKIM/DMARC verdicts
+    flagged        INTEGER NOT NULL DEFAULT 0, -- inbound: failed a verdict, or an automatic reply
+    truncated      INTEGER NOT NULL DEFAULT 0, -- inbound: the body is incomplete; the full message is in S3
+    at             TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_ses ON mail_message(ses_message_id) WHERE ses_message_id <> '';
+CREATE INDEX IF NOT EXISTS idx_mail_msgid ON mail_message(header_msgid);
+CREATE INDEX IF NOT EXISTS idx_mail_thread ON mail_message(thread_id, id);
+
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

@@ -180,6 +180,7 @@ type dashboardData struct {
 	Guest   guestActView   // public activation menu (State "guest")
 	Wait    *guestWaitView // public "waiting for approval" page (State "guest-wait")
 	Admin   *adminView     // admin dashboard (State "admin")
+	Mailbox *mailboxView   // the hello@ mailbox (State "admin-mail")
 	Unsub   *unsubView     // public unsubscribe confirm/result (State "unsubscribe")
 	Message *messageView   // styled message/error page (State "message")
 	Decide  *decideView    // public no-sign-in guest-request decide page (State "guestdecide")

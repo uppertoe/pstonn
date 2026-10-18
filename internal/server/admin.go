@@ -102,6 +102,10 @@ type adminView struct {
 	ContactMessages []contactMessageRow
 	ContactEnabled  bool
 	ContactPush     bool // whether a new message also reaches the operator as a push
+	// The hello@ mailbox: whether it is set up, and how many threads are waiting
+	// on an answer (their latest message is an unflagged inbound one).
+	MailboxOn      bool
+	MailUnanswered int
 }
 
 type contactMessageRow struct {
@@ -282,6 +286,12 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		alog.Infof("admin: list suppressions: %v", err)
+	}
+	v.MailboxOn = s.cfg.MailboxEnabled()
+	if n, err := s.store.UnansweredMail(r.Context()); err == nil {
+		v.MailUnanswered = n
+	} else {
+		alog.Infof("admin: count unanswered mail: %v", err)
 	}
 	v.ContactEnabled = s.cfg.ContactEnabled()
 	v.ContactPush = s.notify.ContactPushConfigured()

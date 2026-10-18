@@ -180,6 +180,53 @@ func (m *Mailer) send(to, subject, body string, o Options) error {
 	return m.deliver(to, []byte(b.String()))
 }
 
+// Personal is a message one person writes to another from the operator's mail
+// page, as opposed to a notice the app composes. It is sent as plain text only,
+// from the address the operator answers on, without the notice headers: no
+// Auto-Submitted (a reply is wanted, and an auto-responder should treat it as a
+// person's mail) and no List-Unsubscribe (it is a one-to-one letter, not a list).
+type Personal struct {
+	From       string // "p.stonn <hello@stonn.org>"
+	To         string
+	Subject    string
+	Body       string
+	InReplyTo  string   // the Message-ID being answered, angle brackets kept; "" for a new message
+	References []string // the chain to carry forward, oldest first
+}
+
+// SendPersonal delivers p and returns the Message-ID it was sent with, so a
+// reply to it can be threaded back.
+func (m *Mailer) SendPersonal(p Personal) (string, error) {
+	if m == nil {
+		return "", errors.New("mailer: not configured")
+	}
+	id := messageID(p.From)
+	headers := []string{
+		"From: " + headerValue(p.From),
+		"To: " + headerValue(p.To),
+		"Date: " + time.Now().Format(time.RFC1123Z),
+		"Message-ID: " + id,
+		"Subject: " + mime.QEncoding.Encode("utf-8", headerValue(p.Subject)),
+	}
+	if p.InReplyTo != "" {
+		headers = append(headers, "In-Reply-To: "+headerValue(p.InReplyTo))
+	}
+	if len(p.References) > 0 {
+		headers = append(headers, "References: "+headerValue(strings.Join(p.References, " ")))
+	}
+	headers = append(headers,
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Transfer-Encoding: base64",
+	)
+	body := strings.ReplaceAll(strings.ReplaceAll(p.Body, "\r\n", "\n"), "\n", "\r\n")
+	msg := strings.Join(headers, "\r\n") + "\r\n\r\n" + b64Wrap(body) + "\r\n"
+	if m.SendHook != nil {
+		return id, m.SendHook(p.To, p.Subject, p.Body, Options{})
+	}
+	return id, m.deliverAs(p.From, p.To, []byte(msg))
+}
+
 // How long one complete SMTP exchange (dial through QUIT) may take. Sends run
 // synchronously inside the scheduler's keep-warm pass and the outbox worker, so
 // a server that accepts the connection and then stalls must not be able to hold
@@ -191,7 +238,10 @@ var smtpExchangeTimeout = 30 * time.Second
 // and write. Semantics mirror smtp.SendMail: EHLO, STARTTLS when offered, auth
 // when configured and offered, then MAIL/RCPT/DATA/QUIT. PLAIN auth still
 // refuses to run over plaintext (smtp.PlainAuth enforces TLS-or-localhost).
-func (m *Mailer) deliver(to string, msg []byte) error {
+func (m *Mailer) deliver(to string, msg []byte) error { return m.deliverAs(m.from, to, msg) }
+
+// deliverAs is deliver with an explicit envelope sender, for SendPersonal.
+func (m *Mailer) deliverAs(sender, to string, msg []byte) error {
 	// RCPT TO takes a BARE address, never a display-name form. Operator-supplied
 	// addresses (ADMIN_EMAIL, CONTACT_TO) are validated with mail.ParseAddress,
 	// which happily accepts `Ops <ops@example.com>` — so without this the config
@@ -202,7 +252,7 @@ func (m *Mailer) deliver(to string, msg []byte) error {
 	if strings.ContainsAny(to, "\r\n") {
 		return errors.New("mailer: recipient contains CR/LF")
 	}
-	from := envelopeAddress(m.from)
+	from := envelopeAddress(sender)
 	if strings.ContainsAny(from, "\r\n") {
 		return errors.New("mailer: sender contains CR/LF")
 	}

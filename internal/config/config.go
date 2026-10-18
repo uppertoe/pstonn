@@ -143,10 +143,23 @@ type Config struct {
 	// entirely (no route, 404), so a deployment that hasn't wired SES up is not
 	// exposing an unused public handler. SES_SNS_TOPIC_ARN.
 	SESTopicARN string
+
+	// InboundTopicARN is the SNS topic SES publishes received mail to (the
+	// hello@ address), delivered to the same POST /hooks/ses and told apart by
+	// topic. MailboxFrom is the address the operator answers from on /admin/mail,
+	// e.g. "p.stonn <hello@stonn.org>". Both are needed, with SMTP, for the
+	// mailbox to be on. INBOUND_SNS_TOPIC_ARN, MAILBOX_FROM.
+	InboundTopicARN string
+	MailboxFrom     string
 }
 
 // SESHookEnabled reports whether the SES bounce/complaint webhook is configured.
 func (c *Config) SESHookEnabled() bool { return c.SESTopicARN != "" }
+
+// MailboxEnabled reports whether hello@ mail is received and can be answered.
+func (c *Config) MailboxEnabled() bool {
+	return c.InboundTopicARN != "" && c.MailboxFrom != "" && c.SMTP.Enabled()
+}
 
 // ContactEnabled reports whether the public contact form should be offered.
 // Submissions are stored and shown on /admin, so no mail channel is required;
@@ -428,13 +441,15 @@ func Load() (*Config, error) {
 			BaseURL: strings.TrimRight(os.Getenv("NTFY_BASE_URL"), "/"),
 			Token:   strings.TrimSpace(os.Getenv("NTFY_TOKEN")),
 		},
-		ContactForm:    env("CONTACT_FORM", "") == "1" || env("CONTACT_FORM", "") == "true",
-		ContactTo:      strings.TrimSpace(os.Getenv("CONTACT_TO")),
-		AdminEmail:     strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
-		AdminNtfyTopic: strings.TrimSpace(os.Getenv("ADMIN_NTFY_TOPIC")),
-		StatusToken:    strings.TrimSpace(os.Getenv("STATUS_TOKEN")),
-		MaxAccounts:    envInt("MAX_ACCOUNTS", 0),
-		SESTopicARN:    strings.TrimSpace(os.Getenv("SES_SNS_TOPIC_ARN")),
+		ContactForm:     env("CONTACT_FORM", "") == "1" || env("CONTACT_FORM", "") == "true",
+		ContactTo:       strings.TrimSpace(os.Getenv("CONTACT_TO")),
+		AdminEmail:      strings.TrimSpace(os.Getenv("ADMIN_EMAIL")),
+		AdminNtfyTopic:  strings.TrimSpace(os.Getenv("ADMIN_NTFY_TOPIC")),
+		StatusToken:     strings.TrimSpace(os.Getenv("STATUS_TOKEN")),
+		MaxAccounts:     envInt("MAX_ACCOUNTS", 0),
+		SESTopicARN:     strings.TrimSpace(os.Getenv("SES_SNS_TOPIC_ARN")),
+		InboundTopicARN: strings.TrimSpace(os.Getenv("INBOUND_SNS_TOPIC_ARN")),
+		MailboxFrom:     strings.TrimSpace(os.Getenv("MAILBOX_FROM")),
 		AppOIDC: AppOIDCConfig{
 			Issuer:       strings.TrimRight(os.Getenv("APP_OIDC_ISSUER"), "/"),
 			ClientID:     os.Getenv("APP_OIDC_CLIENT_ID"),
@@ -581,7 +596,7 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("SMTP_FROM (%q) is not a valid email address: %w", cfg.SMTP.From, err)
 		}
 	}
-	for name, addr := range map[string]string{"ADMIN_EMAIL": cfg.AdminEmail, "CONTACT_TO": cfg.ContactTo} {
+	for name, addr := range map[string]string{"ADMIN_EMAIL": cfg.AdminEmail, "CONTACT_TO": cfg.ContactTo, "MAILBOX_FROM": cfg.MailboxFrom} {
 		if addr == "" {
 			continue
 		}

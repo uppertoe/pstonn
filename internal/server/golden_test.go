@@ -256,6 +256,22 @@ func goldenExtraCases(loc *time.Location, user identity.User, now time.Time) []r
 			},
 		}}, ""},
 		{"admin empty", dashboardData{User: user, State: "admin", Loc: loc, Admin: &adminView{SchedulerLast: "never", SchedulerStale: true}}, ""},
+		{"admin with mailbox", dashboardData{User: user, State: "admin", Loc: loc, Admin: &adminView{SchedulerLast: "1 min ago", MailboxOn: true, MailUnanswered: 2}}, ""},
+		{"admin-mail", dashboardData{User: user, State: "admin-mail", Loc: loc, LogoutURL: "https://auth.example.com/logout", Flash: "Your message has been sent.",
+			Mailbox: &mailboxView{Enabled: true, Push: true, From: "p.stonn <hello@stonn.org>", Threads: []mailThreadView{
+				{ID: 4, Subject: "Re: p.stonn and your visitor permit", With: "resident@example.com", ReplyTo: 5, ReplySubject: "Re: p.stonn and your visitor permit", Waiting: true,
+					Messages: []mailRowView{
+						{Who: "To resident@example.com", When: "Sun 18 Oct, 9:00 am (3 hours ago)", Reply: "Hello,\n\nWe noticed that you connected your visitor permit."},
+						{Inbound: true, Who: "Resident <resident@example.com>", When: "Sun 18 Oct, 11:00 am (1 hour ago)", Reply: "Thank you, I just forgot.",
+							Quoted: "On 18 Oct 2026, p.stonn wrote:\n> Hello,", Verdict: "spam PASS · virus PASS · SPF PASS · DKIM PASS · DMARC PASS"},
+					}},
+				{ID: 2, Subject: "Cheap offers", With: "bot@example.net", ReplyTo: 2, ReplySubject: "Re: Cheap offers",
+					Messages: []mailRowView{
+						{Inbound: true, Who: "bot@example.net", When: "Sat 17 Oct, 2:00 am (1 day ago)", Reply: "<script>alert(1)</script>", Flagged: true,
+							Verdict: "spam FAIL · virus PASS · SPF FAIL · DKIM GRAY · DMARC FAIL", Truncated: true, S3Key: "hello/abc123"},
+					}},
+			}}}, ""},
+		{"admin-mail off", dashboardData{User: user, State: "admin-mail", Loc: loc, Mailbox: &mailboxView{}}, ""},
 		{"schedule with warn and flash", app("schedule", func(d *dashboardData) { d.Warn = "Couldn't reach the council just now."; d.Flash = "Saved." }), ""},
 		{"schedule with legend overflow", app("schedule", func(d *dashboardData) {
 			d.App.LegendVehicles = d.Vehicles

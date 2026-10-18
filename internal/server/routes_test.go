@@ -84,7 +84,9 @@ func TestMutatingRoutesAreGuarded(t *testing.T) {
 		case guardPublic:
 			_, safe = publicMutations[rt.methodPattern]
 		case guardAdmin:
-			safe = false // requireAdmin runs no CSRF check; there is no admin mutation today
+			safe = false // requireAdmin runs no CSRF check
+		case guardAdminWrite:
+			safe = true // requireAdmin plus sameOriginWrite
 		}
 		if !safe {
 			t.Errorf("mutating route %q has guard %d but is not an approved guarded mutation: "+

@@ -282,6 +282,22 @@ func (s *Server) withConsent(h http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+// sameOriginWrite refuses a cross-site state-changing request and caps its body,
+// as withUser does for the signed-in app. It runs inside requireAdmin, so only an
+// administrator's own page can post.
+func (s *Server) sameOriginWrite(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if isStateChanging(r) {
+			if !sameOrigin(r) {
+				s.message(w, http.StatusForbidden, "p.stonn could not verify this request. Please reload the page and try again.")
+				return
+			}
+			limitBody(r)
+		}
+		h(w, r)
+	}
+}
+
 func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, ok := s.user(w, r)

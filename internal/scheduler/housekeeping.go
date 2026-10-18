@@ -111,6 +111,10 @@ func (s *Scheduler) sweepGuestRequests(ctx context.Context) {
 	if _, err := s.store.PruneContactMessages(ctx, s.now().Add(-store.ContactMessageRetention)); err != nil {
 		alog.Infof("prune contact messages: %v", err)
 	}
+	// hello@ mail names a third party; same operator-only 180 days (store.MailRetention).
+	if _, err := s.store.PruneMail(ctx, s.now().Add(-store.MailRetention)); err != nil {
+		alog.Infof("prune mail: %v", err)
+	}
 	// Referral invites name the inviter and a third party who never signed up;
 	// same 90-day window as the other logs (store.ReferralInviteRetention).
 	if _, err := s.store.PruneReferralInvites(ctx, s.now().Add(-store.ReferralInviteRetention)); err != nil {

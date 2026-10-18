@@ -3,6 +3,7 @@
 {{template "appbar" .}}
 <main id="main" tabindex="-1" class="adminwrap">
   <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-gear"}}</span> Admin</div>
+  <p class="subtitle">{{if .Admin.MailboxOn}}<a href="/admin/mail">Open the mailbox</a>. {{if eq .Admin.MailUnanswered 0}}No messages to hello@ are waiting for an answer.{{else if eq .Admin.MailUnanswered 1}}One message to hello@ is waiting for an answer.{{else}}{{.Admin.MailUnanswered}} messages to hello@ are waiting for an answer.{{end}}{{else}}<a href="/admin/mail">The mailbox</a> is not set up.{{end}}</p>
   <div class="adm-health {{if .Admin.SchedulerStale}}bad{{else}}ok{{end}}">
     <div><strong>Scheduler</strong> {{if .Admin.SchedulerStale}}looks stalled &mdash; last clean pass {{.Admin.SchedulerLast}}{{else}}healthy &mdash; last pass {{.Admin.SchedulerLast}}{{end}}</div>
     <div class="adm-stats">
@@ -156,4 +157,56 @@
   </div>
 </main>
 
+{{end}}
+
+{{define "page-admin-mail"}}
+{{/* ================= MAILBOX (operators only) =================
+     Mail to hello@ arrives through SES and the signed SNS hook; answers go out
+     from MAILBOX_FROM. Everything shown here is untrusted text from the open
+     internet, so it is rendered as escaped plain text and nothing is linked. */}}
+{{template "appbar" .}}
+<main id="main" tabindex="-1" class="adminwrap">
+  <div class="sectitle" style="--hue:var(--sec-settings)"><span class="ic">{{template "ic-mail"}}</span> Mail</div>
+  <p class="subtitle"><a href="/admin">Back to admin</a>. {{if .Mailbox.Enabled}}Messages to hello@ are listed with the newest first, and answers are sent from {{.Mailbox.From}}. A new message {{if .Mailbox.Push}}is pushed to the admin ntfy topic{{else}}is not pushed anywhere (set ADMIN_NTFY_TOPIC){{end}}.{{else}}The mailbox is off. Set INBOUND_SNS_TOPIC_ARN and MAILBOX_FROM to receive and send mail here.{{end}}</p>
+  {{if .Flash}}<div class="banner ok">{{template "ic-check"}} {{.Flash}}</div>{{end}}
+  {{if .Mailbox.Enabled}}
+  <details class="card" style="margin-bottom:14px">
+    <summary><strong>Write a new message</strong></summary>
+    <form method="post" action="/admin/mail/send" style="margin-top:12px;display:grid;gap:10px"
+          data-confirm="Send this message from {{.Mailbox.From}}?" data-confirm-ok="Send" data-confirm-tone="primary">
+      <label class="fld"><span>To</span><input type="email" name="to" required autocomplete="off"></label>
+      <label class="fld"><span>Subject</span><input type="text" name="subject" required maxlength="200"></label>
+      <label class="fld"><span>Message</span><textarea name="body" rows="9" required maxlength="20000"></textarea></label>
+      <div><button type="submit">{{template "ic-mail"}} Send</button></div>
+    </form>
+  </details>
+  {{end}}
+  {{range .Mailbox.Threads}}
+  <section class="card" style="margin-bottom:14px">
+    <h2><span class="ic">{{template "ic-mail"}}</span> {{.Subject}}</h2>
+    <p class="sub" style="margin-top:-8px">{{if .With}}The conversation is with {{.With}}.{{end}}{{if .Waiting}} <strong>This message is waiting for an answer.</strong>{{end}}</p>
+    {{range .Messages}}
+    <div style="border-top:1px solid var(--line);padding:12px 0">
+      <div class="sub"><strong>{{if .Inbound}}From {{.Who}}{{else}}{{.Who}}, sent from p.stonn{{end}}</strong> &middot; {{.When}}</div>
+      {{if .Flagged}}<div class="banner warn" style="margin:8px 0">SES flagged this message ({{.Verdict}}). Check it before answering.</div>{{end}}
+      {{if .Reply}}<div style="white-space:pre-wrap;margin-top:8px">{{.Reply}}</div>{{end}}
+      {{if .Quoted}}<details style="margin-top:8px"><summary class="sub">Show the quoted message</summary><div class="sub" style="white-space:pre-wrap;margin-top:6px">{{.Quoted}}</div></details>{{end}}
+      {{if .Truncated}}<p class="sub" style="margin-top:8px">p.stonn can show only part of this message. The full message is saved in S3 as {{.S3Key}}.</p>{{end}}
+      {{if and .Inbound (not .Flagged)}}<p class="sub" style="margin-top:6px">SES checks: {{.Verdict}}.</p>{{end}}
+    </div>
+    {{end}}
+    {{if and $.Mailbox.Enabled .ReplyTo}}
+    <form method="post" action="/admin/mail/send" style="display:grid;gap:10px;border-top:1px solid var(--line);padding-top:12px"
+          data-confirm="Send this reply to {{.With}}?" data-confirm-ok="Send reply" data-confirm-tone="primary">
+      <input type="hidden" name="reply" value="{{.ReplyTo}}">
+      <input type="hidden" name="subject" value="{{.ReplySubject}}">
+      <label class="fld"><span>Reply to {{.With}}</span><textarea name="body" rows="6" required maxlength="20000"></textarea></label>
+      <div><button type="submit">{{template "ic-mail"}} Send reply</button></div>
+    </form>
+    {{end}}
+  </section>
+  {{else}}
+  <p class="empty-note">No mail has arrived yet.</p>
+  {{end}}
+</main>
 {{end}}

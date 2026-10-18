@@ -490,6 +490,7 @@ window.popClamp = window.popClamp || function (el, tries) {
 {{- else if eq .State "share-card"}}{{template "page-share-card" .}}
 {{- else if eq .State "guide"}}{{template "page-guide" .}}
 {{- else if eq .State "admin"}}{{template "page-admin" .}}
+{{- else if eq .State "admin-mail"}}{{template "page-admin-mail" .}}
 {{- else}}{{template "page-app" .}}
 {{- end}}
 

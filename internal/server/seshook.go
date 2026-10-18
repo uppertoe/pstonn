@@ -85,9 +85,11 @@ type sesEvent struct {
 	} `json:"reject"`
 }
 
-// maxSNSBody bounds the POST body. SES notifications are a few KB; the endpoint
-// is public, so it must not be a memory sink.
-const maxSNSBody = 256 << 10
+// maxSNSBody bounds the POST body. SES event notifications are a few KB; a
+// received message carries its content base64-encoded, and SES sends content
+// only up to 150 KB (about 200 KB encoded, plus the headers listed twice). The
+// endpoint is public, so it must not be a memory sink.
+const maxSNSBody = 512 << 10
 
 // sesHook consumes SES bounce and complaint notifications delivered via SNS, and
 // records undeliverable addresses so the app stops mailing them. Without this the
@@ -123,7 +125,9 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 	}
 	// Topic first: cheapest check, and it scopes everything that follows to the
 	// one topic this deployment owns.
-	if m.TopicARN != s.cfg.SESTopicARN {
+	// The hello@ mailbox's received mail rides the same endpoint on its own topic.
+	inbound := s.cfg.InboundTopicARN != "" && m.TopicARN == s.cfg.InboundTopicARN
+	if !inbound && (s.cfg.SESTopicARN == "" || m.TopicARN != s.cfg.SESTopicARN) {
 		alog.Warnf("ses hook: refusing message for unexpected topic %q", m.TopicARN)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
@@ -158,6 +162,16 @@ func (s *Server) sesHook(w http.ResponseWriter, r *http.Request) {
 		}
 		alog.Infof("ses hook: confirmed SNS subscription for topic %s", m.TopicARN)
 	case "Notification":
+		if inbound {
+			if err := s.handleInboundMail(r.Context(), m.Message); err != nil {
+				// A storage failure: ask SNS to redeliver. The SES message id dedups a
+				// retry that lands after a write did in fact commit.
+				alog.Errorf("ses hook: storing received mail failed, asking SNS to retry: %v", err)
+				http.Error(w, "temporary storage error", http.StatusInternalServerError)
+				return
+			}
+			break
+		}
 		if err := s.handleSESEvent(r, m.Message); err != nil {
 			// A suppression write failed (a full data volume, a read-only remount). Ack
 			// it with 200 and SNS deletes the message — a bounce mostly self-heals on the

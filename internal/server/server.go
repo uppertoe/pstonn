@@ -185,8 +185,12 @@ const (
 	// guardConsent is withConsent: guardUser plus the terms-acceptance gate. The
 	// default for any route that stores or changes account data.
 	guardConsent
-	// guardAdmin is requireAdmin: signed in and in the admin group.
+	// guardAdmin is requireAdmin: signed in and in the admin group. No CSRF
+	// check, so never a mutation.
 	guardAdmin
+	// guardAdminWrite is requireAdmin plus the same-origin check and body cap
+	// that withUser applies: the one admin mutation is sending mail.
+	guardAdminWrite
 )
 
 type routeInfo struct {
@@ -207,6 +211,8 @@ func (s *Server) handle(mux *http.ServeMux, methodPattern string, guard guardKin
 		h = s.withConsent(h)
 	case guardAdmin:
 		h = s.requireAdmin(h)
+	case guardAdminWrite:
+		h = s.requireAdmin(s.sameOriginWrite(h))
 	case guardPublic:
 		// no wrapper: public, token/bearer-authenticated, or already wrapped
 	}
@@ -392,7 +398,7 @@ func (s *Server) Handler() http.Handler {
 	// only when a topic ARN is configured, so an unwired deployment 404s rather
 	// than exposing an idle handler. SNS cannot send a bearer token, so trust
 	// comes from the message signature + topic ARN (see sesHook).
-	if s.cfg.SESHookEnabled() {
+	if s.cfg.SESHookEnabled() || s.cfg.InboundTopicARN != "" {
 		s.handle(mux, "POST /hooks/ses", guardPublic, s.sesHook)
 	}
 
@@ -460,6 +466,8 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /share/card", guardConsent, s.shareCard)
 	s.handle(mux, "POST /share/invite", guardConsent, s.sendReferral)
 	s.handle(mux, "GET /admin", guardAdmin, s.adminPage)
+	s.handle(mux, "GET /admin/mail", guardAdmin, s.adminMailPage)
+	s.handle(mux, "POST /admin/mail/send", guardAdminWrite, s.adminMailSend)
 	s.handle(mux, "GET /status", guardPublic, s.statusJSON) // machine watchdog; bearer-token gated
 	s.handle(mux, "GET /permits/new", guardUser, s.pickerPage)
 	s.handle(mux, "GET /permits/{id}/card", guardConsent, s.permitCard)

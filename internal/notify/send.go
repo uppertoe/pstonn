@@ -109,6 +109,28 @@ func (s *Service) sendEmailAs(ctx context.Context, tenantOwner, tenantID, to, su
 // whether anybody is TOLD a message arrived.
 func (s *Service) ContactPushConfigured() bool { return s.adminTopic != "" && s.ntfyBase != "" }
 
+// NotifyMail pushes a message received at the hello@ address to the operator's
+// ntfy topic, for the same reason NotifyContact does: ntfy only, never email.
+// The push carries the sender and a preview; the message is read and answered
+// on /admin/mail.
+func (s *Service) NotifyMail(ctx context.Context, from, subject, preview string) error {
+	if !s.ContactPushConfigured() {
+		return nil
+	}
+	body := "From " + from
+	if subject != "" {
+		body += "\n" + subject
+	}
+	if p := contactPreview(preview); p != "" {
+		body += "\n\n" + p
+	}
+	extra := map[string]string{}
+	if s.appURL != "" {
+		extra["Click"] = s.appURL + "/admin/mail"
+	}
+	return s.sendNtfyHeaders(ctx, s.adminTopic, "p.stonn mail", body, "default", "envelope", extra)
+}
+
 // NotifyContact pushes a contact-form submission to the operator's ntfy topic.
 // Deliberately ntfy ONLY, never email: the form is public, so its content is
 // whatever a stranger (or a bot) typed. Relaying that through the outbound
