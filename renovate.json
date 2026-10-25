@@ -33,6 +33,11 @@
       "matchManagers": ["gomod", "dockerfile", "custom.regex"],
       "matchUpdateTypes": ["patch", "pin", "digest"],
       "automerge": true
+    },
+    {
+      "description": "Move the Go toolchain directive, CI go-version, Dockerfile golang base and govulncheck pin in ONE PR. Split, each fails CI alone: govulncheck stays red until all of them land (2026-10-25, #50/#51/#52).",
+      "matchDepNames": ["golang", "go", "golang.org/x/vuln"],
+      "groupName": "go toolchain"
     }
   ]
 }
