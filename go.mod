@@ -1,12 +1,12 @@
 module github.com/uppertoe/pstonn
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.27.3
 
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/oauth2 v0.37.0
 	modernc.org/sqlite v1.57.0
 	rsc.io/qr v0.2.0
 )
