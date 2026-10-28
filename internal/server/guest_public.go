@@ -752,6 +752,78 @@ func isHX(r *http.Request) bool { return r.Header.Get("HX-Request") == "true" }
 // only the inner fragment and loses its wrapper — and its padding.
 func isBoosted(r *http.Request) bool { return r.Header.Get("HX-Boosted") == "true" }
 
+// guestAlreadyCovered reports whether activating the target (a saved car when
+// vehicleID is set, else the typed reg in state) for [now, end) would change
+// nothing, returning the covering booking's end. That holds only when the
+// tenant already shows the plate AND the freshest booking overlapping the
+// window is this same link's booking for the same car, already started and
+// running to end or later: Resolve's freshest-wins rule then gives the
+// identical answer at every instant with or without a new booking. current
+// (the page's plate) is only a cheap first filter; councilShows confirms it.
+//
+// Everything else falls through to a real activation, deliberately: a newer
+// booking in the window (the fresh one would beat it), a longer window (the
+// overnight tick extends), a target the tenant does not yet show (the press
+// retries the write), and a booking made by the household or another link — a
+// guest's own booking must survive the household deleting theirs or another
+// link being revoked, which sweeps that link's bookings.
+func (s *Server) guestAlreadyCovered(ctx context.Context, gc guestCtx, permit model.Permit, now, end time.Time, current string, vehicleID int64, reg, state string) (time.Time, bool) {
+	if gc.TokenID == 0 || !model.SamePlate(current, reg) {
+		return time.Time{}, false
+	}
+	overrides, err := s.store.ListOverrides(ctx, permit.ID, now) // not yet ended
+	if err != nil {
+		return time.Time{}, false
+	}
+	var best *model.Override
+	for i := range overrides {
+		o := &overrides[i]
+		if !o.StartsAt.Before(end) {
+			continue // begins after the window
+		}
+		if best == nil || o.CreatedAt.After(best.CreatedAt) ||
+			(o.CreatedAt.Equal(best.CreatedAt) && o.ID > best.ID) {
+			best = o
+		}
+	}
+	if best == nil || best.GuestTokenID != gc.TokenID || best.Empty ||
+		best.StartsAt.After(now) || best.EndsAt == nil || best.EndsAt.Before(end) {
+		return time.Time{}, false
+	}
+	if vehicleID != 0 {
+		if best.VehicleID != vehicleID {
+			return time.Time{}, false
+		}
+	} else if best.VehicleID != 0 || !model.SamePlate(best.Registration, reg) || best.State != state {
+		return time.Time{}, false
+	}
+	if !s.councilShows(ctx, permit, reg) {
+		return time.Time{}, false
+	}
+	return *best.EndsAt, true
+}
+
+// councilShows confirms with the tenant that reg is on the permit right now:
+// from a reading younger than guestPlateFreshness, else by reading it live.
+// The page's current plate cannot be trusted for this on its own — once the
+// cached reading is stale it falls back to our stored belief, which an outside
+// change on the council's own site leaves wrong, and the real activation this
+// would skip is what puts the car back. Any failure to read says no, so the
+// press falls through to the real activation and its own error handling.
+func (s *Server) councilShows(ctx context.Context, permit model.Permit, reg string) bool {
+	if s.tenant == nil {
+		return false
+	}
+	ref := model.Permit{TenantID: permit.TenantID, CouncilPermitID: permit.CouncilPermitID, PermitTypeID: permit.PermitTypeID}
+	if actual, _, fresh, err := s.tenant.CurrentVehicleCached(ctx, permit.Owner, ref, guestPlateFreshness); err == nil && fresh {
+		return model.SamePlate(actual, reg)
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	actual, err := s.tenant.CurrentVehicle(readCtx, permit.Owner, ref)
+	return err == nil && model.SamePlate(actual, reg)
+}
+
 // guestActivate performs an activation: it creates a fresh override for the chosen
 // car (end of today, or tomorrow if overnight) and applies it to the tenant for
 // instant feedback, leaving the scheduler to guarantee eventual consistency. The
@@ -799,6 +871,23 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	current := s.guestCurrentPlate(r.Context(), gc, permit)
 
+	// A press that would change nothing — the car is already on the permit under
+	// this link's own booking, for at least as long — saves no second booking and
+	// sends the household no second round of notices; it says so instead.
+	alreadyOn := func(vehicleID int64, reg, state string) bool {
+		until, ok := s.guestAlreadyCovered(r.Context(), gc, permit, now, end, current, vehicleID, reg, state)
+		if !ok {
+			return false
+		}
+		flash := reg + " is already on the permit."
+		if t := untilText(now, until); t != "" {
+			flash = reg + " is already on the permit " + t + "."
+		}
+		alog.Infof("guest activate %s on permit %d: already on under this link's booking; nothing saved", reg, permit.ID)
+		s.renderGuestMenu(w, r, gc, permit, current, flash, "")
+		return true
+	}
+
 	// The target is either an arbitrary plate (when the grant allows it, e.g. a
 	// visitor QR) or one of the grant's saved cars. Each becomes a fresh override,
 	// created now, so it wins the resolution tie-break for its window.
@@ -815,6 +904,9 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 		createdBy = gc.Recipient
 		if createdBy == "" {
 			createdBy = "visitor (QR)"
+		}
+		if alreadyOn(0, reg, regState) {
+			return
 		}
 		id, err := s.store.CreateGuestPlateOverride(r.Context(), permit.ID, plate, regState, now, &end, createdBy, gc.TokenID)
 		if err != nil {
@@ -836,6 +928,9 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reg, name, color, createdBy, regState = chosen.Registration, chosen.Label, chosen.Color, gc.Recipient, chosen.State
+		if alreadyOn(chosen.ID, reg, regState) {
+			return
+		}
 		id, err := s.store.CreateGuestOverride(r.Context(), permit.ID, chosen.ID, now, &end, gc.Recipient, gc.TokenID)
 		if err != nil {
 			s.renderGuestMenu(w, r, gc, permit, current, "", guestCreateMessage(err, "p.stonn could not save your choice. Please try again."))

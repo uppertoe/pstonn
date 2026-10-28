@@ -45,6 +45,9 @@ type Tenant interface {
 	ListPermitsComplete(ctx context.Context, owner, tenantID string) ([]parking.PermitInfo, bool, error)
 	// CurrentVehicleCached is the bounded-read plate lookup the pages use.
 	CurrentVehicleCached(ctx context.Context, owner string, p model.Permit, maxAge time.Duration) (reg string, age time.Duration, fresh bool, err error)
+	// CurrentVehicle reads the plate live, for a decision that must not rest on
+	// a stale reading (a guest press that would otherwise skip its write).
+	CurrentVehicle(ctx context.Context, owner string, p model.Permit) (string, error)
 	// RefreshFailingFor reports how long background plate refreshes have been failing.
 	RefreshFailingFor(owner string, p model.Permit) time.Duration
 	// ForgetPermit drops cached state for a permit the owner stopped managing.
