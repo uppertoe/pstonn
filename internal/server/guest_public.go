@@ -758,8 +758,8 @@ func isBoosted(r *http.Request) bool { return r.Header.Get("HX-Boosted") == "tru
 // tenant already shows the plate AND the freshest booking overlapping the
 // window is this same link's booking for the same car, already started and
 // running to end or later: Resolve's freshest-wins rule then gives the
-// identical answer at every instant with or without a new booking. current
-// (the page's plate) is only a cheap first filter; councilShows confirms it.
+// identical answer at every instant with or without a new booking. The caller
+// has already confirmed with councilShows that the tenant holds reg.
 //
 // Everything else falls through to a real activation, deliberately: a newer
 // booking in the window (the fresh one would beat it), a longer window (the
@@ -767,8 +767,8 @@ func isBoosted(r *http.Request) bool { return r.Header.Get("HX-Boosted") == "tru
 // retries the write), and a booking made by the household or another link — a
 // guest's own booking must survive the household deleting theirs or another
 // link being revoked, which sweeps that link's bookings.
-func (s *Server) guestAlreadyCovered(ctx context.Context, gc guestCtx, permit model.Permit, now, end time.Time, current string, vehicleID int64, reg, state string) (time.Time, bool) {
-	if gc.TokenID == 0 || !model.SamePlate(current, reg) {
+func (s *Server) guestAlreadyCovered(ctx context.Context, gc guestCtx, permit model.Permit, now, end time.Time, vehicleID int64, reg, state string) (time.Time, bool) {
+	if gc.TokenID == 0 {
 		return time.Time{}, false
 	}
 	overrides, err := s.store.ListOverrides(ctx, permit.ID, now) // not yet ended
@@ -797,10 +797,30 @@ func (s *Server) guestAlreadyCovered(ctx context.Context, gc guestCtx, permit mo
 	} else if best.VehicleID != 0 || !model.SamePlate(best.Registration, reg) || best.State != state {
 		return time.Time{}, false
 	}
-	if !s.councilShows(ctx, permit, reg) {
-		return time.Time{}, false
-	}
 	return *best.EndsAt, true
+}
+
+// guestCarAlreadyOn reports whether the tenant already holds reg under state,
+// so putting it on changes nothing on the permit. The tenant's record is read
+// for the plate only (it does not report the state), so the state is taken from
+// what p.stonn last put there: the schedule's current target, or with nothing
+// scheduled, the owner's saved car with that plate. The same letters in another
+// state are another car, and a real change the council applies.
+func (s *Server) guestCarAlreadyOn(ctx context.Context, permit model.Permit, current, reg, state string) bool {
+	if !model.SamePlate(current, reg) {
+		return false
+	}
+	if want, wantState, _, _ := s.guestDesired(ctx, permit); want != "" {
+		if !model.SamePlate(want, reg) || wantState != state {
+			return false
+		}
+	} else {
+		vehicles, err := s.store.ListVehiclesFor(ctx, permit.Owner)
+		if err != nil || stateForPlate(vehicles, reg) != state {
+			return false
+		}
+	}
+	return s.councilShows(ctx, permit, reg)
 }
 
 // councilShows confirms with the tenant that reg is on the permit right now:
@@ -871,11 +891,20 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	current := s.guestCurrentPlate(r.Context(), gc, permit)
 
-	// A press that would change nothing — the car is already on the permit under
-	// this link's own booking, for at least as long — saves no second booking and
-	// sends the household no second round of notices; it says so instead.
+	// wasOn records that the tenant already held the chosen car before this
+	// press (confirmed, not the page's possibly stale plate). A press that would
+	// change nothing — the car already on under this link's own booking, for at
+	// least as long — saves nothing and says so. Any other press of a car already
+	// on still books, so the car stays covered whatever happens to the booking
+	// that put it there (a revoked link's bookings are swept; the household can
+	// delete its own), but nothing on the permit changed, so nobody is notified.
+	wasOn := false
 	alreadyOn := func(vehicleID int64, reg, state string) bool {
-		until, ok := s.guestAlreadyCovered(r.Context(), gc, permit, now, end, current, vehicleID, reg, state)
+		wasOn = s.guestCarAlreadyOn(r.Context(), permit, current, reg, state)
+		if !wasOn {
+			return false
+		}
+		until, ok := s.guestAlreadyCovered(r.Context(), gc, permit, now, end, vehicleID, reg, state)
 		if !ok {
 			return false
 		}
@@ -970,6 +999,10 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	})
 	if d != guestApplyAllowed {
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
+		return
+	}
+	if err == nil && wasOn {
+		s.renderGuestMenu(w, r, gc, permit, reg, reg+" is already on the permit. p.stonn will keep it on until "+until+".", "")
 		return
 	}
 	if err == nil {
