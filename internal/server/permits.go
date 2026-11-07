@@ -202,48 +202,46 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 	}
 	fallback := s.visitorNameFallback(ctx, owner, permits)
 	if fallback && complete {
-		// The tenant appears to have renamed its permit types out from under the
-		// name-match — systemic (hits every new signup), so the operator must
-		// hear. Once per process: a rename doesn't unhappen between requests.
-		s.renameAlertOnce.Do(func() {
-			// Name the types actually seen AND what the picker did with each:
-			// without that the alert cannot distinguish "the tenant renamed its
-			// types" (systemic) from "this account just holds no visitor permit"
-			// (benign) — and an earlier wording that flatly claimed permits were
-			// being "offered with a caution" sent the operator investigating a
-			// resident-only household whose permit was never offered at all
-			// (2026-08-23). Type names are tenant catalog labels shared by every
-			// holder of the type, not personal data — never log permit numbers or
-			// regos here.
-			types := make([]string, 0, len(permits))
-			offered := 0
-			for _, p := range permits {
-				t := fmt.Sprintf("%q", p.PermitType)
-				switch {
-				case !p.CanChangeVehicle:
-					t += " (not changeable — not offered)"
-				case s.isResidentPermit(ctx, owner, p.PermitType):
-					t += " (changeable, resident — excluded, never offered)"
-				default:
-					t += " (changeable — offered with a caution)"
-					offered++
-				}
-				types = append(types, t)
+		// Name the types actually seen AND what the picker did with each. Type
+		// names are tenant catalog labels shared by every holder of the type, not
+		// personal data — never log permit numbers or regos here.
+		types := make([]string, 0, len(permits))
+		offered := 0
+		for _, p := range permits {
+			t := fmt.Sprintf("%q", p.PermitType)
+			switch {
+			case !p.CanChangeVehicle:
+				t += " (not changeable — not offered)"
+			case s.isResidentPermit(ctx, owner, p.PermitType):
+				t += " (changeable, resident — excluded, never offered)"
+			default:
+				t += " (changeable — offered with a caution)"
+				offered++
 			}
-			seen := strings.Join(types, ", ")
-			alog.Warnf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback engaged; %s", redact.Email(owner), seen)
-			outcome := "Nothing was offered: every changeable permit here is a resident permit, which the fallback excludes outright (it holds the resident's own car). The household saw their permits greyed out with the reason."
-			if offered > 0 {
-				outcome = "Non-resident changeable permits were offered with a caution; resident permits (if any) stayed excluded."
-			}
-			nctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			_ = s.notify.NotifyAdmin(nctx, "Council may have renamed permit types",
-				"An account holds permits with CanChangeVehicle=true but none whose type name contains \"visitor\" — either the council renamed its permit types (systemic: hits every new signup) or this household simply holds no visitor permit (benign).\n\n"+
-					"What the picker did with each type:\n"+seen+"\n\n"+
-					outcome+"\n\n"+
-					"If these are ordinary non-visitor types, no action is needed. If a visitor-like type has a new name, update the council policy's VisitorWord.")
-		})
+			types = append(types, t)
+		}
+		seen := strings.Join(types, ", ")
+		if offered == 0 {
+			// Every changeable permit is a resident permit, which the fallback never
+			// offers: this household simply holds no visitor permit. A real rename
+			// would leave the renamed visitor type offered with a caution, so this is
+			// no evidence of one — and alerting on it sent the operator investigating
+			// resident-only households twice (2026-08-23, 2026-11-07).
+			alog.Infof("picker: account %s holds no visitor permit, only resident or unchangeable permits; nothing offered; %s", redact.Email(owner), seen)
+		} else {
+			// The tenant appears to have renamed its permit types out from under the
+			// name-match — systemic (hits every new signup), so the operator must
+			// hear. Once per process: a rename doesn't unhappen between requests.
+			s.renameAlertOnce.Do(func() {
+				alog.Warnf("picker: account %s holds changeable permits but NONE named 'visitor' — council may have renamed permit types; fallback engaged; %s", redact.Email(owner), seen)
+				nctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				_ = s.notify.NotifyAdmin(nctx, "Council may have renamed permit types",
+					"An account holds permits with CanChangeVehicle=true but none whose type name contains \"visitor\", and the fallback offered at least one non-resident permit with a caution. Either the council renamed its visitor type (systemic: hits every new signup) or this household holds another changeable type.\n\n"+
+						"What the picker did with each type:\n"+seen+"\n\n"+
+						"If these are ordinary non-visitor types, no action is needed. If a visitor-like type has a new name, update the council policy's VisitorWord.")
+			})
+		}
 	}
 	for _, p := range permits {
 		if already[p.CouncilPermitID] {
@@ -258,7 +256,9 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		reason := ""
 		switch {
 		case !visitor:
-			reason = "p.stonn can only schedule visitor permits."
+			reason = "p.stonn can only manage visitor permits."
+		case !p.CanChangeVehicle && s.policyFor(ctx, owner).IsPaper(p.PermitType):
+			reason = "A paper visitor permit has no rego for p.stonn to change."
 		case !p.CanChangeVehicle:
 			reason = "Your council account can't change the rego on this permit."
 		}
@@ -298,6 +298,7 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		base.Picker.Pick = append(base.Picker.Pick, pickView{
 			CouncilPermitID: p.CouncilPermitID, PermitTypeID: p.PermitTypeID,
 			PermitNumber: p.PermitNumber, PermitType: p.PermitType, CurrentRego: p.CurrentRego,
+			Kind:    permitKind(s.policyFor(ctx, owner), p.PermitType),
 			Addable: addable, Reason: reason, Warn: warn, Dead: dead, Status: status,
 		})
 	}
@@ -331,6 +332,26 @@ func (s *Server) renderPicker(w http.ResponseWriter, r *http.Request, base dashb
 		alog.Infof("picker for %s: %d council permit(s), %d already managed, %d offered live: %s",
 			redact.Email(owner), len(permits), len(permits)-len(base.Picker.Pick), offered, detail)
 		base.Picker.OfferedCount = offered // drives the picker's one-vs-many guidance
+	}
+	// A first-timer whose permits are all greyed out was still told to "pick the
+	// permit you want to schedule" (two resident-only households stalled there,
+	// 2026-11-05 and 2026-11-07). Explain why instead. Not on a partial read: a
+	// missing page may hold the visitor permit.
+	{
+		policy := s.policyFor(ctx, owner)
+		anyAddable := false
+		for _, pv := range base.Picker.Pick {
+			anyAddable = anyAddable || pv.Addable
+		}
+		for _, p := range permits {
+			if policy.IsVisitor(p.PermitType) {
+				base.Picker.HasVisitor = true
+			}
+			if policy.IsResident(p.PermitType) && !policy.ScheduleResident {
+				base.Picker.HasResident = true
+			}
+		}
+		base.Picker.NoneAddable = complete && !base.Picker.HasManaged && len(base.Picker.Pick) > 0 && !anyAddable
 	}
 	// Live permits first, dead ones last; the tenant's own order within each
 	// group. The template renders the dead group under its own heading.
@@ -427,6 +448,18 @@ func (s *Server) visitorNameFallback(ctx context.Context, owner string, permits 
 }
 func (s *Server) visitorSchedulable(ctx context.Context, owner string, p parking.PermitInfo, fallback bool) bool {
 	return s.policyFor(ctx, owner).Schedulable(p, fallback)
+}
+
+// permitKind names the label a permit's type wears in the picker: visitor or
+// resident, the two kinds the page explains; anything else wears none.
+func permitKind(policy tenant.PermitPolicy, permitType string) string {
+	switch {
+	case policy.IsVisitor(permitType):
+		return "visitor"
+	case policy.IsResident(permitType):
+		return "resident"
+	}
+	return ""
 }
 
 // fallbackWarn is the caution shown on a permit offered via the name fallback.

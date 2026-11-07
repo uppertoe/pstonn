@@ -319,6 +319,14 @@ type pickerData struct {
 	// "this is usually your visitor permit" (singular) line would contradict the
 	// two-or-more shown, so a "you can set up both" line is used instead.
 	OfferedCount int
+	// NoneAddable: a first-timer's picker lists permits but none can be set up, so
+	// the "pick the permit" lead would be an unanswerable instruction. The page
+	// explains why instead, using HasResident (the account holds a resident permit
+	// p.stonn may not schedule) and HasVisitor (it holds a visitor permit of any
+	// kind, so it is not told to apply for one).
+	NoneAddable bool
+	HasResident bool
+	HasVisitor  bool
 }
 
 // shareData backs the Share page (State "share") and its printable card
@@ -912,6 +920,7 @@ type pickView struct {
 	PermitNumber    string
 	PermitType      string
 	CurrentRego     string
+	Kind            string // "visitor" or "resident" (the label its type name wears), else ""
 	Addable         bool   // a visitor permit whose vehicle the holder can change
 	Reason          string // why it can't be added (shown greyed-out when !Addable)
 	// Warn flags a permit that is addable but already expired or cancelled, so the

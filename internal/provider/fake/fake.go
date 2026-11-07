@@ -40,10 +40,12 @@ type Provider struct {
 	RejectPassword string
 	// Scripting hooks for tests: LoginErr fails every login with the given error;
 	// ListErr fails ListPermits; Extra permits are appended to the canned two;
-	// Partial makes ListPermits claim one more permit than it returns.
+	// Only, when non-nil, replaces the canned two (an account holding no visitor
+	// permit); Partial makes ListPermits claim one more permit than it returns.
 	LoginErr error
 	ListErr  error
 	Extra    []provider.Permit
+	Only     []provider.Permit
 	Partial  bool
 	// Logins counts Login attempts (rejected ones included), so a test can prove
 	// an automatic reconnect tried exactly one login — or none at all.
@@ -155,6 +157,9 @@ func (f *Provider) ListPermits(ctx context.Context, s *provider.Session) ([]prov
 		CouncilPermitID: "90002", PermitTypeID: "15", PermitNumber: "VPP-104234", PermitType: "(A) 2nd Visitor Permit",
 		Status: "Granted", CurrentRego: reg2, StartDate: now.AddDate(0, -1, 0), EndDate: now.AddDate(0, 6, 0), CanChangeVehicle: true,
 	}}
+	if f.Only != nil {
+		ps = append([]provider.Permit{}, f.Only...)
+	}
 	ps = append(ps, f.Extra...)
 	total := len(ps)
 	if f.Partial {

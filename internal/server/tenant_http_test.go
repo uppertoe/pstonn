@@ -158,13 +158,47 @@ func TestPickerOverHTTP(t *testing.T) {
 		r.fake.Extra = []provider.Permit{{CouncilPermitID: "77", PermitTypeID: "1", PermitNumber: "RPP77", PermitType: "(A) 1st Resident Permit", Status: "Granted", CanChangeVehicle: true}}
 		defer func() { r.fake.Extra = nil }()
 		body := r.get("/schedule", rigUser).Body.String()
-		for _, want := range []string{`name="council_permit_id" value="90001"`, `name="council_permit_id" value="90002"`, "RPP77", "p.stonn can only schedule visitor permits."} {
+		for _, want := range []string{`name="council_permit_id" value="90001"`, `name="council_permit_id" value="90002"`, "RPP77", "p.stonn can only manage visitor permits."} {
 			if !strings.Contains(body, want) {
 				t.Errorf("picker missing %q:\n%s", want, excerpt(body))
 			}
 		}
 		if strings.Contains(body, `name="council_permit_id" value="77"`) {
 			t.Error("the resident permit was offered for adding")
+		}
+	})
+	// Two households stalled on an all-greyed picker that still said "pick the
+	// permit" (2026-11-05, 2026-11-07). Each must be told why and what to do.
+	resident := provider.Permit{CouncilPermitID: "77", PermitTypeID: "1", PermitNumber: "RPP77", PermitType: "(A) 1st Resident Permit", Status: "Granted", CanChangeVehicle: true}
+	t.Run("a resident-only account is told why and sent to apply", func(t *testing.T) {
+		r.fake.Only = []provider.Permit{resident}
+		defer func() { r.fake.Only = nil }()
+		body := r.get("/schedule", rigUser).Body.String()
+		for _, want := range []string{"p.stonn can’t schedule any of the permits on your council account.", "Resident permits", "apply for a visitor permit on the council’s", "delete all your data in Settings", `class="pkind pkind-resident"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("resident-only picker missing %q:\n%s", want, excerpt(body))
+			}
+		}
+		if strings.Contains(body, "Pick the permit you want to schedule") {
+			t.Error("an all-greyed picker still asks the household to pick a permit")
+		}
+		// A resident-only account is no evidence of a council rename, so the
+		// once-per-process rename alert must still be unspent.
+		spent := true
+		r.s.renameAlertOnce.Do(func() { spent = false })
+		if spent {
+			t.Error("a resident-only account fired the council-rename alert")
+		}
+	})
+	t.Run("a paper visitor permit holder is not told to apply", func(t *testing.T) {
+		r.fake.Only = []provider.Permit{resident, {CouncilPermitID: "78", PermitTypeID: "36", PermitNumber: "PVP78", PermitType: "Physical Visitor Permit (Exemption)", Status: "Granted"}}
+		defer func() { r.fake.Only = nil }()
+		body := r.get("/schedule", rigUser).Body.String()
+		if !strings.Contains(body, "p.stonn can’t schedule any of the permits") {
+			t.Fatalf("paper-permit picker not explained:\n%s", excerpt(body))
+		}
+		if strings.Contains(body, "apply for a visitor permit on the council’s") {
+			t.Error("a household holding a paper visitor permit was told to apply for one")
 		}
 	})
 	t.Run("a partial list is said out loud", func(t *testing.T) {

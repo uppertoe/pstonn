@@ -199,12 +199,25 @@
        page for them, and the link would be a loop. */}}
   {{if .Picker.HasManaged}}<a class="link-quiet" href="/schedule" style="margin-bottom:10px;display:inline-flex">&larr; Back to schedule</a>{{end}}
   <section class="card">
-    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> Choose a permit to set up</div>
+    <div class="sectitle" style="--hue:var(--sec-schedule)"><span class="ic">{{template "ic-ticket"}}</span> {{if .Picker.NoneAddable}}Your council permits{{else}}Choose a permit to set up{{end}}</div>
     {{/* .OfferedCount (set in renderPicker) is how many live visitor permits are on
          offer. More than one means "this is usually your visitor permit" (singular)
          would contradict the two-or-more shown — an unanswerable choice — so lead
          with a "set up both" line instead. */}}
-    {{if gt .Picker.OfferedCount 1}}
+    {{if .Picker.NoneAddable}}
+    {{/* Every permit listed is greyed out, so "pick the permit" would be an
+         instruction the household cannot follow: two resident-only households
+         reloaded this page and left (2026-11-05, 2026-11-07). Say why, point a
+         household without a visitor permit at the application, and offer the way
+         out, since p.stonn now holds their council password for nothing. */}}
+    <div class="pick-why">
+      <p class="subtitle">{{T "onboarding.picker_greyed_lead" .}}</p>
+      <p class="empty-note">{{T "onboarding.picker_greyed_visitor" . (slots "visitor" (kind "visitor"))}}</p>
+      {{if .Picker.HasResident}}<p class="empty-note">{{T "onboarding.picker_greyed_resident" . (slots "resident" (kind "resident"))}}</p>{{end}}
+      {{if not .Picker.HasVisitor}}<p class="empty-note">{{T "onboarding.picker_greyed_apply" . (slots "apply" (link (or .Tenant.Links.ApplyPermit .Tenant.Links.ApplyVisitor) (noboost) (newtab)) "b" (strong))}}</p>{{end}}
+      <p class="empty-note">{{T "onboarding.picker_greyed_leave" . (slots "settings" (link "/settings"))}}</p>
+    </div>
+    {{else if gt .Picker.OfferedCount 1}}
     <p class="subtitle">You have more than one visitor permit. Each one holds a rego. You can set up all of them; pick one to start, and add the others whenever you like.</p>
     {{else}}
     <p class="subtitle">Pick the permit you want to schedule. This is usually your visitor permit.</p>
@@ -216,7 +229,9 @@
          two and a half hours, read /how on another device, and never tapped Manage.
          Say plainly that choosing is a local, reversible step — nothing touches the
          council until a schedule is set. */}}
+    {{if not .Picker.NoneAddable}}
     <p class="subtitle">Choosing a permit changes nothing at the council. You set up the schedule next. <a href="/features" hx-boost="false">What p.stonn can do</a></p>
+    {{end}}
     {{/* Two groups: live permits (the ones a resident is here for), then dead
          ones under their own heading. A dead permit is still addable — its old
          schedule can be copied onto a renewal — but it must not look like the
@@ -232,7 +247,7 @@
       <div class="pick-item {{if not .Addable}}disabled{{end}}">
         <div>
           <div style="font-weight:650">{{.PermitNumber}}</div>
-          <div class="muted" style="font-size:13px;margin-top:2px">{{.PermitType}}{{if .CurrentRego}} · currently <span class="reg">{{.CurrentRego}}</span>{{end}}</div>
+          <div class="muted" style="font-size:13px;margin-top:2px">{{if .Kind}}<span class="pkind pkind-{{.Kind}}">{{if eq .Kind "visitor"}}{{template "ic-ticket"}}{{else}}{{template "ic-car"}}{{end}}{{.PermitType}}</span>{{else}}{{.PermitType}}{{end}}{{if .CurrentRego}} · currently <span class="reg">{{.CurrentRego}}</span>{{end}}</div>
         </div>
         {{if .Addable}}
         <form method="post" action="/permits">

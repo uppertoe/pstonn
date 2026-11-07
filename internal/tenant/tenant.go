@@ -115,6 +115,7 @@ type Links struct {
 	Register      string `json:"register"`       // create a portal account
 	ResetPassword string `json:"reset_password"` // forgotten-password page
 	ApplyVisitor  string `json:"apply_visitor"`  // the tenant's page on applying for a visitor permit
+	ApplyPermit   string `json:"apply_permit"`   // the portal's own "Apply for permit" page (signed in); optional
 	Permits       string `json:"permits"`        // the tenant's parking-permits overview page
 	FAQ           string `json:"faq"`            // the tenant's permit FAQ page
 }
@@ -151,6 +152,11 @@ type PermitPolicy struct {
 	// IS the visitor mechanism, so it is schedulable directly, not only under
 	// fallback. Turning this on is a policy decision per council, not a capability.
 	ScheduleResident bool `json:"schedule_resident"`
+	// PaperWord is the case-insensitive substring that marks a paper visitor permit
+	// ("Physical Visitor Permit (Exemption)"): one with no rego to change, so the
+	// picker can say that rather than blame the account. Empty means the tenant
+	// has none.
+	PaperWord string `json:"paper_word"`
 
 	residentRe *regexp.Regexp
 }
@@ -158,6 +164,11 @@ type PermitPolicy struct {
 // IsVisitor reports whether a permit type is the schedulable visitor type.
 func (p PermitPolicy) IsVisitor(permitType string) bool {
 	return p.VisitorWord != "" && strings.Contains(strings.ToLower(permitType), strings.ToLower(p.VisitorWord))
+}
+
+// IsPaper reports whether a permit type is a paper visitor permit.
+func (p PermitPolicy) IsPaper(permitType string) bool {
+	return p.PaperWord != "" && p.IsVisitor(permitType) && strings.Contains(strings.ToLower(permitType), strings.ToLower(p.PaperWord))
 }
 
 // IsResident reports whether a permit type is a resident permit (the holder's own

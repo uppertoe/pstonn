@@ -105,3 +105,20 @@ func TestFromConfig(t *testing.T) {
 		t.Error("sandbox should select the fake connector")
 	}
 }
+
+func TestIsPaper(t *testing.T) {
+	p := PermitPolicy{VisitorWord: "visitor", ResidentWord: "resident", PaperWord: "physical"}
+	for typ, want := range map[string]bool{
+		"Physical Visitor Permit (Exemption)": true,
+		"(A) Physical Visitor Permit":         true,
+		"(A) Digital Visitor Permit":          false,
+		"(A) 1st Resident Permit":             false,
+	} {
+		if got := p.IsPaper(typ); got != want {
+			t.Errorf("IsPaper(%q) = %v, want %v", typ, got, want)
+		}
+	}
+	if (PermitPolicy{VisitorWord: "visitor"}).IsPaper("Physical Visitor Permit") {
+		t.Error("a tenant with no paper word reported a paper permit")
+	}
+}

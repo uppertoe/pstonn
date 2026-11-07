@@ -547,6 +547,21 @@ func templateRenderCases(loc *time.Location, user identity.User, tm Terms, now t
 			{CouncilPermitID: "14576", PermitTypeID: "14", PermitNumber: "VPP24714", PermitType: "(A) 1st Visitor Permit", CurrentRego: "ABC123", Addable: true},
 			{CouncilPermitID: "9001", PermitTypeID: "3", PermitNumber: "RPP5", PermitType: "(B) Resident Permit", Addable: false, Reason: "Only visitor permits can be scheduled."},
 		}}}, "Only visitor permits can be scheduled."},
+		// Every permit greyed out (a resident-only household, 2026-11-07): the page
+		// explains why instead of asking them to pick, and sends them to apply.
+		{"picker resident only", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{NoneAddable: true, HasResident: true, HasPermits: true, Pick: []pickView{
+			{CouncilPermitID: "9001", PermitTypeID: "1", PermitNumber: "RPP5", PermitType: "(A) 1st Resident Permit", Kind: "resident", Reason: "p.stonn can only manage visitor permits."},
+			{CouncilPermitID: "9002", PermitTypeID: "15", PermitNumber: "RPP6", PermitType: "(A) 2nd Resident Permit", Kind: "resident", Reason: "p.stonn can only manage visitor permits."},
+		}}}, "the council reviews each change to confirm that the car is registered to your address"},
+		{"picker resident only links the application", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{NoneAddable: true, HasResident: true, HasPermits: true, Pick: []pickView{
+			{CouncilPermitID: "9001", PermitNumber: "RPP5", PermitType: "(A) 1st Resident Permit", Kind: "resident", Reason: "p.stonn can only manage visitor permits."},
+		}}}, "select <strong>Visitor Permit</strong>, then <strong>Digital Visitor Permit</strong>"},
+		// A paper visitor permit holder already has a visitor permit, so is not told
+		// to apply for one (the exemption exists for people who can't use digital).
+		{"picker resident and paper permit", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{NoneAddable: true, HasResident: true, HasVisitor: true, HasPermits: true, Pick: []pickView{
+			{CouncilPermitID: "9001", PermitNumber: "RPP5", PermitType: "(A) 1st Resident Permit", Kind: "resident", Reason: "p.stonn can only manage visitor permits."},
+			{CouncilPermitID: "9003", PermitNumber: "PVP7", PermitType: "Physical Visitor Permit (Exemption)", Kind: "visitor", Reason: "A paper visitor permit has no rego for p.stonn to change."},
+		}}}, "A paper visitor permit has no rego for p.stonn to change."},
 		// Two offered visitor permits: the guidance acknowledges both rather than
 		// saying "your visitor permit" (singular) over a two-choice screen.
 		{"picker two visitor permits", dashboardData{User: user, State: "picker", Loc: loc, Picker: &pickerData{OfferedCount: 2, Pick: []pickView{

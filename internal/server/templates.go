@@ -126,6 +126,7 @@ var templateFuncs = template.FuncMap{
 	"newtab":      i18n.NewTab,
 	"noboost":     i18n.NoBoost,
 	"strong":      i18n.Strong,
+	"kind":        i18n.Kind,
 	"weekdayName": func(w time.Weekday) string { return w.String() },
 	// sourceLabel turns an apply-log source code into words for the Activity page.
 	// The stored codes are internal; the page is read by householders.

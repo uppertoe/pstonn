@@ -21,6 +21,7 @@
       "policy": {
         "visitor_word": "visitor",
         "resident_word": "resident",
+        "paper_word": "physical",
         "home_state": "VIC"
       },
       "links": {
@@ -28,6 +29,7 @@
         "register": "https://parkingpermits.stonnington.vic.gov.au/idm/account/Register",
         "reset_password": "https://parkingpermits.stonnington.vic.gov.au/idm/account/ForgotPassword",
         "apply_visitor": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/Visitor-parking-permits",
+        "apply_permit": "https://parkingpermits.stonnington.vic.gov.au/ssp/u/permits/permitgroup",
         "permits": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits",
         "faq": "https://www.stonnington.vic.gov.au/Services/Parking/Parking-permits/About-digital-parking-permits/Parking-permit-FAQs"
       },

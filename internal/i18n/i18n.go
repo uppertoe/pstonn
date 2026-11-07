@@ -112,6 +112,26 @@ func Strong() Slot {
 	return func(inner htmltemplate.HTML) htmltemplate.HTML { return "<strong>" + inner + "</strong>" }
 }
 
+// permitKindIcons is the closed set of permit kinds a Kind slot can mark, each
+// with the icon it wears (the same paths as ic-ticket and ic-car in icons.html).
+var permitKindIcons = map[string]string{
+	"visitor":  `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2 2 2 0 0 0 0 4 2 2 0 0 1-2 2H6a2 2 0 0 1-2-2 2 2 0 0 0 0-4z"/><path d="M13 6v12"/></svg>`,
+	"resident": `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13"/><path d="M4 17h16v-3a2 2 0 0 0-1-1.7L18 12H6l-1 .3A2 2 0 0 0 4 14z"/><circle cx="7.5" cy="17.5" r="1.3"/><circle cx="16.5" cy="17.5" r="1.3"/></svg>`,
+}
+
+// Kind marks the words naming a kind of permit ("visitor permits") with that
+// kind's label style, so a reader can tell the two kinds apart at a glance. An
+// unknown kind renders the words unmarked.
+func Kind(kind string) Slot {
+	icon, ok := permitKindIcons[kind]
+	return func(inner htmltemplate.HTML) htmltemplate.HTML {
+		if !ok {
+			return inner
+		}
+		return htmltemplate.HTML(`<span class="pkind pkind-` + kind + `">` + icon + string(inner) + `</span>`)
+	}
+}
+
 // Markers: a message's {{slot "name"}}words{{endslot}} renders to private
 // markers around the words (which are ordinary message text, so they may carry
 // interpolations) that the catalog resolves against the call site's Slots AFTER
