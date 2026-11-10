@@ -8,11 +8,11 @@
 <meta name="robots" content="noindex,nofollow">
 
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230d9488'/%3E%3Cpath d='M11.5 24V8h6a5.2 5.2 0 0 1 0 10.4h-6' fill='none' stroke='white' stroke-width='2.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=3d03e1c28a">
-<link rel="apple-touch-icon" href="/static/icon-180.png?v=3d03e1c28a">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png?v=6e560ffe9d">
+<link rel="apple-touch-icon" href="/static/icon-180.png?v=6e560ffe9d">
 <meta name="theme-color" media="(prefers-color-scheme:light)" content="#0d9488">
 <meta name="theme-color" media="(prefers-color-scheme:dark)" content="#0b1120">
-<link rel="stylesheet" href="/static/app.css?v=3d03e1c28a">
+<link rel="stylesheet" href="/static/app.css?v=6e560ffe9d">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="p.stonn"><link rel="manifest" href="/site.webmanifest">
 <script>
   
@@ -122,8 +122,8 @@
   document.addEventListener('htmx:afterSettle', function () { window.pstonnWake.sync(); });
   document.addEventListener('DOMContentLoaded', function () { window.pstonnWake.sync(); });
 </script>
-<script src="/static/htmx.min.js?v=3d03e1c28a"></script>
-<script defer src="/static/alpine.min.js?v=3d03e1c28a"></script>
+<script src="/static/htmx.min.js?v=6e560ffe9d"></script>
+<script defer src="/static/alpine.min.js?v=6e560ffe9d"></script>
 
 
 <script>
@@ -220,6 +220,14 @@
   }
   
   
+  addEventListener('htmx:beforeRequest', function (e) {
+    var elt = e.detail && e.detail.elt;
+    var form = elt && elt.closest && elt.closest('form');
+    var slot = form && form.querySelector('[data-form-error]');
+    if (slot) { slot.hidden = true; slot.textContent = ''; }
+  });
+  
+  
   
   
   
@@ -229,8 +237,22 @@
     if (!x || x.status < 400) return;
     e.detail.shouldSwap = false;
     if (x.status === 422) {
-      e.detail.isError = false;
-      showToast((x.responseText || 'Something needs your attention.').trim());
+      
+      
+      
+      
+      
+      
+      var text = (x.responseText || 'Something needs your attention.').trim();
+      var form = e.detail.requestConfig && e.detail.requestConfig.elt && e.detail.requestConfig.elt.closest('form');
+      var slot = form && form.querySelector('[data-form-error]');
+      if (slot) {
+        slot.textContent = text;
+        slot.hidden = false;
+        if (slot.scrollIntoView) slot.scrollIntoView({block: 'nearest'});
+      } else {
+        showToast(text);
+      }
       return;
     }
     var msg = 'p.stonn could not finish that request. Please try again.';
@@ -1046,7 +1068,12 @@ window.popClamp = window.popClamp || function (el, tries) {
   <form class="stack" method="post" action="/permits/7/override" data-plate-confirm="plate"
         hx-post="/permits/7/override" hx-target="#pbody-7" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
-        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', selReg:'', plate:'', starts:'now', ends:'day', fromDate:'',
+        x-data="{mode:'car', open:false, sel:'', lbl:'', col:'', selReg:'', plate:'', starts:'now', ends:'day', fromDate:'', untilDate:'',
+                 startDay() {
+                   if (this.starts=='later' && this.fromDate) return this.fromDate;
+                   const d = new Date(), p = n => String(n).padStart(2, '0');
+                   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+                 },
                  endLabel(offset) {
                    const d = (this.starts=='later' && this.fromDate) ? new Date(this.fromDate + 'T12:00') : new Date();
                    d.setDate(d.getDate() + offset);
@@ -1093,6 +1120,8 @@ window.popClamp = window.popClamp || function (el, tries) {
         <p class="empty-note" style="margin-top:6px">Choose one of the regos saved on your Regos page.</p>
       </div>
       <div class="segpane" :class="{hide: mode!='plate'}">
+        
+        <div class="platepair">
         <label class="fld">Number plate
           <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
         </label>
@@ -1101,6 +1130,7 @@ window.popClamp = window.popClamp || function (el, tries) {
           <select name="plate_state" class="vstate"><option value="VIC">VIC</option><option value="NSW">NSW</option><option value="SA">SA</option></select>
         </label>
         
+        </div>
         
         <p class="empty-note" style="margin-top:6px">Use this for a rego you have not saved, such as a friend&rsquo;s car, a hire car or a tradie&rsquo;s ute. p.stonn uses it for this booking only and does not save it.</p>
         
@@ -1130,17 +1160,20 @@ window.popClamp = window.popClamp || function (el, tries) {
         <div class="vpick-list" x-show="endsOpen" x-cloak @click.outside="endsOpen=false">
           <button type="button" class="vopt" @click="ends='day'; endsOpen=false"><span class="lab" x-text="endLabel(0)">At midnight tonight</span></button>
           <button type="button" class="vopt" @click="ends='nextday'; endsOpen=false"><span class="lab" x-text="endLabel(1)">At midnight tomorrow night</span></button>
-          <button type="button" class="vopt" @click="ends='custom'; endsOpen=false"><span class="lab">At a set time</span></button>
+          <button type="button" class="vopt" @click="ends='custom'; endsOpen=false; if (!untilDate) untilDate=startDay()"><span class="lab">At a set time</span></button>
         </div>
       </div>
       <div class="segpanes" style="margin-bottom:8px">
         <div class="segpane" :class="{hide: ends!='custom'}">
-          <div class="dtpair"><input type="date" name="until_date" :disabled="ends!='custom'" aria-label="End date"><input type="time" name="until_time" :disabled="ends!='custom'" aria-label="End time"></div>
+          <div class="dtpair"><input type="date" name="until_date" x-model="untilDate" :disabled="ends!='custom'" aria-label="End date"><input type="time" name="until_time" :disabled="ends!='custom'" aria-label="End time"></div>
+          
           <p class="empty-note" style="margin-top:6px">If you give a date with no time, the booking runs to the end of that day.</p>
         </div>
       </div>
     </div>
     <div class="modal-actions">
+      
+      <p class="form-error" data-form-error role="alert" hidden></p>
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       
       <button type="submit" :disabled="mode=='car' ? !sel : !plate.trim()"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></svg> Book</button>
