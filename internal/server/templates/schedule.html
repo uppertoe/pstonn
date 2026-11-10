@@ -587,7 +587,12 @@
   <form class="stack" method="post" action="/permits/{{.Permit.ID}}/override" data-plate-confirm="plate"
         hx-post="/permits/{{.Permit.ID}}/override" hx-target="#pbody-{{.Permit.ID}}" hx-swap="innerHTML"
         x-init="window.htmx && htmx.process($el)"
-        x-data="{mode:'{{if .Vehicles}}car{{else}}plate{{end}}', open:false, sel:'', lbl:'', col:'', selReg:'', plate:'', starts:'now', ends:'day', fromDate:'',
+        x-data="{mode:'{{if .Vehicles}}car{{else}}plate{{end}}', open:false, sel:'', lbl:'', col:'', selReg:'', plate:'', starts:'now', ends:'day', fromDate:'', untilDate:'',
+                 startDay() {
+                   if (this.starts=='later' && this.fromDate) return this.fromDate;
+                   const d = new Date(), p = n => String(n).padStart(2, '0');
+                   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+                 },
                  endLabel(offset) {
                    const d = (this.starts=='later' && this.fromDate) ? new Date(this.fromDate + 'T12:00') : new Date();
                    d.setDate(d.getDate() + offset);
@@ -643,6 +648,11 @@
         <p class="empty-note" style="margin-top:6px">Choose one of the regos saved on your Regos page.</p>
       </div>
       <div class="segpane" :class="{hide: mode!='plate'}">
+        {{/* Plate and state side by side: this pane sets the height of both
+             (they share a grid cell), and stacked it left a tall empty gap under
+             the saved-rego picker that pushed "The booking ends" below the Book
+             bar on a phone. */}}
+        <div class="platepair">
         <label class="fld">Number plate
           <input type="text" name="plate" x-model="plate" placeholder="e.g. XYZ789" maxlength="10" autocapitalize="characters" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
         </label>
@@ -651,6 +661,7 @@
           <select name="plate_state" class="vstate">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>
         </label>
         {{end}}
+        </div>
         {{if .Vehicles}}
         <p class="empty-note" style="margin-top:6px">Use this for a rego you have not saved, such as a friend&rsquo;s car, a hire car or a tradie&rsquo;s ute. p.stonn uses it for this booking only and does not save it.</p>
         {{else}}
@@ -701,17 +712,25 @@
         <div class="vpick-list" x-show="endsOpen" x-cloak @click.outside="endsOpen=false">
           <button type="button" class="vopt" @click="ends='day'; endsOpen=false"><span class="lab" x-text="endLabel(0)">At midnight tonight</span></button>
           <button type="button" class="vopt" @click="ends='nextday'; endsOpen=false"><span class="lab" x-text="endLabel(1)">At midnight tomorrow night</span></button>
-          <button type="button" class="vopt" @click="ends='custom'; endsOpen=false"><span class="lab">At a set time</span></button>
+          <button type="button" class="vopt" @click="ends='custom'; endsOpen=false; if (!untilDate) untilDate=startDay()"><span class="lab">At a set time</span></button>
         </div>
       </div>
       <div class="segpanes" style="margin-bottom:8px">
         <div class="segpane" :class="{hide: ends!='custom'}">
-          <div class="dtpair"><input type="date" name="until_date" :disabled="ends!='custom'" aria-label="End date"><input type="time" name="until_time" :disabled="ends!='custom'" aria-label="End time"></div>
+          <div class="dtpair"><input type="date" name="until_date" x-model="untilDate" :disabled="ends!='custom'" aria-label="End date"><input type="time" name="until_time" :disabled="ends!='custom'" aria-label="End time"></div>
+          {{/* The date is filled in with the start day when "At a set time" is
+               chosen: two of one household's bookings were refused six times with
+               the date left empty (2026-11-08/10). */}}
           <p class="empty-note" style="margin-top:6px">If you give a date with no time, the booking runs to the end of that day.</p>
         </div>
       </div>
     </div>
     <div class="modal-actions">
+      {{/* A refusal (422) is written here by layout.html and the form stays open.
+           It sits in the pinned action bar, above Book, so it is on screen however
+           far the form is scrolled. It used to be a five-second toast over the
+           schedule while the form closed. */}}
+      <p class="form-error" data-form-error role="alert" hidden></p>
       <button type="button" class="ghost" @click="addOpen=false">Cancel</button>
       {{/* Can't submit with neither a car nor a plate — the server refuses that
            anyway, but a button that fires only to bounce reads as broken. */}}

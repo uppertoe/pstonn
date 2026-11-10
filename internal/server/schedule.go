@@ -1102,7 +1102,14 @@ func (s *Server) addOverride(w http.ResponseWriter, r *http.Request) {
 		s.formError(w, r, "p.stonn no longer makes bookings without an end. Please choose when this booking ends.")
 		return
 	case "custom":
-		raw := combineDateTime(r.FormValue("until_date"), r.FormValue("until_time"), "00:00")
+		untilDate := r.FormValue("until_date")
+		// A time with no date means that time on the day the booking starts: the
+		// form now fills the date in, but a time typed into a cleared date box
+		// should still say what the person meant rather than be refused.
+		if strings.TrimSpace(untilDate) == "" && strings.TrimSpace(r.FormValue("until_time")) != "" {
+			untilDate = startsAt.In(s.locForPermit(r.Context(), p)).Format("2006-01-02")
+		}
+		raw := combineDateTime(untilDate, r.FormValue("until_time"), "00:00")
 		if raw == "" {
 			s.formError(w, r, "Pick the date this booking should end, or choose one of the other options.")
 			return

@@ -182,6 +182,13 @@ dialog.confirm[open] { animation:rise .18s ease both; }
    share; both clear their native icons. They wrap to two lines only if pinched
    narrower than a single pair can hold. */
 .dtpair { display:flex; gap:8px; flex-wrap:wrap; }
+.platepair { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:8px; align-items:end; }
+.platepair .fld { margin:0; }
+/* A form's refusal, written beside the fields by layout.html's 422 handler. */
+.modal-actions { flex-wrap:wrap; }
+.modal-actions .form-error { flex:1 1 100%; margin:0; }
+.form-error[hidden] { display:none; }
+.form-error { margin:10px 0 0; padding:10px 12px; border-radius:var(--radius-sm); background:var(--danger-soft); color:var(--danger); font-size:13.5px; font-weight:560; }
 .dtpair input { min-width:0; }
 .dtpair input[type="date"] { flex:3 1 150px; }
 .dtpair input[type="time"] { flex:2 1 100px; }

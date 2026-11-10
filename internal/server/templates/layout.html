@@ -244,6 +244,14 @@
   if ('serviceWorker' in navigator) {
     addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
   }
+  // A form's inline refusal (see the 422 branch below) is cleared each time the
+  // form is sent again, so a fixed field does not keep showing the old message.
+  addEventListener('htmx:beforeRequest', function (e) {
+    var elt = e.detail && e.detail.elt;
+    var form = elt && elt.closest && elt.closest('form');
+    var slot = form && form.querySelector('[data-form-error]');
+    if (slot) { slot.hidden = true; slot.textContent = ''; }
+  });
   // Surface server-side errors. htmx does NOT swap non-2xx bodies, so without
   // this every failed submit would appear to do nothing. Validation problems
   // arrive as 422 with a bare plain-text message; everything else (403/409/429/
@@ -255,8 +263,22 @@
     if (!x || x.status < 400) return;
     e.detail.shouldSwap = false;
     if (x.status === 422) {
-      e.detail.isError = false;
-      showToast((x.responseText || 'Something needs your attention.').trim());
+      // Leave isError set: htmx derives detail.successful from it, and a modal
+      // that closes on success (the booking form) closed on every refusal while
+      // this handler cleared it — taking the fields the message pointed at with
+      // it (2026-11-08/10: one household was refused six times and removed its
+      // permit). A form with a [data-form-error] slot shows the message there,
+      // beside the fields; anything else gets the toast.
+      var text = (x.responseText || 'Something needs your attention.').trim();
+      var form = e.detail.requestConfig && e.detail.requestConfig.elt && e.detail.requestConfig.elt.closest('form');
+      var slot = form && form.querySelector('[data-form-error]');
+      if (slot) {
+        slot.textContent = text;
+        slot.hidden = false;
+        if (slot.scrollIntoView) slot.scrollIntoView({block: 'nearest'});
+      } else {
+        showToast(text);
+      }
       return;
     }
     var msg = 'p.stonn could not finish that request. Please try again.';

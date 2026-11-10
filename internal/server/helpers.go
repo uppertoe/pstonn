@@ -21,8 +21,13 @@ var alog = applog.For("server")
 // into a toast (htmx does NOT swap non-2xx bodies, so returning an error page
 // here would be silently dropped — the form would appear to do nothing). For a
 // normal request it falls back to a full page. The 422 also keeps detail.successful
-// false, so a modal wired to close only on success stays open for a retry.
+// false (layout.html leaves htmx's isError alone), so a modal wired to close only
+// on success stays open for a retry; a form with a [data-form-error] slot shows
+// the message there instead of in the toast.
 func (s *Server) formError(w http.ResponseWriter, r *http.Request, msg string) {
+	// Logged so a household that is refused again and again is visible: the
+	// messages are fixed sentences and the path carries only p.stonn's own ids.
+	alog.Infof("form refused: %s %s: %s", r.Method, r.URL.Path, msg)
 	if r.Header.Get("HX-Request") != "" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)

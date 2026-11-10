@@ -240,9 +240,7 @@
          identical passes seven seconds apart (2026-08-22) — both emails went out
          to both people. A validation failure (422 toast) leaves the form on the
          page, so the guard is released then — otherwise the button stays dead
-         until a reload. Keyed on the status, not detail.successful: the toast
-         handler in layout.html clears isError for 422 so htmx does not log it,
-         which also makes htmx report the request as successful. */}}
+         until a reload. Keyed on the status, which says plainly what happened. */}}
     {{/* The submit is gated on at least one recipient that looks like an email,
          mirroring the server's parseEmails/looksLikeEmail. One household (2026-09-09,
          on a phone) ticked a car and pressed the button with the box empty; the
