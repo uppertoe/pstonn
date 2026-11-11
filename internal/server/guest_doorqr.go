@@ -658,7 +658,7 @@ func (s *Server) runDecideRequest(r *http.Request, owner, user string, id int64,
 	bg := context.WithoutCancel(r.Context())
 	d, applyErr := s.applyGuestPlate(bg, guestApply{
 		permit: permit, plate: req.Plate, state: req.State, tokenID: doorToken, overrideID: ovID,
-		okDetail: "approved a printed-QR request", logAs: "doorqr approve",
+		okDetail: "approved a printed-QR request", logAs: "doorqr approve", via: "printed QR",
 	})
 	if d != guestApplyAllowed {
 		// A door QR revoked between the approval and here: the household was told the

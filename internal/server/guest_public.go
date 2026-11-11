@@ -275,6 +275,7 @@ type guestApply struct {
 	tokenID, overrideID int64
 	okDetail            string // activity-log detail on success ("activated by …")
 	logAs               string // server-log prefix on failure ("guest activate")
+	via                 string // server-log source on success ("quick picker", "pass revert")
 }
 
 // applyGuestPlate is the one path by which a guest-authorised change reaches the
@@ -337,6 +338,10 @@ func (s *Server) applyGuestPlate(ctx context.Context, a guestApply) (guestApplyD
 	// without adding a chance of success — and most callers are unauthenticated.
 	s.sched.Kick()
 	if err == nil {
+		// Same shape as the scheduler's write line, so a prod check sees guest and
+		// picker changes alongside roster ones. okDetail is not logged: it can name
+		// a guest's email.
+		alog.Infof("permit %s -> %s (%s) for %s", a.permit.CouncilPermitID, a.plate, a.via, redact.Email(a.permit.Owner))
 		_ = s.store.RecordApply(ctx, a.permit.ID, a.plate, "guest", "success", a.okDetail)
 		return guestApplyAllowed, nil
 	}
@@ -995,7 +1000,7 @@ func (s *Server) guestActivate(w http.ResponseWriter, r *http.Request) {
 	bg := context.WithoutCancel(r.Context())
 	d, err := s.applyGuestPlate(bg, guestApply{
 		permit: permit, plate: reg, state: regState, tokenID: gc.TokenID, overrideID: overrideID,
-		okDetail: "activated by " + createdBy, logAs: "guest activate",
+		okDetail: "activated by " + createdBy, logAs: "guest activate", via: guestKind(gc.Grant),
 	})
 	if d != guestApplyAllowed {
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
@@ -1136,7 +1141,7 @@ func (s *Server) guestRevert(w http.ResponseWriter, r *http.Request) {
 	bg := context.WithoutCancel(r.Context())
 	d, err := s.applyGuestPlate(bg, guestApply{
 		permit: permit, plate: target, state: targetState, tokenID: gc.TokenID, overrideID: 0,
-		okDetail: "put back by " + createdBy, logAs: "guest revert to",
+		okDetail: "put back by " + createdBy, logAs: "guest revert to", via: guestKind(gc.Grant) + " revert",
 	})
 	if d != guestApplyAllowed {
 		s.renderGuestMenu(w, r, gc, permit, s.guestCurrentPlate(bg, gc, permit), "", d.message())
