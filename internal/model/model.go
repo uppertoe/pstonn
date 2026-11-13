@@ -335,25 +335,7 @@ type Resolution struct {
 // now must already be in the timezone rosters are expressed in (weekday is read
 // from it directly, and c's anchor date is parsed in its clock).
 func Resolve(now time.Time, c Cycle, rules []WeeklyRule, overrides []Override) Resolution {
-	var best *Override
-	for i := range overrides {
-		o := &overrides[i]
-		if o.StartsAt.After(now) {
-			continue // not started yet
-		}
-		if o.EndsAt != nil && !now.Before(*o.EndsAt) {
-			continue // already ended
-		}
-		// Freshest decision wins. CreatedAt is only second-precision, so two
-		// overrides booked in the same second tie on CreatedAt; break that by ID
-		// (auto-increment → the later-inserted one), so "freshest wins" stays
-		// deterministic instead of falling back to scan order.
-		if best == nil || o.CreatedAt.After(best.CreatedAt) ||
-			(o.CreatedAt.Equal(best.CreatedAt) && o.ID > best.ID) {
-			best = o
-		}
-	}
-	if best != nil {
+	if best := WinningOverride(now, overrides); best != nil {
 		// An override takes effect when its window opens, or when it was booked if
 		// that is later (a booking backdated over a window already in progress takes
 		// effect the moment it is made). Comparing the two is also what says whether
@@ -396,6 +378,35 @@ func Resolve(now time.Time, c Cycle, rules []WeeklyRule, overrides []Override) R
 		return Resolution{VehicleID: bestRule.VehicleID, Empty: bestRule.Empty, Source: SourceRoster, Since: midnight, Scheduled: true}
 	}
 	return Resolution{Source: SourceNone}
+}
+
+// WinningOverride is the override that decides the permit at now, or nil when
+// none is in force. Resolve takes its override from here, and the permit card
+// marks the same one, so the card can never name a different booking from the
+// one the scheduler applies.
+func WinningOverride(now time.Time, overrides []Override) *Override {
+	var best *Override
+	for i := range overrides {
+		o := &overrides[i]
+		if !o.InForce(now) {
+			continue
+		}
+		// Freshest decision wins. CreatedAt is only second-precision, so two
+		// overrides booked in the same second tie on CreatedAt; break that by ID
+		// (auto-increment → the later-inserted one), so "freshest wins" stays
+		// deterministic instead of falling back to scan order.
+		if best == nil || o.CreatedAt.After(best.CreatedAt) ||
+			(o.CreatedAt.Equal(best.CreatedAt) && o.ID > best.ID) {
+			best = o
+		}
+	}
+	return best
+}
+
+// InForce reports whether the override's window covers now: started, and not
+// yet ended (the end is exclusive).
+func (o Override) InForce(now time.Time) bool {
+	return !o.StartsAt.After(now) && (o.EndsAt == nil || now.Before(*o.EndsAt))
 }
 
 // SameTarget reports whether two resolutions want the same thing on the permit:

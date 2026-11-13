@@ -259,6 +259,10 @@
       {{end}}
     </div>
   </div>
+  {{/* The pill and, under it, the plate that takes over when the booking in
+       charge ends. The wrapper keeps both on the header's right; the plate poll
+       still swaps only the pill. */}}
+  <div class="nowcol">
   <div class="nowbadge">
     <span class="muted" style="font-size:12.5px">on the permit now</span>
     {{/* The plate carries its car's own colour, like every other plate in the app.
@@ -308,6 +312,8 @@
          re-check of one badge must be invisible unless the plate actually changed. */}}
     <div style="display:none" class="hx-quiet" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="closest .nowbadge" hx-swap="outerHTML transition:false" hx-select=".nowbadge"></div>
     {{end}}
+  </div>
+  {{with .Next}}<p class="nownext">{{template "ic-next"}}{{if .Empty}}<span class="noplate">no rego</span>{{else}}<span class="plate"{{if .Color}} style="--plate:{{.Color}}"{{end}}>{{.Reg}}</span>{{end}}<span class="muted">from {{.At}}</span></p>{{end}}
   </div>
 </div>
 
@@ -491,8 +497,11 @@
 {{if .Overrides}}
 <div class="oneoff-list">
   {{range .Overrides}}
-  <div class="oneoff-item">
-    <span class="veh">{{if .Empty}}<span class="clearmark">{{template "ic-empty"}}clear</span>{{else}}{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span>{{end}}</span>
+  {{/* The booking in charge is marked; one covered by a newer booking is
+       dimmed with the layers mark, because it takes over again when the newer
+       one is cancelled or ends. */}}
+  <div class="oneoff-item{{if .Now}} is-now{{else if .Under}} is-under{{end}}">
+    <span class="veh">{{if .Under}}<span class="undermark" role="img" title="Covered by a newer booking" aria-label="Covered by a newer booking">{{template "ic-layers"}}</span>{{end}}{{if .Empty}}<span class="clearmark">{{template "ic-empty"}}clear</span>{{else}}{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span>{{end}}</span>
     {{/* Name whoever booked it. The account is shared, so "who decided this?" is
          a real question — and an open-ended booking beats the roster indefinitely,
          which is worth being able to attribute. */}}
@@ -501,7 +510,7 @@
          start→end as one unit sets the row's minimum width to both dates combined,
          which is what pushed a long booking past its card. */}}
     <span class="when"><span class="nb">{{localTime .StartsAt $.Loc}}</span> → <span class="nb">{{if .EndsAt}}{{localEnd .EndsAt $.Loc}}{{else}}open-ended{{end}}</span>{{if .CreatedBy}} <span class="by">· by {{.CreatedBy}}</span>{{end}}</span>
-    <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#pbody-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this one-off booking?" data-confirm-ok="Cancel booking">
+    <form hx-post="/permits/{{.PermitID}}/overrides/{{.ID}}/delete" hx-target="#pbody-{{.PermitID}}" hx-swap="innerHTML" hx-confirm="Cancel this booking?{{with .CancelNote}} {{.}}{{end}}" data-confirm-ok="Cancel booking"{{if .CancelPlate}} data-confirm-plate="{{.CancelPlate}}" data-confirm-color="{{.CancelColor}}" data-confirm-plate-label="{{.CancelLabel}}"{{end}}>
       <button class="ghost icon" type="submit" title="Cancel" aria-label="Cancel this booking">{{template "ic-x"}}</button>
     </form>
   </div>

@@ -716,7 +716,10 @@ type permitView struct {
 	UndoWeek  string
 	Cal       []calView
 	Overrides []overrideView
-	Vehicles  []vehicleView
+	// Next, when set, is what goes on the permit once the booking in charge now
+	// ends; nil when nothing different follows.
+	Next     *nextView
+	Vehicles []vehicleView
 	// Regions are the tenant's registration jurisdictions (home first) for the
 	// one-off plate's state selector; empty hides it.
 	Regions []provider.Region
@@ -912,6 +915,23 @@ type overrideView struct {
 	StartsAt  time.Time
 	EndsAt    *time.Time
 	CreatedBy string
+	// Now marks the booking that decides the permit right now; Under marks one
+	// in force but covered by a newer booking, which takes over again if the
+	// newer one is cancelled or ends.
+	Now, Under bool
+	// What cancelling the booking does to the permit now, for its confirm:
+	// CancelPlate (with its colour) goes back on or stays on, as CancelLabel
+	// says; CancelNote is the message's second sentence when no plate applies.
+	CancelPlate, CancelColor, CancelLabel, CancelNote string
+}
+
+// nextView is the plate the schedule hands the permit to when the booking in
+// charge now ends, shown under "on the permit now". Empty means the permit is
+// then left with no rego. At says when, in the card's own words ("midnight").
+type nextView struct {
+	Reg, Color string
+	Empty      bool
+	At         string
 }
 
 type pickView struct {

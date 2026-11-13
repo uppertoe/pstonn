@@ -163,6 +163,9 @@ dialog.confirm[open] { animation:rise .18s ease both; }
 /* The rego a confirm is about, above the message, as the app shows it. */
 .dlg-plate { margin:0; display:flex; align-items:center; gap:10px; }
 .dlg-plate[hidden] { display:none; }
+/* A cancel confirm names the plate it leaves, under the question. */
+.dlg-box.plate-below .dlg-plate { order:1; }
+.dlg-box.plate-below .dlg-actions { order:2; }
 .dlg-plate .plate { font-size:17px; padding:6px 12px; }
 .dlg-plate-label { font-weight:600; }
 /* Who is told about the change: a note and one line per person. */
@@ -340,6 +343,12 @@ tr:last-child td { border-bottom:0; }
    swapping the heading for this input doesn't shift the text or the row height. */
 .pname-edit input { flex:1; min-width:150px; font-size:17px; font-weight:600; letter-spacing:-.01em; padding:1px 2px; border:0; border-bottom:2px solid var(--primary); border-radius:0; background:transparent; color:var(--ink); }
 .pname-edit input:focus { outline:none; }
+/* The pill and the plate that follows the booking in charge, stacked at the
+   header's right. The next line starts at the pill's own inset. */
+.nowcol { display:grid; justify-items:start; gap:7px; }
+.nownext { margin:0; padding-left:15px; display:flex; align-items:center; gap:8px; font-size:12.5px; }
+.nownext > svg { width:16px; height:16px; color:var(--muted); margin-top:-4px; }
+.nownext .plate, .nownext .noplate { font-size:12px; padding:2px 7px; }
 .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
 .permit-expiry { display:flex; align-items:center; gap:7px; margin:2px 0 0; font-size:12.5px; color:var(--muted); }
 .permit-expiry svg { width:15px; height:15px; flex:0 0 auto; }
@@ -521,6 +530,12 @@ tr:last-child td { border-bottom:0; }
 .oneoff-item .when .nb { white-space:nowrap; }
 .oneoff-item .when .by { overflow-wrap:anywhere; }
 .oneoff-item form { justify-self:end; }
+/* The booking in charge carries the calendar's "today" ring; one covered by a
+   newer booking is dimmed, with the layers mark ahead of its car. */
+.oneoff-item.is-now { border-color:var(--primary); box-shadow:0 0 0 1px var(--primary) inset; background:var(--surface); }
+.oneoff-item.is-under .veh, .oneoff-item.is-under .when { opacity:.55; }
+.undermark { display:inline-flex; vertical-align:-3px; margin-right:7px; color:var(--muted); }
+.undermark svg { width:16px; height:16px; }
 @media (max-width:600px){
   .oneoff-item { grid-template-columns:1fr 40px; }
   .oneoff-item .when { grid-column:1 / -1; grid-row:2; }
@@ -975,6 +990,7 @@ table.adm .bad { color:var(--danger); }
      second. Row two is reserved at a height that fits both the badge and a
      two-line failure note, so no state swap ever moves the layout. */
   .nowbadge { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto minmax(38px, auto); grid-template-areas:"plate label" "icon hint"; align-items:center; column-gap:10px; row-gap:8px; width:100%; border-radius:16px; padding:12px 14px; }
+  .nowcol { width:100%; }
   .nowbadge > .plate { grid-area:plate; justify-self:start; }
   .nowbadge > .muted { grid-area:label; }
   /* The tick alone wears an UNFILLED echo of the plate badge — same border

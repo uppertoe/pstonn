@@ -487,16 +487,61 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		})
 	}
 
+	// Which booking is in charge, and what cancelling each one would do now: the
+	// resolver run again without it, so the confirm names the same plate the
+	// scheduler would then apply.
+	var winID int64
+	if w := model.WinningOverride(now, overrides); w != nil {
+		winID = w.ID
+	}
 	var ovs []overrideView
 	for _, o := range overrides {
 		reg, label, color := dispReg(o.VehicleID, o.Registration)
 		if o.Empty {
 			reg, label, color = "", "No rego", ""
 		}
-		ovs = append(ovs, overrideView{
+		ov := overrideView{
 			ID: o.ID, PermitID: p.ID, Reg: reg, Label: label, Empty: o.Empty,
 			Color: color, StartsAt: o.StartsAt, EndsAt: o.EndsAt, CreatedBy: o.CreatedBy,
-		})
+			Now: o.ID == winID, Under: o.ID != winID && o.InForce(now),
+		}
+		switch {
+		case ov.Under:
+			ov.CancelNote = "Nothing changes now."
+		case ov.Now:
+			rest := make([]model.Override, 0, len(overrides)-1)
+			for _, x := range overrides {
+				if x.ID != o.ID {
+					rest = append(rest, x)
+				}
+			}
+			after := model.Resolve(now, cyc, rules, rest)
+			afterReg, _, afterColor := dispReg(after.VehicleID, after.Registration)
+			switch {
+			case after.Empty && !o.Empty:
+				ov.CancelNote = "The permit will then have no rego."
+			case after.Source == model.SourceNone || after.SameTarget(res) || afterReg == "":
+				// Nothing takes over, so the council keeps what is on the permit.
+				if p.ActiveRegistration != "" {
+					ov.CancelPlate, ov.CancelColor, ov.CancelLabel = p.ActiveRegistration, colorOfPlate(vviews, p.ActiveRegistration), "stays on."
+				}
+			default:
+				ov.CancelPlate, ov.CancelColor, ov.CancelLabel = afterReg, afterColor, "goes back on."
+			}
+		}
+		ovs = append(ovs, ov)
+	}
+	// What follows the booking in charge, once it ends. Nothing is shown when
+	// nothing different follows: the permit simply keeps its plate.
+	var next *nextView
+	if res.Source == model.SourceOverride && res.Until != nil {
+		after := model.Resolve(res.Until.In(loc), cyc, rules, overrides)
+		if after.Source != model.SourceNone && !after.SameTarget(res) {
+			reg, _, color := dispReg(after.VehicleID, after.Registration)
+			if after.Empty || reg != "" {
+				next = &nextView{Reg: reg, Color: color, Empty: after.Empty, At: nextAtLabel(now, res.Until.In(loc))}
+			}
+		}
 	}
 	source := ""
 	if res.Source != model.SourceNone {
@@ -574,7 +619,7 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 		CanAddWeek:    canGrow,
 		AddWeeksLabel: addLabel, RemoveWeeksLabel: removeLabel, RemoveFromWeek: removeFrom + 1, AfterRemoveIndex: removeFrom - 1,
 		CalRowLabels: calRowLabels,
-		Cal:          cal, Overrides: ovs, Vehicles: vviews, Loc: loc,
+		Cal:          cal, Overrides: ovs, Next: next, Vehicles: vviews, Loc: loc,
 		ActiveColor: colorOfPlate(vviews, p.ActiveRegistration),
 		RosterEmpty: len(rules) == 0,
 		CopyPitch:   len(rules) == 0 && !p.CopyOfferDone,
@@ -1467,4 +1512,24 @@ func (s *Server) hasLivePermit(ctx context.Context, owner string) bool {
 		}
 	}
 	return false
+}
+
+// nextAtLabel says when the next plate goes on, as briefly as the card allows:
+// "midnight" for tonight's, the time for later today, otherwise the day. Both
+// times must be in the permit's location. A booking's end is exclusive, so an
+// end at midnight is the start of the day named.
+func nextAtLabel(now, at time.Time) string {
+	midnight := at.Hour() == 0 && at.Minute() == 0
+	sameDay := at.Year() == now.Year() && at.YearDay() == now.YearDay()
+	tomorrow := now.AddDate(0, 0, 1)
+	switch {
+	case midnight && at.Year() == tomorrow.Year() && at.YearDay() == tomorrow.YearDay():
+		return "midnight"
+	case sameDay:
+		return at.Format("3:04pm")
+	case midnight:
+		return at.Format("Mon 2 Jan")
+	default:
+		return at.Format("Mon 2 Jan, 3:04pm")
+	}
 }

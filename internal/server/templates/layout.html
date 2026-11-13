@@ -363,6 +363,7 @@ window.popClamp = window.popClamp || function (el, tries) {
     ok.classList.toggle('danger', opts.tone !== 'primary');
     var slot = d.querySelector('.dlg-plate');
     slot.hidden = !opts.plate;
+    d.querySelector('.dlg-box').classList.toggle('plate-below', !!opts.plateBelow);
     if (opts.plate) {
       var chip = slot.querySelector('.plate');
       chip.textContent = opts.plate;
@@ -479,7 +480,11 @@ window.popClamp = window.popClamp || function (el, tries) {
     if (!e.detail.question) return; // only intercept explicit hx-confirm
     e.preventDefault();
     var elt = e.detail.elt;
-    appConfirm(e.detail.question, elt && elt.dataset ? elt.dataset.confirmOk : null)
+    {{/* data-confirm-plate names what cancelling leaves on the permit, shown
+         under the question in the plate's own colour. */}}
+    var ds = elt && elt.dataset ? elt.dataset : {};
+    var opts = ds.confirmPlate ? {plate: ds.confirmPlate, plateColor: ds.confirmColor, plateLabel: ds.confirmPlateLabel, plateBelow: true} : null;
+    appConfirm(e.detail.question, ds.confirmOk || null, opts)
       .then(function (ok) { if (ok) e.detail.issueRequest(true); });
   });
 })();
