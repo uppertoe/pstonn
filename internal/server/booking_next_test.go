@@ -92,7 +92,7 @@ func TestPermitCardShowsWhatComesNext(t *testing.T) {
 		short := g.book(visitor, g.now.Add(-time.Minute), g.now.Add(2*time.Hour))
 		pv := g.build()
 
-		if o := byID(pv, short); !o.Now || o.Under || o.CancelPlate != "CJV604" || o.CancelLabel != "goes back on." {
+		if o := byID(pv, short); !o.Now || o.Under || o.CancelPlate != "CJV604" || o.CancelLabel != "will be applied to the permit." {
 			t.Fatalf("short booking = %+v, want in charge, cancelling puts CJV604 back", o)
 		}
 		if o := byID(pv, long); o.Now || !o.Under || o.CancelPlate != "" || o.CancelNote != "Nothing changes now." {
@@ -107,7 +107,7 @@ func TestPermitCardShowsWhatComesNext(t *testing.T) {
 		}
 		out := buf.String()
 		for _, want := range []string{`class="nownext"`, `aria-label="Next on the permit:"`, `aria-current="true"`, `>CJV604</span><span class="muted">from `, `oneoff-item is-now`, `oneoff-item is-under`,
-			`data-confirm-plate="CJV604"`, `data-confirm-plate-label="goes back on."`, `hx-confirm="Cancel this booking? Nothing changes now."`} {
+			`data-confirm-plate="CJV604"`, `data-confirm-plate-label="will be applied to the permit."`, `hx-confirm="Cancel this booking? Nothing changes now."`} {
 			if !strings.Contains(out, want) {
 				t.Errorf("card missing %q", want)
 			}
@@ -120,7 +120,7 @@ func TestPermitCardShowsWhatComesNext(t *testing.T) {
 		g.set(home)
 		oid := g.book(visitor, g.now.Add(-time.Minute), g.now.Add(2*time.Hour))
 		pv := g.build()
-		if o := byID(pv, oid); !o.Now || o.CancelPlate != "HOME01" || o.CancelLabel != "goes back on." {
+		if o := byID(pv, oid); !o.Now || o.CancelPlate != "HOME01" || o.CancelLabel != "will be applied to the permit." {
 			t.Fatalf("booking = %+v, want cancelling to put the roster's HOME01 back", o)
 		}
 		if pv.Next == nil || pv.Next.Reg != "HOME01" {
@@ -132,7 +132,7 @@ func TestPermitCardShowsWhatComesNext(t *testing.T) {
 		g := newRig(t, "lone@example.com", "VIS002")
 		oid := g.book(g.car("VIS002"), g.now.Add(-time.Minute), g.now.Add(2*time.Hour))
 		pv := g.build()
-		if o := byID(pv, oid); !o.Now || o.CancelPlate != "VIS002" || o.CancelLabel != "stays on." {
+		if o := byID(pv, oid); !o.Now || o.CancelPlate != "VIS002" || o.CancelLabel != "will stay on the permit." {
 			t.Fatalf("booking = %+v, want cancelling to leave VIS002 on", o)
 		}
 		if pv.Next != nil {

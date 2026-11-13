@@ -523,10 +523,10 @@ func (s *Server) buildPermitView(ctx context.Context, p model.Permit, vviews []v
 			case after.Source == model.SourceNone || after.SameTarget(res) || afterReg == "":
 				// Nothing takes over, so the council keeps what is on the permit.
 				if p.ActiveRegistration != "" {
-					ov.CancelPlate, ov.CancelColor, ov.CancelLabel = p.ActiveRegistration, colorOfPlate(vviews, p.ActiveRegistration), "stays on."
+					ov.CancelPlate, ov.CancelColor, ov.CancelLabel = p.ActiveRegistration, colorOfPlate(vviews, p.ActiveRegistration), "will stay on the permit."
 				}
 			default:
-				ov.CancelPlate, ov.CancelColor, ov.CancelLabel = afterReg, afterColor, "goes back on."
+				ov.CancelPlate, ov.CancelColor, ov.CancelLabel = afterReg, afterColor, "will be applied to the permit."
 			}
 		}
 		ovs = append(ovs, ov)

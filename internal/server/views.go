@@ -920,7 +920,7 @@ type overrideView struct {
 	// newer one is cancelled or ends.
 	Now, Under bool
 	// What cancelling the booking does to the permit now, for its confirm:
-	// CancelPlate (with its colour) goes back on or stays on, as CancelLabel
+	// CancelPlate (with its colour) is applied to the permit or stays on it, as CancelLabel
 	// says; CancelNote is the message's second sentence when no plate applies.
 	CancelPlate, CancelColor, CancelLabel, CancelNote string
 }
