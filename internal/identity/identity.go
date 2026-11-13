@@ -2,10 +2,12 @@
 // injected by the platform's Caddy forward_auth layer. This app implements no
 // login of its own: Caddy authenticates the request against vps-scaffold-auth,
 // strips any client-supplied identity headers, and re-injects the authoritative
-// values Remote-User / Remote-Email / Remote-Groups before proxying to us.
+// values Remote-User / Remote-Email / Remote-Roles before proxying to us.
 //
-// See vps-scaffold conventions: header names are Remote-* (not X-Auth-*), and
-// Groups is a comma-separated list containing "admin" and/or "user".
+// See vps-scaffold conventions: header names are Remote-* (not X-Auth-*).
+// Remote-Roles lists the person's roles in this app ("user", "admin"), as the
+// gateway's app roles decide them. Until every guard sends it, Remote-Groups
+// (a comma-separated list containing "admin" and/or "user") is read instead.
 package identity
 
 import (
@@ -142,7 +144,21 @@ func proxyPresentsSecret(r *http.Request, secret string) bool {
 	return subtle.ConstantTimeCompare([]byte(r.Header.Get(proxySecretHeader)), []byte(secret)) == 1
 }
 
-func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySecret string) func(http.Handler) http.Handler {
+// Option adjusts the middleware.
+type Option func(*options)
+
+type options struct{ trustRoles bool }
+
+// TrustRemoteRoles lets Remote-Roles decide the person's roles when the
+// gateway sends it. Use it only behind a proxy that strips a client-sent
+// Remote-Roles on every route; without it, Remote-Groups alone decides.
+func TrustRemoteRoles(on bool) Option { return func(o *options) { o.trustRoles = on } }
+
+func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySecret string, opts ...Option) func(http.Handler) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var u User
@@ -152,7 +168,7 @@ func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySec
 						u = User{
 							Email:  email,
 							Name:   strings.TrimSpace(r.Header.Get("Remote-User")),
-							Groups: splitGroups(r.Header.Get("Remote-Groups")),
+							Groups: groupsFrom(r.Header, o.trustRoles),
 						}
 					} else if !fromTrustedProxy(r.RemoteAddr) {
 						warnUntrustedIdentity(r.RemoteAddr)
@@ -179,6 +195,26 @@ func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySec
 func FromContext(ctx context.Context) (User, bool) {
 	u, ok := ctx.Value(ctxKey{}).(User)
 	return u, ok && u.Email != ""
+}
+
+// groupsFrom is the person's groups as the app uses them: their app roles
+// from Remote-Roles when the gateway sends that header, otherwise the older
+// Remote-Groups. A role guard sends both, and its global group names must not
+// make someone an admin here, so Remote-Roles alone decides when present.
+// Every signed-in person holds the user role, so "user" is always included.
+// Remote-Roles is read only when trustRoles is set (TRUST_REMOTE_ROLES), so
+// the app cannot believe a client-sent copy behind a proxy that predates it.
+func groupsFrom(h http.Header, trustRoles bool) []string {
+	if _, ok := h["Remote-Roles"]; !ok || !trustRoles {
+		return splitGroups(h.Get("Remote-Groups"))
+	}
+	groups := []string{"user"}
+	for _, r := range splitGroups(h.Get("Remote-Roles")) {
+		if r != "user" {
+			groups = append(groups, r)
+		}
+	}
+	return groups
 }
 
 func splitGroups(raw string) []string {

@@ -158,3 +158,79 @@ func TestFromContextRejectsEmptyEmail(t *testing.T) {
 		t.Fatal("an anonymous request must report ok=false")
 	}
 }
+
+// TestRemoteRolesDecideWhenPresent covers the move to the gateway's app
+// roles. A role guard sends Remote-Roles beside the older Remote-Groups; the
+// roles decide, so a global group named "admin" does not make someone an
+// admin of this app. Without Remote-Roles the older header still decides.
+func TestRemoteRolesDecideWhenPresent(t *testing.T) {
+	cases := []struct {
+		name         string
+		roles        *string
+		groups       string
+		admin        bool
+		wantHasGroup string
+	}{
+		{name: "admin role", roles: ptr("admin,user"), groups: "", admin: true, wantHasGroup: "user"},
+		{name: "user role only, global admin group", roles: ptr("user"), groups: "admin", admin: false, wantHasGroup: "user"},
+		{name: "empty roles header", roles: ptr(""), groups: "admin", admin: false, wantHasGroup: "user"},
+		{name: "no roles header, older groups", roles: nil, groups: "user,admin", admin: true, wantHasGroup: "admin"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			u, ok := resolveRoles(t, true, func(r *http.Request) {
+				proxyPeer(r)
+				r.Header.Set("Remote-Email", "u@example.com")
+				if c.groups != "" {
+					r.Header.Set("Remote-Groups", c.groups)
+				}
+				if c.roles != nil {
+					r.Header.Set("Remote-Roles", *c.roles)
+				}
+			})
+			if !ok {
+				t.Fatal("no identity")
+			}
+			if u.IsAdmin() != c.admin {
+				t.Errorf("IsAdmin = %v, want %v (groups %v)", u.IsAdmin(), c.admin, u.Groups)
+			}
+			found := false
+			for _, g := range u.Groups {
+				found = found || g == c.wantHasGroup
+			}
+			if !found {
+				t.Errorf("groups %v lack %q", u.Groups, c.wantHasGroup)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+// resolveRoles is resolve in forward-auth mode with TrustRemoteRoles set.
+func resolveRoles(t *testing.T, trustRoles bool, prep func(*http.Request)) (User, bool) {
+	t.Helper()
+	var got User
+	var ok bool
+	h := Middleware("", nil, true, "", TrustRemoteRoles(trustRoles))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got, ok = FromContext(r.Context())
+	}))
+	r := httptest.NewRequest("GET", "/schedule", nil)
+	prep(r)
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	return got, ok
+}
+
+// Without TRUST_REMOTE_ROLES a client-sent Remote-Roles is ignored, so the
+// app is safe behind a proxy that does not yet strip it.
+func TestRemoteRolesIgnoredUntilTrusted(t *testing.T) {
+	u, _ := resolveRoles(t, false, func(r *http.Request) {
+		proxyPeer(r)
+		r.Header.Set("Remote-Email", "u@example.com")
+		r.Header.Set("Remote-Groups", "user")
+		r.Header.Set("Remote-Roles", "admin")
+	})
+	if u.IsAdmin() {
+		t.Errorf("an untrusted Remote-Roles made the person an admin: groups %v", u.Groups)
+	}
+}
