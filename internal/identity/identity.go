@@ -2,10 +2,12 @@
 // injected by the platform's Caddy forward_auth layer. This app implements no
 // login of its own: Caddy authenticates the request against vps-scaffold-auth,
 // strips any client-supplied identity headers, and re-injects the authoritative
-// values Remote-User / Remote-Email / Remote-Groups before proxying to us.
+// values Remote-User / Remote-Email / Remote-Roles before proxying to us.
 //
-// See vps-scaffold conventions: header names are Remote-* (not X-Auth-*), and
-// Groups is a comma-separated list containing "admin" and/or "user".
+// See vps-scaffold conventions: header names are Remote-* (not X-Auth-*).
+// Remote-Roles lists the person's roles in this app ("user", "admin"), as the
+// gateway's app roles decide them. Until every guard sends it, Remote-Groups
+// (a comma-separated list containing "admin" and/or "user") is read instead.
 package identity
 
 import (
@@ -152,7 +154,7 @@ func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySec
 						u = User{
 							Email:  email,
 							Name:   strings.TrimSpace(r.Header.Get("Remote-User")),
-							Groups: splitGroups(r.Header.Get("Remote-Groups")),
+							Groups: groupsFrom(r.Header),
 						}
 					} else if !fromTrustedProxy(r.RemoteAddr) {
 						warnUntrustedIdentity(r.RemoteAddr)
@@ -179,6 +181,24 @@ func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySec
 func FromContext(ctx context.Context) (User, bool) {
 	u, ok := ctx.Value(ctxKey{}).(User)
 	return u, ok && u.Email != ""
+}
+
+// groupsFrom is the person's groups as the app uses them: their app roles
+// from Remote-Roles when the gateway sends that header, otherwise the older
+// Remote-Groups. A role guard sends both, and its global group names must not
+// make someone an admin here, so Remote-Roles alone decides when present.
+// Every signed-in person holds the user role, so "user" is always included.
+func groupsFrom(h http.Header) []string {
+	if _, ok := h["Remote-Roles"]; !ok {
+		return splitGroups(h.Get("Remote-Groups"))
+	}
+	groups := []string{"user"}
+	for _, r := range splitGroups(h.Get("Remote-Roles")) {
+		if r != "user" {
+			groups = append(groups, r)
+		}
+	}
+	return groups
 }
 
 func splitGroups(raw string) []string {
