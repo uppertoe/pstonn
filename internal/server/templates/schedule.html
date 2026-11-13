@@ -313,7 +313,7 @@
     <div style="display:none" class="hx-quiet" hx-get="/permits/{{.Permit.ID}}/card?n={{.PollNext}}" hx-trigger="load delay:{{.PollDelay}}s" hx-target="closest .nowbadge" hx-swap="outerHTML transition:false" hx-select=".nowbadge"></div>
     {{end}}
   </div>
-  {{with .Next}}<p class="nownext">{{template "ic-next"}}{{if .Empty}}<span class="noplate">no rego</span>{{else}}<span class="plate"{{if .Color}} style="--plate:{{.Color}}"{{end}}>{{.Reg}}</span>{{end}}<span class="muted">from {{.At}}</span></p>{{end}}
+  {{with .Next}}<p class="nownext"><span class="nextmark" role="img" aria-label="Next on the permit:">{{template "ic-next"}}</span>{{if .Empty}}<span class="noplate">no rego</span>{{else}}<span class="plate"{{if .Color}} style="--plate:{{.Color}}"{{end}}>{{.Reg}}</span>{{end}}<span class="muted">from {{.At}}</span></p>{{end}}
   </div>
 </div>
 
@@ -500,7 +500,7 @@
   {{/* The booking in charge is marked; one covered by a newer booking is
        dimmed with the layers mark, because it takes over again when the newer
        one is cancelled or ends. */}}
-  <div class="oneoff-item{{if .Now}} is-now{{else if .Under}} is-under{{end}}">
+  <div class="oneoff-item{{if .Now}} is-now{{else if .Under}} is-under{{end}}"{{if .Now}} aria-current="true"{{end}}>
     <span class="veh">{{if .Under}}<span class="undermark" role="img" title="Covered by a newer booking" aria-label="Covered by a newer booking">{{template "ic-layers"}}</span>{{end}}{{if .Empty}}<span class="clearmark">{{template "ic-empty"}}clear</span>{{else}}{{if .Color}}<span class="dot" style="background:{{.Color}}"></span>{{end}}{{.Label}} <span class="reg">{{.Reg}}</span>{{end}}</span>
     {{/* Name whoever booked it. The account is shared, so "who decided this?" is
          a real question — and an open-ended booking beats the roster indefinitely,

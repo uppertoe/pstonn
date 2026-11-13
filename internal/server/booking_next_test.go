@@ -106,7 +106,7 @@ func TestPermitCardShowsWhatComesNext(t *testing.T) {
 			t.Fatal(err)
 		}
 		out := buf.String()
-		for _, want := range []string{`class="nownext"`, `>CJV604</span><span class="muted">from `, `oneoff-item is-now`, `oneoff-item is-under`,
+		for _, want := range []string{`class="nownext"`, `aria-label="Next on the permit:"`, `aria-current="true"`, `>CJV604</span><span class="muted">from `, `oneoff-item is-now`, `oneoff-item is-under`,
 			`data-confirm-plate="CJV604"`, `data-confirm-plate-label="goes back on."`, `hx-confirm="Cancel this booking? Nothing changes now."`} {
 			if !strings.Contains(out, want) {
 				t.Errorf("card missing %q", want)

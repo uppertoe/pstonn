@@ -347,7 +347,8 @@ tr:last-child td { border-bottom:0; }
    header's right. The next line starts at the pill's own inset. */
 .nowcol { display:grid; justify-items:start; gap:7px; }
 .nownext { margin:0; padding-left:15px; display:flex; align-items:center; gap:8px; font-size:12.5px; }
-.nownext > svg { width:16px; height:16px; color:var(--muted); margin-top:-4px; }
+.nextmark { display:inline-flex; color:var(--muted); margin-top:-4px; }
+.nextmark svg { width:16px; height:16px; }
 .nownext .plate, .nownext .noplate { font-size:12px; padding:2px 7px; }
 .nowbadge { display:inline-flex; align-items:center; gap:9px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:14px; }
 .permit-expiry { display:flex; align-items:center; gap:7px; margin:2px 0 0; font-size:12.5px; color:var(--muted); }
