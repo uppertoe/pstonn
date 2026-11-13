@@ -159,6 +159,14 @@ headers are ignored entirely (`server.go` passes `trustForwardAuth=false`), so n
 is required there. The proxy side sets the same value as `PSTONN_PROXY_SECRET`; setting
 one side only refuses every sign-in, loudly, in the app log.
 
+The gateway's app roles add `Remote-Roles`, the person's roles in this app. When
+`TRUST_REMOTE_ROLES=1` is set and the header is present, it alone decides who is an
+admin, so a global group named `admin` no longer does. Set it only in the same server
+change that makes Caddy strip a client-sent `Remote-Roles` on every route: behind an
+older Caddy that passes the header through, any signed-in person could name themselves
+an admin. Without the setting the header is ignored and `Remote-Groups` decides as
+before, pinned by **`TestRemoteRolesIgnoredUntilTrusted`**.
+
 ## Invariant: the shared SQLite connection
 
 The store runs on effectively one connection, shared between the HTTP handlers and the

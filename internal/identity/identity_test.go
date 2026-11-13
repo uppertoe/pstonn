@@ -178,7 +178,7 @@ func TestRemoteRolesDecideWhenPresent(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			u, ok := resolve(t, "", nil, true, func(r *http.Request) {
+			u, ok := resolveRoles(t, true, func(r *http.Request) {
 				proxyPeer(r)
 				r.Header.Set("Remote-Email", "u@example.com")
 				if c.groups != "" {
@@ -206,3 +206,31 @@ func TestRemoteRolesDecideWhenPresent(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// resolveRoles is resolve in forward-auth mode with TrustRemoteRoles set.
+func resolveRoles(t *testing.T, trustRoles bool, prep func(*http.Request)) (User, bool) {
+	t.Helper()
+	var got User
+	var ok bool
+	h := Middleware("", nil, true, "", TrustRemoteRoles(trustRoles))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got, ok = FromContext(r.Context())
+	}))
+	r := httptest.NewRequest("GET", "/schedule", nil)
+	prep(r)
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	return got, ok
+}
+
+// Without TRUST_REMOTE_ROLES a client-sent Remote-Roles is ignored, so the
+// app is safe behind a proxy that does not yet strip it.
+func TestRemoteRolesIgnoredUntilTrusted(t *testing.T) {
+	u, _ := resolveRoles(t, false, func(r *http.Request) {
+		proxyPeer(r)
+		r.Header.Set("Remote-Email", "u@example.com")
+		r.Header.Set("Remote-Groups", "user")
+		r.Header.Set("Remote-Roles", "admin")
+	})
+	if u.IsAdmin() {
+		t.Errorf("an untrusted Remote-Roles made the person an admin: groups %v", u.Groups)
+	}
+}

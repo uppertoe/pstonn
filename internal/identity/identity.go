@@ -144,7 +144,21 @@ func proxyPresentsSecret(r *http.Request, secret string) bool {
 	return subtle.ConstantTimeCompare([]byte(r.Header.Get(proxySecretHeader)), []byte(secret)) == 1
 }
 
-func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySecret string) func(http.Handler) http.Handler {
+// Option adjusts the middleware.
+type Option func(*options)
+
+type options struct{ trustRoles bool }
+
+// TrustRemoteRoles lets Remote-Roles decide the person's roles when the
+// gateway sends it. Use it only behind a proxy that strips a client-sent
+// Remote-Roles on every route; without it, Remote-Groups alone decides.
+func TrustRemoteRoles(on bool) Option { return func(o *options) { o.trustRoles = on } }
+
+func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySecret string, opts ...Option) func(http.Handler) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var u User
@@ -154,7 +168,7 @@ func Middleware(devEmail string, decode Decoder, trustForwardAuth bool, proxySec
 						u = User{
 							Email:  email,
 							Name:   strings.TrimSpace(r.Header.Get("Remote-User")),
-							Groups: groupsFrom(r.Header),
+							Groups: groupsFrom(r.Header, o.trustRoles),
 						}
 					} else if !fromTrustedProxy(r.RemoteAddr) {
 						warnUntrustedIdentity(r.RemoteAddr)
@@ -188,8 +202,10 @@ func FromContext(ctx context.Context) (User, bool) {
 // Remote-Groups. A role guard sends both, and its global group names must not
 // make someone an admin here, so Remote-Roles alone decides when present.
 // Every signed-in person holds the user role, so "user" is always included.
-func groupsFrom(h http.Header) []string {
-	if _, ok := h["Remote-Roles"]; !ok {
+// Remote-Roles is read only when trustRoles is set (TRUST_REMOTE_ROLES), so
+// the app cannot believe a client-sent copy behind a proxy that predates it.
+func groupsFrom(h http.Header, trustRoles bool) []string {
+	if _, ok := h["Remote-Roles"]; !ok || !trustRoles {
 		return splitGroups(h.Get("Remote-Groups"))
 	}
 	groups := []string{"user"}
