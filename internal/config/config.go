@@ -48,6 +48,11 @@ type Config struct {
 	// reachable from something on a private network that is not the proxy.
 	// PROXY_SECRET; optional, forward-auth mode only.
 	ProxySecret string
+	// TrustRemoteRoles (TRUST_REMOTE_ROLES=1) lets the gateway's Remote-Roles
+	// header decide the person's roles. Set it only once the reverse proxy
+	// strips a client-sent Remote-Roles on every route; until then the app
+	// reads Remote-Groups alone.
+	TrustRemoteRoles bool
 
 	// SessionSecret signs the app's stateless session cookie (HMAC-SHA256).
 	// Required whenever app-login (AppOIDC) is enabled. SESSION_SECRET.
@@ -401,6 +406,7 @@ func Load() (*Config, error) {
 		Domain:           os.Getenv("DOMAIN"),
 		DevIdentityEmail: strings.ToLower(strings.TrimSpace(os.Getenv("DEV_IDENTITY_EMAIL"))),
 		ProxySecret:      strings.TrimSpace(os.Getenv("PROXY_SECRET")),
+		TrustRemoteRoles: os.Getenv("TRUST_REMOTE_ROLES") == "1",
 		CookieSecure:     env("COOKIE_SECURE", "true") != "false",
 		Council: CouncilConfig{
 			Issuer:                env("COUNCIL_ISSUER", "https://parkingpermits.stonnington.vic.gov.au/idm"),
