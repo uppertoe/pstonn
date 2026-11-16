@@ -8,6 +8,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -28,6 +29,9 @@ type Config struct {
 	// DataEncryptionKey seals the council session cookie at rest (AES-256-GCM).
 	// 32 bytes, provided as 64 hex chars via DATA_ENCRYPTION_KEY.
 	DataEncryptionKey []byte
+	// InsecureDevKey: DataEncryptionKey came from an "insecure-" string, which
+	// only a local run may use (see insecureKeyPrefix).
+	InsecureDevKey bool
 
 	// DisplayLocation is the timezone rosters are interpreted in. Parking is a
 	// local-time concern ("swap the plate on Monday morning"), so we schedule in
@@ -490,11 +494,19 @@ func Load() (*Config, error) {
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("DATA_ENCRYPTION_KEY")); raw != "" {
-		key, err := hexKey("DATA_ENCRYPTION_KEY", raw)
-		if err != nil {
-			return nil, err
+		if strings.HasPrefix(raw, insecureKeyPrefix) {
+			// A local run's key, named as such so it can never pass for a real one:
+			// it lets the sandbox sign approve links and keep sealed data across
+			// restarts. Refused below alongside any sign of a real deployment.
+			sum := sha256.Sum256([]byte(raw))
+			cfg.DataEncryptionKey, cfg.InsecureDevKey = sum[:], true
+		} else {
+			key, err := hexKey("DATA_ENCRYPTION_KEY", raw)
+			if err != nil {
+				return nil, err
+			}
+			cfg.DataEncryptionKey = key
 		}
-		cfg.DataEncryptionKey = key
 	}
 
 	// Derive redirect URIs from DOMAIN if not set explicitly. Each must be
@@ -553,6 +565,11 @@ func Load() (*Config, error) {
 	// bypass if it ever ships in production. Refuse to start when it is set
 	// alongside anything that means "real deployment", so it can never silently
 	// coexist with one.
+	if cfg.InsecureDevKey {
+		if sig := productionSignal(cfg); sig != "" {
+			return nil, fmt.Errorf("a DATA_ENCRYPTION_KEY starting %q is for local runs only and must not be set together with %s. Generate a real key with: openssl rand -hex 32", insecureKeyPrefix, sig)
+		}
+	}
 	if cfg.DevIdentityEmail != "" {
 		if sig := productionSignal(cfg); sig != "" {
 			return nil, fmt.Errorf("DEV_IDENTITY_EMAIL must not be set together with %s: it bypasses authentication (every request becomes an admin, with the group list [\"user\",\"admin\"]). Unset it for production", sig)
@@ -750,7 +767,7 @@ func registrable(host string) string {
 // someone is serving this to the internet, and no local run needs them.
 func productionSignal(cfg *Config) string {
 	switch {
-	case len(cfg.DataEncryptionKey) == 32:
+	case len(cfg.DataEncryptionKey) == 32 && !cfg.InsecureDevKey:
 		return "DATA_ENCRYPTION_KEY"
 	case cfg.AppOIDC.Enabled():
 		return "APP_OIDC_ISSUER"
@@ -789,6 +806,10 @@ func loopbackBase(raw string) bool {
 // so a wrapped error puts fragments of a live secret into the startup log, the
 // container log, and whatever ships those off-host. The operator does not need
 // them: there is exactly one correct shape, and it is stated.
+// insecureKeyPrefix marks a DATA_ENCRYPTION_KEY as a local run's: the key is
+// derived from the whole string, and it is not read as a production signal.
+const insecureKeyPrefix = "insecure-"
+
 func hexKey(name, raw string) ([]byte, error) {
 	key, err := hex.DecodeString(raw)
 	if err != nil || len(key) != 32 {

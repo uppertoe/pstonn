@@ -523,3 +523,48 @@ func prodDeployment(t *testing.T) {
 	t.Setenv("DOMAIN", "example.com")
 	t.Setenv("PROXY_SECRET", "0123456789abcdef0123456789abcdef")
 }
+
+// TestInsecureDevKey: a key starting "insecure-" lets a local run with the dev
+// switches still sign approve links and seal data, but it is refused next to
+// any sign of a real deployment, so a prod env can never carry one.
+func TestInsecureDevKey(t *testing.T) {
+	const devKey = "insecure-local-sandbox"
+
+	t.Run("sandbox and dev email with an insecure key load", func(t *testing.T) {
+		t.Setenv("COUNCIL_SANDBOX", "1")
+		t.Setenv("DEV_IDENTITY_EMAIL", "dev@example.com")
+		t.Setenv("DATA_ENCRYPTION_KEY", devKey)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("an insecure key with the dev switches should load, got %v", err)
+		}
+		if len(cfg.DataEncryptionKey) != 32 || !cfg.InsecureDevKey {
+			t.Fatalf("key = %d bytes, insecure = %v; want a 32-byte key marked insecure", len(cfg.DataEncryptionKey), cfg.InsecureDevKey)
+		}
+	})
+
+	t.Run("an insecure key on a real deployment is refused", func(t *testing.T) {
+		t.Setenv("DATA_ENCRYPTION_KEY", devKey)
+		prodDeployment(t)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "local runs only") {
+			t.Fatalf("want the insecure-key guard error, got %v", err)
+		}
+	})
+
+	t.Run("an insecure key with a public base URL is refused", func(t *testing.T) {
+		t.Setenv("DATA_ENCRYPTION_KEY", devKey)
+		t.Setenv("PUBLIC_BASE_URL", "https://p.example.com")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "local runs only") {
+			t.Fatalf("want the insecure-key guard error, got %v", err)
+		}
+	})
+
+	t.Run("any other non-hex key is still refused", func(t *testing.T) {
+		t.Setenv("DATA_ENCRYPTION_KEY", "not-a-key")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "64 hex characters") {
+			t.Fatalf("want the hex-key error, got %v", err)
+		}
+	})
+}
