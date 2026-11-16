@@ -431,7 +431,8 @@ CREATE TABLE IF NOT EXISTS outbox (
     critical      INTEGER NOT NULL DEFAULT 0, -- safety-tier mail: delivered past a self-service unsubscribe
     hero_plate    TEXT NOT NULL DEFAULT '',  -- registration to render as a centred plate chip in the HTML mail
     hero_color    TEXT NOT NULL DEFAULT '',  -- that plate's colour (hex), so the chip matches the on-site plate
-    hero_caption  TEXT NOT NULL DEFAULT ''   -- the line above the chip saying its standing ("No longer on the permit")
+    hero_caption  TEXT NOT NULL DEFAULT '',  -- the line above the chip saying its standing ("No longer on the permit")
+    ntfy_click    TEXT NOT NULL DEFAULT ''   -- where tapping the push opens (a guest request's decide page)
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(status, next_attempt);
 
@@ -708,6 +709,9 @@ CREATE INDEX IF NOT EXISTS idx_mail_thread ON mail_message(thread_id, id);
 		// onboard, portal and fortnight notes: those are different concerns and are
 		// mutually exclusive by construction anyway (2026-09-23).
 		`ALTER TABLE account_flags ADD COLUMN last_nudge_at TEXT NOT NULL DEFAULT ''`,
+		// Tapping a guest-request push opens that member's no-sign-in decide page,
+		// so the push carries its own tap target (2026-11-16).
+		`ALTER TABLE outbox ADD COLUMN ntfy_click TEXT NOT NULL DEFAULT ''`,
 	} {
 		// String match is unavoidable here: SQLite reports a duplicate column as a
 		// generic SQLITE_ERROR (code 1), so there is no numeric code to key on.

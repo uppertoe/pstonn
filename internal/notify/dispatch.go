@@ -1002,23 +1002,34 @@ func (s *Service) NotifyDriftChanged(ctx context.Context, owner, tenantID string
 
 // NotifyGuestRequest tells the account (all members) that someone scanned a
 // printed QR and is asking to put a plate on the permit, so they can approve or
-// decline it in the app. Each member is nudged on the channels THEY chose (the
+// decline it. Each member is nudged on the channels THEY chose (the
 // EnqueueApply pattern) — a push-only secondary gets the push on their own
 // topic, not silence. Two deliberate departures from the apply pattern:
 // failures-only does not apply (this is a question, not an outcome), and quiet
 // hours are NOT honoured — the visitor is standing at the door now, and the
 // request expires unanswered within the hour.
+//
+// Both channels lead to the member's own signed decide page, which needs no
+// sign-in: the email links it, and tapping the push opens it. url (the Guests
+// tab) is the fallback when no decide link can be minted.
+//
+// The push carrying the link is a deliberate trade (2026-11-16). An ntfy topic
+// is readable by anyone who learns its name, so a leaked topic now also answers
+// requests — but only a pending one (someone must first scan the printed QR),
+// only until it expires within the hour, and only by pressing Approve: opening
+// the page changes nothing.
 func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, plate, url string, reqID int64) error {
 	subject := fmt.Sprintf("A visitor is asking to put %s on your permit “%s”", plate, permitLabel)
-	lines := []string{
-		fmt.Sprintf("Someone scanned your printed QR and is asking to put %s on your permit “%s”.", plate, permitLabel),
+	asked := fmt.Sprintf("Someone scanned your printed QR and is asking to put %s on your permit “%s”.", plate, permitLabel)
+	// The fallback body, for a member with no decide link.
+	plain := []string{
+		asked,
 		"",
 		fmt.Sprintf("Open p.stonn to approve or decline. If you approve, p.stonn puts %s on the permit until the end of the day. p.stonn will not change the permit unless you do.", plate),
 	}
 	if url != "" {
-		lines = append(lines, "", url)
+		plain = append(plain, "", url)
 	}
-	body := strings.Join(lines, "\n")
 	dels, err := s.accountDeliveries(ctx, owner)
 	if err != nil {
 		return err
@@ -1026,7 +1037,7 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 	var errs []string
 	for _, d := range dels {
 		m := outMessage{
-			Account: owner, Subject: subject, Body: body,
+			Account: owner, Subject: subject, Body: strings.Join(plain, "\n"),
 			NtfyPriority: "high", NtfyTag: "bell",
 			Reason: reasonAccount,
 			// Per-member key (then per-target suffix in enqueueSplit): a re-scan of
@@ -1034,19 +1045,22 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 			// anyone, and one member's rows never dedup away another member's.
 			DedupKey: fmt.Sprintf("guestreq|%s|%s|%s|%s", d.email, owner, permitLabel, plate),
 		}
-		// The email additionally carries this member's signed one-tap decide link.
-		// EMAIL ONLY, never the push: an ntfy topic is readable by anyone who
-		// learns its name, and a topic that leaked must stay read-only — it must
-		// not start carrying the capability to put a plate on the permit. So the
-		// member's email and ntfy nudges are enqueued as SEPARATE messages with
-		// different bodies (same dedup key; enqueueSplit's per-target suffix
-		// already keeps the rows distinct).
+		// The link is signed for this member, so the email and push are enqueued as
+		// separate messages (same dedup key; enqueueSplit's per-target suffix keeps
+		// the rows distinct).
+		link := s.GuestDecideURL(reqID, d.email)
 		if d.pref.EmailEnabled && s.mail.Enabled() {
 			em := m
 			em.Recipients = []string{d.email}
-			if link := s.GuestDecideURL(reqID, d.email); link != "" {
-				em.Body = body + "\n\nApprove or decline without signing in:\n" + link +
-					"\nThis link works only for this request, and only for you."
+			if link != "" {
+				em.Body = strings.Join([]string{
+					asked,
+					"",
+					"You can approve or decline the request at this link without signing in:",
+					link,
+					"",
+					fmt.Sprintf("If you approve, p.stonn will put %s on the permit until the end of the day. p.stonn will not change the permit unless you approve the request. This link works only for this request, and only for you.", plate),
+				}, "\n")
 			}
 			if e := s.enqueueSplit(ctx, em); e != nil {
 				errs = append(errs, RedactEmail(d.email)+": "+errText(e, d.email))
@@ -1055,6 +1069,10 @@ func (s *Service) NotifyGuestRequest(ctx context.Context, owner, permitLabel, pl
 		if d.pref.NtfyEnabled && s.ntfyBase != "" && d.pref.NtfyTopic != "" {
 			pm := m
 			pm.NtfyTopic = d.pref.NtfyTopic
+			if link != "" {
+				pm.Body = fmt.Sprintf("A visitor is asking to put %s on your permit “%s”. Tap this notification to approve or decline the request.", plate, permitLabel)
+				pm.NtfyClick = link
+			}
 			if e := s.enqueueSplit(ctx, pm); e != nil {
 				errs = append(errs, RedactEmail(d.email)+": "+errText(e, d.email))
 			}

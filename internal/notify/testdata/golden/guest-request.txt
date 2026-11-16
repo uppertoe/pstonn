@@ -4,19 +4,16 @@ Subject: A visitor is asking to put GUEST1 on your permit “Visitor”
 
 Someone scanned your printed QR and is asking to put GUEST1 on your permit “Visitor”.
 
-Open p.stonn to approve or decline. If you approve, p.stonn puts GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you do.
+You can approve or decline the request at this link without signing in:
+https://p.stonn.org/r/4/cHJpbWFyeUBleGFtcGxlLmNvbQ/TOKEN
 
-https://p.stonn.org/g/req/4
+If you approve, p.stonn will put GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you approve the request. This link works only for this request, and only for you.
 
-=== OUTBOX account= recipients= ntfy=pstonn-primary/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
+=== OUTBOX account= recipients= ntfy=pstonn-primary/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit click=https://p.stonn.org/r/4/cHJpbWFyeUBleGFtcGxlLmNvbQ/TOKEN
 Dedup: guestreq|primary@example.com|primary@example.com|Visitor|GUEST1|ntfy
 Subject: A visitor is asking to put GUEST1 on your permit “Visitor”
 
-Someone scanned your printed QR and is asking to put GUEST1 on your permit “Visitor”.
-
-Open p.stonn to approve or decline. If you approve, p.stonn puts GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you do.
-
-https://p.stonn.org/g/req/4
+A visitor is asking to put GUEST1 on your permit “Visitor”. Tap this notification to approve or decline the request.
 
 === OUTBOX account= recipients=sam@example.com ntfy=/high/bell reason=this address manages, or shares access to, a p.stonn account that schedules a visitor parking permit
 Dedup: guestreq|sam@example.com|primary@example.com|Visitor|GUEST1|email|sam@example.com
@@ -24,7 +21,8 @@ Subject: A visitor is asking to put GUEST1 on your permit “Visitor”
 
 Someone scanned your printed QR and is asking to put GUEST1 on your permit “Visitor”.
 
-Open p.stonn to approve or decline. If you approve, p.stonn puts GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you do.
+You can approve or decline the request at this link without signing in:
+https://p.stonn.org/r/4/c2FtQGV4YW1wbGUuY29t/TOKEN
 
-https://p.stonn.org/g/req/4
+If you approve, p.stonn will put GUEST1 on the permit until the end of the day. p.stonn will not change the permit unless you approve the request. This link works only for this request, and only for you.
 

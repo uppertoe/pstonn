@@ -3,6 +3,8 @@ package notify
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,12 +223,12 @@ func TestQueuedMailCarriesProvenance(t *testing.T) {
 	}
 }
 
-// TestGuestRequestLinkEmailOnly is the channel-split guarantee for the no-sign-in
-// decide link: the EMAIL body carries the signed capability, the ntfy push does
-// NOT. An ntfy topic is readable by anyone who learns its name — by design it
-// may leak information, but it must never carry the power to put a plate on the
-// permit.
-func TestGuestRequestLinkEmailOnly(t *testing.T) {
+// TestGuestRequestLinksToDecidePage: both channels lead straight to the
+// member's no-sign-in decide page. The email links it as its only link (the
+// signed-in Guests tab used to come first, and that was the one people tapped),
+// and the push opens it on tap. The push body carries no URL itself: the
+// capability rides the Click header, and the delivered row drops it.
+func TestGuestRequestLinksToDecidePage(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
 	if err != nil {
@@ -235,12 +237,17 @@ func TestGuestRequestLinkEmailOnly(t *testing.T) {
 	defer st.Close()
 
 	const owner = "primary@example.com"
-	// Both channels on for the same person, so the split is visible on one member.
+	// Both channels on for the same person, so each row is visible on one member.
 	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "own-topic"}); err != nil {
 		t.Fatal(err)
 	}
+	var click string
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		click = r.Header.Get("Click")
+	}))
+	defer ntfy.Close()
 	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
-	svc := New(st, m, "https://ntfy.test", "", "https://p.example", "", "", time.UTC, nil, DeriveDecideKey(bytes.Repeat([]byte{7}, 32)))
+	svc := New(st, m, ntfy.URL, "", "https://p.example", "", "", time.UTC, nil, DeriveDecideKey(bytes.Repeat([]byte{7}, 32)))
 
 	if err := svc.NotifyGuestRequest(ctx, owner, "VPP1", "TRD441", "https://p.example/guests", 41); err != nil {
 		t.Fatal(err)
@@ -253,12 +260,53 @@ func TestGuestRequestLinkEmailOnly(t *testing.T) {
 		t.Fatalf("outbox = %d due messages, want 2 (email + push for the one member)", len(due))
 	}
 	for _, it := range due {
-		hasLink := strings.Contains(it.Body, "/r/41/")
-		switch {
-		case it.NtfyTopic == "" && !hasLink:
-			t.Errorf("email body is missing the decide link:\n%s", it.Body)
-		case it.NtfyTopic != "" && hasLink:
-			t.Errorf("ntfy push body carries the decide capability:\n%s", it.Body)
+		if it.NtfyTopic == "" {
+			if !strings.Contains(it.Body, "without signing in:\nhttps://p.example/r/41/") {
+				t.Errorf("email body does not lead with the decide link:\n%s", it.Body)
+			}
+			if strings.Contains(it.Body, "/guests") || it.NtfyClick != "" {
+				t.Errorf("email row carries the Guests tab or a tap target:\n%s (click %q)", it.Body, it.NtfyClick)
+			}
+			continue
+		}
+		if !strings.HasPrefix(it.NtfyClick, "https://p.example/r/41/") {
+			t.Errorf("push tap target = %q, want the decide page", it.NtfyClick)
+		}
+		if strings.Contains(it.Body, "http") || !strings.Contains(it.Body, "Tap this notification") {
+			t.Errorf("push body = %q, want the tap wording and no URL", it.Body)
+		}
+		svc.deliver(ctx, it)
+		if click != it.NtfyClick {
+			t.Errorf("delivered Click header = %q, want %q", click, it.NtfyClick)
+		}
+	}
+}
+
+// TestGuestRequestWithoutDecideKey: with no key to sign a decide link, both
+// channels fall back to the Guests tab rather than a link that cannot work.
+func TestGuestRequestWithoutDecideKey(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const owner = "primary@example.com"
+	if err := st.SetNotifyPref(ctx, store.NotifyPref{Owner: owner, EmailEnabled: true, NtfyEnabled: true, NtfyTopic: "own-topic"}); err != nil {
+		t.Fatal(err)
+	}
+	m := mailer.New(config.SMTPConfig{Host: "smtp.test", Port: 587, From: "p.stonn <no-reply@stonn.org>"})
+	svc := New(st, m, "https://ntfy.test", "", "https://p.example", "", "", time.UTC, nil, nil)
+	if err := svc.NotifyGuestRequest(ctx, owner, "VPP1", "TRD441", "https://p.example/guests", 41); err != nil {
+		t.Fatal(err)
+	}
+	due, err := st.DueOutbox(ctx, time.Now().UTC(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range due {
+		if !strings.HasSuffix(it.Body, "https://p.example/guests") || strings.Contains(it.Body, "/r/") || it.NtfyClick != "" {
+			t.Errorf("row (topic %q) = %q click %q, want the Guests-tab fallback", it.NtfyTopic, it.Body, it.NtfyClick)
 		}
 	}
 }

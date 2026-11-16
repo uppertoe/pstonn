@@ -82,8 +82,13 @@ func (c *capture) ntfy(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	fmt.Fprintf(&c.buf, "=== NTFY %s\nTitle: %s\nPriority: %s\nTags: %s\n\n%s\n\n",
-		strings.TrimPrefix(r.URL.Path, "/"), r.Header.Get("Title"), r.Header.Get("Priority"), r.Header.Get("Tags"), body)
+	// The tap target is only printed when set, so the routine goldens read as before.
+	click := ""
+	if v := r.Header.Get("Click"); v != "" {
+		click = "Click: " + v + "\n"
+	}
+	fmt.Fprintf(&c.buf, "=== NTFY %s\nTitle: %s\nPriority: %s\nTags: %s\n%s\n%s\n\n",
+		strings.TrimPrefix(r.URL.Path, "/"), r.Header.Get("Title"), r.Header.Get("Priority"), r.Header.Get("Tags"), click, body)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -99,6 +104,9 @@ func (c *capture) outbox(it store.OutboxItem) {
 	tier := ""
 	if it.Critical {
 		tier = " critical=true"
+	}
+	if it.NtfyClick != "" {
+		tier += " click=" + it.NtfyClick
 	}
 	fmt.Fprintf(&c.buf, "=== OUTBOX account=%s recipients=%s ntfy=%s/%s/%s reason=%s%s\nDedup: %s\nSubject: %s\n%s\n%s\n\n",
 		it.Account, strings.Join(it.Recipients, ","), it.NtfyTopic, it.NtfyPriority, it.NtfyTag, it.Reason, tier, key, it.Subject,
@@ -160,7 +168,7 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(st, m, ntfy.URL, "", appURL, "admin@stonn.org", "pstonn-admin", loc, []byte("golden-unsub-key"), []byte("golden-decide-key"))
+	svc := New(st, m, ntfy.URL, "", appURL, "admin@stonn.org", "pstonn-admin", loc, []byte("golden-unsub-key"), DeriveDecideKey(bytes.Repeat([]byte("g"), 32)))
 	svc.enqueueHook = c.enqueued
 
 	// Household: an owner with email + push, and a member with email only.

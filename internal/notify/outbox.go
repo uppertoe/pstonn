@@ -42,6 +42,8 @@ type outMessage struct {
 	// the driver-on notice); it rides the row because the outbox delivers after
 	// enqueue.
 	Hero mailer.Hero
+	// NtfyClick is where tapping the push opens; empty leaves ntfy's default.
+	NtfyClick string
 }
 
 func (s *Service) enqueue(ctx context.Context, m outMessage) error {
@@ -49,6 +51,7 @@ func (s *Service) enqueue(ctx context.Context, m outMessage) error {
 		Account: m.Account, DedupKey: m.DedupKey, Reason: m.Reason, Recipients: m.Recipients, NtfyTopic: m.NtfyTopic,
 		NtfyPriority: m.NtfyPriority, NtfyTag: m.NtfyTag, Subject: m.Subject, Body: m.Body,
 		NotBefore: m.NotBefore, Critical: m.Critical, HeroPlate: m.Hero.Plate, HeroColor: m.Hero.Color, HeroCaption: m.Hero.Caption,
+		NtfyClick: m.NtfyClick,
 	}
 	if s.enqueueHook != nil {
 		s.enqueueHook(it)
@@ -363,7 +366,11 @@ func (s *Service) deliver(ctx context.Context, it store.OutboxItem) (lastErr str
 		if pr == "" {
 			pr = "default"
 		}
-		if e := s.sendNtfy(ctx, it.NtfyTopic, it.Subject, it.Body, pr, it.NtfyTag); e != nil {
+		var extra map[string]string
+		if it.NtfyClick != "" {
+			extra = map[string]string{"Click": it.NtfyClick}
+		}
+		if e := s.sendNtfyHeaders(ctx, it.NtfyTopic, it.Subject, it.Body, pr, it.NtfyTag, extra); e != nil {
 			errs = append(errs, "ntfy: "+e.Error())
 			allPermanent = false // an ntfy failure is always worth retrying
 		} else {
