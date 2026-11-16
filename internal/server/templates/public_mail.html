@@ -79,7 +79,7 @@
     {{if eq .Decide.Outcome "applied"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
     <h1>Approved</h1>
-    <p class="gresult"><span class="reg">{{.Decide.Plate}}</span> is on your {{if .Decide.PermitLabel}}permit “{{.Decide.PermitLabel}}”{{else}}visitor permit{{end}} now{{if .Decide.Until}}, {{.Decide.Until}}{{end}}.</p>
+    <p class="gresult"><span class="reg">{{.Decide.Plate}}</span> is on your {{if .Decide.PermitLabel}}permit “{{.Decide.PermitLabel}}”{{else}}visitor permit{{end}}{{if .Decide.Until}} until {{.Decide.Until}}{{else}} now{{end}}.</p>
     <p class="empty-note" style="margin-top:14px">Your visitor is covered. p.stonn has told the rest of the household. The change is on the Activity page.</p>
     {{else if eq .Decide.Outcome "approving"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
@@ -104,7 +104,7 @@
     {{else if eq .Decide.Status "approved"}}
     <div class="gring ok" style="margin:18px auto 12px">{{template "ic-check"}}</div>
     <h1>Already approved</h1>
-    <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> approved{{else}}Someone in your household approved{{end}} <span class="reg">{{.Decide.Plate}}</span>{{if .Decide.Until}}, {{.Decide.Until}}{{end}}. You do not need to do anything more.</p>
+    <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> approved{{else}}Someone in your household approved{{end}} <span class="reg">{{.Decide.Plate}}</span>{{if .Decide.Until}} until {{.Decide.Until}}{{end}}. You do not need to do anything more.</p>
     {{else if eq .Decide.Status "denied"}}
     <h1>Already declined</h1>
     <p class="gresult">{{if .Decide.DecidedBy}}<strong>{{.Decide.DecidedBy}}</strong> declined this request{{else}}Someone in your household declined this request{{end}}, so p.stonn did not put <span class="reg">{{.Decide.Plate}}</span> on the permit.</p>
