@@ -515,11 +515,11 @@ window.popClamp = window.popClamp || function (el, tries) {
 
   
   
-  <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-how-hint')==='1'}" x-show="!hide" x-cloak>
+  <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-guests-hint')==='1'}" x-show="!hide" x-cloak>
     <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="6" height="6" rx="1"/><rect x="14.5" y="3.5" width="6" height="6" rx="1"/><rect x="3.5" y="14.5" width="6" height="6" rx="1"/><path d="M14.5 14.5h2.5v2.5M20.5 14.5v.02M14.5 20.5v.02M17.5 20.5h3v-3"/></svg>
     <span>If family, a cleaner or a tradie visits, they can put their own rego on the permit. <a href="/guests">See how on the Guests page</a>.</span>
     <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
-            @click="hide=true; localStorage.setItem('pstonn-how-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+            @click="hide=true; localStorage.setItem('pstonn-guests-hint','1')"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </p>
   
   
