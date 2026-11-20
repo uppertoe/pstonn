@@ -143,7 +143,7 @@
         {{if gt (len .GuestMgmt.PermitOpts) 1}}
         <select name="permit_id">{{range .GuestMgmt.PermitOpts}}<option value="{{.ID}}">{{.Label}}</option>{{end}}</select>
         {{else}}{{range .GuestMgmt.PermitOpts}}<input type="hidden" name="permit_id" value="{{.ID}}">{{end}}{{end}}
-        <button type="submit" class="ghost">{{template "ic-qr"}} Print a QR</button>
+        <button type="submit">{{template "ic-qr"}} Print a QR</button>
       </form>
     </div>
   </section>

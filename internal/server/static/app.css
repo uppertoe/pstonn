@@ -681,6 +681,10 @@ button:disabled { opacity:.55; cursor:progress; }
    the same colour (the printed QR inside the teal "visitor here now" card). */
 .qropt-tint { background:color-mix(in srgb, var(--hue) 7%, var(--surface-2)); border-color:color-mix(in srgb, var(--hue) 22%, var(--line)); }
 .qropt-tint .qropt-txt strong { color:var(--hue); }
+/* --on-primary pairs with each theme's primary (white on the light theme's
+   deep teal, dark ink on the dark theme's pale one); the hues follow the same
+   light/dark split, so it reads on the blue too. */
+.qropt-tint button { background:var(--hue); color:var(--on-primary); }
 /* the add-a-car row is a form, not another car: rule it off from the list */
 .vaddform { border-top:1px solid var(--line); padding-top:16px; }
 .vstate-chip { color:var(--muted); font-weight:400; font-size:13px; }
