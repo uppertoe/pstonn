@@ -677,6 +677,10 @@ button:disabled { opacity:.55; cursor:progress; }
 .qropt-txt { display:flex; flex-direction:column; gap:3px; }
 .qropt select { width:100%; }
 .qropt button { margin-top:auto; }
+/* An option drawn in its own tool's hue, so the tile that jumps to it lands on
+   the same colour (the printed QR inside the teal "visitor here now" card). */
+.qropt-tint { background:color-mix(in srgb, var(--hue) 7%, var(--surface-2)); border-color:color-mix(in srgb, var(--hue) 22%, var(--line)); }
+.qropt-tint .qropt-txt strong { color:var(--hue); }
 /* the add-a-car row is a form, not another car: rule it off from the list */
 .vaddform { border-top:1px solid var(--line); padding-top:16px; }
 .vstate-chip { color:var(--muted); font-weight:400; font-size:13px; }
@@ -719,7 +723,7 @@ button:disabled { opacity:.55; cursor:progress; }
 .tiles + .secgroup, .todo + .secgroup { margin-top:18px; }
 /* Same-page anchors land with a little air above the target; nothing is pinned
    at the top of the viewport, so that is all the room they need. */
-.secgroup, .card[id], .todo[id] { scroll-margin-top:14px; }
+.secgroup, .card[id], .todo[id], .qropt[id] { scroll-margin-top:14px; }
 /* A folding card: heading row with its actions and a chevron, a one-line
    summary, and a body that opens under it. Closed by default so the card takes
    two lines until it is wanted. */

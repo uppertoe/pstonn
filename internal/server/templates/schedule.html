@@ -106,13 +106,12 @@
   {{end}}
 
   {{if or .App.Permits .App.ExpiredPermits}}
-  {{/* The feature-tour hint: most households use only the roster and one-off
-       bookings, so point once at the demos for the rest. Dismiss is remembered
-       per browser, like the other hint strips. Full navigation into /how — its
-       demo assets are head-only (see publicheader). */}}
+  {{/* The guest-tools hint: most households use only the roster and one-off
+       bookings, so point once at the Guests tab, naming the visitors each tool
+       is for. Dismiss is remembered per browser, like the other hint strips. */}}
   <p class="share-hint" style="--hue:var(--sec-guests)" x-data="{hide: localStorage.getItem('pstonn-how-hint')==='1'}" x-show="!hide" x-cloak>
     {{template "ic-qr"}}
-    <span>There&rsquo;s more than the roster: visitor QRs, a printed QR you confirm on your phone, and guest passes. <a href="/features" hx-boost="false">See how they work</a>.</span>
+    <span>If family, a cleaner or a tradie visits, they can put their own rego on the permit. <a href="/guests">See how on the Guests page</a>.</span>
     <button type="button" class="ghost icon sm" aria-label="Dismiss" title="Dismiss"
             @click="hide=true; localStorage.setItem('pstonn-how-hint','1')">{{template "ic-x"}}</button>
   </p>

@@ -48,7 +48,7 @@
       {{if .Regions}}<select name="state" class="vstate" aria-label="{{T "vehicle.state_label" .}}" title="{{T "vehicle.state_label" .}}">{{range .Regions}}<option value="{{.Code}}">{{.Label}}</option>{{end}}</select>{{end}}
       <button type="submit">{{template "ic-plus"}} Add</button>
     </form>
-    <p class="empty-note" style="margin-top:10px">An email address is optional. If you add one, p.stonn fills it in on guest passes and, unless you untick the box above, emails that person each time it puts their rego on the permit. See <a href="/guests">Guests</a>.</p>
+    <p class="empty-note" style="margin-top:10px">An email address is optional. If you add one, p.stonn fills it in on guest passes and emails that person each time it puts their rego on the permit. See <a href="/guests">Guests</a>.</p>
   </section>
 {{if .BookFAB}}
 {{/* Same corner, same words as the Schedule page's button. hx-push-url drops

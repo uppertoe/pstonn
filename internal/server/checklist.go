@@ -99,10 +99,10 @@ func (s *Server) checklistFor(ctx context.Context, owner, user string, isPrimary
 			note(perr)
 		}
 		items = []checkItem{
-			{Milestone: store.MilestoneVisitorQR, Label: "Show a visitor QR to someone at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
-			{Milestone: store.MilestoneGuestPass, Label: "Send a guest pass to a household that visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
-			{Milestone: store.MilestonePrintedQR, Label: "Put up a printed QR that you confirm on your phone", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
-			{Milestone: store.MilestonePicker, Label: "Save a quick picker to your own phone", Href: "#picker", Done: perr == nil || did(store.ActionPickerCreate)},
+			{Milestone: store.MilestoneVisitorQR, Label: "Show a QR code to a tradie or friend at the door", Href: "#now", Done: shown > 0 || did(store.ActionDoorQRShow)},
+			{Milestone: store.MilestoneGuestPass, Label: "Send a guest pass to a family member who visits often", Href: "#new", Done: passes > 0 || did(store.ActionGuestCreate)},
+			{Milestone: store.MilestonePrintedQR, Label: "Stick a printed QR code on the fridge for your cleaner", Href: "#now", Done: printed > 0 || did(store.ActionDoorQRCreate)},
+			{Milestone: store.MilestonePicker, Label: "Save a quick picker to your home screen for your saved regos", Href: "#picker", Done: perr == nil || did(store.ActionPickerCreate)},
 		}
 	case "settings":
 		permits, err := s.store.ListPermitsFor(ctx, owner)
