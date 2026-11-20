@@ -10,8 +10,8 @@ X-Frame-Options: DENY
 
 // p.stonn offline page. Serves /offline when a navigation cannot reach the
 // server; caches nothing else and answers nothing else.
-var CACHE = 'pstonn-offline-52f7581e4a';
-var ASSETS = ["/offline", "/static/app.css?v=52f7581e4a", "/static/spacegrotesk-wordmark.woff2?v=52f7581e4a", "/static/icon-192.png?v=52f7581e4a", "/static/icon-180.png?v=52f7581e4a"];
+var CACHE = 'pstonn-offline-5c8af93efb';
+var ASSETS = ["/offline", "/static/app.css?v=5c8af93efb", "/static/spacegrotesk-wordmark.woff2?v=5c8af93efb", "/static/icon-192.png?v=5c8af93efb", "/static/icon-180.png?v=5c8af93efb"];
 var OFFLINE = ASSETS[0];
 
 self.addEventListener('install', function (e) {
